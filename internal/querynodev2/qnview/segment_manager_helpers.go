@@ -1,8 +1,9 @@
 package qnview
 
 import (
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func segmentPartitionMap(view *viewpb.QueryViewOfQueryNode) map[int64]int64 {

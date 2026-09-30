@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -309,7 +310,7 @@ func (hc *handlerClientImpl) AcquireTransformLogStream(ctx context.Context, pcha
 	defer hc.lifetime.Done()
 
 	if pchannel == "" {
-		return nil, errors.New("pchannel is required")
+		return nil, merr.WrapErrServiceInternalMsg("pchannel is required")
 	}
 	logger := mlog.With(mlog.String("pchannel", pchannel), mlog.String("handler", "transformlog-event-stream"))
 	s, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {

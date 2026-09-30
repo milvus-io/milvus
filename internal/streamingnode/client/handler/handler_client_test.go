@@ -343,6 +343,7 @@ func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t
 }
 
 func TestHandlerClientAcquireTransformLogStreamUsesLocalWAL(t *testing.T) {
+	handlerregistry.ResetRegisterLocalWALManager()
 	paramtable.Init()
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	t.Cleanup(func() {

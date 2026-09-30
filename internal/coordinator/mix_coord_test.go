@@ -38,7 +38,6 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -156,32 +155,8 @@ func TestMixCoordDropCollectionDataView(t *testing.T) {
 	})
 }
 
-func TestMixCoordDelegatesDataViewReferences(t *testing.T) {
-	mockey.PatchConvey("delegate data view references to datacoord", t, func() {
-		dataCoord := &datacoord.Server{}
-		coord := &mixCoordImpl{datacoordServer: dataCoord}
-		version := qviews.DataVersion{StreamingVersion: 3, CompactVersion: 1}
-
-		mockey.Mock((*datacoord.Server).PinDataView).
-			To(func(ctx context.Context, collectionID int64, actual qviews.DataVersion) error {
-				assert.Equal(t, int64(100), collectionID)
-				assert.Equal(t, version, actual)
-				return nil
-			}).Build()
-		mockey.Mock((*datacoord.Server).RecoverDataViewReference).
-			Return(true, nil).Build()
-		mockey.Mock((*datacoord.Server).UnpinDataView).Return().Build()
-
-		assert.NoError(t, coord.PinDataView(context.Background(), 100, version))
-		pinned, err := coord.RecoverDataViewReference(context.Background(), 100, version)
-		assert.NoError(t, err)
-		assert.True(t, pinned)
-		coord.UnpinDataView(100, version)
-	})
-}
-
 func TestMixCoordInitializesBeforeStartingDataAndQueryCoord(t *testing.T) {
-	mockey.PatchConvey("recover query view references before datacoord can start GC", t, func() {
+	mockey.PatchConvey("initialize both coordinators before starting background workers", t, func() {
 		dataCoord := &datacoord.Server{}
 		queryCoord := &querycoordv2.Server{}
 		coord := &mixCoordImpl{

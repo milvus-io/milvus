@@ -279,8 +279,7 @@ message StreamingNodeInfo {
 
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
- 
- repeated PChannelInfo secondary_channels = 3;
+    repeated PChannelInfo secondary_channels = 3;
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
 }
@@ -591,7 +590,6 @@ message TransformLogEntry {
 
     oneof entry {
         TransformDeleteEntry delete = 2;
- 
     }
 }
 
@@ -760,7 +758,7 @@ message VChannelSummaryInsertRecord {
 // Client: log coord. There should be only one client globally to call this
 // service on all streamingnode.
 service StreamingNodeManagerService {
- rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest) returns (StreamingNodeManagerValidateRuntimeResponse) {};
+    rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest) returns (StreamingNodeManagerValidateRuntimeResponse) {};
     // Assign is a unary RPC to assign a channel on a log node.
     // Block until the channel assignd is ready to read or write on the log
     // node. Error: If the channel already exists, return error with code
@@ -1065,8 +1063,8 @@ message TransformSubscriptionSyncUp {
     int64 subscription_id = 1;
     string vchannel = 2;
 
-    // Echoes the requested exclusive start point. It is not a latest TimeTick
-    // watermark.
+    // Every requested transform through this TimeTick has been delivered.
+    // This is readable coverage, not a persistence acknowledgement.
     uint64 time_tick = 3;
 }
 
@@ -1088,11 +1086,13 @@ message TransformMessageBatch {
     repeated TransformLogEntry entries = 3;
 }
 
+// Legacy wire definition; WALSummary owns current transform storage.
 message TransformLogChunk {
     uint64 chunk_id = 1;
     repeated TransformLogEntry entries = 2;
 }
 
+// Legacy wire definition; not used by RecoveryStorage catalog persistence.
 message VChannelTransformLogMeta {
     // TransformLog durable frontier published in recovery catalog.
     uint64 checkpoint_time_tick = 1;
@@ -1107,14 +1107,6 @@ message VChannelTransformLogMeta {
     // L0 materializer cursor.
     uint64 materialized_time_tick = 5;
 }
-
-
-
-
-
-
-
-
 
 message StreamingNodeRuntimeAnalyzerInfo {
     string params = 1;

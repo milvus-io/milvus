@@ -17,12 +17,10 @@
 package datacoord
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"sort"
-"slices"
 	"strconv"
 	"time"
 
@@ -1357,34 +1355,6 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 	return infos, indexInfos, nil
 }
 
-func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	return s.queryViewCollectionIndexInfos(collectionID)
-}
-
-func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
-	return packQueryViewCollectionIndexInfos(indexes)
-}
-
-func packQueryViewCollectionIndexInfos(indexes []*model.Index) []*indexpb.IndexInfo {
-	infos := lo.Map(indexes, func(index *model.Index, _ int) *indexpb.IndexInfo {
-		return &indexpb.IndexInfo{
-			CollectionID:    index.CollectionID,
-			FieldID:         index.FieldID,
-			IndexName:       index.IndexName,
-			IndexID:         index.IndexID,
-			TypeParams:      index.TypeParams,
-			IndexParams:     index.IndexParams,
-			IsAutoIndex:     index.IsAutoIndex,
-			UserIndexParams: index.UserIndexParams,
-		}
-	})
-	slices.SortFunc(infos, func(left, right *indexpb.IndexInfo) int {
-		return cmp.Compare(left.GetIndexID(), right.GetIndexID())
-	})
-	return infos
-}
-
 func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, indexInfos []*indexpb.IndexInfo, segmentIndexes map[int64]*model.SegmentIndex) *querypb.SegmentLoadInfo {
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:       segment.GetID(),
@@ -1481,7 +1451,6 @@ func (s *Server) packQueryViewFieldIndexInfos(segmentIndexes map[int64]*model.Se
 	}
 	return infos
 }
-
 
 // GetChannelRecoveryInfo get recovery channel info.
 // Called by: StreamingNode.

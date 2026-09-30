@@ -934,7 +934,6 @@ func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentI
 		// current pointer; fall through to the ordinary no-op path instead of
 		// re-publishing an identical revision.
 		result.GetManifest() != segment.GetManifestPath()
-
 }
 
 func queryViewJSONLoadInfoChanged(result *workerpb.StatsResult) bool {
@@ -952,7 +951,6 @@ func queryViewJSONLoadInfoChanged(result *workerpb.StatsResult) bool {
 func queryViewTextLoadInfoChanged(result *workerpb.StatsResult) bool {
 	return result.GetManifest() != "" && result.GetManifest() != result.GetBaseManifest() ||
 		len(result.GetTextStatsLogs()) > 0
-
 }
 
 func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {

@@ -310,7 +310,6 @@ func RecoverShardViewRegistry(
     ctx context.Context,
     catalog queryview.QueryViewCatalog,
     syncer syncer.ReliableSyncer,
-    dataViewReferences ...qviews.DataViewReferenceManager,
 ) (*ShardViewRegistry, error)
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager
@@ -328,11 +327,15 @@ Maintains live per-shard stats via callbacks from each `ShardViewManager`.
 publishes the resident full snapshot lazily; `SnapshotForShards()` copies only
 the requested `ShardID -> *ShardStats` entries.
 
-Shard managers remain resident for the lifetime of the Registry. A QueryView
-reaching Dropped removes that state machine from its manager, but does not
-remove the manager. Collection index entries are maintained independently of
-view state transitions. Node index entries follow the latest stats and
-disappear when the shard no longer references that node.
+Shard managers remain resident until release is requested and every QueryView
+has completed durable removal. The registry then removes that exact manager
+instance and its indexes. Stats callbacks carry manager identity so callbacks
+from an evicted instance cannot overwrite a replacement's stats. Observers
+must be lightweight and non-blocking because publications hold the manager lock.
+
+The DataCoord adapter obtains scoped `DataViewRef` values with `Latest`, copies
+membership and row counts from the same immutable version, then calls `Deref`.
+The balancer does not restore the obsolete Pin/Unpin reference-manager API.
 
 #### CollectionLoadManager (Facade)
 

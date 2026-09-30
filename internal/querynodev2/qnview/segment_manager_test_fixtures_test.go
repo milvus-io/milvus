@@ -420,6 +420,7 @@ func (e *fakeSegmentResourceEstimator) Reserve(_ context.Context, info *querypb.
 }
 
 type fakeNodeScheduler struct {
+	mu      sync.Mutex
 	tasks   []*SegmentLoadTask
 	updates []*SegmentUpdateTask
 }
@@ -429,9 +430,13 @@ func (s *fakeNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHa
 	case schedulerTaskFunc:
 		_ = task.Execute(context.Background())
 	case *SegmentLoadTask:
+		s.mu.Lock()
 		s.tasks = append(s.tasks, task)
+		s.mu.Unlock()
 	case *SegmentUpdateTask:
+		s.mu.Lock()
 		s.updates = append(s.updates, task)
+		s.mu.Unlock()
 	}
 	return noopNodeTaskHandle{}
 }
@@ -490,3 +495,15 @@ func (s *fakeSegmentLoadInfoSubscription) CollectionID() int64 { return s.option
 func (s *fakeSegmentLoadInfoSubscription) SegmentID() int64    { return s.option.SegmentID }
 func (*fakeSegmentLoadInfoSubscription) Error() error          { return nil }
 func (s *fakeSegmentLoadInfoSubscription) Close()              { s.closed = true }
+
+func (s *fakeNodeScheduler) Tasks() []*SegmentLoadTask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*SegmentLoadTask(nil), s.tasks...)
+}
+
+func (s *fakeNodeScheduler) Updates() []*SegmentUpdateTask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*SegmentUpdateTask(nil), s.updates...)
+}

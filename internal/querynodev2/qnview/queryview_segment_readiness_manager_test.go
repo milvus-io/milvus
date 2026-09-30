@@ -4,10 +4,10 @@ package qnview
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -71,10 +71,10 @@ func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.
 		&fakeTransformSegment{id: 1001, partitionID: 10},
 	}
 
-	var physicalReq AcquirePhysicalSegments
+	physicalRequests := make(chan AcquirePhysicalSegments, 1)
 	physical := fakePhysicalSegmentManager{
 		acquire: func(req AcquirePhysicalSegments) {
-			physicalReq = req
+			physicalRequests <- req
 			req.OnLoaded(loaded)
 		},
 		release: func(req ReleaseSegments) {
@@ -91,9 +91,8 @@ func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
 
-	require.Eventually(t, func() bool {
-		return physicalReq.Key == key
-	}, time.Second, 10*time.Millisecond)
+	physicalReq := <-physicalRequests
+	require.Equal(t, key, physicalReq.Key)
 	require.Equal(t, meta, physicalReq.Meta)
 	require.Equal(t, view, physicalReq.View)
 
@@ -663,10 +662,10 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
 	firstSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[0].OnLoaded(firstSegment)
+	scheduler.Tasks()[0].OnLoaded(firstSegment)
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -684,11 +683,11 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond, "retry after registration failure should submit a new physical load")
 
 	secondSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(secondSegment)
+	scheduler.Tasks()[1].OnLoaded(secondSegment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
@@ -723,9 +722,9 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
-	scheduler.tasks[0].OnUnrecoverable(errors.New("load failed"))
+	scheduler.Tasks()[0].OnUnrecoverable(errors.New("load failed"))
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -739,11 +738,11 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond, "retry after scheduler failure should submit a new physical load")
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(segment)
+	scheduler.Tasks()[1].OnLoaded(segment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
@@ -778,9 +777,9 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
-	scheduler.tasks[0].OnUnrecoverable(errors.New("load failed"))
+	scheduler.Tasks()[0].OnUnrecoverable(errors.New("load failed"))
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -794,11 +793,11 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond)
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(segment)
+	scheduler.Tasks()[1].OnLoaded(segment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
@@ -863,6 +862,7 @@ func TestQueryViewSegmentReadinessManager_KeepsEnsureRegisterVChannelTogether(t 
 	assert.Equal(t, "vchannel-1", buffer.registeredChannel[1000])
 	assert.Equal(t, "vchannel-2", buffer.registeredChannel[2000])
 }
+
 func TestQueryViewSegmentReadinessManager_FailureReportsUnrecoverable(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
 	view := buildHandlerTestQNView(1)

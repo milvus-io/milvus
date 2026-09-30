@@ -264,34 +264,6 @@ func cloneLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFie
 	return cloned
 }
 
-func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
-	resp := &querypb.GetQueryViewLoadInfoResponse{
-		Status:       merr.Success(),
-		CollectionID: req.GetCollectionID(),
-	}
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-	if req.GetCollectionID() == 0 {
-		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
-		return resp, nil
-	}
-	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil {
-		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view runtime is nil"))
-		return resp, nil
-	}
-	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
-	if cfg == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
-		return resp, nil
-	}
-	resp.Version = s.qviewsRuntime.loadConfigStore.GetConfigVersion(req.GetCollectionID())
-	resp.PartitionIDs = append([]int64(nil), cfg.PartitionIDs...)
-	resp.LoadFields = cloneLoadFields(cfg.LoadFields)
-	return resp, nil
-}
-
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	logger := mlog.With(
 		mlog.Int64("dbID", req.GetDbID()),

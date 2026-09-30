@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -122,7 +123,9 @@ func (s *snShardView) advancePendingDownLocked(version qviews.QueryViewVersion, 
 		return
 	}
 	entry.cancelPendingDown()
+	before := entry.sm.State()
 	entry.sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeApplyCoordViewEvent{ViewStateTransition: qvobserve.ViewStateTransition{CollectionID: collectionIDForEntry(entry), View: entry.View.QueryViewKey(), From: before, To: entry.sm.State()}})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 

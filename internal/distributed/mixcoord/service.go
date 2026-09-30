@@ -795,10 +795,6 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 	return s.mixCoord.GetLoadSegmentInfo(ctx, req)
 }
 
-func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
-	return s.mixCoord.GetQueryViewLoadInfo(ctx, req)
-}
-
 func (s *Server) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
 	return s.mixCoord.WatchQueryViewSegmentLoadInfo(stream)
 }

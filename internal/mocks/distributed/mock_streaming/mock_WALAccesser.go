@@ -6,8 +6,8 @@ import (
 	context "context"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
-	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -603,7 +603,8 @@ func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.Repl
 func NewMockWALAccesser(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockWALAccesser {
+},
+) *MockWALAccesser {
 	mock := &MockWALAccesser{}
 	mock.Mock.Test(t)
 

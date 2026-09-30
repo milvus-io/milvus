@@ -17,6 +17,9 @@ type (
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
+	// TransformLog exposes subscription streams backed by the recovery summary.
+	TransformLog() TransformLogAccesser
+
 	ratelimit.RateLimitObserverRegistry
 
 	ROWAL

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -498,4 +499,30 @@ func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*que
 		return nil, false
 	}
 	return module.QueryRuntime(key)
+}
+
+// AcquireStream gives each consumer an independent subscription lifetime while
+// retaining the recovery manager's single authoritative summary reader.
+func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	if pchannel != m.pchannel {
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-m.closeCh:
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	default:
+	}
+	stream := walsummary.NewStream(m.config.SummaryManager)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-m.closeCh:
+		case <-stream.Done():
+			return
+		}
+		_ = stream.Close()
+	}()
+	return stream, nil
 }

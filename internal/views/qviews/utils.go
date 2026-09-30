@@ -37,13 +37,6 @@ type ShardID struct {
 	VChannel  string
 }
 
-// UnknownReplicaID is the placeholder replica ID carried by shard IDs resolved
-// by the query client before the real replica ID is learned. The client no
-// longer discovers replica IDs from channel assignment; the StreamingNode
-// resolves such shard IDs by vchannel and echoes the real replica ID back in
-// the query plan.
-const UnknownReplicaID int64 = 0
-
 // String returns the string representation of the shard id.
 func (id ShardID) String() string {
 	return fmt.Sprintf("%d-%s", id.ReplicaID, id.VChannel)
@@ -105,13 +98,6 @@ func (s StateTransition) IsStateTransition() bool {
 type DataVersion struct {
 	StreamingVersion int64
 	CompactVersion   int64
-}
-
-// DataViewReferenceManager protects DataViews referenced by persisted QueryViews.
-type DataViewReferenceManager interface {
-	PinDataView(ctx context.Context, collectionID int64, version DataVersion) error
-	RecoverDataViewReference(ctx context.Context, collectionID int64, version DataVersion) (bool, error)
-	UnpinDataView(collectionID int64, version DataVersion)
 }
 
 // String returns the string representation of the data version.

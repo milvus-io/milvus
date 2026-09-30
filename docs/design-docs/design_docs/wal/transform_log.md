@@ -8,9 +8,10 @@
 **Status:** The local SN bootstrap adaptor is implemented in
 `internal/streamingnode/server/wal/walsummary/stream.go` and wired through
 `vchannel.PChannelRecoveryManager` into GrowingRuntime. It performs bounded Delete replay for
-QueryRuntime preparation. Remote transport and QN continuous-subscription
-integration remain planned; the general subscription contract below includes
-those future consumers.
+QueryRuntime preparation. Remote transport and QN continuous subscriptions use the same reader through
+`PChannelRecoveryManager.AcquireStream` and `SubscribeTransform`. Each acquired
+stream owns its subscriptions and closes on client cancellation or PChannel
+shutdown.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
@@ -26,7 +27,7 @@ WALSummary (one store per PChannel)
   +-- Summary L0 consumer               [retained, not wired]
   +-- TransformLog subscription adaptor
         +-- local SN bounded replay     [implemented]
-        +-- remote / QN subscriptions   [planned]
+        +-- remote / QN subscriptions   [implemented]
 ```
 
 TransformLog owns stream and subscription lifetimes, delivery cursors,
@@ -40,9 +41,8 @@ VChannel subscriptions reuse the same chunk buffer while resident. Cache evictio
 does not remove index entries or change delivery cursors; live subscriptions may
 read object storage again after eviction. See [chunk cache](summary.md#541-resident-index-and-chunk-cache).
 
-The qv branch's stream protocol and consumers are the reference for external
-behavior. Its independent VChannel storage and retained-message write path are
-not part of this design.
+The qv stream protocol and consumers share this adaptor. The former independent
+VChannel storage and retained-message write path are not used.
 
 ## 2. Subscription Interface
 
@@ -59,7 +59,7 @@ strictly after its start cursor. An unset end means continuous delivery; a set
 end means bounded replay through that position. Stream closure releases all
 subscriptions; closing one subscription does not close a shared stream.
 
-The planned QueryNode integration uses continuous subscriptions to catch loaded
+QueryNode integration uses continuous subscriptions to catch loaded
 sealed Segments up and then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
 growing resources from a captured WAL view; subsequent resource events arrive
 through the VChannel's ordered live event path. Both consumers are specified to use the same Summary-backed read semantics.
@@ -92,7 +92,7 @@ lower bound. It has two responsibilities:
    After applying the preceding entries, a view can use this signal to establish
    that it has caught up, rather than enter service with historical TransformLog
    backlog and make its first queries pay that replay cost. QN readiness wiring
-   remains planned in this extraction.
+   is implemented by the qv segment readiness manager.
 
 Delivery and application are distinct. A successful Handler call may only enqueue
 work. Consumers must apply the complete ordered prefix before advancing their
@@ -159,8 +159,8 @@ unavailable prefix, never the retained interval still required through the end.
 ### Unbounded subscriptions for QueryNode
 
 The local adaptor's unbounded mode uses WALSummary's VChannel-scoped transform
-notifications. This prepares the server-side behavior for QueryNode; remote
-transport and QN integration remain outside this extraction. Bounded SN bootstrap
+notifications. The qv branch exposes this through SubscribeTransform and the QN
+VChannel buffer. Bounded SN bootstrap
 keeps its existing global-coverage notification behavior.
 
 The QN contract is to wait for the VChannel `transforming_timetick` selected by
@@ -172,11 +172,11 @@ applicable global barrier. It reads and delivers the required Delete prefix
 before reporting SyncUp. QN must finish applying that prefix before advancing
 its local visibility; receipt of a notification is not query readiness.
 
-The planned QN view preparation uses this applied catch-up signal, together with
-segment loading and the required MVCC boundary, before reporting Ready. Loading
-the base segments or receiving a SyncUp while its preceding Deletes remain
-queued is insufficient. This consumer-side readiness integration is not yet
-implemented by the local adaptor.
+QN view preparation waits for base segment loading and application through the
+buffer's catch-up frontier before reporting Ready. Loading base segments or
+receiving SyncUp while preceding Deletes remain queued is insufficient. The
+readiness manager and TransformLogBuffer implement this consumer-side gate;
+per-query checks separately wait for the query plan's required MVCC boundary.
 
 Notifications cover payload-free changes too: insert-only transaction commits,
 flush/import publication, relevant DDL and schema changes. Their classification

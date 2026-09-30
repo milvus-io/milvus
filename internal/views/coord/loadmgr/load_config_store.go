@@ -269,3 +269,10 @@ func diffInt64Set(a, b []int64) []int64 {
 	}
 	return out
 }
+
+// GetConfigWithVersion returns one immutable configuration and its matching version.
+func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig, uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.configs[collectionID], s.versions[collectionID]
+}

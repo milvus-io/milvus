@@ -429,9 +429,9 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 ## 3. QueryNode State Machine
 
-The resource preparation steps below describe the target QN integration. Remote
-TransformLog consumption and its catch-up readiness wiring are not implemented
-by the current SN extraction.
+The qv branch wires remote TransformLog consumption through a shared VChannel
+buffer. Segment readiness waits for ordered catch-up application; queries still
+wait for their own Transform MVCC boundary.
 
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
 

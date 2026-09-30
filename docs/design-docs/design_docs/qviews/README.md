@@ -64,8 +64,12 @@ For node-side Phase 1 planning and Phase 2 execution, see
   Boost scorers follow the same ownership rule: SN adapters borrow the pinned
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
-- **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
-  complete SN/QN end-to-end flow above remain integration work.
+- **Scope:** `RequeryOnView` returns Unimplemented. Proxy orchestration and
+  QN execution are wired in this qv branch. The shared buffer's historical start
+  and retention requirements are described in
+  [Transform Start Frontier](transform_start_after_timetick.md).
+  TransformLog subscriptions accept Summary's retained lower bound; this
+  compatibility behavior alone does not prove that earlier Deletes were applied.
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,
@@ -375,11 +379,11 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
 | Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
-| Streaming Node | TransformLog adaptor | Local Summary-backed SN bootstrap is wired; remote QN publication remains planned. See [TransformLog](../wal/transform_log.md). |
+| Streaming Node | TransformLog adaptor | Local SN bootstrap and remote QN publication share the Summary-backed adaptor. See [TransformLog](../wal/transform_log.md). |
 | Streaming Node | Growing Segment Manager | Incremental data management, maintaining Growing Segment lifecycle |
 | Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
-| Query Node | Pure Delete Stream Manager | Planned remote subscription client applying Delete data to each Segment; not wired by this SN extraction. |
+| Query Node | Pure Delete Stream Manager | Remote subscription client with a shared VChannel buffer applying Delete data to each Segment. |
 
 ### 11.3 SyncQueryView RPC
 
@@ -439,10 +443,11 @@ Target changes:
 The current [TransformLog adaptor](../wal/transform_log.md) wraps WALSummary
 reads. Local SN bootstrap uses bounded replay; subsequent SN events arrive via
 the VChannel live path. The local unbounded mode has scoped notifications, but
-remote QN subscriptions and their retention integration remain planned.
+remote QN subscriptions use the same adaptor. The advancing retention frontier
+remains deferred; see [Transform subscriptions](pure_transform_subscription.md).
 
-The following describes future pure-delete consumption options, not enabled
-QN behavior in this extraction:
+The following describes the target pure-delete consumption options; the current
+QN path uses ordered TransformLog replay and per-segment application:
 
 - During Recovery, pure delete stream subscriptions use batch processing for merging.
 - L0 is used on StreamingNode.

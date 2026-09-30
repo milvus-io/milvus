@@ -232,5 +232,3 @@ func (w nopCloseWAL) UnwrapWAL() wal.WAL {
 func (w nopCloseWAL) Close() {
 	// do nothing
 }
-
-func (w nopCloseWAL) UnwrapWAL() wal.WAL { return w.WAL }

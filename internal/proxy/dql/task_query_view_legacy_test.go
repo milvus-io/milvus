@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package proxy
+package dql
 
 import (
 	"context"
@@ -66,7 +66,7 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 			},
 		},
 	}
-	task := &queryTask{
+	task := &QueryTask{
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgID(1)),
 			CollectionID: 1,
@@ -98,7 +98,7 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 			},
 		},
 	}
-	task := &searchTask{
+	task := &SearchTask{
 		SearchRequest: &internalpb.SearchRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgID(2)),
 			CollectionID: 1,

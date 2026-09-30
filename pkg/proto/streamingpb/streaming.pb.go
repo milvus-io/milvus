@@ -7657,8 +7657,8 @@ type TransformSubscriptionSyncUp struct {
 
 	SubscriptionId int64  `protobuf:"varint,1,opt,name=subscription_id,json=subscriptionId,proto3" json:"subscription_id,omitempty"`
 	Vchannel       string `protobuf:"bytes,2,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
-	// Echoes the requested exclusive start point. It is not a latest TimeTick
-	// watermark.
+	// Every requested transform through this TimeTick has been delivered.
+	// This is readable coverage, not a persistence acknowledgement.
 	TimeTick uint64 `protobuf:"varint,3,opt,name=time_tick,json=timeTick,proto3" json:"time_tick,omitempty"`
 }
 
@@ -7882,6 +7882,7 @@ func (x *TransformMessageBatch) GetEntries() []*TransformLogEntry {
 	return nil
 }
 
+// Legacy wire definition; WALSummary owns current transform storage.
 type TransformLogChunk struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -7937,6 +7938,7 @@ func (x *TransformLogChunk) GetEntries() []*TransformLogEntry {
 	return nil
 }
 
+// Legacy wire definition; not used by RecoveryStorage catalog persistence.
 type VChannelTransformLogMeta struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

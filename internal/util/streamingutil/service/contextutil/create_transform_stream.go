@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -28,21 +28,21 @@ func WithCreateTransformStream(ctx context.Context, req *streamingpb.CreateTrans
 func GetCreateTransformStream(ctx context.Context) (*streamingpb.CreateTransformStreamRequest, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, errors.New("create transform stream metadata not found from incoming context")
+		return nil, merr.WrapErrServiceInternalMsg("create transform stream metadata not found from incoming context")
 	}
 	msg := md.Get(createTransformStreamKey)
 	if len(msg) == 0 {
-		return nil, errors.New("create transform stream metadata not found")
+		return nil, merr.WrapErrServiceInternalMsg("create transform stream metadata not found")
 	}
 
 	bytes, err := base64.StdEncoding.DecodeString(msg[0])
 	if err != nil {
-		return nil, errors.Wrap(err, "decode create transform stream metadata failed")
+		return nil, merr.Wrap(err, "decode create transform stream metadata failed")
 	}
 
 	req := &streamingpb.CreateTransformStreamRequest{}
 	if err := proto.Unmarshal(bytes, req); err != nil {
-		return nil, errors.Wrap(err, "unmarshal create transform stream request failed")
+		return nil, merr.Wrap(err, "unmarshal create transform stream request failed")
 	}
 	return req, nil
 }

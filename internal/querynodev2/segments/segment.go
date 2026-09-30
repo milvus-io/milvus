@@ -719,6 +719,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, loadInfo *querypb.SegmentL
 	// lower-level implementation detail.
 	return s.Reopen(ctx, loadInfo)
 }
+
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {

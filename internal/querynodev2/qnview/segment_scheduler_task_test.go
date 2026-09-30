@@ -190,9 +190,11 @@ func TestSegmentLoadTask_ReservesAndReleasesResourceAroundLoad(t *testing.T) {
 		},
 	}, estimator)
 
-	require.Eventually(t, func() bool {
-		return len(loadedCh) == 1
-	}, time.Second, 10*time.Millisecond)
+	select {
+	case <-loadedCh:
+	case <-time.After(time.Second):
+		t.Fatal("segment load did not finish")
+	}
 	require.Len(t, estimator.infos, 1)
 	assert.Equal(t, int64(1000), estimator.infos[0].GetSegmentID())
 	require.Len(t, estimator.collections, 1)

@@ -53,10 +53,10 @@ func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) 
 	})
 
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
+	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+	for _, task := range scheduler.Tasks() {
 		taskBySegment[task.SegmentID] = task
 	}
 	for _, segmentID := range []int64{1000, 1001} {
@@ -181,10 +181,10 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 	})
 
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 3
+		return len(scheduler.Tasks()) == 3
 	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
+	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+	for _, task := range scheduler.Tasks() {
 		taskBySegment[task.SegmentID] = task
 	}
 
@@ -202,11 +202,11 @@ func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentL
 
 	taskBySegment[1002].OnLoaded(&fakeTransformSegment{id: 1002, partitionID: 10})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 5
+		return len(scheduler.Tasks()) == 5
 	}, time.Second, 10*time.Millisecond)
 	require.Empty(t, mgr.pendingLoadSegments)
 	retries := make(map[int64]*SegmentLoadTask, 2)
-	for _, task := range scheduler.tasks[3:] {
+	for _, task := range scheduler.Tasks()[3:] {
 		retries[task.SegmentID] = task
 	}
 	require.Contains(t, retries, int64(1000))
@@ -265,9 +265,9 @@ func TestViewScopedPhysicalSegmentManager_PreservesLatestStreamSnapshotForPendin
 				Revision:     SegmentLoadInfoRevision{Revision: 11},
 				LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1001, PartitionID: 10, CollectionID: testCollectionID},
 			}))
-			require.Len(t, scheduler.tasks, 2)
-			taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-			for _, task := range scheduler.tasks {
+			require.Len(t, scheduler.Tasks(), 2)
+			taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+			for _, task := range scheduler.Tasks() {
 				taskBySegment[task.SegmentID] = task
 			}
 			latest := snapshot
@@ -287,19 +287,19 @@ func TestViewScopedPhysicalSegmentManager_PreservesLatestStreamSnapshotForPendin
 				require.NoError(t, stream.Emit(latest))
 			}
 			if test.emitLatestBeforeFailure {
-				require.Len(t, scheduler.tasks, 2)
+				require.Len(t, scheduler.Tasks(), 2)
 			} else {
-				require.Len(t, scheduler.tasks, 3)
+				require.Len(t, scheduler.Tasks(), 3)
 			}
 
 			taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
-			require.Len(t, scheduler.tasks, 3)
-			retry := scheduler.tasks[2]
+			require.Len(t, scheduler.Tasks(), 3)
+			retry := scheduler.Tasks()[2]
 			require.Equal(t, int64(1000), retry.SegmentID)
 			require.Equal(t, latest, retry.Snapshot)
 
 			retry.OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
-			require.Empty(t, scheduler.updates)
+			require.Empty(t, scheduler.Updates())
 		})
 	}
 }
@@ -321,28 +321,28 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t 
 		OnUnrecoverable:        func() { t.Fatal("unexpected unrecoverable") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
+	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+	for _, task := range scheduler.Tasks() {
 		taskBySegment[task.SegmentID] = task
 	}
 	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
 	taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 3
+		return len(scheduler.Tasks()) == 3
 	}, time.Second, 10*time.Millisecond)
 
 	dropped := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
-	require.ErrorIs(t, scheduler.tasks[2].Context.Err(), context.Canceled)
+	require.ErrorIs(t, scheduler.Tasks()[2].Context.Err(), context.Canceled)
 	select {
 	case <-dropped:
 		t.Fatal("release should wait for pending retry callback")
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	scheduler.tasks[2].OnUnrecoverable(context.Canceled)
+	scheduler.Tasks()[2].OnUnrecoverable(context.Canceled)
 	select {
 	case <-dropped:
 	case <-time.After(time.Second):
@@ -368,10 +368,10 @@ func TestViewScopedPhysicalSegmentManager_FailsResourceFailureWithoutOtherSegmen
 		OnUnrecoverable:        func() { t.Fatal("unexpected view unrecoverable") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
 
-	scheduler.tasks[0].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
+	scheduler.Tasks()[0].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
 	select {
 	case got := <-failedCh:
 		assert.Equal(t, int64(1000), got)
@@ -398,10 +398,10 @@ func TestViewScopedPhysicalSegmentManager_FailsNonResourceErrorWhileOtherSegment
 		OnUnrecoverable:        func() { t.Fatal("unexpected view unrecoverable") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
+	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+	for _, task := range scheduler.Tasks() {
 		taskBySegment[task.SegmentID] = task
 	}
 
@@ -430,19 +430,19 @@ func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRele
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
 
 	dropped := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
 
-	require.ErrorIs(t, scheduler.tasks[0].Context.Err(), context.Canceled)
+	require.ErrorIs(t, scheduler.Tasks()[0].Context.Err(), context.Canceled)
 	select {
 	case <-dropped:
 		t.Fatal("release should wait for canceled loading task callback")
 	case <-time.After(20 * time.Millisecond):
 	}
-	scheduler.tasks[0].OnUnrecoverable(assert.AnError)
+	scheduler.Tasks()[0].OnUnrecoverable(assert.AnError)
 	select {
 	case <-dropped:
 	case <-time.After(time.Second):
@@ -466,7 +466,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t 
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
 
 	dropped := make(chan struct{}, 1)
@@ -478,7 +478,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t 
 	}
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[0].OnLoaded(segment)
+	scheduler.Tasks()[0].OnLoaded(segment)
 	select {
 	case <-dropped:
 	case <-time.After(time.Second):
@@ -509,9 +509,9 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 		},
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
-	scheduler.tasks[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+	scheduler.Tasks()[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
 
 	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
 		CollectionID: testCollectionID,
@@ -527,13 +527,13 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 	})
 
 	require.Eventually(t, func() bool {
-		return len(scheduler.updates) == 1
+		return len(scheduler.Updates()) == 1
 	}, time.Second, 10*time.Millisecond)
-	scheduler.updates[0].OnUpdated(SegmentLoadInfoRevision{Revision: 10})
+	scheduler.Updates()[0].OnUpdated(SegmentLoadInfoRevision{Revision: 10})
 	require.Eventually(t, func() bool {
-		return len(scheduler.updates) == 2
+		return len(scheduler.Updates()) == 2
 	}, time.Second, 10*time.Millisecond)
-	require.Equal(t, uint64(11), scheduler.updates[1].Snapshot.Revision.Revision)
+	require.Equal(t, uint64(11), scheduler.Updates()[1].Snapshot.Revision.Revision)
 }
 
 func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightUpdate(t *testing.T) {
@@ -563,7 +563,7 @@ func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightU
 		SegmentID:    1000,
 		Revision:     inFlightRevision,
 	})
-	require.Len(t, scheduler.updates, 1)
+	require.Len(t, scheduler.Updates(), 1)
 
 	// SegmentLoadInfo revisions are content hashes, not monotonic sequence
 	// numbers. The latest metadata may therefore return to the currently
@@ -573,10 +573,10 @@ func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightU
 		SegmentID:    1000,
 		Revision:     appliedRevision,
 	})
-	scheduler.updates[0].OnUpdated(inFlightRevision)
+	scheduler.Updates()[0].OnUpdated(inFlightRevision)
 
-	require.Len(t, scheduler.updates, 2)
-	assert.Equal(t, appliedRevision, scheduler.updates[1].Snapshot.Revision)
+	require.Len(t, scheduler.Updates(), 2)
+	assert.Equal(t, appliedRevision, scheduler.Updates()[1].Snapshot.Revision)
 }
 
 func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTaskRetries(t *testing.T) {
@@ -701,7 +701,7 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	}
 
 	mgr.Acquire(req)
-	require.Empty(t, scheduler.tasks)
+	require.Empty(t, scheduler.Tasks())
 	require.Len(t, stream.subscriptions, 1)
 	assert.Equal(t, testCollectionID, stream.subscriptions[0].option.CollectionID)
 	assert.Equal(t, int64(1000), stream.subscriptions[0].option.SegmentID)
@@ -716,8 +716,8 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
 	}))
 
-	require.Len(t, scheduler.tasks, 1)
-	assert.Equal(t, revision, scheduler.tasks[0].Snapshot.Revision)
+	require.Len(t, scheduler.Tasks(), 1)
+	assert.Equal(t, revision, scheduler.Tasks()[0].Snapshot.Revision)
 	updatedRevision := SegmentLoadInfoRevision{Revision: 11}
 	require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
 		CollectionID: testCollectionID,
@@ -725,8 +725,8 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 		Revision:     updatedRevision,
 		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
 	}))
-	assert.Empty(t, scheduler.updates)
-	scheduler.tasks[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
+	assert.Empty(t, scheduler.Updates())
+	scheduler.Tasks()[0].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
 
 	select {
 	case loaded := <-loadedCh:
@@ -736,9 +736,9 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 		t.Fatal("timed out waiting for watched segment load")
 	}
 	require.Len(t, stream.subscriptions, 1)
-	require.Len(t, scheduler.updates, 1)
-	assert.Equal(t, updatedRevision, scheduler.updates[0].Snapshot.Revision)
-	scheduler.updates[0].OnUpdated(updatedRevision)
+	require.Len(t, scheduler.Updates(), 1)
+	assert.Equal(t, updatedRevision, scheduler.Updates()[0].Snapshot.Revision)
+	scheduler.Updates()[0].OnUpdated(updatedRevision)
 	require.Len(t, stream.subscriptions, 1)
 
 	droppedCh := make(chan struct{}, 1)
@@ -783,10 +783,10 @@ func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptio
 		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
 	}
 	require.NoError(t, oldSubscription.option.Handler.Handle(snapshot))
-	assert.Empty(t, scheduler.tasks)
+	assert.Empty(t, scheduler.Tasks())
 
 	require.NoError(t, stream.Emit(snapshot))
-	require.Len(t, scheduler.tasks, 1)
+	require.Len(t, scheduler.Tasks(), 1)
 }
 
 func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRelease(t *testing.T) {
@@ -810,7 +810,7 @@ func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRel
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for first view") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
+		return len(scheduler.Tasks()) == 1
 	}, time.Second, 10*time.Millisecond)
 	mgr.Acquire(AcquirePhysicalSegments{
 		Key: key2, Meta: meta2, View: view,
@@ -818,7 +818,7 @@ func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRel
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 	time.Sleep(20 * time.Millisecond)
-	require.Len(t, scheduler.tasks, 1, "shared in-flight segment should not submit another load task")
+	require.Len(t, scheduler.Tasks(), 1, "shared in-flight segment should not submit another load task")
 
 	dropped1 := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key1, OnDropped: func() { dropped1 <- struct{}{} }})
@@ -827,10 +827,10 @@ func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRel
 		defer mgr.mu.Unlock()
 		return mgr.views[key1] == nil
 	}, time.Second, 10*time.Millisecond)
-	assert.NoError(t, scheduler.tasks[0].Context.Err())
+	assert.NoError(t, scheduler.Tasks()[0].Context.Err())
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[0].OnLoaded(segment)
+	scheduler.Tasks()[0].OnLoaded(segment)
 	select {
 	case <-dropped1:
 	case <-time.After(time.Second):
@@ -874,10 +874,10 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for first view") },
 	})
 	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
+		return len(scheduler.Tasks()) == 2
 	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
+	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.Tasks()))
+	for _, task := range scheduler.Tasks() {
 		taskBySegment[task.SegmentID] = task
 	}
 	mgr.Acquire(AcquirePhysicalSegments{
@@ -886,7 +886,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
 	time.Sleep(20 * time.Millisecond)
-	require.Len(t, scheduler.tasks, 2, "shared in-flight segment should not submit another load task")
+	require.Len(t, scheduler.Tasks(), 2, "shared in-flight segment should not submit another load task")
 
 	dropped1 := make(chan struct{}, 1)
 	mgr.Release(ReleaseSegments{Key: key1, OnDropped: func() { dropped1 <- struct{}{} }})
