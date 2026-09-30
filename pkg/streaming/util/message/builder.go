@@ -48,7 +48,8 @@ func NewImmutableMesasge(
 	properties map[string]string,
 ) ImmutableMessage {
 	return &immutableMessageImpl{
-		id: id,
+		id:        id,
+		bodyCache: &bodyCacheSlot{},
 		messageImpl: messageImpl{
 			payload:    payload,
 			properties: properties,

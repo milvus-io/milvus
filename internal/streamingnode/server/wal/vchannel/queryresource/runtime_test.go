@@ -93,6 +93,7 @@ func TestQueryRuntimeInitialBatchAndReadyEventsUseSameConsumer(t *testing.T) {
 func TestManagerQueuedMessageDoesNotRetainAck(t *testing.T) {
 	id := walimplstest.NewTestMessageID(10)
 	insert := message.CreateTestInsertMessage(t, 1, 2, 20, id).IntoImmutableMessage(id)
+	decodedBody := message.MustAsImmutableInsertMessageV1(insert).MustBody()
 	txnContext := message.TxnContext{TxnID: 1}
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
 		WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
@@ -130,6 +131,7 @@ func TestManagerQueuedMessageDoesNotRetainAck(t *testing.T) {
 				count++
 				require.Equal(t, raw.TimeTick(), selected.TimeTick)
 				require.Equal(t, uint64(2), selected.Message.MustBody().GetNumRows())
+				require.Same(t, decodedBody, selected.Message.MustBody(), "cached Body remains usable after persistence Ack")
 				return nil
 			}))
 			require.Equal(t, 1, count)

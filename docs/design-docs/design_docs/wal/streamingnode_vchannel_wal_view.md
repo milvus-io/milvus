@@ -83,7 +83,13 @@ Message Ack handles. Snapshot capture and live delivery share the original
 payloads, including complete transactions. Releasing persistence handles clears
 the recovery owner's references; Go references held by query work keep the
 immutable data alive without delaying Ack completion. Consumers must not mutate
-the shared messages; privately decoded bodies remain independently owned.
+the shared messages or their cached Body results.
+
+The [Immutable Message Body Cache](message_body_cache.md) shares read-only
+decoded bodies across RecoveryStorage and query consumers, with synchronous
+LRU capacity eviction and process-wide asynchronous idle expiry. Consumers copy execution metadata and field wrappers
+before timestamp replacement, validity normalization or legacy function-output
+materialization; large column values remain borrowed read-only.
 
 ## 4. Startup Readiness
 
