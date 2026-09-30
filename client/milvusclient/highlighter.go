@@ -247,7 +247,7 @@ func (l *LexicalHighlighter) protoMessage() (*commonpb.Highlighter, error) {
 //
 // Used internally by highlighter builders to produce the wire-format
 // KeyValuePair list. Mirrors the pattern in runAnalyzerOption.WithAnalyzerParams
-// (read_options.go:956-963).
+// in read_options.go.
 func appendJSONParam(params []*commonpb.KeyValuePair, key string, value any) ([]*commonpb.KeyValuePair, error) {
 	if value == nil {
 		return params, nil
