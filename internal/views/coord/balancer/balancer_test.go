@@ -12,6 +12,7 @@ import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -214,4 +215,76 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 		manager := reg.Get(shard)
 		return manager != nil && manager.Stats().PreparingVersion != nil
 	}, 5*time.Second, time.Millisecond)
+}
+
+func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
+	registry := emptyRegistry(t)
+	shard := cacheShard(1, 10)
+	cache := newTestCache(cfgFor(1, 10, []int64{100}, nil))
+	cache.PublishDataView(1, cacheData(1, shard.VChannel, 100))
+	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
+	config := *cache.GetBalanceConfig()
+	config.TickerInterval = time.Hour
+	cache.UpdateBalanceConfig(&config)
+	cache.MarkReady()
+
+	// Retire the first manager between Ensure and AddPreparing, reproducing
+	// the stale-pointer interleaving without replacing either implementation.
+	var ensure func(*coordview.ShardViewRegistry, qviews.ShardID) *coordview.ShardViewManager
+	var retired *coordview.ShardViewManager
+	var releaseErr error
+	ensurePatch := mockey.Mock((*coordview.ShardViewRegistry).Ensure).Origin(&ensure).To(func(r *coordview.ShardViewRegistry, id qviews.ShardID) *coordview.ShardViewManager {
+		manager := ensure(r, id)
+		if retired == nil {
+			retired = manager
+			releaseErr = manager.RequestRelease(t.Context())
+		}
+		return manager
+	}).Build()
+	t.Cleanup(func() { ensurePatch.UnPatch() })
+
+	type attempt struct {
+		manager *coordview.ShardViewManager
+		err     error
+	}
+	attempts := make(chan attempt, 4)
+	var prepare func(*coordview.ShardViewManager, context.Context, *qviews.QueryViewAtCoordBuilder) error
+	preparePatch := mockey.Mock((*coordview.ShardViewManager).AddPreparing).Origin(&prepare).To(func(manager *coordview.ShardViewManager, ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
+		err := prepare(manager, ctx, builder)
+		select {
+		case attempts <- attempt{manager: manager, err: err}:
+		case <-ctx.Done():
+		}
+		return err
+	}).Build()
+	t.Cleanup(func() { preparePatch.UnPatch() })
+
+	balancer := NewDefaultBalancer(cache, registry, nil)
+	// Only the initial scan and apply's own retry can drive this test:
+	// neither cache notifications nor the periodic timer may rescue it.
+	cache.SetNotifier(nil)
+	balancer.Start(t.Context())
+	t.Cleanup(balancer.Stop)
+	nextAttempt := func() attempt {
+		t.Helper()
+		select {
+		case result := <-attempts:
+			return result
+		case <-time.After(5 * time.Second):
+			t.Fatal("balancer did not retry preparation through the current manager")
+			return attempt{}
+		}
+	}
+	first, second := nextAttempt(), nextAttempt()
+	balancer.Stop()
+	require.NoError(t, releaseErr)
+	require.Same(t, retired, first.manager)
+	require.ErrorIs(t, first.err, merr.ErrServiceUnavailable)
+	require.NoError(t, second.err)
+	require.NotSame(t, first.manager, second.manager)
+	require.Same(t, registry.Get(shard), second.manager)
+	require.Nil(t, first.manager.Stats().PreparingVersion)
+	require.NotNil(t, second.manager.Stats().PreparingVersion)
+	require.Empty(t, attempts)
 }
