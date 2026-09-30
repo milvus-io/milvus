@@ -248,7 +248,7 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, propert
 		Schema:     schema,
 		Properties: properties,
 	}, nil)
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil) (enhance: extract proxy DML tasks into dml package):internal/proxy/dml/task_insert_idempotency_test.go
+	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	return cache
 }
 

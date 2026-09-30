@@ -41,7 +41,6 @@ func TestPartitionKey(t *testing.T) {
 	cache := newTestCache()
 	collectionID := int64(1000)
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID}, nil)
 	defaultPartitions := make(map[string]int64, common.DefaultPartitionsWithPartitionKey)
 	for i := int64(0); i < common.DefaultPartitionsWithPartitionKey; i++ {
 		defaultPartitions[fmt.Sprintf("_default_%d", i)] = i
@@ -70,6 +69,7 @@ func TestPartitionKey(t *testing.T) {
 	}
 	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
 	schema.Fields = append(schema.Fields, partitionKeyField)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -102,6 +102,7 @@ func TestPartitionKey(t *testing.T) {
 	t.Run("Insert", func(t *testing.T) {
 		it := &InsertTask{
 			baseTask: baseTask{MetaCache: cache},
+			node:     &mockTaskNode{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{
@@ -229,7 +230,6 @@ func TestDefaultPartition(t *testing.T) {
 	cache := newTestCache()
 	collectionID := int64(1000)
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID}, nil)
 	defaultPartitions := make(map[string]int64, common.DefaultPartitionsWithPartitionKey)
 	for i := int64(0); i < common.DefaultPartitionsWithPartitionKey; i++ {
 		defaultPartitions[fmt.Sprintf("_default_%d", i)] = i
@@ -251,6 +251,7 @@ func TestDefaultPartition(t *testing.T) {
 	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
 	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -280,6 +281,7 @@ func TestDefaultPartition(t *testing.T) {
 	t.Run("Insert", func(t *testing.T) {
 		it := &InsertTask{
 			baseTask: baseTask{MetaCache: cache},
+			node:     &mockTaskNode{metaCache: cache},
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{},
 				InsertRequest: &msgpb.InsertRequest{

@@ -153,11 +153,15 @@ func (t *QueryTask) Request() *milvuspb.QueryRequest {
 }
 
 // SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
+//
+//go:noinline
 func (t *QueryTask) SetSkipRuntimeRLS(skip bool) {
 	t.skipRuntimeRLS = skip
 }
 
 // SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
+//
+//go:noinline
 func (t *QueryTask) SetPreserveRawFields(preserve bool) {
 	t.preserveRawFields = preserve
 }

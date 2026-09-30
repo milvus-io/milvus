@@ -1,7 +1,10 @@
 package dml
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
@@ -174,14 +177,27 @@ func newBFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.Fi
 
 // mockTaskNode is a taskmodel.TaskNode stub for tests whose methods are not
 // invoked on the exercised paths.
-type mockTaskNode struct{}
+type mockTaskNode struct {
+	metaCache metacache.Cache
+}
 
-func (n *mockTaskNode) GetMetaCache() metacache.Cache        { return nil }
+func (n *mockTaskNode) GetMetaCache() metacache.Cache        { return n.metaCache }
 func (n *mockTaskNode) MixCoord() types.MixCoordClient       { return nil }
 func (n *mockTaskNode) LBPolicy() shardclient.LBPolicy       { return nil }
 func (n *mockTaskNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *mockTaskNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *mockTaskNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
+func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, cache metacache.Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
+	if !rlsEnabled || !skipRLS {
+		return rlsEnabled, nil
+	}
+	if rlsForce {
+		return false, merr.WrapErrPrivilegeNotPermitted(
+			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+			operation, collectionName)
+	}
+	return false, nil
+}
 
 // mockUpsertNode is a test double for the proxy composition root that the
 // UpsertTask holds as its node. It exposes a writable tsoAllocator and a
@@ -274,4 +290,31 @@ func captureProxyLogs(t *testing.T) *mlog.TestSink {
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
 	})
+}
+
+func constructPlaceholderGroup(nq, dim int) *commonpb.PlaceholderGroup {
+	values := make([][]byte, 0, nq)
+	for i := 0; i < nq; i++ {
+		bs := make([]byte, 0, dim*4)
+		for j := 0; j < dim; j++ {
+			var buffer bytes.Buffer
+			f := rand.Float32()
+			err := binary.Write(&buffer, common.Endian, f)
+			if err != nil {
+				panic(err)
+			}
+			bs = append(bs, buffer.Bytes()...)
+		}
+		values = append(values, bs)
+	}
+
+	return &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{
+				Tag:    "$0",
+				Type:   commonpb.PlaceholderType_FloatVector,
+				Values: values,
+			},
+		},
+	}
 }

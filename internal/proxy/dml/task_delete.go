@@ -7,9 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -17,10 +14,9 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
-"github.com/milvus-io/milvus/internal/proxy/scheduler"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
@@ -39,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 )
 
 type BaseDeleteTask = msgstream.DeleteMsg

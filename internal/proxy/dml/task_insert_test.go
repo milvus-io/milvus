@@ -519,7 +519,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{Schema: schema}, nil)
-	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil).Maybe()
 	task := &InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -885,7 +885,7 @@ func TestMaxInsertSize(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.On("GetCollectionID", mock.Anything, dbName, collectionName).Return(UniqueID(100), nil)
 		cache.On("GetCollectionInfo", mock.Anything, dbName, collectionName, UniqueID(100)).Return(&collectionInfo{Schema: schema}, nil)
-		cache.On("GetCollectionSchema", mock.Anything, dbName, collectionName).Return(schema, nil)
+		cache.On("GetCollectionSchema", mock.Anything, dbName, collectionName).Return(schema, nil).Maybe()
 		it := InsertTask{
 			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),

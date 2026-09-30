@@ -65,7 +65,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		})
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, validatePartitionTag, nil) 0f0e9b4770 (enhance: extract proxy DML tasks into dml package)
+		mockTest(t, ValidatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		// Schema with namespace enabled
