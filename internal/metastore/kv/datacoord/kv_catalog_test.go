@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -905,14 +906,16 @@ func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_ChannelExists_SaveError(t *testing.T) {
-	txn := mocks.NewMetaKv(t)
-	txn.EXPECT().
-		Load(mock.Anything, mock.Anything).
-		Return("", errors.New("mock error"))
+func Test_ChannelExists_LoadError(t *testing.T) {
+	txn := etcdkv.NewEtcdKV(nil, "")
+	loadErr := errors.New("mock error")
+	load := mockey.Mock(mockey.GetMethod(txn, "Load")).Return("", loadErr).Build()
+	defer load.UnPatch()
 
 	catalog := NewCatalog(txn, rootPath, "")
-	assert.False(t, catalog.ChannelExists(context.TODO(), "test_channel_1"))
+	exists, err := catalog.ChannelExists(context.TODO(), "test_channel_1")
+	assert.False(t, exists)
+	require.ErrorIs(t, err, loadErr)
 }
 
 func Test_parseBinlogKey(t *testing.T) {
