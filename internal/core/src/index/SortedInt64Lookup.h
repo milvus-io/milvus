@@ -27,16 +27,62 @@ namespace milvus::index::detail {
 // Below this size, avoid allocating and sorting a query copy.
 inline constexpr size_t kSortedInt64BatchThreshold = 128;
 
+// Visit matching row offsets using the original full-range binary-search
+// strategy. Validator is called before each row is reported so callers can
+// retain diagnostics for malformed sorted ranges without coupling this helper
+// to a logging implementation.
+template <typename Iterator,
+          typename Value,
+          typename Visitor,
+          typename Validator>
+void
+VisitSortedMatches(Iterator first,
+                   Iterator last,
+                   size_t n,
+                   const Value* values,
+                   Visitor visit,
+                   Validator validate) {
+    if (n == 0 || first == last) {
+        return;
+    }
+    const auto less = [](const auto& entry, const auto value) {
+        return entry.a_ < value;
+    };
+    for (size_t i = 0; i < n; ++i) {
+        auto lb = std::lower_bound(first, last, values[i], less);
+        auto ub = std::upper_bound(
+            lb, last, values[i], [](const auto value, const auto& entry) {
+                return value < entry.a_;
+            });
+        for (; lb != ub; ++lb) {
+            validate(values[i], *lb);
+            visit(lb->idx_);
+        }
+    }
+}
+
+template <typename Iterator, typename Value, typename Visitor>
+void
+VisitSortedMatches(Iterator first,
+                   Iterator last,
+                   size_t n,
+                   const Value* values,
+                   Visitor visit) {
+    VisitSortedMatches(
+        first, last, n, values, visit, [](const auto&, const auto&) {});
+}
+
 // Visit matching row offsets in a sorted range of {a_, idx_} entries. The
 // caller owns bitmap initialization (all false for IN, validity for NOT IN).
 // Iterators may refer to heap or mmap storage; neither input is modified.
-template <typename Iterator, typename Visitor>
+template <typename Iterator, typename Visitor, typename Validator>
 void
 VisitSortedInt64Matches(Iterator first,
                         Iterator last,
                         size_t n,
                         const int64_t* values,
-                        Visitor visit) {
+                        Visitor visit,
+                        Validator validate) {
     if (n == 0 || first == last) {
         return;
     }
@@ -48,16 +94,7 @@ VisitSortedInt64Matches(Iterator first,
     // Use the actual entry range, not the row count (which includes NULLs).
     if (n < kSortedInt64BatchThreshold ||
         n > static_cast<size_t>(last - first)) {
-        for (size_t i = 0; i < n; ++i) {
-            auto lb = std::lower_bound(first, last, values[i], less);
-            auto ub = std::upper_bound(
-                lb, last, values[i], [](int64_t value, const auto& entry) {
-                    return value < entry.a_;
-                });
-            for (; lb != ub; ++lb) {
-                visit(lb->idx_);
-            }
-        }
+        VisitSortedMatches(first, last, n, values, visit, validate);
         return;
     }
 
@@ -89,10 +126,22 @@ VisitSortedInt64Matches(Iterator first,
         // Each matching entry must be visited anyway. Walking its equal run
         // avoids a second search, and the next query starts after that run.
         while (cursor != last && cursor->a_ == value) {
+            validate(value, *cursor);
             visit(cursor->idx_);
             ++cursor;
         }
     }
+}
+
+template <typename Iterator, typename Visitor>
+void
+VisitSortedInt64Matches(Iterator first,
+                        Iterator last,
+                        size_t n,
+                        const int64_t* values,
+                        Visitor visit) {
+    VisitSortedInt64Matches(
+        first, last, n, values, visit, [](const auto&, const auto&) {});
 }
 
 }  // namespace milvus::index::detail

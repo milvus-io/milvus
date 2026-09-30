@@ -23,6 +23,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <string_view>
 #include <unordered_set>
@@ -150,6 +151,50 @@ CheckEdgeCases() {
         empty, empty, 0, nullptr, [](int32_t) { std::abort(); });
 }
 
+void
+CheckValidationCallbacks() {
+    std::vector<Entry> entries;
+    for (int32_t i = 0; i < 256; ++i) {
+        entries.emplace_back(i, i);
+    }
+
+    size_t validations = 0;
+    auto validate = [&](const int64_t expected, const Entry& entry) {
+        if (entry.a_ != expected) {
+            std::cerr << "validation callback received a mismatched entry\n";
+            std::exit(1);
+        }
+        ++validations;
+    };
+    auto visit = [](int32_t) {};
+
+    const std::vector<int64_t> small_query{17};
+    milvus::index::detail::VisitSortedMatches(entries.begin(),
+                                              entries.end(),
+                                              small_query.size(),
+                                              small_query.data(),
+                                              visit,
+                                              validate);
+    if (validations != 1) {
+        std::cerr << "fallback validation callback count mismatch\n";
+        std::exit(1);
+    }
+
+    std::vector<int64_t> batch_query(128);
+    std::iota(batch_query.begin(), batch_query.end(), 0);
+    validations = 0;
+    milvus::index::detail::VisitSortedInt64Matches(entries.begin(),
+                                                   entries.end(),
+                                                   batch_query.size(),
+                                                   batch_query.data(),
+                                                   visit,
+                                                   validate);
+    if (validations != batch_query.size()) {
+        std::cerr << "batch validation callback count mismatch\n";
+        std::exit(1);
+    }
+}
+
 volatile size_t checksum = 0;
 
 template <typename Function>
@@ -273,6 +318,7 @@ main(int argc, char** argv) {
         return 1;
     }
     CheckEdgeCases();
+    CheckValidationCallbacks();
     std::cerr << "2400 scan/baseline comparisons passed for IN and NOT IN\n";
     if (mode != "--verify-only") {
         std::cout << std::setprecision(6);
