@@ -303,6 +303,14 @@ Object-storage work in `BeforeRelease` and external ready/dropped callbacks run
 outside these critical sections. The single current BM25 aggregate and deferred
 Delete replay memory optimization remain unchanged.
 
+Dropping the last reference cancels an outstanding initial build, but cancellation
+does not end a running `Prepare` or C call. Resource closure and `OnDropped` must
+wait for the scheduler handle to finish, including a canceled build that never
+started. A short-lived cleanup goroutine performs this wait outside the shard,
+owner and manager locks and without occupying a scheduler worker. `Manager.Close`
+also drains these detached builds. A subsequent acquisition may create a new
+runtime; the old build's completion cannot publish readiness for that runtime.
+
 ### Deferred: slow-consumer backpressure and cancellation
 
 TODO(#40451, explicitly deferred from this PR): when GrowingRuntime consumption

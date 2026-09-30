@@ -99,6 +99,13 @@ or target advancement, rather than using an independent store mutex after
 releasing the Oracle lock. Live events, version preparation and lazy
 materialization can run on different goroutines; each observes consistent
 membership and statistics under this one lock.
+
+Insert materialization, column conversion and private BM25 delta computation run
+outside the Oracle lock using immutable schema metadata. Under the write lock,
+the Oracle rechecks the segment's flushed/sealed state and merges the delta into
+both retained growing statistics and the current aggregate. Queries can read the
+previous complete aggregate during conversion. Event application remains ordered
+by QueryRuntime, so its barrier cannot overtake this publication.
 Version selection borrows growing statistics within that critical section (or
 exclusive initialization). Merging copies their counts into the aggregate or
 delta; no borrowed statistics escape the lock, so per-segment snapshots are unnecessary.
