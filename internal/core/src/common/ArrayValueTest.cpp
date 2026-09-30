@@ -33,6 +33,7 @@
 
 #include "common/StructElementOffsets.h"
 #include "common/ChunkWriter.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/FieldMeta.h"
@@ -421,6 +422,9 @@ RunStorageV3SealedRetrieve(bool enable_mmap,
         segment->SetLoadInfo(load_info);
         milvus::tracer::TraceContext trace_ctx;
         ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+        const auto arrow_projection = ArrowListToScalarFieldProto(
+            *std::static_pointer_cast<arrow::ListArray>(nested_array),
+            (*schema)[nested_field].get_array_type_schema());
         const std::vector<int64_t> offsets = {3, 0, 1, 2, 0};
         auto result = segment->bulk_subscript(
             nullptr, nested_field, offsets.data(), offsets.size());
@@ -429,6 +433,7 @@ RunStorageV3SealedRetrieve(bool enable_mmap,
         ASSERT_EQ(actual.data_size(), offsets.size());
         for (size_t i = 0; i < offsets.size(); ++i) {
             AssertProtoEqual(rows[offsets[i]], actual.data(i));
+            AssertProtoEqual(arrow_projection[offsets[i]], actual.data(i));
         }
         return;
     }
