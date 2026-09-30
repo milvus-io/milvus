@@ -65,7 +65,7 @@ type growingSegmentStats struct {
 }
 
 // growingStatsStore belongs to one oracleRuntime. After initialization, its
-// owner must hold oracleRuntime.mu for all access, including segment contents.
+// owner must hold oracleRuntime.mu for access to segments and their contents.
 // Membership cleanup and aggregate publication share the same critical section.
 type growingStatsStore struct {
 	schema   *schemapb.CollectionSchema
@@ -118,25 +118,31 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 	segment.stats.merge(stats)
 }
 
-func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (int64, bm25Stats, error) {
-	segmentID := insert.Assignment.GetSegmentAssignment().GetSegmentId()
-	partitionID := insert.Assignment.GetPartitionId()
+// collectInsertStats only reads immutable schema metadata and builds a private
+// delta. Keep materialization and column conversion outside the oracle lock.
+func (s *growingStatsStore) collectInsertStats(insert walview.SegmentInsertMessage) (bm25Stats, error) {
 	stats := newBM25StatsFromSchema(s.schema, s.fieldIDs)
 	if err := collectGrowingInsertStats(stats, s.schema, insert); err != nil {
-		return 0, nil, err
+		return nil, err
 	}
+	return stats, nil
+}
+
+func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage, stats bm25Stats) error {
+	segmentID := insert.Assignment.GetSegmentAssignment().GetSegmentId()
+	partitionID := insert.Assignment.GetPartitionId()
 	segment := s.getOrCreateSegment(segmentID, partitionID)
 	if segment.flushed {
-		return 0, nil, merr.WrapErrServiceInternalMsg("BM25 growing segment %d already flushed", segmentID)
+		return merr.WrapErrServiceInternalMsg("BM25 growing segment %d already flushed", segmentID)
 	}
 	if segment.sealedAt != nil {
-		return 0, nil, merr.WrapErrServiceInternalMsg("BM25 growing segment %d already sealed", segmentID)
+		return merr.WrapErrServiceInternalMsg("BM25 growing segment %d already sealed", segmentID)
 	}
 	if segment.partitionID == 0 {
 		segment.partitionID = partitionID
 	}
 	segment.stats.merge(stats)
-	return segmentID, stats, nil
+	return nil
 }
 
 func (s *growingStatsStore) markFlushed(segmentID int64) {
@@ -323,8 +329,11 @@ func (r *oracleRuntime) loadInitialGrowing(ctx context.Context, walView walview.
 		}
 		for _, raw := range segment.Data.InsertMessages {
 			if err := walview.ForEachSegmentInsertMessage(raw, segment.SegmentID, func(insert walview.SegmentInsertMessage) error {
-				_, _, err := r.growingStore.appendInsert(insert)
-				return err
+				stats, err := r.growingStore.collectInsertStats(insert)
+				if err != nil {
+					return err
+				}
+				return r.growingStore.appendInsert(insert, stats)
 			}); err != nil {
 				return err
 			}
@@ -576,12 +585,16 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 			if !r.includesPartition(insert.Assignment.GetPartitionId()) {
 				return nil
 			}
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			segmentID, stats, err := r.growingStore.appendInsert(insert)
+			stats, err := r.growingStore.collectInsertStats(insert)
 			if err != nil {
 				return err
 			}
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if err := r.growingStore.appendInsert(insert, stats); err != nil {
+				return err
+			}
+			segmentID := insert.Assignment.GetSegmentAssignment().GetSegmentId()
 			if r.currentStats != nil {
 				if _, sealed := r.currentSealed[segmentID]; !sealed {
 					r.currentGrowing[segmentID] = struct{}{}
