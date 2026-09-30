@@ -2152,10 +2152,6 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	var rlsErr error
 	if !l0ImportDisabled {
 		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
-		if merr.IsRetryableErr(rlsErr) {
-			resp.Status = merr.Status(rlsErr)
-			return resp, nil
-		}
 	}
 
 	files := in.GetFiles()

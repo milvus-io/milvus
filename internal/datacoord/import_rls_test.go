@@ -104,7 +104,7 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		require.ErrorIs(t, rls.ValidateRowsByPredicate(context.Background(), field("other"), 1, predicate, "import", "check"), merr.ErrPrivilegeNotPermitted)
 	})
 
-	t.Run("metadata failure is retried", func(t *testing.T) {
+	t.Run("metadata failure is classified retryable", func(t *testing.T) {
 		mixCoord := internalmocks.NewMixCoord(t)
 		mixCoord.EXPECT().GetRLSMetadata(mock.MatchedBy(func(ctx context.Context) bool {
 			_, ok := ctx.Deadline()
@@ -117,7 +117,7 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		require.True(t, merr.IsRetryableErr(err))
 	})
 
-	t.Run("metadata storage failure is retried", func(t *testing.T) {
+	t.Run("metadata storage failure is classified retryable", func(t *testing.T) {
 		mixCoord := internalmocks.NewMixCoord(t)
 		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
 			Status: merr.Status(merr.WrapErrIoFailedReason("etcd read failed")),

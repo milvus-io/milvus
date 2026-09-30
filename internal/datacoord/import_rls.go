@@ -54,9 +54,9 @@ func (s *Server) getImportRLSMetadata(
 // predicate that can be persisted with the import job. The import ACK callback
 // holds the same exclusive canonical-collection resource key as every RLS
 // mutation, so no policy or principal update can run between the two metadata
-// reads under the broadcaster's collection-lock contract. Metadata read
-// failures are retriable; the returned policy error is deterministic for this
-// snapshot.
+// reads under the broadcaster's collection-lock contract. The ACK callback
+// persists any metadata read failure on a terminal failed job instead of
+// retrying the RPC while retaining that collection lock.
 func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) ([]byte, error) {
 	properties := in.GetSchema().GetProperties()
 	enabled, err := common.IsRLSEnabled(properties...)
