@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -127,7 +127,7 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 
 	chMgr := channelmgr.NewMockChannelsMgr(t)
 	chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
-	dt := deleteTask{
+	dt := DeleteTask{
 		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		req: &milvuspb.DeleteRequest{
@@ -143,7 +143,7 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 }
 
 func TestDeleteTask_PreExecuteSkipsNamespaceValidationWhenUnset(t *testing.T) {
-	dt := deleteTask{
+	dt := DeleteTask{
 		req: &milvuspb.DeleteRequest{},
 	}
 	assert.NoError(t, dt.PreExecute(context.Background()))
@@ -161,7 +161,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 	}
 
 	t.Run("empty expr", func(t *testing.T) {
-		dt := deleteTask{}
+		dt := DeleteTask{}
 		assert.Error(t, dt.Execute(context.Background()))
 	})
 
@@ -175,7 +175,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		allocator.Close()
 
-		dt := deleteTask{
+		dt := DeleteTask{
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -208,7 +208,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		allocator.Start()
 		assert.NoError(t, err)
 
-		dt := deleteTask{
+		dt := DeleteTask{
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -222,6 +222,8 @@ func TestDeleteTask_Execute(t *testing.T) {
 			},
 			primaryKeys: pk,
 		}
+		streaming.SetupNoopWALForTest()
+		defer streaming.SetupNoopWALForTest()
 		streaming.ExpectErrorOnce(errors.New("mock error"))
 		assert.Error(t, dt.Execute(context.Background()))
 	})
@@ -277,7 +279,7 @@ func (s *DeleteRunnerSuite) SetupSuite() {
 func (s *DeleteRunnerSuite) TestInitSuccess() {
 	s.Run("non_pk == 1", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "non_pk == 1",
@@ -300,7 +302,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 	s.Run("non_pk > 1, partition key", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "non_pk > 1",
@@ -322,7 +324,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 	s.Run("pk == 1, partition key", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "pk == 1",
@@ -352,7 +354,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 			&schemapb.FieldSchema{FieldID: common.StartOfUserFieldID + 1, Name: "non_pk", DataType: schemapb.DataType_Int64},
 		)
 		s.schema = mustNewSchemaInfo(schema)
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "pk == 1",
@@ -375,7 +377,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 	s.Run("pk == 1, no partition name", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "pk == 1",
@@ -414,7 +416,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 	s.Run("pk == 1, with partition name", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				PartitionName:  "part1",
@@ -457,7 +459,7 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 	s.Run("namespace partition mode routes to namespace partition", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		namespace := "tenant_partition"
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Namespace:      &namespace,
@@ -503,14 +505,14 @@ func (s *DeleteRunnerSuite) TestInitSuccess() {
 
 func (s *DeleteRunnerSuite) TestInitFailure() {
 	s.Run("empty collection name", func() {
-		dr := deleteRunner{}
+		dr := DeleteRunner{}
 		s.Error(dr.Init(context.Background()))
 	})
 
 	s.Run("namespace disabled", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
 		namespace := "ns-1"
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "pk == 1",
@@ -539,7 +541,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("fail to get database info", func() {
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 			},
@@ -550,7 +552,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		s.Error(dr.Init(context.Background()))
 	})
 	s.Run("fail to get collection id", func() {
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 			},
@@ -564,7 +566,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("fail get collection info", func() {
-		dr := deleteRunner{req: &milvuspb.DeleteRequest{
+		dr := DeleteRunner{req: &milvuspb.DeleteRequest{
 			CollectionName: s.collectionName,
 		}}
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 0}, nil)
@@ -578,7 +580,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("create plan failed", func() {
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "????",
@@ -594,7 +596,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 	s.Run("delete with always true expression failed", func() {
 		alwaysTrueExpr := " "
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           alwaysTrueExpr,
@@ -619,7 +621,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		builder.AddInt64(3)
 		blob := builder.Marshal()
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "membership_match(pk, {bf}, type=bloom)",
@@ -640,7 +642,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("partition key mode but delete with partition name", func() {
-		dr := deleteRunner{req: &milvuspb.DeleteRequest{
+		dr := DeleteRunner{req: &milvuspb.DeleteRequest{
 			CollectionName: s.collectionName,
 			PartitionName:  s.partitionName,
 		}}
@@ -655,7 +657,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("invalid partition name", func() {
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				PartitionName:  "???",
@@ -690,7 +692,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 	})
 
 	s.Run("get partition id failed", func() {
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				PartitionName:  s.partitionName,
@@ -727,7 +729,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 
 	s.Run("get vchannel failed", func() {
 		mockChMgr := channelmgr.NewMockChannelsMgr(s.T())
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			req: &milvuspb.DeleteRequest{
 				CollectionName: s.collectionName,
 				Expr:           "non_pk in [1, 2, 3]",
@@ -747,6 +749,7 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 }
 
 func TestDeleteRunner_Run(t *testing.T) {
+	streaming.SetupNoopWALForTest()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -796,7 +799,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			metaCache:       metaCache,
 			chMgr:           mockMgr,
 			schema:          schema,
@@ -835,7 +838,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			idAllocator:     idAllocator,
 			tsoAllocatorIns: tsoAllocator,
 			metaCache:       metaCache,
@@ -881,7 +884,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		pt := paramtable.Get()
 		pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, "1")
 		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			schema:       schema,
 			collectionID: collectionID,
 			lb:           shardclient.NewMockLBPolicy(t),
@@ -907,7 +910,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			chMgr:           mockMgr,
@@ -974,7 +977,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			chMgr:           mockMgr,
 			queue:           queue.DmQueue,
 			metaCache:       metaCache,
@@ -1038,7 +1041,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			chMgr:           mockMgr,
 			queue:           queue.DmQueue,
 			metaCache:       metaCache,
@@ -1103,7 +1106,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			queue:           queue.DmQueue,
 			metaCache:       metaCache,
 			chMgr:           mockMgr,
@@ -1175,7 +1178,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)
 
-		dr := deleteRunner{
+		dr := DeleteRunner{
 			metaCache:       mockCache,
 			queue:           queue.DmQueue,
 			chMgr:           mockMgr,
