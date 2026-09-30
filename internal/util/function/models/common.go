@@ -406,7 +406,10 @@ func retrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 		// (ErrFunctionFailed, not retriable). Repeating a permanently failing
 		// request cannot make it succeed; it only triples the load on the model
 		// service and adds the whole backoff to the user-visible error.
-		if !merr.IsRetryableErr(err) {
+		// Stop only on a typed error explicitly classified non-retriable:
+		// merr.IsRetryableErr is false for any non-merr error, so an error
+		// that reaches here unclassified is treated as transient.
+		if merr.IsMilvusError(err) && !merr.IsRetryableErr(err) {
 			return nil, err
 		}
 

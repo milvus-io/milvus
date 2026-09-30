@@ -173,3 +173,29 @@ func (s *CommonSuite) TestRetrySendRetriesUntilSuccess() {
 	s.Equal(2, attempts)
 	s.Equal(`{"ok": true}`, string(body))
 }
+
+// TestRetrySendRetriesTransportFailure pins the transport-error path: when
+// http.Client.Do fails (here the server drops the connection before writing a
+// response), the error is transient and the next attempt must still be made.
+func (s *CommonSuite) TestRetrySendRetriesTransportFailure() {
+	attempts := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			s.Require().NoError(err)
+			conn.Close()
+			return
+		}
+		w.Write([]byte(`{"ok": true}`))
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	body, err := retrySend(ctx, []byte(`{}`), http.MethodPost, ts.URL, nil, 3)
+	s.NoError(err)
+	s.Equal(2, attempts)
+	s.Equal(`{"ok": true}`, string(body))
+}
