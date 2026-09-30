@@ -126,7 +126,7 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface
 	return handleExprInternal(schema, exprStr, &ParserVisitorArgs{})
 }
 
-func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
 	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
@@ -141,17 +141,33 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 		return nil, merr.WrapErrQueryPlanMsg("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
 	}
 
+	return predicate.expr, nil
+}
+
+func ParseExprTemplate(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	if visitorArgs == nil {
+		visitorArgs = &ParserVisitorArgs{}
+	}
+	return parseExprTemplateInner(schema, exprStr, visitorArgs)
+}
+
+func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	expr, err := parseExprTemplateInner(schema, exprStr, visitorArgs)
+	if err != nil {
+		return nil, err
+	}
+
 	valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := FillExpressionValue(predicate.expr, valueMap); err != nil {
+	if err := FillExpressionValue(expr, valueMap); err != nil {
 		return nil, err
 	}
 
-	predicate.expr = rewriter.RewriteExpr(predicate.expr)
-	return predicate.expr, nil
+	expr = rewriter.RewriteExpr(expr)
+	return expr, nil
 }
 
 func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {

@@ -2,6 +2,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -42,6 +43,19 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
+	}
+	if err := common.ValidateRLSProperties(req.GetProperties()...); err != nil {
+		return err
+	}
+	if err := common.ValidateRLSEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+	for _, key := range req.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
 	}
 
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
