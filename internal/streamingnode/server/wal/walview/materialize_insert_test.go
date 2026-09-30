@@ -45,11 +45,14 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	require.NotEmpty(t, output.FieldsData[1].GetVectors().GetSparseFloatVector().GetContents()[0])
 	patch := mockey.Mock((*function.FunctionRunnerLocalStore).FillEmbeddingData).Return(context.Canceled).Build()
 	defer patch.UnPatch()
-	materialized, err := MaterializeInsertRequest(schema, inputFor(output))
+	materializedInput := inputFor(output)
+	cached := materializedInput.Message.MustBody()
+	materialized, err := MaterializeInsertRequest(schema, materializedInput)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(output, materialized))
-	materialized.FieldsData[1].GetVectors().GetSparseFloatVector().Contents[0][0] ^= 1
-	require.False(t, proto.Equal(output, materialized), "each materialization owns its decoded fields")
+	require.Same(t, cached.FieldsData[1].GetVectors().GetSparseFloatVector(), materialized.FieldsData[1].GetVectors().GetSparseFloatVector(), "materialized columns are borrowed read-only")
+	materialized.FieldsData[1].FieldName = "private"
+	require.True(t, proto.Equal(output, cached), "execution metadata belongs to the consumer")
 	require.Zero(t, patch.Times())
 	_, err = MaterializeInsertRequest(schema, input)
 	require.ErrorIs(t, err, context.Canceled)
