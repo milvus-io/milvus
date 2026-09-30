@@ -190,6 +190,10 @@ SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
     const auto total_before =
         op ? op->storage_usage.scanned_total_bytes.load() : 0;
     const auto params = query->get_search_info().search_params_;
+    const bool diagnostic = params.contains("debug_ann_fusing_profile") &&
+                            params.value("debug_ann_fusing_profile", false);
+    FilterDiagnostics sample_profile;
+    FilterDiagnosticScope sample_scope(diagnostic ? &sample_profile : nullptr);
     // A whole-query debug ratio must never replace this expression's sample.
     const int requested = params.value("ann_fusing_sample_rows", 20);
     AssertInfo(requested == 10 || requested == 20,
@@ -246,6 +250,32 @@ SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
         accepted += truth[i] && valid[i];
     }
     const double ratio = 1.0 - static_cast<double>(accepted) / count;
+    if (diagnostic) {
+        LOG_INFO(
+            "ann_fusing profile phase=sample segment={} timestamp={} "
+            "rows={} chunk={} chunk_rows={} filter_ratio={} prepare_us={} "
+            "eval_us={} raw_path_rows={} index_path_rows={} raw_read_us={} "
+            "index_read_us={} storage_accounted_cold_bytes={} "
+            "storage_accounted_total_bytes={}",
+            segment->get_segment_id(),
+            query->get_query_timestamp(),
+            count,
+            chunk,
+            rows,
+            ratio,
+            std::chrono::duration<double, std::micro>(prepared_at - started)
+                .count(),
+            std::chrono::duration<double, std::micro>(evaluated_at -
+                                                      prepared_at)
+                .count(),
+            sample_profile.raw_path_rows,
+            sample_profile.index_path_rows,
+            sample_profile.raw_read_ns / 1000.0,
+            sample_profile.index_read_ns / 1000.0,
+            op ? op->storage_usage.scanned_cold_bytes.load() - cold_before : 0,
+            op ? op->storage_usage.scanned_total_bytes.load() - total_before
+               : 0);
+    }
     LOG_DEBUG(
         "ann_fusing sample source=single_cell storage={} chunk={} rows={} "
         "chunk_first={} chunk_rows={} requested_rows={} filter_ratio={} "

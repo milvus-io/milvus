@@ -37,6 +37,9 @@ class OffsetExpressionCallback final {
     int64_t row_count_;
     // Opt-in diagnostic only; never enable while measuring search latency.
     bool debug_trace_offsets_{false};
+    bool debug_profile_{false};
+    int64_t segment_id_{0};
+    uint64_t query_timestamp_{0};
 };
 
 }  // namespace milvus::exec

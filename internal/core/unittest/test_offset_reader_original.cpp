@@ -5,6 +5,7 @@
 #include <fstream>
 #include <random>
 #include <set>
+#include <thread>
 
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/OffsetExpressionEvaluator.h"
@@ -355,6 +356,124 @@ TEST_F(OriginalOffsetReaderTest, CallbackWithoutAnnSearchParameters) {
     QueryContext query("offset-only", &segment, ids.size(), 1);
     ExecContext exec(&query);
     EXPECT_NO_THROW(OffsetExpressionCallback(Mod(), &exec, ids.size()));
+}
+
+TEST_F(OriginalOffsetReaderTest,
+       DiagnosticScopesAreWorkerLocalAndExceptionSafe) {
+    FilterDiagnostics outer, inner;
+    ASSERT_EQ(active_filter_diagnostics, nullptr);
+    {
+        FilterDiagnosticScope scope(&outer);
+        try {
+            FilterDiagnosticScope nested(&inner);
+            FilterDiagnosticFailure failure(&inner);
+            FilterDiagnosticTimer timer(&inner.execute_ns);
+            EXPECT_EQ(active_filter_diagnostics, &inner);
+            throw std::runtime_error("diagnostic scope unwind");
+        } catch (const std::runtime_error&) {
+        }
+        EXPECT_EQ(active_filter_diagnostics, &outer);
+        EXPECT_EQ(inner.errors, 1);
+        EXPECT_GT(inner.execute_ns, 0);
+        std::thread other([&] {
+            EXPECT_EQ(active_filter_diagnostics, nullptr);
+            FilterDiagnostics local;
+            FilterDiagnosticScope worker_scope(&local);
+            EXPECT_EQ(active_filter_diagnostics, &local);
+        });
+        other.join();
+        EXPECT_EQ(active_filter_diagnostics, &outer);
+        {
+            FilterDiagnosticScope disabled(nullptr);
+            EXPECT_EQ(active_filter_diagnostics, nullptr);
+        }
+        EXPECT_EQ(active_filter_diagnostics, &outer);
+    }
+    EXPECT_EQ(active_filter_diagnostics, nullptr);
+}
+
+TEST_F(OriginalOffsetReaderTest, DiagnosticCallbackPreservesOriginalMasks) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("original_id", DataType::INT64);
+    auto column = Column(true);
+    SamplingSegment segment(schema, column);
+    using Status = knowhere::CandidateEvalStatus;
+    for (bool enabled : {false, true}) {
+        QueryContext query("original-profile", &segment, ids.size(), 17);
+        SearchInfo info;
+        info.search_params_ = {{"debug_ann_fusing_profile", enabled}};
+        query.set_search_info(info);
+        ExecContext exec(&query);
+        OffsetExpressionCallback callback(Mod(), &exec, ids.size());
+        const auto view = callback.view();
+        // Independent workspaces, same immutable expression. Repeated calls,
+        // empty batches and inactive invalid offsets must retain ABI semantics.
+        for (int worker_number = 0; worker_number < 2; ++worker_number) {
+            void* worker = nullptr;
+            ASSERT_EQ(view.create_worker(view.context, &worker),
+                      Status::Success);
+            ASSERT_NE(worker, nullptr);
+            for (uint32_t count = 0; count <= 64; ++count) {
+                std::array<int32_t, 64> offsets{};
+                uint64_t active = 0, expected = 0;
+                for (uint32_t lane = 0; lane < count; ++lane) {
+                    offsets[lane] =
+                        lane % 3 == 0 ? -1 : (lane * 997) % ids.size();
+                    if (offsets[lane] >= 0) {
+                        active |= uint64_t{1} << lane;
+                        if (ids[offsets[lane]] % 5 < 3)
+                            expected |= uint64_t{1} << lane;
+                    }
+                }
+                uint64_t accepted = ~uint64_t{0};
+                EXPECT_EQ(view.eval_batch(
+                              worker, offsets.data(), count, active, &accepted),
+                          Status::Success);
+                EXPECT_EQ(accepted, expected);
+                EXPECT_EQ(active_filter_diagnostics, nullptr);
+            }
+            const int32_t invalid = -1;
+            uint64_t accepted;
+            EXPECT_EQ(view.eval_batch(worker, &invalid, 1, 1, &accepted),
+                      Status::InvalidArgument);
+            EXPECT_EQ(accepted, 0);
+            EXPECT_EQ(active_filter_diagnostics, nullptr);
+            view.destroy_worker(worker);
+        }
+    }
+}
+
+TEST_F(OriginalOffsetReaderTest, DiagnosticReaderCountsActualSourcePath) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("original_id", DataType::INT64);
+    auto column = Column(true);
+    SamplingSegment segment(schema, column);
+    QueryContext query("profile-source", &segment, ids.size(), 17);
+    ExecContext exec(&query);
+    PreparedOffsetExpressionEvaluator prepared(Mod(), &exec, true);
+    auto worker = prepared.CreateWorkspace();
+    OffsetVector offsets{0, 997, 2000, 65535};
+    FilterDiagnostics stats;
+    {
+        FilterDiagnosticScope scope(&stats);
+        auto result = worker->EvalOffsets(offsets);
+        EXPECT_EQ(result->size(), offsets.size());
+    }
+    EXPECT_EQ(stats.raw_path_rows, offsets.size());
+    EXPECT_EQ(stats.raw_read_rows, offsets.size());
+    EXPECT_EQ(stats.index_path_rows, 0);
+    EXPECT_EQ(stats.index_read_ns, 0);
+    EXPECT_GE(stats.raw_path_ns, stats.raw_read_ns);
+    EXPECT_GT(stats.raw_read_ns, 0);
+    EXPECT_EQ(active_filter_diagnostics, nullptr);
+    SearchInfo info;
+    info.search_params_ = {{"ann_fusing_sample_rows", 10}};
+    query.set_search_info(info);
+    const auto reference = SampleOffsetFilterRatio(Mod(), &exec);
+    info.search_params_["debug_ann_fusing_profile"] = true;
+    query.set_search_info(info);
+    EXPECT_EQ(SampleOffsetFilterRatio(Mod(), &exec), reference);
+    EXPECT_EQ(active_filter_diagnostics, nullptr);
 }
 
 TEST_F(OriginalOffsetReaderTest, PhysicalIdentityNotMatchingChunkNumbers) {

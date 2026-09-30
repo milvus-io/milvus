@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "exec/FilterDiagnostics.h"
+
 #include "exec/ExprExecPath.h"
 #include "index/ScalarIndexType.h"
 
@@ -815,6 +817,11 @@ class SegmentExpr : public Expr {
                                     TargetBitmapView valid_res,
                                     const TargetBitmap* candidate_mask,
                                     const ValTypes&... values) {
+        auto* profile = active_filter_diagnostics;
+        FilterDiagnosticTimer path_timer(profile ? &profile->index_path_ns
+                                                 : nullptr);
+        if (profile)
+            profile->index_path_rows += input->size();
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -863,8 +870,13 @@ class SegmentExpr : public Expr {
                 offsets[count] = (*input)[i + count];
                 ++count;
             }
+            FilterDiagnosticTimer read_timer(profile ? &profile->index_read_ns
+                                                     : nullptr);
             auto batch =
                 index_ptr->Reverse_LookupViews({offsets.data(), count});
+            read_timer.Stop();
+            if (profile)
+                profile->index_read_rows += count;
             AssertInfo(batch.size() == count,
                        "index lookup batch size mismatch");
             // Legacy owning-string kernels (also instantiated for growing
@@ -981,6 +993,12 @@ class SegmentExpr : public Expr {
             }
         }
 
+        auto* profile = active_filter_diagnostics;
+        FilterDiagnosticTimer path_timer(profile ? &profile->raw_path_ns
+                                                 : nullptr);
+        if (profile)
+            profile->raw_path_rows += input->size();
+
         // Prepare by physical source layout, not by predicate or search hint.
         // Numeric elements of ARRAY/JSON are not scalar spans even when T is
         // arithmetic; their existing view/element readers remain responsible.
@@ -1011,6 +1029,8 @@ class SegmentExpr : public Expr {
                     for (size_t i = 0; i < input->size(); i += kGatherRows) {
                         const auto count =
                             std::min(kGatherRows, input->size() - i);
+                        FilterDiagnosticTimer read_timer(
+                            profile ? &profile->raw_read_ns : nullptr);
                         const bool all_valid = offset_reader_->Gather<T>(
                             op_ctx_,
                             input->data() + i,
@@ -1018,6 +1038,9 @@ class SegmentExpr : public Expr {
                             gathered.data(),
                             validity.data(),
                             skip_func ? chunks.data() : nullptr);
+                        read_timer.Stop();
+                        if (profile)
+                            profile->raw_read_rows += count;
                         uint64_t skipped = 0;
                         if (skip_func) {
                             // The original skip predicate belongs to this Expr.
@@ -1111,9 +1134,14 @@ class SegmentExpr : public Expr {
                     ++input_pos;
                 }
 
+                FilterDiagnosticTimer read_timer(profile ? &profile->raw_read_ns
+                                                         : nullptr);
                 auto pw = segment_->chunk_views_by_offsets<ViewType>(
                     op_ctx_, field_id_, run_chunk_id, batch_offsets);
                 const auto& [data_vec, valid_data] = pw.get();
+                read_timer.Stop();
+                if (profile)
+                    profile->raw_read_rows += batch_offsets.size();
                 AssertInfo(data_vec.size() == batch_offsets.size(),
                            "view row count mismatch: {} vs {}",
                            data_vec.size(),

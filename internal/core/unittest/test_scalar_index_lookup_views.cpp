@@ -297,9 +297,21 @@ TEST_F(ScalarIndexLookupViewsTest, ExprMaskAndBatchCursor) {
         };
         index.read_offsets.clear();
         index.largest_batch = 0;
-        EXPECT_EQ(reader.ProcessIndexLookupByOffsetsWithMask<std::string_view>(
-                      consume, &offsets, result.view(), valid.view(), mask),
-                  offsets.size());
+        exec::FilterDiagnostics profile;
+        {
+            exec::FilterDiagnosticScope scope(&profile);
+            EXPECT_EQ(
+                reader.ProcessIndexLookupByOffsetsWithMask<std::string_view>(
+                    consume, &offsets, result.view(), valid.view(), mask),
+                offsets.size());
+        }
+        EXPECT_EQ(profile.index_path_rows, offsets.size());
+        EXPECT_EQ(profile.index_read_rows, expected.size());
+        EXPECT_EQ(profile.raw_path_rows, 0);
+        EXPECT_GE(profile.index_path_ns, profile.index_read_ns);
+        if (!expected.empty())
+            EXPECT_GT(profile.index_read_ns, 0);
+        EXPECT_EQ(exec::active_filter_diagnostics, nullptr);
         EXPECT_EQ(cursor, offsets.size());
         EXPECT_EQ(index.read_offsets, expected);
         if (mode == 0) {

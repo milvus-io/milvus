@@ -92,13 +92,27 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     const auto preparation_started = std::chrono::steady_clock::now();
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
+    const auto* placeholders = query_context_->get_placeholder_group();
+    // Retrieve/filter-only operators do not have an initialized ANN request.
+    // Diagnostics must retain the same boundary as ANN strategy selection.
+    if (placeholders != nullptr) {
+        const auto& diagnostic_params =
+            query_context_->get_search_info().search_params_;
+        if (diagnostic_params.contains("debug_ann_fusing_profile") &&
+            diagnostic_params.value("debug_ann_fusing_profile", false)) {
+            profile_ = std::make_unique<FilterDiagnostics>();
+            profile_segment_id_ = query_context_->get_segment()->get_segment_id();
+            profile_timestamp_ = query_context_->get_query_timestamp();
+        }
+    }
+    FilterDiagnosticTimer profile_prepare(profile_ ? &profile_->prepare_ns
+                                                   : nullptr);
     // Compile the normal Expr once; this same tree is retained for baseline.
     exprs_ = std::make_unique<ExprSet>(
         std::vector<expr::TypedExprPtr>{filter->filter()}, exec_context, true);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
 
-    const auto* placeholders = query_context_->get_placeholder_group();
     // This operator also serves scalar retrieve/get and filter-only plans.
     // Their default SearchInfo is not an ANN request and has no field binding.
     const auto request = placeholders == nullptr
@@ -187,6 +201,31 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     }
 }
 
+PhyFilterBitsNode::~PhyFilterBitsNode() {
+    if (profile_) {
+        try {
+            const auto& p = *profile_;
+            LOG_INFO(
+                "ann_fusing profile phase=filter segment={} timestamp={} "
+                "skipped={} cache_hit={} completed={} errors={} rows={} "
+                "prepare_us={} output_us={} prefetch_wait_us={} filter_us={}",
+                profile_segment_id_,
+                profile_timestamp_,
+                skip_user_bitmap_,
+                profile_cache_hit_,
+                num_processed_rows_ == need_process_rows_,
+                p.errors,
+                num_processed_rows_,
+                p.prepare_ns / 1000.0,
+                p.execute_ns / 1000.0,
+                p.wait_ns / 1000.0,
+                p.filter_ns / 1000.0);
+        } catch (...) {
+            // Logging must not change destruction/cancellation semantics.
+        }
+    }
+}
+
 void
 PhyFilterBitsNode::AddInput(RowVectorPtr& input) {
     input_ = std::move(input);
@@ -208,6 +247,9 @@ PhyFilterBitsNode::IsFinished() {
 
 RowVectorPtr
 PhyFilterBitsNode::GetOutput() {
+    FilterDiagnosticTimer profile_output(profile_ ? &profile_->execute_ns
+                                                  : nullptr);
+    FilterDiagnosticFailure profile_failure(profile_.get());
     milvus::exec::checkCancellation(query_context_);
 
     if (AllInputProcessed()) {
@@ -243,6 +285,7 @@ PhyFilterBitsNode::GetOutput() {
         if (ExprResCacheManager::Instance().Get(key, cached) &&
             cached.result != nullptr &&
             cached.result->size() == need_process_rows_) {
+            profile_cache_hit_ = true;
             num_processed_rows_ = need_process_rows_;
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
@@ -257,7 +300,9 @@ PhyFilterBitsNode::GetOutput() {
         "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
     tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
 
-    exprs_->WaitPrefetch();
+    WaitPrefetch();
+    FilterDiagnosticTimer profile_filter(profile_ ? &profile_->filter_ns
+                                                  : nullptr);
 
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
