@@ -271,7 +271,8 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	// payload and id is always immutable, so we only clone the prop here is ok.
 	prop := m.properties.Clone()
 	return &immutableMessageImpl{
-		id: id,
+		id:        id,
+		bodyCache: &bodyCacheSlot{},
 		messageImpl: messageImpl{
 			payload:    m.payload,
 			properties: prop,
@@ -454,7 +455,8 @@ func CloneMutableMessage(msg MutableMessage) MutableMessage {
 
 type immutableMessageImpl struct {
 	messageImpl
-	id MessageID
+	id        MessageID
+	bodyCache *bodyCacheSlot
 }
 
 // WALName returns the name of message related wal.
@@ -498,7 +500,8 @@ func (m *immutableMessageImpl) cloneForTxnBody(timetick uint64, LastConfirmedMes
 func (m *immutableMessageImpl) clone() *immutableMessageImpl {
 	// payload and message id is always immutable, so we only clone the prop here is ok.
 	return &immutableMessageImpl{
-		id: m.id,
+		id:        m.id,
+		bodyCache: m.bodyCache,
 		messageImpl: messageImpl{
 			payload:    m.payload,
 			properties: m.properties.Clone(),
