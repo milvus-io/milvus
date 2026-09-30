@@ -1789,12 +1789,14 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	var dataTimestamp uint64
 	var rlsPrincipal string
 	var skipRLS bool
+	var options map[string]string
 	mockey.Mock((*Server).createImportJobFromAck).To(
 		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
 			channelNames = append([]string{}, in.GetChannelNames()...)
 			dataTimestamp = in.GetDataTimestamp()
 			rlsPrincipal = in.GetRlsPrincipal()
 			skipRLS = in.GetSkipRls()
+			options = funcutil.KeyValuePair2Map(in.GetOptions())
 			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
 		}).Build()
 
@@ -1828,6 +1830,8 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, uint64(200), dataTimestamp)
 	assert.Equal(t, "alice", rlsPrincipal)
 	assert.True(t, skipRLS)
+	assert.NotContains(t, options, importutilv2.RLSPrincipal)
+	assert.NotContains(t, options, importutilv2.SkipRLS)
 }
 
 func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {

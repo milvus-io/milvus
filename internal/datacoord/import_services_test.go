@@ -771,6 +771,43 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSDenialCreatesFailedJ
 	s.Equal("1000", resp.GetJobID())
 }
 
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSVersionGateCreatesFailedJob() {
+	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("false")
+	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		ID:            100,
+		VChannelNames: []string{"v1"},
+	}, nil)
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
+		return job.GetState() == internalpb.ImportJobState_Failed &&
+			strings.Contains(job.GetReason(), "cluster upgrade completes")
+	})).Return(nil).Once()
+	allocator := allocator.NewMockAllocator(s.T())
+	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+
+	server := &Server{handler: mockHandler, importMeta: importMeta, allocator: allocator}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		ChannelNames:   []string{"v1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:       "test_collection",
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+		},
+		Files:   []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
+		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+	}, false)
+
+	s.NoError(err)
+	s.NoError(merr.Error(resp.GetStatus()))
+	s.Equal("1000", resp.GetJobID())
+}
+
 func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSMetadataDiscoveryFailureIsRetryable() {
 	mixCoord := internalmocks.NewMixCoord(s.T())
 	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).

@@ -67,10 +67,10 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
 		}
 		rlsPrincipal, skipRLS = "", false
-		options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
-			return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
-		})
 	}
+	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
+		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
+	})
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.

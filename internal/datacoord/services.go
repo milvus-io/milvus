@@ -2115,15 +2115,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
-// Note: the pre-broadcast L0-import gate in ImportV2 covers only locally
-// originated imports. Replicated import messages (CDC) from a cluster with
-// enableL0Import=true land here directly without passing that gate, so it must
-// be re-checked. The gate here must NOT return an error: ack callbacks are
-// retried forever (callMessageAckCallbackUntilDone), and skipping job creation
-// would wedge the replicated CommitImport path (HandleCommitVchannel retries
-// on job-not-found). Instead the job is created directly in Failed state — a
-// terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
-// and the failure stays visible via GetImportProgress.
+// Note: pre-broadcast feature gates cover only locally originated imports.
+// Replicated or old-Proxy messages land here directly, so the gates must be
+// re-checked. A disabled gate must create a Failed job instead of returning a
+// retryable error: ack callbacks retry forever while holding the collection
+// resource guard. The terminal job also keeps the failure visible through
+// GetImportProgress.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{

@@ -71,7 +71,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 		return nil, nil
 	}
 	if !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
-		return nil, merr.WrapErrServiceUnavailable(
+		return nil, merr.WrapErrImportSysFailed(
 			"RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
 	if in.GetSkipRls() {

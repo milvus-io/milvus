@@ -199,6 +199,6 @@ func TestResolveImportRLSPredicateRejectsBeforeClusterUpgrade(t *testing.T) {
 		RlsPrincipal: "alice",
 		SkipRls:      true,
 	})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.True(t, merr.IsRetryableErr(err))
+	require.ErrorIs(t, err, merr.ErrImportSysFailed)
+	require.False(t, merr.IsRetryableErr(err))
 }
