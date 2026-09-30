@@ -412,12 +412,12 @@ func TestSnapshot_TracksLoadInfoVersionPerCollection(t *testing.T) {
 
 	require.NoError(t, store.Put(context.Background(), cfg1))
 	first := store.Snapshot()
-	assert.Equal(t, uint64(2), first.ConfigVersion(cfg1.CollectionID))
+	assert.Equal(t, loadInfoVersion(cfg1), first.ConfigVersion(cfg1.CollectionID))
 
 	require.NoError(t, store.Put(context.Background(), cfg2))
 	second := store.Snapshot()
-	assert.Equal(t, uint64(2), second.ConfigVersion(cfg1.CollectionID))
-	assert.Equal(t, uint64(3), second.ConfigVersion(cfg2.CollectionID))
+	assert.Equal(t, first.ConfigVersion(cfg1.CollectionID), second.ConfigVersion(cfg1.CollectionID))
+	assert.Equal(t, loadInfoVersion(cfg2), second.ConfigVersion(cfg2.CollectionID))
 }
 
 func TestRecoverLoadConfigStore_EmptyState(t *testing.T) {

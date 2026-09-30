@@ -70,7 +70,7 @@ func (f queryViewFlush) Empty() bool {
 //
 // After construction, the pending flush contains the Preparing view for
 // write-ahead persistence and the Preparing targets for all work nodes.
-func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
+func NewCoordQueryViewStateMachineWithRef(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
 	sm := &CoordQueryViewStateMachine{
 		state:           qviews.QueryViewStatePreparing,
 		view:            view,
@@ -99,7 +99,7 @@ func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard, ref qviews.Dat
 //   - Up:            no pending (wait for events).
 //   - Down:          re-push Down to SN.
 //   - Unrecoverable: stays Unrecoverable, waits for Manager to call EnterDropping.
-func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
+func RecoverCoordQueryViewStateMachineWithRef(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
 	recoveredState := qviews.QueryViewState(view.Meta.State)
 	sm := &CoordQueryViewStateMachine{
 		state:           recoveredState,
@@ -433,4 +433,15 @@ func (sm *CoordQueryViewStateMachine) viewWithState(state qviews.QueryViewState)
 	v := proto.Clone(sm.view).(*viewpb.QueryViewOfShard)
 	v.Meta.State = viewpb.QueryViewState(state)
 	return v
+}
+
+// NewCoordQueryViewStateMachine preserves the standalone state-machine API.
+// Reference-owning managers use NewCoordQueryViewStateMachineWithRef.
+func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
+	return NewCoordQueryViewStateMachineWithRef(view, nil)
+}
+
+// RecoverCoordQueryViewStateMachine preserves standalone recovery without a ref.
+func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
+	return RecoverCoordQueryViewStateMachineWithRef(view, nil)
 }

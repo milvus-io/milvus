@@ -414,16 +414,20 @@ func TestShardViewManagerUnpinsOnlyAfterDroppedPersist(t *testing.T) {
 	require.NoError(t, mgr.RequestRelease(context.Background()))
 	simulateNodeResponse(t, s, testSN, version, qviews.QueryViewStateDropped)
 
-	catalog.saveErr = errors.New("persist failed")
+	// Keep the deletion pending: resources must remain pinned until persistence.
+	batch := mgr.scheduler.Begin()
 	s.mu.Lock()
 	s.waitFlush = nil
 	s.mu.Unlock()
 	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
-	require.EqualError(t, mgr.scheduler.Flush(context.Background()), "persist failed")
 	require.Empty(t, derefs)
 	mgr.mu.Lock()
 	require.Contains(t, mgr.views, version)
 	mgr.mu.Unlock()
+	batch.Commit()
+	require.NoError(t, mgr.scheduler.Flush(context.Background()))
+	require.Len(t, derefs, 1)
+	derefs = nil
 
 	catalog.saveErr = nil
 	recovered := buildTestViewWithVersion(1, 1, 1, 1)
@@ -1143,8 +1147,8 @@ func TestOnQueryNodeLost_RemovedView_NoOp(t *testing.T) {
 }
 
 func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) {
-	untouched := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 1), nil)
-	processed := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 2), nil)
+	untouched := NewCoordQueryViewStateMachineWithRef(buildTestViewWithVersion(1, 1, 1, 1), nil)
+	processed := NewCoordQueryViewStateMachineWithRef(buildTestViewWithVersion(1, 1, 1, 2), nil)
 	manager := &ShardViewManager{
 		ctx:     context.Background(),
 		shardID: testShardID,
@@ -1163,4 +1167,88 @@ func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) 
 	assert.Equal(t, processed.Version(), qviews.FromProtoQueryViewVersion(event.persists[0].GetMeta().GetVersion()))
 	assert.Len(t, event.syncs, 2)
 	assert.False(t, untouched.ConsumeFlush().Empty())
+}
+
+func TestAddPreparing_RejectedAfterRequestRelease(t *testing.T) {
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManager(t, catalog, s)
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	require.NoError(t, mgr.RequestRelease(context.Background()))
+
+	// A prepare arriving after release started must be rejected: resurrecting
+	// a Preparing view would fight the teardown already in flight.
+	catalog.reset()
+	s.reset()
+	err := mgr.AddPreparing(context.Background(), testBuilder(2, 1, 1))
+	require.Error(t, err)
+
+	// No new view, persist, or sync effects from the rejected prepare.
+	assert.Equal(t, 0, catalog.numSaveCalls())
+	assert.Zero(t, s.syncViewCount())
+	mgr.mu.Lock()
+	require.Len(t, mgr.views, 1)
+	assert.Equal(t, qviews.QueryViewStateDropping, mgr.views[testVersion(1, 1, 1)].State())
+	mgr.mu.Unlock()
+}
+
+func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	sm := NewCoordQueryViewStateMachine(view)
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
+	sm.ConsumeFlush()
+	sm.EnterDown()
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
+	sm.ConsumeFlush()
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
+	require.Equal(t, qviews.QueryViewStateDropped, sm.State())
+
+	manager := &ShardViewManager{
+		ctx:     context.Background(),
+		shardID: testShardID,
+		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
+			sm.Version(): sm,
+		},
+	}
+	manager.mu.Lock()
+	manager.processStateMachine(sm)
+	event := manager.consumeDirtyEventLocked()
+	_, retainedBeforePersist := manager.views[sm.Version()]
+	manager.mu.Unlock()
+
+	assert.True(t, retainedBeforePersist)
+	require.Len(t, event.afterPersist, 1)
+	event.afterPersist[0]()
+
+	manager.mu.Lock()
+	_, retainedAfterPersist := manager.views[sm.Version()]
+	manager.mu.Unlock()
+	assert.False(t, retainedAfterPersist)
+}
+
+func TestShardViewManagerDoesNotPublishReleaseWithoutRequestRelease(t *testing.T) {
+	view := buildTestViewWithVersion(1, 1, 1, 1)
+	sm := NewCoordQueryViewStateMachine(view)
+	manager := &ShardViewManager{
+		ctx:     context.Background(),
+		shardID: testShardID,
+		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
+			sm.Version(): sm,
+		},
+	}
+
+	released := false
+	manager.setOnReleasedEmpty(func(qviews.ShardID, *ShardViewManager) {
+		released = true
+	})
+	manager.finalizeRemoval(sm)
+
+	assert.False(t, released)
 }

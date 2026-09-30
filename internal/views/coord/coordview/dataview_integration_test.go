@@ -69,7 +69,7 @@ func newInterfaceRegistry(t *testing.T, m dataview.Manager, recovered []*viewpb.
 	t.Cleanup(func() { saved.UnPatch() })
 	transport := mockey.Mock((*mockSyncer).SyncViews).Return(nil).Build()
 	t.Cleanup(func() { transport.UnPatch() })
-	registry, err := RecoverShardViewRegistry(t.Context(), catalog, &mockSyncer{}, m)
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, &mockSyncer{}, m)
 	require.NoError(t, err)
 	t.Cleanup(registry.Close)
 	return registry

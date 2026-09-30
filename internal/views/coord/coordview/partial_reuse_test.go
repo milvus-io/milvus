@@ -16,7 +16,7 @@ func TestPartialReadyResourcesSurvivePrepareFailure(t *testing.T) {
 	defer patch.UnPatch()
 	view := buildTestViewWithVersion(2, 1, 1, 1)
 	view.Meta.LoadInfoVersion = 7
-	sm := NewCoordQueryViewStateMachine(view, stubDataViewRef{})
+	sm := NewCoordQueryViewStateMachineWithRef(view, stubDataViewRef{})
 	sm.qnReadySegments[1] = []int64{1000}
 	mgr := &ShardViewManager{views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{sm.Version(): sm}}
 	before := mgr.Stats()

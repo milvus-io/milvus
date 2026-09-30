@@ -288,7 +288,8 @@ before enabling DataView GC; that wiring is outside this PR.
 The current implementation exposes two consumer contracts:
 
 - `qviews.DataViewRefProvider.Get` supplies exact-version references to
-  `ShardViewRegistry`. Each state machine owns one acquired reference.
+  `ShardViewRegistry` through `RecoverShardViewRegistryWithDataViews`. Each
+  state machine owns one acquired reference.
 - `api.DataViewPublisher.RegisterDataViewListener` synchronously replays existing
   immutable collection objects and publishes subsequent updates without a
   missing-update window. Balancer reads these objects from its resident cache.

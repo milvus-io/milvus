@@ -330,6 +330,20 @@ value and its source revision with the cache before Put returns. Remove
 publishes desired absence before returning. Existing Snapshot APIs can remain
 compatibility views but are not the Balancer read path.
 
+**LoadInfoVersion**: The identity stored in QueryView metadata is derived from
+canonical persisted configuration content using SHA-256 truncated to the uint64
+wire field (with the high bit reserved for this identity domain). It is an opaque
+identity compared for equality, not an ordered counter. Canonicalization sorts
+partition IDs, fields/indexes and replica IDs; it includes collection/database
+identity, replica mode and resource groups. Scheduling priority is excluded
+because it is not persisted and does not identify loaded resources. Config
+recovery and repeated equivalent Put calls reproduce the same identity; a real
+configuration change gets a different fingerprint, subject to the negligible
+collision risk inherent in the 64-bit field. The process-local store revision
+continues to invalidate snapshots but is never used as LoadInfoVersion.
+No catalog or RPC schema change is needed. Earlier draft counter-based views
+are replaced once when their identity differs.
+
 **Write amplification**: Put always writes the full config (no diff). Orphan partitions / replicas (present in previous state but absent from new config) are deleted. This is intentionally simple — dedup / diff optimization can be added later if write volume becomes a concern.
 
 #### ShardViewRegistry
@@ -339,7 +353,7 @@ Owns **actual view state**: ShardViewManager lifecycle and view-derived indexes.
 ```go
 type ShardViewRegistry struct { /* ... */ }
 
-func RecoverShardViewRegistry(
+func RecoverShardViewRegistryWithDataViews(
     ctx context.Context,
     catalog queryview.QueryViewCatalog,
     syncer syncer.ReliableSyncer,
