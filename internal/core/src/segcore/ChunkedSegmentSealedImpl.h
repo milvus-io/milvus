@@ -1904,6 +1904,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                         const SchemaPtr& target_schema,
                                         RuntimeResourceState& runtime);
 
+    static std::optional<FieldId>
+    SelectStructElementOffsetsSource(
+        const RuntimeResourceState& runtime,
+        const Schema& schema,
+        const SegmentLoadInfo& load_info,
+        const std::string& struct_name,
+        const std::unordered_set<FieldId>& newly_loaded_fields,
+        const std::unordered_set<FieldId>& excluded_fields);
+
+    static void
+    BuildStructElementOffsets(
+        RuntimeResourceState& runtime,
+        const SchemaPtr& schema_snapshot,
+        const SegmentLoadInfo& segment_load_info,
+        const std::unordered_set<FieldId>& affected_fields,
+        milvus::OpContext* op_ctx,
+        const std::unordered_set<FieldId>& newly_loaded_fields = {},
+        const std::unordered_set<FieldId>& excluded_fields = {},
+        bool rebuild_all = false);
+
     void
     RegisterStructElementOffsetsForField(const FieldMeta& field_meta,
                                          RuntimeResourceState& runtime,

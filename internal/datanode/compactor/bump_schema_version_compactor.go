@@ -452,6 +452,13 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 
 	readFields := make([]*schemapb.FieldSchema, 0, len(inputSchema.GetFields())+1)
 	seen := make(map[int64]struct{}, len(inputSchema.GetFields())+1)
+	structByChild := make(map[int64]*schemapb.StructArrayFieldSchema)
+	selectedStructs := make(map[int64]struct{})
+	for _, st := range t.plan.GetSchema().GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structByChild[child.GetFieldID()] = st
+		}
+	}
 	// Appends a field once (dedup by ID); absent fields stay in the read schema
 	// for the reader to fill per its contract.
 	addReadField := func(field *schemapb.FieldSchema) {
@@ -463,6 +470,10 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 			return
 		}
 		seen[fieldID] = struct{}{}
+		if st := structByChild[fieldID]; st != nil {
+			selectedStructs[st.GetFieldID()] = struct{}{}
+			return
+		}
 		readFields = append(readFields, field)
 	}
 	// Every additive pass reads one stable system column so batches retain row
@@ -498,10 +509,19 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 	}
 
 	schema := t.plan.GetSchema()
+	readStructs := make([]*schemapb.StructArrayFieldSchema, 0, len(selectedStructs))
+	for _, st := range schema.GetStructArrayFields() {
+		if _, selected := selectedStructs[st.GetFieldID()]; selected {
+			// The reader needs at least one stored sibling for each partial
+			// struct. Keeping the whole membership lets it prefer an Arrow list.
+			readStructs = append(readStructs, st)
+		}
+	}
 	return &schemapb.CollectionSchema{
 		Name:               schema.GetName(),
 		Description:        schema.GetDescription(),
 		Fields:             readFields,
+		StructArrayFields:  readStructs,
 		EnableDynamicField: schema.GetEnableDynamicField(),
 		Properties:         schema.GetProperties(),
 	}, logicalInputFieldIDs, nil

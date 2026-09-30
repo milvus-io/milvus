@@ -2435,6 +2435,55 @@ TEST(VortexColumnTest, NativeListStructElementOffsets) {
     std::filesystem::remove_all(dir);
 }
 
+// Struct element offsets from an element-nullable sub-field on a Vortex
+// column: a NULL element keeps its slot, a NULL row has no element.
+//   0 [7, NULL]   1 NULL row   2 [NULL]   3 []   4 [8, 9, NULL]
+TEST(VortexColumnTest, ElementNullableStructElementOffsets) {
+    constexpr int64_t field_id = kNormalizedFieldIdBase + 14;
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir = MakeVortexTestDir("milvus_vortex_element_nullable_offsets_test",
+                                 properties);
+    using Elements = std::vector<std::optional<int64_t>>;
+    auto file = WriteSingleColumnVortexFile(
+        dir / "values.vx",
+        field_id,
+        BuildInt64ListArray({Elements{7, std::nullopt},
+                             std::nullopt,
+                             Elements{std::nullopt},
+                             Elements{},
+                             Elements{8, 9, std::nullopt}}),
+        *properties);
+    auto column_group =
+        MakeColumnGroup({file}, properties, {std::to_string(field_id)});
+    FieldMeta field_meta(FieldName("s[values]"),
+                         FieldId(field_id),
+                         DataType::ARRAY,
+                         DataType::INT64,
+                         true,
+                         true,
+                         std::nullopt);
+    VortexColumn column(FieldId(field_id),
+                        field_meta,
+                        std::to_string(field_id),
+                        properties,
+                        column_group);
+
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 5);
+    ASSERT_EQ(offsets->GetRowCount(), 5);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 6);
+    const std::vector<std::pair<int32_t, int32_t>> expected{
+        {0, 2}, {2, 2}, {2, 3}, {3, 3}, {3, 6}};
+    for (int32_t row = 0; row < 5; ++row) {
+        auto range = offsets->ElementIDRangeOfRow(row);
+        EXPECT_EQ(range.first, expected[row].first) << row;
+        EXPECT_EQ(range.second, expected[row].second) << row;
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST(VortexColumnTest, RecursiveArrayUsesExactTargetType) {
     constexpr int64_t field_id = kNormalizedFieldIdBase + 10;
     auto value_builder = std::make_shared<arrow::Int64Builder>();

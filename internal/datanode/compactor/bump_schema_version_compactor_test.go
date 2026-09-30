@@ -2060,6 +2060,25 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaAnchorPlusR
 	}))
 }
 
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRetainsStructSibling() {
+	s.setupTest()
+	st := &schemapb.StructArrayFieldSchema{FieldID: 200, Name: "s", Fields: []*schemapb.FieldSchema{
+		{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		{FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true},
+	}}
+	s.task.plan.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{st}
+	readSchema, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{
+		existingFields:       map[int64]struct{}{common.RowIDField: {}, 201: {}},
+		absentOrdinaryFields: []*schemapb.FieldSchema{st.Fields[1]},
+	})
+	s.Require().NoError(err)
+	s.Require().Len(readSchema.GetStructArrayFields(), 1)
+	s.Equal(st, readSchema.GetStructArrayFields()[0])
+	s.ElementsMatch([]int64{common.RowIDField}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
+}
+
 func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRejectsMissingSystemAnchor() {
 	s.setupTest()
 	_, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{

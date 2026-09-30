@@ -680,6 +680,67 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.False(estimate.emptyOnStaleSchema)
 }
 
+func (s *indexTaskSuite) TestFieldSchemaForIndexBuildFollowsStructNullability() {
+	for _, parentNullable := range []bool{false, true} {
+		child := &schemapb.FieldSchema{
+			FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+			Nullable: !parentNullable,
+		}
+		schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: parentNullable, Fields: []*schemapb.FieldSchema{child},
+		}}}
+		buildField := fieldSchemaForIndexBuild(schema, child)
+		s.Equal(parentNullable, buildField.GetNullable())
+		s.NotSame(child, buildField)
+		s.Equal(!parentNullable, child.GetNullable())
+
+		child.Nullable = parentNullable
+		s.Same(child, fieldSchemaForIndexBuild(schema, child))
+	}
+	plain := &schemapb.FieldSchema{FieldID: s.fieldID + 1, Nullable: false}
+	s.Same(plain, fieldSchemaForIndexBuild(&schemapb.CollectionSchema{}, plain))
+}
+
+func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: false, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, current, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, nil, schema, child))
+	// A non-element-nullable child cannot have been added by online schema
+	// evolution. Its missing binlog is not evidence of an empty added field.
+	child.ElementNullable = false
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	child.Nullable = true
+	schema.StructArrayFields[0].Nullable = true
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	child.ElementNullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+
+	// Top-level non-nullable fields retain the existing missing-binlog error.
+	topLevel := &schemapb.FieldSchema{FieldID: s.fieldID + 1, DataType: schemapb.DataType_ArrayOfVector}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+	topLevel.Nullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+}
+
 func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
 	const dim = 128
 

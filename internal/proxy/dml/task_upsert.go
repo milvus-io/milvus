@@ -534,14 +534,33 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 					}
 					subFieldSchema := findStructChildSchema(structSchema, subField.GetFieldName())
 					if subFieldSchema == nil {
-						return nil, merr.WrapErrParameterInvalidMsg("child %q not found in struct field %q", subField.GetFieldName(), fieldName)
+						return nil, merr.WrapErrParameterInvalidMsg("sub-field %q does not exist in struct field %q", subField.GetFieldName(), fieldName)
 					}
 					subField.FieldId = subFieldSchema.GetFieldID()
 				}
 				continue
 			}
+			if fieldData.GetStructArrays() != nil {
+				if err := fillOmittedStructSubFields(structSchema, fieldData.GetStructArrays(), upsertIDSize); err != nil {
+					return nil, err
+				}
+			}
 			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return nil, err
+			}
+			if !structFieldHasPayload(fieldData.GetStructArrays()) {
+				if !structSchema.GetNullable() {
+					return nil, merr.WrapErrParameterInvalidMsg("struct field %q has no payload", fieldName)
+				}
+				// Every row is null. GenNullableStructArrayFieldData already
+				// builds the full format the fill below would produce.
+				nullStruct, err := GenNullableStructArrayFieldData(structSchema, upsertIDSize)
+				if err != nil {
+					log.Info(ctx, "generate nullable struct field data failed", mlog.Err(err))
+					return nil, err
+				}
+				fieldData.Field = nullStruct.Field
+				continue
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
@@ -1586,8 +1605,8 @@ func ToCompressedFormatNullableStructField(fieldData *schemapb.FieldData) error 
 // validateWholeStructFieldDataForPartialUpdate validates only the logical
 // top-level struct payload used by partial-update whole struct REPLACE.
 // It checks:
-// 1. ArrayOfStruct wrapper and sub-field count/name/type.
-// 2. All-or-none sub-field payload presence and nullable struct null-mask consistency.
+// 1. ArrayOfStruct wrapper and supplied sub-field name/type.
+// 2. Supplied sub-field payload presence and nullable struct null-mask consistency.
 // 3. Payload row counts needed for safe row append.
 // It does not flatten struct data or merge sub-fields; final insert
 // pre-execute still runs checkAndFlattenStructFieldData before storage writes.
@@ -1599,11 +1618,6 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 	if structArrays == nil {
 		return merr.WrapErrParameterInvalidMsg("field %q expects non-nil StructArrays payload", fieldData.GetFieldName())
 	}
-	if len(structArrays.GetFields()) != len(structSchema.GetFields()) {
-		return merr.WrapErrParameterInvalidMsg("length of fields of struct field mismatch length of the fields in schema, fieldName: %s, fieldData fields length:%d, schema fields length:%d",
-			fieldData.GetFieldName(), len(structArrays.GetFields()), len(structSchema.GetFields()))
-	}
-
 	seenSubFieldIDs := make(map[int64]struct{}, len(structArrays.GetFields()))
 	for _, subField := range structArrays.GetFields() {
 		if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
@@ -1636,9 +1650,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			hasDataCount++
 		}
 	}
-	// All sub-fields must be either present together or absent together.
-	// A partial payload would mean partial struct replace, which is not
-	// supported by this path.
+	// An all-null struct has no element counts to copy from a sibling.
 	if hasDataCount == 0 {
 		for _, subField := range structArrays.GetFields() {
 			validData := typeutil.GetFieldDataValidData(subField)
