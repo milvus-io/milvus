@@ -172,7 +172,19 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			continue
 		}
 		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
-			continue
+			// V3 segments do not persist FieldBinlog KVs, so they reload with empty
+			// Binlogs after a DataCoord restart. External-collection segments carry
+			// no stream positions either, which leaves a committed manifest as the
+			// only durable evidence of data. The ManifestEarliest placeholder of a
+			// new growing segment is not data and stays excluded.
+			hasData, err := hasCommittedManifest(s)
+			if err != nil {
+				mlog.Warn(context.TODO(), "skip segment with invalid manifest path in query vchannel positions",
+					mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
+			}
+			if !hasData {
+				continue
+			}
 		}
 		if s.GetIsImporting() {
 			// Skip bulk insert segments.
