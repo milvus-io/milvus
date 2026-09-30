@@ -17,6 +17,8 @@
 package model
 
 import (
+	"maps"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -28,17 +30,21 @@ import (
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
-	TenantID             string
-	DBID                 int64
-	CollectionID         int64
-	Partitions           []*Partition
-	Name                 string
-	DBName               string
-	Description          string
-	AutoID               bool
-	Fields               []*Field
-	StructArrayFields    []*StructArrayField
-	Functions            []*Function
+	TenantID          string
+	DBID              int64
+	CollectionID      int64
+	Partitions        []*Partition
+	Name              string
+	DBName            string
+	Description       string
+	AutoID            bool
+	Fields            []*Field
+	StructArrayFields []*StructArrayField
+	Functions         []*Function
+	// RLS metadata is an internal RootCoord cache. It is persisted in its own
+	// KV namespace and must not be marshaled into collection info.
+	RLSPolicies          map[string]*RLSPolicy
+	RLSPrincipals        []*RLSPrincipal
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -89,6 +95,8 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
+		RLSPolicies:          maps.Clone(c.RLSPolicies),
+		RLSPrincipals:        slices.Clone(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
@@ -127,6 +135,8 @@ func (c *Collection) Clone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
+		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
+		RLSPrincipals:        CloneRLSPrincipals(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
@@ -186,6 +196,16 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 		case message.FieldMaskDB:
 			c.DBID = updates.DbId
 			c.DBName = updates.DbName
+			for _, policy := range c.RLSPolicies {
+				if policy != nil {
+					policy.DBID = updates.DbId
+				}
+			}
+			for _, principal := range c.RLSPrincipals {
+				if principal != nil {
+					principal.DBID = updates.DbId
+				}
+			}
 		case message.FieldMaskCollectionName:
 			c.Name = updates.CollectionName
 		case message.FieldMaskCollectionDescription:

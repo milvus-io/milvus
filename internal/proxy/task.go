@@ -1419,6 +1419,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
+	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
+		return err
+	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {

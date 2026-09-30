@@ -60,6 +60,8 @@ enum MessageType {
     DropIndex            = 36;
     FlushAll             = 37;
     TruncateCollection   = 38;
+    AlterRLSMetadata     = 47;
+    DropRLSMetadata      = 48;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -705,3 +707,51 @@ message TruncateCollectionMessageHeader {
 // TruncateCollectionMessageBody is the body of truncate collection message.
 message TruncateCollectionMessageBody {}
 
+// AlterRLSMetadataMessageHeader identifies the collection whose RLS metadata
+// is being updated. The collection-scoped broadcaster resource key serializes
+// this mutation with collection DDL.
+message AlterRLSMetadataMessageHeader {
+    int64 db_id = 1;
+    int64 collection_id = 2;
+}
+
+// AlterRLSMetadataMessageBody carries the complete post-image so replay does
+// not depend on request-time name resolution or mutable metadata.
+message AlterRLSMetadataMessageBody {
+    oneof metadata {
+        RLSPolicyMetadata policy = 1;
+        RLSPrincipalMetadata principal = 2;
+    }
+}
+
+message RLSPolicyMetadata {
+    int64 policy_id = 1;
+    string policy_name = 2;
+    milvus.RowPolicyType policy_type = 3;
+    repeated milvus.RowPolicyAction actions = 4;
+    string using_expr = 5;
+    string check_expr = 6;
+    string description = 7;
+}
+
+message RLSPrincipalMetadata {
+    string principal_name = 1;
+    // Complete JSON post-image. Values are string, int64, or double.
+    string tags = 2;
+}
+
+// DropRLSMetadataMessageHeader identifies the collection whose RLS metadata
+// is being removed.
+message DropRLSMetadataMessageHeader {
+    int64 db_id = 1;
+    int64 collection_id = 2;
+}
+
+// DropRLSMetadataMessageBody carries one stable logical identity. Replaying a
+// drop after the entry is already absent is a successful no-op.
+message DropRLSMetadataMessageBody {
+    oneof metadata {
+        string policy_name = 1;
+        string principal_name = 2;
+    }
+}
