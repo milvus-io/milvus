@@ -2617,6 +2617,9 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 }
 
 func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
+	clearRequest := mock.MatchedBy(func(req *proxypb.InvalidateCollMetaCacheRequest) bool {
+		return req.GetBase().GetProperties()[common.RLSClearAllCacheKey] == "true"
+	})
 	t.Run("add proxy", func(t *testing.T) {
 		proxyManager := proxyutil.NewMockProxyClientManager(t)
 		observer := NewMockFileResourceObserver(t)
@@ -2625,6 +2628,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
 			clientAdded = true
 		})
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientAdded)
@@ -2644,6 +2648,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest).Return(nil)
 		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
@@ -2659,6 +2664,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager := proxyutil.NewMockProxyClientManager(t)
 		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
 		proxyManager.EXPECT().AddProxyClient(session)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 
 		c := newTestCore()
 		c.proxyClientManager = proxyManager
@@ -2670,6 +2676,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		observer := NewMockFileResourceObserver(t)
 		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
 		proxyManager.EXPECT().AddProxyClient(session)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 		observer.EXPECT().IsEmpty().Return(true)
 
 		c := newTestCore()

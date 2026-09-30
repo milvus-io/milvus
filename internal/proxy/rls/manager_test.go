@@ -95,6 +95,22 @@ func TestManagerRejectsInvalidPredicateStateAsInternal(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
+func TestCompiledExpressionDistinguishesUnloadedFromEmptyPolicies(t *testing.T) {
+	state := newCollectionState()
+	expr, loaded, err := state.getCompiledExpression(rlsutil.PolicyActionQuery, usingExprKind, nil)
+	require.NoError(t, err)
+	require.False(t, loaded)
+	require.Nil(t, expr)
+
+	state.mu.Lock()
+	state.setPreparedPolicySnapshotLocked(time.Now(), map[string]*rlsutil.RowPolicy{})
+	state.mu.Unlock()
+	expr, loaded, err = state.getCompiledExpression(rlsutil.PolicyActionQuery, usingExprKind, nil)
+	require.NoError(t, err)
+	require.True(t, loaded)
+	require.Nil(t, expr)
+}
+
 func TestManagerPolicyCombination(t *testing.T) {
 	ctx := context.Background()
 	manager := newManagerWithAlice()

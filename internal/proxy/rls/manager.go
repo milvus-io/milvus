@@ -150,6 +150,12 @@ func InvalidatePrincipalTags(collectionID UniqueID, principalName string, revisi
 	defaultManager.invalidatePrincipalTags(collectionID, principalName, revision)
 }
 
+// InvalidateAll removes every cached RLS snapshot while preserving dropped
+// collection tombstones.
+func InvalidateAll() {
+	defaultManager.invalidateAll()
+}
+
 func newManager() *manager {
 	return &manager{
 		collections:           map[UniqueID]*collectionState{},
@@ -259,6 +265,31 @@ func (m *manager) markCollectionDropped(collectionID UniqueID) {
 	m.mu.Unlock()
 }
 
+func (m *manager) invalidateAll() {
+	if m == nil {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, state := range m.collections {
+		state.mu.Lock()
+		state.policyGeneration++
+		state.policyRefreshedAt = time.Time{}
+		state.policyBackoff = nil
+		state.policies = nil
+		state.compiled = nil
+		state.principalTags = map[string]*principalTagsEntry{}
+		state.positivePrincipalCacheOrder = list.New()
+		state.negativePrincipalCacheOrder = list.New()
+		state.principalCacheBytes = 0
+		state.principalRefreshTokens = map[string]principalRefreshToken{}
+		state.principalBackoffs = map[string]*principalBackoffEntry{}
+		state.principalBackoffOrder = list.New()
+		state.principalBackoffBytes = 0
+		state.mu.Unlock()
+	}
+}
+
 func (m *manager) runPrincipalCacheScanner(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -296,7 +327,6 @@ func (m *manager) expirePrincipalTags(now time.Time) {
 func newCollectionState() *collectionState {
 	return &collectionState{
 		invalidationRevisions:       map[typeutil.Timestamp]struct{}{},
-		policies:                    map[string]*rlsutil.RowPolicy{},
 		principalTags:               map[string]*principalTagsEntry{},
 		positivePrincipalCacheOrder: list.New(),
 		negativePrincipalCacheOrder: list.New(),
@@ -368,56 +398,84 @@ func (m *manager) policyRefreshCurrent(collectionID UniqueID, state *collectionS
 }
 
 func (m *manager) startPrincipalRefresh(
+	ctx context.Context,
 	key principalKey,
 	refreshTTL time.Duration,
 	refresh func(*collectionState, principalRefreshToken) (any, error),
 ) (*principalTagsEntry, <-chan singleflight.Result, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	state := m.collections[key.collectionID]
-	if state == nil {
-		return nil, nil, merr.WrapErrServiceUnavailableMsg("RLS collection %d was removed during principal refresh", key.collectionID)
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	now := time.Now()
-	if entry := state.principalTags[key.principalName]; entry != nil {
-		if principalTagsEntryFresh(entry, refreshTTL, now) {
-			return entry, nil, nil
-		}
-		state.removePrincipalTagsLocked(key.principalName)
-	}
-	if entry := state.principalBackoffs[key.principalName]; entry != nil {
-		if entry.backoff != nil && now.Before(entry.backoff.NextInstant()) {
-			return nil, nil, merr.WrapErrServiceUnavailableMsg(
-				"RLS principal metadata refresh is backing off for collection %d principal %q",
-				key.collectionID, key.principalName,
-			)
-		}
-	}
-	token, refreshing := state.principalRefreshTokens[key.principalName]
 	ownsSlot := false
-	if !refreshing {
+	releaseSlot := func() {
+		if ownsSlot {
+			<-m.principalRefreshSlots
+			ownsSlot = false
+		}
+	}
+	for {
+		m.mu.RLock()
+		state := m.collections[key.collectionID]
+		if state == nil {
+			m.mu.RUnlock()
+			releaseSlot()
+			return nil, nil, merr.WrapErrServiceUnavailableMsg("RLS collection %d was removed during principal refresh", key.collectionID)
+		}
+		state.mu.Lock()
+		now := time.Now()
+		if entry := state.principalTags[key.principalName]; entry != nil {
+			if principalTagsEntryFresh(entry, refreshTTL, now) {
+				state.mu.Unlock()
+				m.mu.RUnlock()
+				releaseSlot()
+				return entry, nil, nil
+			}
+			state.removePrincipalTagsLocked(key.principalName)
+		}
+		if entry := state.principalBackoffs[key.principalName]; entry != nil {
+			if entry.backoff != nil && now.Before(entry.backoff.NextInstant()) {
+				state.mu.Unlock()
+				m.mu.RUnlock()
+				releaseSlot()
+				return nil, nil, merr.WrapErrServiceUnavailableMsg(
+					"RLS principal metadata refresh is backing off for collection %d principal %q",
+					key.collectionID, key.principalName,
+				)
+			}
+		}
+		token, refreshing := state.principalRefreshTokens[key.principalName]
+		if refreshing {
+			releaseSlot()
+			resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
+				return refresh(state, token)
+			})
+			state.mu.Unlock()
+			m.mu.RUnlock()
+			return nil, resultCh, nil
+		}
+		if ownsSlot {
+			state.principalRefreshSequence++
+			token = state.principalRefreshSequence
+			state.principalRefreshTokens[key.principalName] = token
+			resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
+				defer releaseSlot()
+				return refresh(state, token)
+			})
+			state.mu.Unlock()
+			m.mu.RUnlock()
+			return nil, resultCh, nil
+		}
+		state.mu.Unlock()
+		m.mu.RUnlock()
+
 		select {
 		case m.principalRefreshSlots <- struct{}{}:
 			ownsSlot = true
-		default:
-			return nil, nil, merr.WrapErrServiceUnavailableMsg(
-				"RLS principal metadata refresh capacity is exhausted for collection %d principal %q",
-				key.collectionID, key.principalName,
-			)
+			if err := ctx.Err(); err != nil {
+				releaseSlot()
+				return nil, nil, err
+			}
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
 		}
-		state.principalRefreshSequence++
-		token = state.principalRefreshSequence
-		state.principalRefreshTokens[key.principalName] = token
 	}
-	resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
-		if ownsSlot {
-			defer func() { <-m.principalRefreshSlots }()
-		}
-		return refresh(state, token)
-	})
-	return nil, resultCh, nil
 }
 
 func (m *manager) finishPrincipalRefresh(key principalKey, state *collectionState, token principalRefreshToken, entry *principalTagsEntry, success bool) (bool, error) {

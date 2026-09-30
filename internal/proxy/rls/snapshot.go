@@ -187,7 +187,7 @@ func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID
 	if coord == nil || refreshCtx == nil {
 		return nil, merr.WrapErrServiceInternalMsg("failed to refresh RLS principal tags without coord client")
 	}
-	entry, resultCh, err := m.startPrincipalRefresh(key, refreshTTL, func(state *collectionState, token principalRefreshToken) (any, error) {
+	entry, resultCh, err := m.startPrincipalRefresh(ctx, key, refreshTTL, func(state *collectionState, token principalRefreshToken) (any, error) {
 		if !m.principalRefreshCurrent(key, state, token) {
 			return nil, merr.WrapErrServiceUnavailableMsg("RLS principal %q metadata changed before refresh", principalName)
 		}

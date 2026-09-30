@@ -487,6 +487,7 @@ const (
 	RLSEnabledKey       = "rls.enabled"
 	RLSForceKey         = "rls.force"
 	RLSPrincipalNameKey = "rls.principal_name"
+	RLSClearAllCacheKey = "rls.clear_all_cache"
 
 	// warmup related
 	WarmupKey            = "warmup"
