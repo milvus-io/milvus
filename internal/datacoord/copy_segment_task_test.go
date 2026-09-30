@@ -1701,7 +1701,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
 			if tc.rollback {
-				inspector := newManifestIndexRollbackInspector(ctx, m, copyMeta)
+				inspector := newManifestIndexRollbackInspector(ctx, m)
 				inspector.runOnce(ctx)
 				inspector.runOnce(ctx)
 				s.True(inspector.ready)

@@ -91,6 +91,11 @@ type indexMeta struct {
 	// These locks cover only memory updates and never acquire other meta locks.
 	segmentIndexMapLocksOnce sync.Once
 	segmentIndexMapLocks     *lock.KeyLock[UniqueID]
+
+	// Coalesced placement notifications after records are installed in memory.
+	// They carry no backlog state; recovery and scans derive that from records.
+	manifestIndexBackfillNotify chan struct{}
+	manifestIndexRollbackNotify chan struct{}
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -165,12 +170,14 @@ func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 // NewMeta creates meta from provided `kv.TxnKV`
 func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64) (*indexMeta, error) {
 	mt := &indexMeta{
-		ctx:              ctx,
-		catalog:          catalog,
-		indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
-		keyLock:          lock.NewKeyLock[UniqueID](),
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		ctx:                         ctx,
+		catalog:                     catalog,
+		indexes:                     make(map[UniqueID]map[UniqueID]*model.Index),
+		keyLock:                     lock.NewKeyLock[UniqueID](),
+		segmentBuildInfo:            newSegmentIndexBuildInfo(),
+		segmentIndexes:              typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		manifestIndexBackfillNotify: make(chan struct{}, 1),
+		manifestIndexRollbackNotify: make(chan struct{}, 1),
 	}
 	err := mt.reloadFromKV(collectionIDs)
 	if err != nil {
@@ -297,6 +304,7 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 		m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 	}
 	m.segmentBuildInfo.Add(segIdx)
+	m.notifyManifestIndexMigration(segIdx)
 }
 
 // writeSegmentIndexToManifest reports whether completed StorageV3 index
@@ -339,6 +347,31 @@ func (m *indexMeta) updateSegmentIndexManifestPublished(segIdx *model.SegmentInd
 		}
 	}
 	m.segmentBuildInfo.buildID2SegmentIndex.Insert(updated.BuildID, updated)
+	m.notifyManifestIndexMigration(updated)
+}
+
+// Publication precedes notification so an idle inspector cannot observe an
+// empty backlog and then miss the record that woke it. Never block a metadata
+// writer: one buffered notification is enough to request a fresh scan.
+func (m *indexMeta) notifyManifestIndexMigration(record *model.SegmentIndex) {
+	if record.ManifestPublished {
+		// Invalidate readiness before waking an idle rollback inspector.
+		if manifestIndexRollbackEnabled() {
+			metrics.DataCoordManifestIndexRollbackReady.Set(0)
+		}
+		select {
+		case m.manifestIndexRollbackNotify <- struct{}{}:
+		default:
+		}
+		return
+	}
+	if !segmentIndexNeedsManifestBackfill(record) {
+		return
+	}
+	select {
+	case m.manifestIndexBackfillNotify <- struct{}{}:
+	default:
+	}
 }
 
 func (m *indexMeta) updateIndexMeta(index *model.Index, updateFunc func(clonedIndex *model.Index) error) error {
@@ -1340,6 +1373,10 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 // again on a later scan.
 var errSegmentIndexBackfillSkipped = errors.New("segment index no longer needs manifest backfill")
 
+// errSegmentIndexRollbackSkipped means the selected record was retired or
+// became catalog-backed before rollback acquired its BuildID lock.
+var errSegmentIndexRollbackSkipped = errors.New("segment index no longer needs rollback")
+
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
 // under keyLock to the in-memory install that follows a successful catalog
 // write. action is nil when the mutation resolves to no catalog write at all;
@@ -1367,10 +1404,8 @@ type stagedSegmentIndexMutation struct {
 // that transaction commits. The lock is held from projection through install,
 // so a persisted value can never be built from a read that predates it.
 //
-// A missing record is terminal for an upsert (errSegmentIndexRecordGone) and
-// benign for a removal or rollback: already-retired records need no catalog
-// write, but the caller must still publish their manifest retractions. Rollback
-// excludes active copy installations before selecting segments.
+// A missing record abandons upsert, backfill, and rollback publication. Only
+// removal may still retract an entry after its record has already disappeared.
 //
 // Precondition: the caller holds keyLock(mut.BuildID) across this projection,
 // the returned install, and the deferred metric closure install returns. It is
@@ -1408,11 +1443,17 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 		if mut.Type == SegmentIndexBackfill {
 			return staged, errSegmentIndexBackfillSkipped
 		}
+		if mut.Type == SegmentIndexRollback {
+			return staged, errSegmentIndexRollbackSkipped
+		}
 		return staged, nil
 	}
 
 	if mut.Type == SegmentIndexRollback {
-		// Preserve task state/history when a catalog record already exists.
+		if !previous.ManifestPublished {
+			return staged, errSegmentIndexRollbackSkipped
+		}
+		// Restore only records still known to have no catalog row.
 		// BuildID is locked until the atomic pointer + record PUT completes.
 		action := metastore.SaveSegmentIndex(previous)
 		staged.action = &action

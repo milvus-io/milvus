@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,7 +106,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 					files[file] = struct{}{}
 					require.NoError(t, m.chunkManager.Write(ctx, file, []byte("artifact")))
 				}
-				require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, record.BuildID))
+				require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, record.BuildID))
 			}
 			manifestOnly := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			// Snapshot-pinned immutable revisions retain their old index section.
@@ -114,13 +115,13 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			require.Len(t, oldEntries, 3)
 			withManifestIndexRollback(t, true)
 			setRollbackTestParam(t, &Params.MetaStoreCfg.MaxEtcdTxnNum, "2")
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID)
+			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
 			partial := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
 			kv.failAtomicUpdate = true
-			_, err = m.rollbackSegmentIndexes(ctx, restartSegID)
+			_, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 			require.Error(t, err)
 			assert.Equal(t, partial, m.GetSegment(ctx, restartSegID).GetManifestPath())
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
@@ -129,7 +130,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			kv.failAtomicUpdate = false
 			m = boot()
 			for range 2 {
-				n, err = m.rollbackSegmentIndexes(ctx, restartSegID)
+				n, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID, restartBuildID+1, restartBuildID+2)
 				require.NoError(t, err)
 				assert.Equal(t, 1, n)
 			}
@@ -149,7 +150,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, []byte("artifact"), data)
 			}
-			// Model the downgrade boundary: no manifest index reads are allowed.
+			// Fully migrated records recover from their catalog rows.
 			noRead := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrIoTooManyRequests).Build()
 			t.Cleanup(func() { noRead.UnPatch() })
 			restarted := boot()
@@ -165,7 +166,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 	}
 }
 
-func TestManifestIndexRollbackCopyDrainAndDuplicateResult(t *testing.T) {
+func TestManifestIndexRollbackDoesNotWaitForCopyAndRejectsDuplicateResult(t *testing.T) {
 	m, catalog, _, _ := rollbackFixture(t)
 	ctx := context.TODO()
 	copies, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
@@ -181,11 +182,12 @@ func TestManifestIndexRollbackCopyDrainAndDuplicateResult(t *testing.T) {
 	assert.False(t, mode, "new tasks choose etcd")
 	assert.False(t, present)
 	before := m.GetSegment(ctx, restartSegID).GetManifestPath()
-	inspector := newManifestIndexRollbackInspector(ctx, m, copies)
+	inspector := newManifestIndexRollbackInspector(ctx, m)
 	inspector.runOnce(ctx)
 	assert.False(t, inspector.ready)
-	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPendingCopies))
-	assert.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
+	assert.NotEqual(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath(), "active copy tasks do not block installed records")
+	inspector.runOnce(ctx)
+	assert.True(t, inspector.ready, "copy task completion is independent of the current record backlog")
 	require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted)))
 	inspector.runOnce(ctx)
 	inspector.runOnce(ctx)
@@ -217,7 +219,7 @@ func TestManifestIndexRollbackRejectsLateCleanedCopyResult(t *testing.T) {
 			require.NoError(t, copies.AddTask(ctx, task))
 			require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(),
 				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), updateCopyTaskCleanup(false)))
-			inspector := newManifestIndexRollbackInspector(ctx, m, copies)
+			inspector := newManifestIndexRollbackInspector(ctx, m)
 			inspector.runOnce(ctx)
 			inspector.runOnce(ctx)
 			require.True(t, inspector.ready)
@@ -230,15 +232,15 @@ func TestManifestIndexRollbackRejectsLateCleanedCopyResult(t *testing.T) {
 			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 			assert.True(t, copies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired())
 			inspector.runOnce(ctx)
-			assert.False(t, inspector.ready, "rearmed cleanup must remain pending")
+			assert.True(t, inspector.ready, "copy cleanup is independent of index rollback")
 		})
 	}
 }
 
-func TestManifestIndexRollbackEmptyMarkerAndUnpublishedCopy(t *testing.T) {
+func TestManifestIndexRollbackIgnoresEmptyMarkerAndUnpublishedCopy(t *testing.T) {
 	m, catalog, store, _ := rollbackFixture(t)
 	ctx := context.TODO()
-	_, err := m.rollbackSegmentIndexes(ctx, restartSegID)
+	_, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
 	require.NoError(t, err)
 	before := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	require.Empty(t, store.backfillEntriesAt(before))
@@ -247,14 +249,12 @@ func TestManifestIndexRollbackEmptyMarkerAndUnpublishedCopy(t *testing.T) {
 	require.NoError(t, err)
 	task := createTestCopyTask(restartCollID, restartSegID+1)
 	require.NoError(t, copies.AddTask(ctx, task))
-	inspector := newManifestIndexRollbackInspector(ctx, m, copies)
-	inspector.runOnce(ctx)
-	assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
+	inspector := newManifestIndexRollbackInspector(ctx, m)
+	assert.False(t, inspector.runOnce(ctx), "no records remain, so periodic scans stop")
+	assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex(), "marker cleanup is not rollback work")
 	assert.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
-	inspector.runOnce(ctx)
-	assert.False(t, inspector.ready, "an unpublished copy target blocks readiness")
+	assert.True(t, inspector.ready, "an unpublished copy target has no record to migrate yet")
 	assert.Zero(t, testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPending))
-	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPendingCopies))
 }
 
 func TestManifestIndexRollbackBoundedShutdown(t *testing.T) {
@@ -262,7 +262,7 @@ func TestManifestIndexRollbackBoundedShutdown(t *testing.T) {
 	ctx := context.TODO()
 	for offset := int64(1); offset < 4; offset++ {
 		seedLegacyBackfillRecord(t, m, restartSegID+offset, restartBuildID+offset)
-		require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID+offset, restartBuildID+offset))
+		require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID+offset, restartBuildID+offset))
 	}
 	setRollbackTestParam(t, &Params.DataCoordCfg.ManifestIndexRollbackConcurrency, "2")
 	entered := make(chan struct{}, 4)
@@ -273,7 +273,7 @@ func TestManifestIndexRollbackBoundedShutdown(t *testing.T) {
 		<-release
 		return false
 	}).Build()
-	inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+	inspector := newManifestIndexRollbackInspector(ctx, m)
 	t.Cleanup(func() {
 		inspector.cancel()
 		once.Do(func() { close(release) })
@@ -336,7 +336,7 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		_, err := m.rollbackSegmentIndexes(ctx, restartSegID)
+		_, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
 		rolled <- err
 	}()
 	t.Cleanup(func() {
@@ -385,7 +385,7 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			m, catalog, store, kv := rollbackFixture(t)
 			ctx := context.TODO()
 			retired, _ := m.indexMeta.GetIndexJob(restartBuildID)
-			// A second, live index must still be restored in the same batch.
+			// A second, live index is the only rollback candidate.
 			definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(restartCollID, "")[0])
 			definition.IndexID++
 			definition.IndexName = "live_index"
@@ -396,7 +396,7 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			if tc.keepLive {
 				require.NoError(t, m.indexMeta.CreateIndex(ctx, definition))
 				require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, live))
-				require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, live.BuildID))
+				require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, live.BuildID))
 				liveCount = 1
 			}
 
@@ -425,7 +425,7 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			before := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			require.Len(t, store.backfillEntriesAt(before), liveCount+1, "Dropped index GC leaves manifest entries behind")
 			restoredBefore := testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackRecords)
-			inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+			inspector := newManifestIndexRollbackInspector(ctx, m)
 			if tc.failCatalog {
 				kv.failAtomicUpdate = true
 				inspector.runOnce(ctx)
@@ -439,8 +439,13 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			}
 			inspector.runOnce(ctx)
 			segment := m.GetSegment(ctx, restartSegID)
-			require.False(t, segment.GetManifestHasIndex())
-			require.Empty(t, store.backfillEntriesAt(segment.GetManifestPath()))
+			require.True(t, segment.GetManifestHasIndex())
+			remaining := store.backfillEntriesAt(segment.GetManifestPath())
+			require.Len(t, remaining, 1)
+			assert.Equal(t, retired.BuildID, remaining[0].BuildID, "GC-owned entries are untouched")
+			if !tc.keepLive {
+				assert.Equal(t, before, segment.GetManifestPath())
+			}
 			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 			require.NoError(t, err)
@@ -454,12 +459,155 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady))
 			assert.True(t, m.snapshotMeta.IsSegmentGCBlocked(restartCollID, restartSegID))
 
-			store.failReadsFrom()
-			restarted := bootMetaForRestart(t, catalog, restartCollID)
-			_, exists = restarted.indexMeta.GetIndexJob(restartBuildID)
-			assert.False(t, exists, "rollback must not resurrect the retired index")
-			_, exists = restarted.indexMeta.GetIndexJob(live.BuildID)
-			assert.Equal(t, tc.keepLive, exists)
+			_, exists = m.indexMeta.GetIndexJob(restartBuildID)
+			assert.False(t, exists, "rollback must not recreate retired records")
+		})
+	}
+}
+
+func TestManifestIndexRollbackRecordsFirstAndIdleWake(t *testing.T) {
+	m, catalog, _, _ := rollbackFixture(t)
+	ctx := context.Background()
+	inspector := newManifestIndexRollbackInspector(ctx, m)
+	var segmentScans atomic.Int32
+	segmentPatch := mockey.Mock((*meta).SelectSegments).When(func(*meta, context.Context, ...SegmentFilter) bool {
+		segmentScans.Add(1)
+		return false
+	}).Build()
+	t.Cleanup(func() { segmentPatch.UnPatch() })
+	work, records := inspector.scan(ctx)
+	require.Equal(t, 1, records)
+	require.Len(t, work, 1)
+	assert.Equal(t, []int64{restartBuildID}, work[0].buildIDs)
+	assert.Zero(t, segmentScans.Load(), "ordinary rollback must discover work from index records")
+
+	interval := mockey.Mock(manifestIndexRollbackInterval).Return(10 * time.Millisecond).Build()
+	t.Cleanup(func() { interval.UnPatch() })
+	var scans atomic.Int32
+	scanPatch := mockey.Mock((*manifestIndexRollbackInspector).scan).When(func(*manifestIndexRollbackInspector, context.Context) bool {
+		scans.Add(1)
+		return false
+	}).Build()
+	t.Cleanup(func() { scanPatch.UnPatch() })
+	inspector.Start()
+	t.Cleanup(inspector.Stop)
+	require.Eventually(t, func() bool {
+		return scans.Load() >= 2 && testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
+	}, 5*time.Second, time.Millisecond)
+	assert.Zero(t, segmentScans.Load(), "rollback never enumerates segments for residual cleanup")
+	require.Never(t, func() bool { return scans.Load() != 2 }, 100*time.Millisecond, time.Millisecond)
+
+	// Emulate a late manifest publication after idle. The publication path
+	// must wake rollback; it cannot depend on a still-running periodic scan.
+	seedLegacyBackfillRecord(t, m, restartSegID+1, restartBuildID+1)
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID+1, restartBuildID+1))
+	require.Eventually(t, func() bool {
+		record, ok := m.indexMeta.GetIndexJob(restartBuildID + 1)
+		return ok && !record.ManifestPublished && scans.Load() >= 4 &&
+			testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
+	}, 5*time.Second, time.Millisecond)
+	require.Never(t, func() bool { return scans.Load() != 4 }, 100*time.Millisecond, time.Millisecond)
+	inspector.Stop()
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 2)
+	assert.False(t, m.GetSegment(ctx, restartSegID+1).GetManifestHasIndex())
+}
+
+func TestManifestIndexRollbackMissingSegmentStaysPending(t *testing.T) {
+	m, _, _, _ := rollbackFixture(t)
+	m.segMu.Lock()
+	m.segments.DropSegment(restartSegID)
+	m.segMu.Unlock()
+	inspector := newManifestIndexRollbackInspector(context.Background(), m)
+	assert.True(t, inspector.runOnce(context.Background()), "orphaned manifest-only records must block readiness and keep retries active")
+	assert.False(t, inspector.ready)
+	assert.EqualValues(t, 1, testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPendingRecords))
+}
+
+func TestManifestIndexRollbackLeavesUninstalledCopyIndex(t *testing.T) {
+	m, catalog, store, _ := rollbackFixture(t)
+	ctx := context.Background()
+	first, _ := m.indexMeta.GetIndexJob(restartBuildID)
+	late := model.CloneSegmentIndex(first)
+	late.BuildID++
+	late.IndexID++
+	definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(restartCollID, "")[0])
+	definition.IndexID = late.IndexID
+	definition.IndexName = "late_copy_index"
+	require.NoError(t, m.indexMeta.CreateIndex(ctx, definition))
+	entry, err := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), late)
+	require.NoError(t, err)
+	before := m.GetSegment(ctx, restartSegID).GetManifestPath()
+	// A copy result has published both entries, but has only installed the
+	// first record. Rollback may process that record while copy continues.
+	store.revisions[before] = append(store.revisions[before], entry)
+	inspector := newManifestIndexRollbackInspector(ctx, m)
+	inspector.runOnce(ctx)
+	assert.False(t, inspector.runOnce(ctx))
+	assert.True(t, inspector.ready)
+	remaining := store.backfillEntriesAt(m.GetSegment(ctx, restartSegID).GetManifestPath())
+	require.Len(t, remaining, 1)
+	assert.Equal(t, late.BuildID, remaining[0].BuildID)
+	assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, first.BuildID, rows[0].BuildID)
+
+	// The remaining record arrives after the inspector has gone idle.
+	interval := mockey.Mock(manifestIndexRollbackInterval).Return(10 * time.Millisecond).Build()
+	t.Cleanup(func() { interval.UnPatch() })
+	inspector.Start()
+	t.Cleanup(inspector.Stop)
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
+	}, 5*time.Second, time.Millisecond)
+	require.NoError(t, m.indexMeta.AddSegmentIndexFromManifest(ctx, late))
+	require.Eventually(t, func() bool {
+		record, ok := m.indexMeta.GetIndexJob(late.BuildID)
+		return ok && !record.ManifestPublished && testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady) == 1
+	}, 5*time.Second, time.Millisecond)
+	inspector.Stop()
+	assert.Empty(t, store.backfillEntriesAt(m.GetSegment(ctx, restartSegID).GetManifestPath()))
+	rows, err = catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	assert.Len(t, rows, 2)
+}
+
+func TestManifestIndexRollbackRevalidatesSelectedRecord(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rewritten to catalog", true: "retired"}[retire], func(t *testing.T) {
+			m, catalog, store, _ := rollbackFixture(t)
+			ctx := context.Background()
+			before := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			commits := store.commitCount
+			record, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			// Change the selected record after selection but before staging
+			// takes its BuildID lock. No manifest revision should be published.
+			patch := mockey.Mock((*meta).readManifestIndexes).When(func(_ *meta, _ context.Context, _ string, _ *indexpb.StorageConfig) bool {
+				if retire {
+					require.NoError(t, m.indexMeta.RemoveSegmentIndex(ctx, restartBuildID))
+				} else {
+					require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, record))
+				}
+				return false
+			}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
+			require.ErrorIs(t, err, errSegmentIndexRollbackSkipped)
+			assert.Zero(t, n)
+			assert.Equal(t, commits, store.commitCount)
+			assert.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			assert.Len(t, store.backfillEntriesAt(before), 1)
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			if retire {
+				assert.Empty(t, rows)
+			} else {
+				require.Len(t, rows, 1)
+				assert.Equal(t, record.BuildID, rows[0].BuildID)
+			}
 		})
 	}
 }

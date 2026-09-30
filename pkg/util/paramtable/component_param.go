@@ -7101,7 +7101,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 		Key:          "dataCoord.index.manifestIndexBackfill.interval",
 		Version:      "3.0.1",
 		DefaultValue: "60",
-		Doc:          "Interval in seconds between manifest index backfill scans.",
+		Doc:          "Interval in seconds between manifest index backfill scans while work remains. Empty scans stop the timer; new catalog-backed finished index records wake the inspector.",
 		Export:       true,
 	}
 	p.ManifestIndexBackfillInterval.Init(base.mgr)
@@ -7117,7 +7117,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 			}
 			return strconv.Itoa(batchSize)
 		},
-		Doc:    "Maximum number of SegmentIndex catalog records migrated per scan; the pending gauge always counts the full backlog.",
+		Doc:    "Target number of SegmentIndex catalog records migrated per scan. Whole segments are selected, so the last segment may exceed this budget; the pending gauge counts the full backlog.",
 		Export: true,
 	}
 	p.ManifestIndexBackfillBatchSize.Init(base.mgr)
@@ -7138,7 +7138,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 			}
 			return strconv.Itoa(concurrency)
 		},
-		Doc:    "Number of segments whose manifest index backfill may run in parallel; records of one segment are committed sequentially.",
+		Doc:    "Number of segments whose manifest index backfill may run in parallel. Each segment batches its indexes into one commit unless the etcd transaction operation limit requires splitting.",
 		Export: true,
 	}
 	p.ManifestIndexBackfillConcurrency.Init(base.mgr)
@@ -7146,13 +7146,13 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 	p.ManifestIndexRollbackEnabled = ParamItem{
 		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
 		Doc: `Restore StorageV3 manifest index records to etcd and remove their manifest entries atomically, preserving artifact files. This restart-scoped switch overrides forward manifest publication and backfill; new index completions use etcd.
-Wait for milvus_datacoord_manifest_index_rollback_ready=1 before downgrading to a version that supports StorageV3 and the existing index path layouts. Pending copy tasks and retained Dropped segments must also converge. Set the forward switches to false before downgrading: older versions do not understand this override.`,
+Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
 		Export: true,
 	}
 	p.ManifestIndexRollbackEnabled.Init(base.mgr)
 	p.ManifestIndexRollbackInterval = ParamItem{
 		Key: "dataCoord.index.manifestIndexRollback.interval", Version: "3.0.1", DefaultValue: "60",
-		Doc: "Seconds between rollback scans. Nonpositive durations use 60 seconds.", Export: true,
+		Doc: "Seconds between rollback scans while manifest-resident records remain. Scans stop after readiness and resume on manifest-resident record notifications. Nonpositive durations use 60 seconds.", Export: true,
 	}
 	p.ManifestIndexRollbackInterval.Init(base.mgr)
 	p.ManifestIndexRollbackBatchSize = ParamItem{

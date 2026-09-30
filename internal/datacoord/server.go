@@ -333,6 +333,7 @@ func (s *Server) initDataCoord() error {
 	s.initIndexInspector(storageCli)
 	mlog.Info(s.ctx, "init task scheduler done")
 
+	s.manifestIndexRollbackInspector = newManifestIndexRollbackInspector(s.ctx, s.meta)
 	s.initManifestIndexBackfillInspector()
 	mlog.Info(s.ctx, "init manifest index backfill inspector done")
 
@@ -383,9 +384,6 @@ func (s *Server) initDataCoord() error {
 		s.copySegmentMeta,
 	)
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
-	if s.manifestIndexRollbackInspector == nil {
-		s.manifestIndexRollbackInspector = newManifestIndexRollbackInspector(s.ctx, s.meta, s.copySegmentMeta)
-	}
 
 	// Initialize snapshot manager
 	snapshotManager := NewSnapshotManager(

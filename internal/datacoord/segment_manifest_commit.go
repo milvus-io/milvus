@@ -95,9 +95,8 @@ type SegmentCatalogMutation struct {
 	// each record is re-read and projected under indexMeta's per-buildID lock,
 	// so the persisted value cannot be built from a stale read.
 	//
-	// A foreground completion or historical backfill supplies one publication.
-	// Multiple entries are accepted for removals and rollback, so one revision
-	// can retract several entries with their corresponding catalog mutations.
+	// Foreground completion supplies one publication. Historical backfill may
+	// publish several indexes together; removals and rollback may also batch.
 	SegmentIndexes []SegmentIndexMutation
 
 	// manifestHasIndex is framework-owned. A verified presence/emptiness result
@@ -474,6 +473,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 	buildIDs := make([]int64, 0, len(mutations))
 	seen := make(map[int64]struct{}, len(mutations))
 	publications := 0
+	backfills := 0
 	for _, mutation := range mutations {
 		if mutation.BuildID == 0 {
 			return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -487,6 +487,9 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 		switch mutation.Type {
 		case SegmentIndexUpsert, SegmentIndexBackfill:
 			publications++
+			if mutation.Type == SegmentIndexBackfill {
+				backfills++
+			}
 			if !commitPublishesIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
 					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
@@ -505,10 +508,23 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 			}
 		}
 	}
-	if publications > 0 && len(mutations) != 1 {
+	if publications > 0 && len(mutations) != 1 && backfills != len(mutations) {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"segment manifest commit cannot combine an index publication with other index mutations, segmentID=%d",
 			commit.SegmentID)
+	}
+	if backfills > 1 {
+		entries := commit.Mutation.Updates.Indexes
+		if len(entries) != backfills || len(commit.Mutation.Updates.DropIndexes) != 0 {
+			return nil, merr.WrapErrServiceInternalMsg("backfill batch requires exactly one manifest entry per mutation and no retractions")
+		}
+		indexIDs := make(map[int64]struct{}, len(entries))
+		for _, entry := range entries {
+			if _, exists := indexIDs[entry.IndexID]; exists {
+				return nil, merr.WrapErrServiceInternalMsg("backfill batch repeats indexID=%d", entry.IndexID)
+			}
+			indexIDs[entry.IndexID] = struct{}{}
+		}
 	}
 	sort.Slice(buildIDs, func(i, j int) bool { return buildIDs[i] < buildIDs[j] })
 	return buildIDs, nil
