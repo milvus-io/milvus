@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -182,6 +183,14 @@ func TestValidateFieldIndexParams(t *testing.T) {
 			{Key: common.DimKey, Value: "512"},
 		},
 	}
+	denseField := &schemapb.FieldSchema{
+		FieldID:  103,
+		Name:     "dense",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
+		},
+	}
 
 	t.Run("happy path sparse bm25", func(t *testing.T) {
 		params := map[string]string{
@@ -274,6 +283,61 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		err := ValidateFieldIndexParams(sparseField, params)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "exceeds limit")
+	})
+
+	t.Run("mrl validates base index at prefix dimension", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "FLAT",
+			common.MetricTypeKey:    metric.COSINE,
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "true",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(denseField, params))
+		assert.Equal(t, "128", params[common.DimKey])
+	})
+
+	t.Run("mrl refine flag is normalized", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "FLAT",
+			common.MetricTypeKey:    metric.L2,
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "True",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(denseField, params))
+		assert.Equal(t, "true", params[common.WithMRLRefineKey])
+	})
+
+	for name, values := range map[string]map[string]string{
+		"invalid prefix": {
+			common.MRLDimKey: "128",
+		},
+		"refine without prefix": {
+			common.WithMRLRefineKey: "true",
+		},
+		"invalid refine value": {
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "sometimes",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params := map[string]string{
+				common.IndexTypeKey:  "FLAT",
+				common.MetricTypeKey: metric.L2,
+			}
+			for key, value := range values {
+				params[key] = value
+			}
+			assert.Error(t, ValidateFieldIndexParams(denseField, params))
+		})
+	}
+
+	t.Run("mrl rejects unsupported vector field", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:  "MINHASH_LSH",
+			common.MetricTypeKey: "MHJACCARD",
+			common.MRLDimKey:     "32",
+		}
+		assert.Error(t, ValidateFieldIndexParams(binaryField, params))
 	})
 }
 

@@ -431,6 +431,15 @@ IndexFactory::VecIndexLoadResource(
     int64_t num_rows,
     int64_t dim) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
+    bool mrl_enabled = false;
+    if (auto it = index_params.find(MRL_DIM_KEY); it != index_params.end()) {
+        const auto mrl_dim = std::stoll(it->second);
+        if (mrl_dim > 0 && mrl_dim < dim) {
+            dim = mrl_dim;
+            mmap_enable = false;
+            mrl_enabled = true;
+        }
+    }
 
     auto index_type_it = index_params.find("index_type");
     AssertInfo(index_type_it != index_params.end(), "index type is empty");
@@ -611,7 +620,8 @@ IndexFactory::VecIndexLoadResource(
     LoadResourceRequest request{};
     const auto& res = resource.value();
 
-    request.has_raw_data = CanUseIndexRawDataForField(field_type, has_raw_data);
+    request.has_raw_data =
+        !mrl_enabled && CanUseIndexRawDataForField(field_type, has_raw_data);
     request.final_disk_cost = res.diskCost;
     request.final_memory_cost = res.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
@@ -1540,7 +1550,11 @@ IndexFactory::CreateVectorIndex(
                     index_type,
                     metric_type,
                     version,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<float16>>(
@@ -1548,7 +1562,11 @@ IndexFactory::CreateVectorIndex(
                     index_type,
                     metric_type,
                     version,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
@@ -1556,7 +1574,11 @@ IndexFactory::CreateVectorIndex(
                     index_type,
                     metric_type,
                     version,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
@@ -1644,7 +1666,11 @@ IndexFactory::CreateVectorIndex(
                     metric_type,
                     version,
                     use_knowhere_build_pool,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
                 return std::make_unique<VectorMemIndex<sparse_u32_f32>>(
@@ -1671,7 +1697,11 @@ IndexFactory::CreateVectorIndex(
                     metric_type,
                     version,
                     use_knowhere_build_pool,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorMemIndex<bfloat16>>(
@@ -1680,7 +1710,11 @@ IndexFactory::CreateVectorIndex(
                     metric_type,
                     version,
                     use_knowhere_build_pool,
-                    file_manager_context);
+                    file_manager_context,
+                    create_index_info.dim,
+                    create_index_info.mrl_dim,
+                    create_index_info.with_mrl_refine,
+                    create_index_info.view_data);
             }
             case DataType::VECTOR_INT8: {
                 return std::make_unique<VectorMemIndex<int8>>(

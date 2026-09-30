@@ -64,6 +64,7 @@
 #include "knowhere/dataset.h"
 #include "knowhere/emb_list_utils.h"
 #include "knowhere/index/index_factory.h"
+#include "knowhere/index/mrl_index_node.h"
 #include "knowhere/sparse_utils.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
@@ -171,7 +172,11 @@ VectorMemIndex<T>::VectorMemIndex(
     const MetricType& metric_type,
     const IndexVersion& version,
     bool use_knowhere_build_pool,
-    const storage::FileManagerContext& file_manager_context)
+    const storage::FileManagerContext& file_manager_context,
+    int64_t source_dim,
+    int64_t mrl_dim,
+    bool with_mrl_refine,
+    knowhere::ViewDataOp view_data)
     : VectorIndex(index_type, metric_type),
       elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
@@ -199,6 +204,15 @@ VectorMemIndex<T>::VectorMemIndex(
         }
         ThrowInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
+    if (mrl_dim > 0 && mrl_dim < source_dim) {
+        mrl_enabled_ = true;
+        index_ = knowhere::CreateMRLIndex(std::move(index_),
+                                          source_dim,
+                                          mrl_dim,
+                                          knowhere::datatype_v<T>,
+                                          with_mrl_refine,
+                                          std::move(view_data));
+    }
 }
 
 template <typename T>
@@ -207,7 +221,10 @@ VectorMemIndex<T>::VectorMemIndex(DataType elem_type,
                                   const MetricType& metric_type,
                                   const IndexVersion& version,
                                   const knowhere::ViewDataOp view_data,
-                                  bool use_knowhere_build_pool)
+                                  bool use_knowhere_build_pool,
+                                  int64_t source_dim,
+                                  int64_t mrl_dim,
+                                  bool with_mrl_refine)
     : VectorIndex(index_type, metric_type),
       elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
@@ -230,6 +247,15 @@ VectorMemIndex<T>::VectorMemIndex(DataType elem_type,
             ThrowInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
         ThrowInfo(ErrorCode::KnowhereError, get_index_obj.what());
+    }
+    if (mrl_dim > 0 && mrl_dim < source_dim) {
+        mrl_enabled_ = true;
+        index_ = knowhere::CreateMRLIndex(std::move(index_),
+                                          source_dim,
+                                          mrl_dim,
+                                          knowhere::datatype_v<T>,
+                                          with_mrl_refine,
+                                          view_data);
     }
 }
 

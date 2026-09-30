@@ -131,6 +131,12 @@ InterimSealedIndexTranslator::get_cells(
     if (nullable) {
         valid_data = &vec_data_->GetValidData();
     }
+    const auto mrl_dim =
+        index::GetValueFromConfig<int64_t>(build_config_, MRL_DIM_KEY)
+            .value_or(-1);
+    const auto with_mrl_refine =
+        index::GetValueFromConfig<bool>(build_config_, WITH_MRL_REFINE_KEY)
+            .value_or(false);
 
     if (!is_sparse_) {
         auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
@@ -165,13 +171,16 @@ InterimSealedIndexTranslator::get_cells(
         };
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
-            vec_index =
-                std::make_unique<index::VectorMemIndex<float>>(DataType::NONE,
-                                                               index_type_,
-                                                               metric_type_,
-                                                               index_version_,
-                                                               view_data,
-                                                               false);
+            vec_index = std::make_unique<index::VectorMemIndex<float>>(
+                DataType::NONE,
+                index_type_,
+                metric_type_,
+                index_version_,
+                view_data,
+                false,
+                dim_,
+                mrl_dim,
+                with_mrl_refine);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
                 DataType::NONE,
@@ -179,7 +188,10 @@ InterimSealedIndexTranslator::get_cells(
                 metric_type_,
                 index_version_,
                 view_data,
-                false);
+                false,
+                dim_,
+                mrl_dim,
+                with_mrl_refine);
         } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
                 DataType::NONE,
@@ -187,7 +199,10 @@ InterimSealedIndexTranslator::get_cells(
                 metric_type_,
                 index_version_,
                 view_data,
-                false);
+                false,
+                dim_,
+                mrl_dim,
+                with_mrl_refine);
         }
     } else {
         // sparse vector case

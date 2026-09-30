@@ -320,30 +320,30 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
 			handle := func(numberParams int, autoIndexConfig map[string]string) error {
-				// empty case.
-				if len(indexParamsMap) == numberParams {
-					// though we already know there must be metric type, how to make this safer to avoid crash?
-					metricType := autoIndexConfig[common.MetricTypeKey]
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
-					useAutoIndex(autoIndexConfig)
-					return nil
-				}
-
-				if len(indexParamsMap) > numberParams+1 {
-					return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
-				}
-
-				if len(indexParamsMap) == numberParams+1 {
-					if !metricTypeExist {
-						return merr.WrapErrParameterInvalidMsg("only metric type can be passed when use AutoIndex")
+				allowedParams := numberParams
+				for _, key := range []string{common.MetricTypeKey, common.MRLDimKey, common.WithMRLRefineKey} {
+					if _, ok := indexParamsMap[key]; ok {
+						allowedParams++
 					}
+				}
+				if len(indexParamsMap) != allowedParams {
+					return merr.WrapErrParameterInvalidMsg("only metric type and MRL parameters can be passed when use AutoIndex")
+				}
 
-					// only metric type is passed.
-					cit.newExtraParams = indexparamcheck.WrapUserIndexParams(metricType)
-					useAutoIndex(autoIndexConfig)
-					// make the users' metric type first class citizen.
-					indexParamsMap[common.MetricTypeKey] = metricType
+				userMetricType := autoIndexConfig[common.MetricTypeKey]
+				if metricTypeExist {
+					userMetricType = metricType
 					cit.userAutoIndexMetricTypeSpecified = true
+				}
+				cit.newExtraParams = indexparamcheck.WrapUserIndexParams(userMetricType)
+				for _, key := range []string{common.MRLDimKey, common.WithMRLRefineKey} {
+					if value, ok := indexParamsMap[key]; ok {
+						cit.newExtraParams = append(cit.newExtraParams, &commonpb.KeyValuePair{Key: key, Value: value})
+					}
+				}
+				useAutoIndex(autoIndexConfig)
+				if metricTypeExist {
+					indexParamsMap[common.MetricTypeKey] = metricType
 				}
 
 				return nil

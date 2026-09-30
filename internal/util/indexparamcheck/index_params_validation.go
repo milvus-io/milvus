@@ -17,6 +17,7 @@
 package indexparamcheck
 
 import (
+	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -412,7 +413,65 @@ func ValidateFieldIndexParams(field *schemapb.FieldSchema, indexParamsMap map[st
 	if err := checker.CheckValidDataType(indexType, effectiveField); err != nil {
 		return err
 	}
-	return checker.CheckTrain(effectiveDataType, effectiveElementType, indexParamsMap)
+	trainParams, err := prepareMRLTrainParams(field, indexParamsMap)
+	if err != nil {
+		return err
+	}
+	return checker.CheckTrain(effectiveDataType, effectiveElementType, trainParams)
+}
+
+func prepareMRLTrainParams(field *schemapb.FieldSchema, indexParams map[string]string) (map[string]string, error) {
+	trainParams := make(map[string]string, len(indexParams))
+	for key, value := range indexParams {
+		trainParams[key] = value
+	}
+	delete(trainParams, common.MRLDimKey)
+	delete(trainParams, common.WithMRLRefineKey)
+
+	withRefine := false
+	if value, ok := indexParams[common.WithMRLRefineKey]; ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("%s must be a boolean", common.WithMRLRefineKey)
+		}
+		withRefine = parsed
+		indexParams[common.WithMRLRefineKey] = strconv.FormatBool(parsed)
+	}
+
+	mrlValue, exists := indexParams[common.MRLDimKey]
+	if !exists {
+		if withRefine {
+			return nil, merr.WrapErrParameterInvalidMsg("%s requires a valid %s", common.WithMRLRefineKey, common.MRLDimKey)
+		}
+		return trainParams, nil
+	}
+	mrlDim, err := strconv.ParseInt(mrlValue, 10, 64)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("%s must be an integer", common.MRLDimKey)
+	}
+	if mrlDim == -1 {
+		if withRefine {
+			return nil, merr.WrapErrParameterInvalidMsg("%s requires a valid %s", common.WithMRLRefineKey, common.MRLDimKey)
+		}
+		return trainParams, nil
+	}
+
+	if !typeutil.IsDenseFloatVectorType(field.GetDataType()) || typeutil.IsArrayOfVectorType(field.GetDataType()) {
+		return nil, merr.WrapErrParameterInvalidMsg("MRL supports only dense FLOAT_VECTOR, FLOAT16_VECTOR, and BFLOAT16_VECTOR fields")
+	}
+	metricType := indexParams[common.MetricTypeKey]
+	if metricType != metric.L2 && metricType != metric.IP && metricType != metric.COSINE {
+		return nil, merr.WrapErrParameterInvalidMsg("MRL supports only L2, IP, and COSINE metrics")
+	}
+	sourceDim, err := strconv.ParseInt(indexParams[common.DimKey], 10, 64)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid source dimension for MRL")
+	}
+	if mrlDim <= 0 || mrlDim >= sourceDim {
+		return nil, merr.WrapErrParameterInvalidMsg("%s must satisfy 0 < %s < dim", common.MRLDimKey, common.MRLDimKey)
+	}
+	trainParams[common.DimKey] = strconv.FormatInt(mrlDim, 10)
+	return trainParams, nil
 }
 
 // ValidateIndexName enforces the index-name format rules. Moved from proxy so
