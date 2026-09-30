@@ -39,9 +39,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -252,15 +255,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "not-a-duration"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
 		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -302,15 +305,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
 		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -362,15 +365,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
 		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -427,15 +430,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
 		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -480,6 +483,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -490,15 +494,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
 		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
 		"",
+		"",
+		false,
 	)
 
 	s.Error(err)
@@ -541,7 +545,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
-		CollectionName: "test_collection",
+		CollectionName: "canonical_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name:    "canonical_collection",
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
+				{FieldID: common.StartOfUserFieldID, Name: "id"},
+			},
+		},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -552,18 +564,36 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 
 	_, _, err := server.broadcastImport(
 		ctx,
-		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		&schemapb.CollectionSchema{Name: "test_collection"},
+		[]*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: importutilv2.RLSPrincipal, Value: "mallory"},
+			{Key: importutilv2.SkipRLS, Value: "true"},
+		},
 		1000,
 		[]string{"v1"},
 		"",
+		"alice",
+		false,
 	)
 
 	s.NoError(err)
+	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.capturedMsg)
+	s.NoError(err)
+	body, err := msg.Body()
+	s.NoError(err)
+	version, ok := mockBroadcastAPI.capturedMsg.Properties().Get(importRLSContextVersionProperty)
+	s.True(ok)
+	s.Equal(importRLSContextVersion, version)
+	s.Equal("alice", body.GetOptions()[importutilv2.RLSPrincipal])
+	_, hasSkipRLS := body.GetOptions()[importutilv2.SkipRLS]
+	s.False(hasSkipRLS)
+	s.Equal("canonical_collection", body.GetCollectionName())
+	s.Equal(int32(2), body.GetSchema().GetVersion())
+	s.Require().Len(body.GetSchema().GetFields(), 1)
+	s.Equal(int64(common.StartOfUserFieldID), body.GetSchema().GetFields()[0].GetFieldID())
 }
 
 // --------------------------------
@@ -902,4 +932,82 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "backup")
+}
+
+func TestImportAckCallback_TrustsVersionedRLSContext(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	var principal string
+	var skipRLS bool
+	var options map[string]string
+	mockey.Mock((*Server).createImportJobFromAck).To(
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+			principal = in.GetRlsPrincipal()
+			skipRLS = in.GetSkipRls()
+			options = funcutil.KeyValuePair2Map(in.GetOptions())
+			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
+		}).Build()
+
+	broadcastMsg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			CollectionID: 100,
+			JobID:        1,
+			Options: map[string]string{
+				importutilv2.RLSPrincipal: "alice",
+				importutilv2.SkipRLS:      "true",
+			},
+		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+		WithBroadcast([]string{"vchannel1"}).
+		MustBuildBroadcast().
+		OverwriteBroadcastHeader(1)
+
+	callbacks := &DDLCallbacks{Server: &Server{}}
+	assert.NoError(t, callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+		Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
+	}))
+	assert.Equal(t, "alice", principal)
+	assert.True(t, skipRLS)
+	assert.NotContains(t, options, importutilv2.RLSPrincipal)
+	assert.NotContains(t, options, importutilv2.SkipRLS)
+}
+
+func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	patch := mockey.Mock((*Server).createImportJobFromAck).To(
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+			assert.Empty(t, in.GetRlsPrincipal())
+			assert.False(t, in.GetSkipRls())
+			options := funcutil.KeyValuePair2Map(in.GetOptions())
+			assert.NotContains(t, options, importutilv2.RLSPrincipal)
+			assert.NotContains(t, options, importutilv2.SkipRLS)
+			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
+		}).Build()
+
+	callbacks := &DDLCallbacks{Server: &Server{}}
+	for _, skipRLS := range []string{"true", "not-a-bool"} {
+		broadcastMsg := message.NewImportMessageBuilderV1().
+			WithHeader(&message.ImportMessageHeader{}).
+			WithBody(&msgpb.ImportMsg{
+				CollectionID: 100,
+				JobID:        1,
+				Options: map[string]string{
+					importutilv2.RLSPrincipal: "legacy",
+					importutilv2.SkipRLS:      skipRLS,
+				},
+			}).
+			WithBroadcast([]string{"vchannel1"}).
+			MustBuildBroadcast().
+			OverwriteBroadcastHeader(1)
+
+		err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+			Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+			Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
+		})
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, 2, patch.Times())
 }

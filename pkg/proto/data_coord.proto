@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "plan.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -927,6 +928,7 @@ message ImportRequest {
   repeated common.KeyValuePair plugin_context = 16;
   reserved 17;
   reserved "use_loon_ffi";
+  plan.Expr rls_check_predicate = 18;
 }
 
 message QueryPreImportRequest {
@@ -1008,6 +1010,7 @@ message ImportJob {
   string create_time = 16;
   repeated string ready_vchannels = 17;
   uint64 data_ts = 18;
+  plan.Expr rls_check_predicate = 22;
 }
 
 enum ImportTaskStateV2 {

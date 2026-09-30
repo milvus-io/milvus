@@ -207,7 +207,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 			strIDs := lo.Map(ids, func(id int64, _ int) string {
 				return strconv.FormatInt(id, 10)
 			})
-			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs, DataType: pkField.GetDataType()}
 		}
 	}
 	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts

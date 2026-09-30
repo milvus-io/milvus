@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -440,7 +441,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 		}
-		principalName, enforceRLS, err = rls.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
 		if err != nil {
 			return err
 		}

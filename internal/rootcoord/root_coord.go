@@ -171,6 +171,37 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 	return c.quotaCenter
 }
 
+func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
+	c.proxyClientManager.SetProxyClients(sessions)
+	if len(sessions) > 0 {
+		c.invalidateProxyRLSCache(0)
+	}
+}
+
+func (c *Core) addProxyClient(session *sessionutil.Session) {
+	c.proxyClientManager.AddProxyClient(session)
+	c.invalidateProxyRLSCache(session.GetServerID())
+}
+
+func (c *Core) invalidateProxyRLSCache(proxyID int64) {
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	req := &proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{Properties: map[string]string{common.RLSClearAllCacheKey: "true"}},
+	}
+	var opts []proxyutil.ExpireCacheOpt
+	if proxyID != 0 {
+		opts = append(opts, proxyutil.SetTargetProxyID(proxyID))
+	}
+	if err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, req, opts...); err != nil {
+		log.Ctx(ctx).Warn("failed to invalidate RLS cache on proxy registration",
+			zap.Int64("proxyID", proxyID),
+			zap.Error(err))
+	}
+}
+
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 	pc := c.chanTimeTick.listDmlChannels()
 	pt := make([]uint64, len(pc))
@@ -446,9 +477,9 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.SetProxyClients,
+		c.setProxyClients,
 	)
-	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.addProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 

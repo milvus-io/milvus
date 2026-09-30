@@ -1557,11 +1557,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
-
-		// get schema failed
+		// get collection info failed in PreExecute
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(nil, mockErr).Once()
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1569,10 +1568,10 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// schema has no fields
 		mc = NewMockCache(t)
-		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
 		}, nil).Once()
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
 		assert.NoError(t, err)
@@ -1581,9 +1580,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get channel failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{IsPartitionKey: true},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
 			}},
 		}, nil)
 		globalMetaCache = mc
@@ -1603,9 +1602,9 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get partitions failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{IsPartitionKey: true},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
 			}},
 		}, nil)
 		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
@@ -1617,8 +1616,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// get partitionID failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
@@ -1629,8 +1630,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// no file
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
@@ -1653,8 +1656,10 @@ func TestProxy_ImportV2(t *testing.T) {
 		// normal case
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
@@ -1704,8 +1709,10 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 1}, nil)
@@ -1781,6 +1788,18 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 	})
+}
+
+func TestConvertToV2ImportRequestPreservesRLSContext(t *testing.T) {
+	options := []*commonpb.KeyValuePair{
+		{Key: "rls_principal", Value: "alice"},
+		{Key: "skip_rls", Value: "true"},
+	}
+	req := convertToV2ImportRequest(&milvuspb.ImportRequest{
+		Options: options,
+	})
+
+	assert.Equal(t, options, req.GetOptions())
 }
 
 func TestGetCollectionRateSubLabel(t *testing.T) {
