@@ -57,7 +57,7 @@ func rollbackFixture(t *testing.T) (*meta, *metastorekv.Catalog, *fakeManifestSt
 	catalog := metastorekv.NewCatalog(kv, "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
 	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
-	require.NoError(t, newManifestIndexBackfillInspector(context.TODO(), m).backfillIndex(context.TODO(), restartSegID, restartBuildID))
+	require.NoError(t, newManifestIndexBackfillInspector(context.TODO(), m).backfillIndexes(context.TODO(), restartSegID, restartBuildID))
 	withManifestIndexRollback(t, true)
 	return m, catalog, store, kv
 }
@@ -79,7 +79,7 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			published, ok := m.indexMeta.segmentBuildInfo.Get(restartBuildID)
 			require.True(t, ok)
 			require.True(t, published.ManifestPublished)
-			inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+			inspector := newManifestIndexRollbackInspector(ctx, m)
 			inspector.runOnce(ctx)
 			assert.False(t, inspector.ready, "completion requires a subsequent full scan")
 			after := m.GetSegment(ctx, restartSegID)
@@ -182,7 +182,7 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 				}).Build()
 				t.Cleanup(func() { patch.UnPatch() })
 			}
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID)
+			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
 			if scenario == "segment drops" {
 				require.NoError(t, err)
 				assert.Equal(t, 1, n)
@@ -214,7 +214,7 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 				require.NoError(t, buildErr)
 				store.revisions[before] = []packed.ManifestIndexInfo{entry}
 			}
-			n, err = m.rollbackSegmentIndexes(ctx, restartSegID)
+			n, err = m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
 			rows, listErr = catalog.ListSegmentIndexes(ctx, restartCollID)
@@ -238,9 +238,13 @@ func TestManifestIndexRollbackPreservesCatalogAndReplacement(t *testing.T) {
 			}
 			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, current))
 			current.ManifestPublished = false
-			n, err := m.rollbackSegmentIndexes(ctx, restartSegID)
+			n, err := m.rollbackSegmentIndexes(ctx, restartSegID, restartBuildID)
 			require.NoError(t, err)
-			assert.Equal(t, 1, n)
+			if replacement {
+				assert.Equal(t, 1, n)
+			} else {
+				assert.Zero(t, n, "catalog-backed records are no longer rollback work")
+			}
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 			require.NoError(t, err)
 			if replacement {
@@ -274,14 +278,14 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	replacement := model.CloneSegmentIndex(old)
 	replacement.BuildID = 10000 // sorts before 8100 as an etcd key, but is newer
 	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, replacement))
-	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, replacement.BuildID))
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, replacement.BuildID))
 	// Model real index_id replacement (the shared fake appends instead).
 	current := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	entries := store.backfillEntriesAt(current)
 	require.Len(t, entries, 2)
 	store.revisions[current] = entries[1:]
 	setRollbackTestParam(t, &Params.MetaStoreCfg.MaxEtcdTxnNum, "2")
-	inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+	inspector := newManifestIndexRollbackInspector(ctx, m)
 	inspector.runOnce(ctx)
 	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
@@ -302,24 +306,25 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 		"retiring a restored superseded record must preserve the replacement slot")
 }
 
-func TestManifestIndexRollbackUnmarkedRecordsAndFairness(t *testing.T) {
+func TestManifestIndexRollbackIgnoresMarkerOnlySegments(t *testing.T) {
 	m, catalog, store, _ := rollbackFixture(t)
 	ctx := context.TODO()
 	first := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	store.revisions[first] = nil
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, clearEmptyManifestIndexMarker(restartSegID, first)))
-	// A broken marked segment sorted before the good one must not starve it.
+	// A marker-only segment must not be read or considered rollback work.
 	seedLegacyBackfillRecord(t, m, restartSegID-1, restartBuildID-1)
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateManifestHasIndex(restartSegID-1), UpdateManifest(restartSegID-1, "")))
 	setRollbackTestParam(t, &Params.DataCoordCfg.ManifestIndexRollbackBatchSize, "1")
-	inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+	inspector := newManifestIndexRollbackInspector(ctx, m)
 	inspector.runOnce(ctx)
 	assert.False(t, inspector.ready)
-	assert.Equal(t, float64(2), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPending))
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackPending))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 	inspector.runOnce(ctx)
 	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
 	assert.Len(t, rows, 2, "unmarked manifest-absent record also returns to etcd")
 	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
-	assert.False(t, inspector.ready, "the broken marked segment remains a blocker")
+	assert.True(t, inspector.ready, "marker-only segments belong to GC")
 }

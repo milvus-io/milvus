@@ -46,7 +46,7 @@ const (
 
 // manifestIndexBackfillInspector migrates historical finished StorageV3
 // SegmentIndex rows to the exclusive manifest placement used by foreground
-// publication. Each record is moved by one CommitSegmentManifest transaction:
+// publication. Each segment batch moves in one CommitSegmentManifest transaction:
 // the new revision and the catalog-row deletion become visible together, while
 // the existing in-memory record remains available to readers.
 //
@@ -62,9 +62,8 @@ type manifestIndexBackfillInspector struct {
 
 	meta *meta
 
-	// cursor is the last selected build ID. Scans sort and rotate around it so
-	// one permanently broken record cannot consume the front of every bounded
-	// batch and starve the rest of a large migration.
+	// cursor is the last selected segment ID. Scans rotate around it so a
+	// failing segment cannot starve the rest of a large migration.
 	cursor int64
 
 	// lastPending suppresses repeated completion logs. -1 means that no active
@@ -97,6 +96,9 @@ func (i *manifestIndexBackfillInspector) Start() {
 			mlog.String("switch", Params.DataCoordCfg.WriteSegmentIndexToManifest.Key))
 		return
 	}
+	if i.meta == nil || i.meta.indexMeta == nil {
+		return
+	}
 	i.wg.Add(1)
 	go i.backfillLoop(i.ctx)
 }
@@ -108,49 +110,63 @@ func (i *manifestIndexBackfillInspector) Stop() {
 
 func (i *manifestIndexBackfillInspector) backfillLoop(ctx context.Context) {
 	defer i.wg.Done()
-	interval := manifestIndexBackfillInterval()
-	mlog.Info(ctx, "start manifest index backfill loop", mlog.Duration("interval", interval))
-	// Populate the operator-facing pending gauge promptly instead of leaving
-	// its Prometheus default (zero) visible for a full interval, which could be
-	// mistaken for migration completion immediately after a restart.
-	i.runOnce(ctx)
-	if ctx.Err() != nil {
-		return
-	}
+	runManifestIndexMigrationLoop(ctx, i.meta.indexMeta.manifestIndexBackfillNotify, manifestIndexBackfillInterval, i.runOnce)
+}
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+// Both migration directions scan on startup, retry while work remains, and
+// wait for record notifications once their completion checks pass.
+func runManifestIndexMigrationLoop(ctx context.Context, updates <-chan struct{}, interval func() time.Duration, runOnce func(context.Context) bool) {
+	timer := time.NewTimer(interval())
+	timer.Stop()
+	defer timer.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		// Drain only before scanning. Notifications arriving during or after
+		// the scan must survive its transition to idle, even if it finds zero.
+		select {
+		case <-updates:
+		default:
+		}
+		// The first scan is immediate, including after restart. Pending is
+		// derived from recovered records, never from a separate checkpoint.
+		if runOnce(ctx) {
+			// Pace retries and additional batches; new records coalesce while
+			// work is active rather than bypassing the configured interval.
+			timer.Reset(interval())
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
+			continue
+		}
+		mlog.Info(ctx, "manifest index migration scan stopped; waiting for record updates")
 		select {
 		case <-ctx.Done():
-			mlog.Info(ctx, "manifest index backfill loop exited")
 			return
-		case <-ticker.C:
-			i.runOnce(ctx)
-			if next := manifestIndexBackfillInterval(); next != interval {
-				interval = next
-				ticker.Reset(interval)
-				mlog.Info(ctx, "manifest index backfill interval updated", mlog.Duration("interval", interval))
-			}
+		case <-updates:
 		}
 	}
 }
 
-// runOnce performs one complete in-memory backlog scan and executes at most
-// batchSize record migrations. It is split out so tests can drive one tick.
-func (i *manifestIndexBackfillInspector) runOnce(ctx context.Context) {
+// runOnce scans the complete backlog and selects whole segments until the
+// batchSize record budget is reached. It returns whether periodic scans are
+// still needed. A successful final batch is followed by one confirming scan.
+func (i *manifestIndexBackfillInspector) runOnce(ctx context.Context) bool {
 	if !manifestIndexBackfillActive() || i.meta == nil || i.meta.indexMeta == nil {
-		return
+		return false
 	}
 	record := timerecord.NewTimeRecorder("manifestIndexBackfill")
 
 	work, pending := i.scan(ctx)
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	i.reportPending(ctx, pending)
 	if len(work) == 0 {
-		return
+		return false
 	}
 
 	succeeded := i.execute(ctx, work)
@@ -159,86 +175,84 @@ func (i *manifestIndexBackfillInspector) runOnce(ctx context.Context) {
 		mlog.Int("recordsSucceeded", succeeded),
 		mlog.Int("recordsPending", pending),
 		mlog.Duration("duration", record.ElapseSpan()))
+	return true
 }
 
-type manifestIndexBackfillCandidate struct {
-	segment *SegmentInfo
-	record  *model.SegmentIndex
-}
-
-// segmentManifestIndexBackfill groups selected records by segment. Records in
-// one group are committed sequentially so several pool workers never consume
-// slots waiting for the same per-segment manifest lock.
+// segmentManifestIndexBackfill keeps all selected records for one segment
+// together. Only the catalog transaction limit can split its publication.
 type segmentManifestIndexBackfill struct {
 	segment *SegmentInfo
 	records []*model.SegmentIndex
 }
 
-// scan finds finished, artifact-bearing records whose catalog row still
-// exists. GetSegmentIndexes deliberately filters definitions already handed to
-// GC; fake-finished and non-terminal task rows remain in etcd by design and are
-// not migration work.
-//
-// The full candidate count is returned before batch limiting. Selection rotates
-// by BuildID to guarantee that a repeatedly failing record does not starve
-// candidates ordered after it.
+// scan counts the full eligible backlog before limiting work. Selection rotates
+// by SegmentID and finishes each selected segment even if its records exceed
+// the remaining scan budget. Deleted definitions and task-only records stay on
+// their existing lifecycle paths.
 func (i *manifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentManifestIndexBackfill, int) {
-	segments := i.meta.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			segment.GetStorageVersion() == storage.StorageV3 &&
-			segment.GetLevel() != datapb.SegmentLevel_L0
-	}))
-
-	candidates := make([]manifestIndexBackfillCandidate, 0)
-	for _, segment := range segments {
+	// Filter records before touching segment metadata. Manifest-resident and
+	// task-only records do not cause per-segment lookups or index-map copies.
+	groups := make(map[int64]*segmentManifestIndexBackfill)
+	pending := 0
+	i.meta.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Range(func(_ int64, record *model.SegmentIndex) bool {
 		if ctx.Err() != nil {
-			return nil, 0
+			return false
 		}
-		for _, segIdx := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.GetID()) {
-			if !segmentIndexNeedsManifestBackfill(segIdx) {
-				continue
+		if !segmentIndexNeedsManifestBackfill(record) ||
+			!i.meta.indexMeta.IsIndexExist(record.CollectionID, record.IndexID) {
+			return true
+		}
+		// The build table also retains superseded records for GC. Only the
+		// current (segment, index) occupant can supply a manifest entry.
+		indexes, ok := i.meta.indexMeta.segmentIndexes.Get(record.SegmentID)
+		if !ok {
+			return true
+		}
+		current, ok := indexes.Get(record.IndexID)
+		if !ok || current.BuildID != record.BuildID {
+			return true
+		}
+		group := groups[record.SegmentID]
+		if group == nil {
+			segment := i.meta.GetSegment(ctx, record.SegmentID)
+			if !isSegmentHealthy(segment) || segment.GetStorageVersion() != storage.StorageV3 ||
+				segment.GetLevel() == datapb.SegmentLevel_L0 {
+				return true
 			}
-			candidates = append(candidates, manifestIndexBackfillCandidate{segment: segment, record: segIdx})
+			group = &segmentManifestIndexBackfill{segment: segment}
+			groups[record.SegmentID] = group
 		}
-	}
-	if len(candidates) == 0 {
+		group.records = append(group.records, model.CloneSegmentIndex(record))
+		pending++
+		return true
+	})
+	if ctx.Err() != nil {
 		return nil, 0
 	}
-
-	sort.Slice(candidates, func(left, right int) bool {
-		return candidates[left].record.BuildID < candidates[right].record.BuildID
-	})
-	pending := len(candidates)
+	candidates := make([]segmentManifestIndexBackfill, 0, len(groups))
+	for _, group := range groups {
+		sort.Slice(group.records, func(left, right int) bool {
+			return group.records[left].BuildID < group.records[right].BuildID
+		})
+		candidates = append(candidates, *group)
+	}
 	limit := Params.DataCoordCfg.ManifestIndexBackfillBatchSize.GetAsInt()
-	if limit < 1 {
-		// Paramtable clamps this already. Keep the scan safe for focused tests
-		// that construct configuration manually instead of going through Init.
+	if len(candidates) == 0 || limit < 1 {
 		return nil, pending
 	}
-	if limit > pending {
-		limit = pending
-	}
-	start := sort.Search(len(candidates), func(idx int) bool {
-		return candidates[idx].record.BuildID > i.cursor
+	sort.Slice(candidates, func(left, right int) bool {
+		return candidates[left].segment.GetID() < candidates[right].segment.GetID()
 	})
-
-	selected := make([]manifestIndexBackfillCandidate, 0, limit)
-	for offset := 0; offset < limit; offset++ {
-		selected = append(selected, candidates[(start+offset)%len(candidates)])
-	}
-	i.cursor = selected[len(selected)-1].record.BuildID
-
-	work := make([]segmentManifestIndexBackfill, 0, len(selected))
-	positions := make(map[int64]int, len(selected))
-	for _, candidate := range selected {
-		segmentID := candidate.segment.GetID()
-		position, ok := positions[segmentID]
-		if !ok {
-			positions[segmentID] = len(work)
-			work = append(work, segmentManifestIndexBackfill{segment: candidate.segment})
-			position = len(work) - 1
-		}
-		work[position].records = append(work[position].records, candidate.record)
+	start := sort.Search(len(candidates), func(idx int) bool {
+		return candidates[idx].segment.GetID() > i.cursor
+	})
+	work := make([]segmentManifestIndexBackfill, 0)
+	selected := 0
+	for offset := 0; offset < len(candidates) && selected < limit; offset++ {
+		item := candidates[(start+offset)%len(candidates)]
+		work = append(work, item)
+		selected += len(item.records)
+		i.cursor = item.segment.GetID()
 	}
 	return work, pending
 }
@@ -273,7 +287,7 @@ func (i *manifestIndexBackfillInspector) execute(ctx context.Context, work []seg
 		}))
 	}
 	// BlockOnAll drains every started segment group before Release closes the
-	// pool. Per-record failures are classified below and never abort siblings.
+	// pool. Failed batches are classified below and never abort other segments.
 	_ = conc.BlockOnAll(futures...)
 
 	succeeded := 0
@@ -284,57 +298,76 @@ func (i *manifestIndexBackfillInspector) execute(ctx context.Context, work []seg
 }
 
 func (i *manifestIndexBackfillInspector) backfillSegment(ctx context.Context, item segmentManifestIndexBackfill) int {
+	// Healthy segments contribute one pointer PUT; each index adds one DELETE.
+	limit := Params.MetaStoreCfg.MaxEtcdTxnNum.GetAsInt() - 1
+	if limit < 1 {
+		for _, candidate := range item.records {
+			i.recordFailure(ctx, candidate, merr.WrapErrServiceInternalMsg("index backfill requires at least two etcd transaction operations"))
+		}
+		return 0
+	}
 	succeeded := 0
-	for _, candidate := range item.records {
+	for offset := 0; offset < len(item.records); offset += limit {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := i.backfillIndex(ctx, item.segment.GetID(), candidate.BuildID); err != nil {
-			i.recordFailure(ctx, candidate, err)
+		batch := item.records[offset:min(offset+limit, len(item.records))]
+		buildIDs := make([]int64, 0, len(batch))
+		for _, candidate := range batch {
+			buildIDs = append(buildIDs, candidate.BuildID)
+		}
+		if err := i.backfillIndexes(ctx, item.segment.GetID(), buildIDs...); err != nil {
+			for _, candidate := range batch {
+				i.recordFailure(ctx, candidate, err)
+			}
 			continue
 		}
-		succeeded++
-		metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSucceeded).Inc()
+		succeeded += len(batch)
+		metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSucceeded).Add(float64(len(batch)))
 	}
 	return succeeded
 }
 
-// backfillIndex performs no manifest pre-read. Re-publishing an entry already
-// present under the same index_id is idempotent, while the current SegmentIndex
-// record supplies the exact metadata foreground publication uses. The commit
-// revalidates that projection under the BuildID lock before any manifest I/O.
-func (i *manifestIndexBackfillInspector) backfillIndex(ctx context.Context, segmentID, buildID int64) error {
+// backfillIndexes publishes one segment batch without a manifest pre-read.
+// Every projection is revalidated under its BuildID lock before manifest I/O.
+// A failed or stale batch leaves all its catalog rows available for a later scan.
+func (i *manifestIndexBackfillInspector) backfillIndexes(ctx context.Context, segmentID int64, buildIDs ...int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	segment := i.meta.GetSegment(ctx, segmentID)
 	if segment == nil || !isSegmentHealthy(segment) {
 		return merr.WrapErrSegmentNotFound(segmentID)
 	}
-	segIdx, ok := i.meta.indexMeta.GetIndexJob(buildID)
-	if !ok || !segmentIndexNeedsManifestBackfill(segIdx) ||
-		!i.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-		return errSegmentIndexBackfillSkipped
+	entries := make([]packed.ManifestIndexInfo, 0, len(buildIDs))
+	mutations := make([]SegmentIndexMutation, 0, len(buildIDs))
+	for _, buildID := range buildIDs {
+		segIdx, ok := i.meta.indexMeta.GetIndexJob(buildID)
+		if !ok || !segmentIndexNeedsManifestBackfill(segIdx) ||
+			!i.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			return errSegmentIndexBackfillSkipped
+		}
+		manifestIndex, err := buildManifestIndexInfo(i.meta, segment, segIdx)
+		if err != nil {
+			return err
+		}
+		if err := validateManifestIndexPublishable(segmentID, manifestIndex); err != nil {
+			return err
+		}
+		entries = append(entries, manifestIndex)
+		mutations = append(mutations, SegmentIndexMutation{Type: SegmentIndexBackfill, BuildID: buildID})
 	}
-
-	manifestIndex, err := buildManifestIndexInfo(i.meta, segment, segIdx)
-	if err != nil {
-		return err
+	if len(entries) == 0 {
+		return nil
 	}
-	if err := validateManifestIndexPublishable(segmentID, manifestIndex); err != nil {
-		return err
-	}
-
 	return i.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
 		SegmentID:     segmentID,
 		StorageConfig: createStorageConfig(),
 		Mutation: ManifestMutation{
 			Type:    ManifestMutationCommitUpdates,
-			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{manifestIndex}},
+			Updates: &packed.ManifestUpdates{Indexes: entries},
 		},
-		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndexes: []SegmentIndexMutation{{
-				Type:    SegmentIndexBackfill,
-				BuildID: buildID,
-			}},
-		},
+		CatalogMutation: SegmentCatalogMutation{SegmentIndexes: mutations},
 	})
 }
 

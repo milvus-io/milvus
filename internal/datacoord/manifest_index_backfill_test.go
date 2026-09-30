@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func indexManifestPublished(t *testing.T, indexMeta *indexMeta, buildID int64) bool {
@@ -108,6 +109,78 @@ func seedLegacyBackfillRecord(t *testing.T, m *meta, segmentID, buildID int64) {
 		MemSize:               8192,
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}))
+}
+
+func seedLegacyBackfillIndexes(t *testing.T, m *meta, count int) []*model.SegmentIndex {
+	t.Helper()
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	first, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	records := []*model.SegmentIndex{first}
+	for offset := 1; offset < count; offset++ {
+		definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(restartCollID, "vec_idx")[0])
+		definition.IndexID += int64(offset)
+		definition.FieldID += int64(offset)
+		definition.IndexName = fmt.Sprintf("vec_idx_%d", offset)
+		require.NoError(t, m.indexMeta.CreateIndex(context.TODO(), definition))
+		record := model.CloneSegmentIndex(first)
+		record.IndexID = definition.IndexID
+		record.BuildID += int64(offset)
+		require.NoError(t, m.indexMeta.AddSegmentIndex(context.TODO(), record))
+		records = append(records, record)
+	}
+	return records
+}
+
+func TestManifestIndexBackfillBatchesWholeSegment(t *testing.T) {
+	for _, txnLimit := range []int{128, 3} {
+		t.Run(fmt.Sprintf("txn_%d", txnLimit), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			store := newFakeManifestStore(t)
+			ctx := context.Background()
+			kv := &failBackfillCatalogKV{metaMemoryKV: NewMetaMemoryKV()}
+			catalog := metastorekv.NewCatalog(kv, "", "")
+			m := bootMetaForRestart(t, catalog, restartCollID)
+			records := seedLegacyBackfillIndexes(t, m, 5)
+			seedLegacyBackfillRecord(t, m, restartSegID+1, restartBuildID-1)
+			for item, value := range map[*paramtable.ParamItem]string{
+				&Params.DataCoordCfg.ManifestIndexBackfillBatchSize: "1",
+				&Params.MetaStoreCfg.MaxEtcdTxnNum:                  fmt.Sprint(txnLimit),
+			} {
+				previous := item.GetValue()
+				Params.Save(item.Key, value)
+				t.Cleanup(func() { Params.Save(item.Key, previous) })
+			}
+			withSegmentIndexManifestWrites(t, true)
+			inspector := newManifestIndexBackfillInspector(ctx, m)
+			work, pending := inspector.scan(ctx)
+			require.Len(t, work, 1)
+			require.Len(t, work[0].records, 5, "the record budget must not split a segment")
+			assert.Equal(t, 6, pending)
+			next, pending := inspector.scan(ctx)
+			require.Len(t, next, 1)
+			assert.Equal(t, restartSegID+1, next[0].segment.GetID(), "a failing group must not starve other segments")
+			assert.Equal(t, 6, pending)
+			kv.atomicUpdateSizes = nil
+			require.Equal(t, 5, inspector.execute(ctx, work))
+			expectedCommits := (5 + txnLimit - 2) / (txnLimit - 1)
+			assert.Equal(t, expectedCommits, store.commitCount)
+			require.Len(t, kv.atomicUpdateSizes, expectedCommits)
+			for _, size := range kv.atomicUpdateSizes {
+				assert.LessOrEqual(t, size, txnLimit)
+			}
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, restartBuildID-1, rows[0].BuildID)
+			published := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			require.Len(t, store.backfillEntriesAt(published), 5)
+			restarted := bootMetaForRestart(t, catalog, restartCollID)
+			for _, record := range records {
+				assert.True(t, indexManifestPublished(t, restarted.indexMeta, record.BuildID))
+			}
+		})
+	}
 }
 
 // The final-state matrix is the migration contract: before the tick the index
@@ -338,10 +411,12 @@ func TestManifestIndexBackfillIgnoresCopiedManifestRecord(t *testing.T) {
 
 type failBackfillCatalogKV struct {
 	*metaMemoryKV
-	failAtomicUpdate bool
+	failAtomicUpdate  bool
+	atomicUpdateSizes []int
 }
 
 func (kv *failBackfillCatalogKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	kv.atomicUpdateSizes = append(kv.atomicUpdateSizes, len(saves)+len(removals))
 	if kv.failAtomicUpdate {
 		return merr.WrapErrIoFailedReason("injected backfill catalog failure")
 	}
@@ -360,21 +435,23 @@ func TestManifestIndexBackfillCatalogFailureKeepsRowAndPointer(t *testing.T) {
 	kv := &failBackfillCatalogKV{metaMemoryKV: NewMetaMemoryKV()}
 	catalog := metastorekv.NewCatalog(kv, "", "")
 	m := bootMetaForRestart(t, catalog, restartCollID)
-	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	records := seedLegacyBackfillIndexes(t, m, 3)
 	base := m.GetSegment(ctx, restartSegID).GetManifestPath()
 
 	withSegmentIndexManifestWrites(t, true)
 	kv.failAtomicUpdate = true
 	inspector := newManifestIndexBackfillInspector(ctx, m)
-	inspector.runOnce(ctx)
+	assert.True(t, inspector.runOnce(ctx), "catalog failure must keep periodic retries active")
 
 	assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
-	require.Len(t, persisted, 1)
-	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+	require.Len(t, persisted, 3)
+	for _, record := range records {
+		assert.False(t, indexManifestPublished(t, m.indexMeta, record.BuildID))
+	}
 	_, pending := inspector.scan(ctx)
-	assert.Equal(t, 1, pending)
+	assert.Equal(t, 3, pending)
 
 	// The immutable orphan does not block retry; only the catalog pointer is
 	// visible, and it still names the original base.
@@ -382,7 +459,7 @@ func TestManifestIndexBackfillCatalogFailureKeepsRowAndPointer(t *testing.T) {
 	inspector.runOnce(ctx)
 	published := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	assert.NotEqual(t, base, published)
-	require.Len(t, store.backfillEntriesAt(published), 1)
+	require.Len(t, store.backfillEntriesAt(published), 3)
 	persisted, err = catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
 	assert.Empty(t, persisted)
@@ -429,7 +506,7 @@ func TestBackfillMutationRejectsMismatchedSegmentIdentity(t *testing.T) {
 	corrupt.PartitionID++
 	m.indexMeta.updateSegmentIndex(corrupt)
 
-	err := newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID)
+	err := newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "targets collection/partition/segment")
 	assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
@@ -439,8 +516,41 @@ func TestBackfillMutationRejectsMismatchedSegmentIdentity(t *testing.T) {
 	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 }
 
+func TestBackfillBatchRejectsMixedOrUnmatchedMutations(t *testing.T) {
+	for _, shape := range []string{"foreground", "removal", "extra entry", "retraction", "duplicate index"} {
+		t.Run(shape, func(t *testing.T) {
+			commit := SegmentManifestCommit{
+				SegmentID: restartSegID,
+				Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+					Indexes: []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 10}, {IndexID: 2, BuildID: 20}},
+				}},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: []SegmentIndexMutation{
+					{Type: SegmentIndexBackfill, BuildID: 10}, {Type: SegmentIndexBackfill, BuildID: 20},
+				}},
+			}
+			_, err := validateSegmentIndexMutations(commit)
+			require.NoError(t, err)
+			switch shape {
+			case "foreground":
+				commit.CatalogMutation.SegmentIndexes[1].Type = SegmentIndexUpsert
+			case "removal":
+				commit.CatalogMutation.SegmentIndexes[1].Type = SegmentIndexRemove
+				commit.Mutation.Updates.DropIndexes = []packed.DropIndexEntry{{IndexID: 2, ExpectedBuildID: 20}}
+			case "extra entry":
+				commit.Mutation.Updates.Indexes = append(commit.Mutation.Updates.Indexes, packed.ManifestIndexInfo{IndexID: 3, BuildID: 30})
+			case "retraction":
+				commit.Mutation.Updates.DropIndexes = []packed.DropIndexEntry{{IndexID: 3, ExpectedBuildID: 30}}
+			case "duplicate index":
+				commit.Mutation.Updates.Indexes[1].IndexID = 1
+			}
+			_, err = validateSegmentIndexMutations(commit)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
-	for _, shape := range []string{"noop", "multiple publications", "worker result"} {
+	for _, shape := range []string{"noop", "duplicate index IDs", "worker result"} {
 		t.Run(shape, func(t *testing.T) {
 			withSegmentIndexManifestWrites(t, false)
 			store := newFakeManifestStore(t)
@@ -465,7 +575,7 @@ func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
 			switch shape {
 			case "noop":
 				commit.Mutation = ManifestMutation{Type: ManifestMutationNoop, ManifestPath: segment.GetManifestPath()}
-			case "multiple publications":
+			case "duplicate index IDs":
 				second := entry
 				second.BuildID++
 				commit.Mutation.Updates.Indexes = append(commit.Mutation.Updates.Indexes, second)

@@ -485,12 +485,7 @@ var (
 	DataCoordManifestIndexRollbackPending = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
 		Name: "manifest_index_rollback_pending_segments",
-		Help: "number of segments with a manifest index marker or catalog-absent index records before rollback batch limiting",
-	})
-	DataCoordManifestIndexRollbackPendingCopies = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
-		Name: "manifest_index_rollback_pending_copy_tasks",
-		Help: "number of unfinished copy tasks blocking manifest index rollback readiness",
+		Help: "number of candidate segments in the current rollback record scan before batch limiting",
 	})
 	DataCoordManifestIndexRollbackPendingRecords = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
@@ -500,7 +495,7 @@ var (
 	DataCoordManifestIndexRollbackReady = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
 		Name: "manifest_index_rollback_ready",
-		Help: "one after an active complete scan finds no manifest indexes, catalog-absent records or unfinished copy tasks; zero otherwise",
+		Help: "one after an active complete scan finds no manifest-resident in-memory index records; zero otherwise",
 	})
 	DataCoordManifestIndexRollbackRecords = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
@@ -567,7 +562,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordManifestIndexBackfillPending)
 	registry.MustRegister(DataCoordManifestIndexBackfillRecords)
 	registry.MustRegister(DataCoordManifestIndexRollbackPending)
-	registry.MustRegister(DataCoordManifestIndexRollbackPendingCopies)
 	registry.MustRegister(DataCoordManifestIndexRollbackPendingRecords)
 	registry.MustRegister(DataCoordManifestIndexRollbackReady)
 	registry.MustRegister(DataCoordManifestIndexRollbackRecords)

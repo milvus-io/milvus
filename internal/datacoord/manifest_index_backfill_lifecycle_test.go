@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -87,7 +89,7 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 					return original(receiver, ctx, commit)
 				}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
-			err := newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID)
+			err := newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID)
 			require.True(t, changed)
 			require.NoError(t, changeErr, "the competing operation must succeed before checking publication")
 			require.Error(t, err)
@@ -99,6 +101,44 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 		})
 	}
+}
+
+func TestManifestIndexBackfillBatchRevalidatesEveryRecord(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	store := newFakeManifestStore(t)
+	ctx := context.Background()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	records := seedLegacyBackfillIndexes(t, m, 2)
+	base := m.GetSegment(ctx, restartSegID).GetManifestPath()
+	withSegmentIndexManifestWrites(t, true)
+
+	// Change the second record after projection but before the batch locks.
+	// The first record must not be published on its own.
+	var original func(*meta, context.Context, SegmentManifestCommit) error
+	patch := mockey.Mock((*meta).CommitSegmentManifest).Origin(&original).To(
+		func(receiver *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			if err := receiver.indexMeta.UpdateVersion(records[1].BuildID, 10); err != nil {
+				return err
+			}
+			return original(receiver, ctx, commit)
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	work, _ := inspector.scan(ctx)
+	assert.Zero(t, inspector.execute(ctx, work))
+	assert.Zero(t, store.commitCount)
+	assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	for _, record := range records {
+		assert.False(t, indexManifestPublished(t, m.indexMeta, record.BuildID))
+	}
+	patch.UnPatch()
+	work, _ = inspector.scan(ctx)
+	assert.Equal(t, 2, inspector.execute(ctx, work))
+	assert.Equal(t, 1, store.commitCount)
 }
 
 func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
@@ -125,7 +165,7 @@ func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
 			return original(base, commit)
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID))
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID))
 
 	assert.False(t, old.ManifestPublished, "a reader's existing snapshot must remain unchanged")
 	assert.True(t, indexManifestPublished(t, m.indexMeta, old.BuildID))
@@ -169,7 +209,7 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 				}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
 			inspector := newManifestIndexBackfillInspector(ctx, m)
-			err := inspector.backfillIndex(ctx, restartSegID, restartBuildID)
+			err := inspector.backfillIndexes(ctx, restartSegID, restartBuildID)
 			require.Error(t, err)
 			switch scenario {
 			case "write fails":
@@ -219,7 +259,7 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 		t.Cleanup(func() { _ = m.chunkManager.Remove(ctx, file) })
 	}
 	// Backfill passed its live-definition check before DDL retired the index.
-	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID))
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID))
 	require.NoError(t, m.indexMeta.MarkIndexAsDeleted(ctx, restartCollID, []int64{restartIndexID}))
 	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
 	_, exists := m.indexMeta.GetIndexJob(restartBuildID)
@@ -371,6 +411,11 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			inspector.runOnce(ctx)
 			published := m.GetSegment(ctx, restartSegID).GetManifestPath()
 			require.NotEqual(t, initial, published)
+			_, initialVersion, err := packed.UnmarshalManifestPath(initial)
+			require.NoError(t, err)
+			_, publishedVersion, err := packed.UnmarshalManifestPath(published)
+			require.NoError(t, err)
+			assert.Equal(t, initialVersion+1, publishedVersion, "both indexes must share one manifest revision")
 			entries, err := packed.GetManifestIndexInfos(published, cfg)
 			require.NoError(t, err)
 			require.Len(t, entries, 2)
@@ -404,4 +449,147 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			assert.Zero(t, pending)
 		})
 	}
+}
+
+// Once the confirming scan finds no records, interval ticks must not cause
+// further work. Every catalog writer that can reintroduce a finished artifact
+// must wake the same inspector without restarting DataCoord.
+func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
+	for _, writer := range []string{"copy install", "finish task", "version update"} {
+		t.Run(writer, func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			withManifestIndexBackfillEnabled(t, true)
+			newFakeManifestStore(t)
+			ctx := context.Background()
+			m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			// An in-flight task remains in etcd and must not keep migration polling.
+			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+				CollectionID: restartCollID, PartitionID: restartPartID, SegmentID: restartSegID,
+				IndexID: restartIndexID + 10, BuildID: restartBuildID + 10,
+				IndexState: commonpb.IndexState_InProgress,
+			}))
+			withSegmentIndexManifestWrites(t, true)
+			inspector := newManifestIndexBackfillInspector(ctx, m)
+			interval := mockey.Mock(manifestIndexBackfillInterval).Return(10 * time.Millisecond).Build()
+			t.Cleanup(func() { interval.UnPatch() })
+			var scans atomic.Int32
+			scanPatch := mockey.Mock((*manifestIndexBackfillInspector).scan).When(func(_ *manifestIndexBackfillInspector, _ context.Context) bool {
+				scans.Add(1)
+				return false
+			}).Build()
+			t.Cleanup(func() { scanPatch.UnPatch() })
+			inspector.Start()
+			t.Cleanup(inspector.Stop)
+			require.Eventually(t, func() bool { return scans.Load() >= 2 }, 5*time.Second, time.Millisecond)
+			assert.True(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+			require.Never(t, func() bool { return scans.Load() != 2 }, 100*time.Millisecond, time.Millisecond,
+				"an empty backlog must stop periodic scans")
+
+			buildID := restartBuildID
+			switch writer {
+			case "copy install":
+				record, ok := m.indexMeta.GetIndexJob(buildID)
+				require.True(t, ok)
+				record.BuildID++
+				buildID = record.BuildID
+				require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, record))
+			case "finish task":
+				require.NoError(t, m.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+					BuildID: buildID, State: commonpb.IndexState_Finished,
+					IndexFileKeys:         []string{"0", "1"},
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				}))
+			case "version update":
+				require.NoError(t, m.indexMeta.UpdateVersion(buildID, 10))
+			}
+			require.Eventually(t, func() bool {
+				record, ok := m.indexMeta.GetIndexJob(buildID)
+				return ok && record.ManifestPublished && scans.Load() >= 4
+			}, 5*time.Second, time.Millisecond)
+			require.Never(t, func() bool { return scans.Load() != 4 }, 100*time.Millisecond, time.Millisecond)
+			inspector.Stop()
+		})
+	}
+}
+
+func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	withManifestIndexBackfillEnabled(t, true)
+	newFakeManifestStore(t)
+	ctx := context.Background()
+	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	withSegmentIndexManifestWrites(t, true)
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	require.NoError(t, inspector.backfillIndexes(ctx, restartSegID, restartBuildID))
+
+	// Freeze the first empty scan after it observed zero, but before it can
+	// wait for notification. A record installed here must survive that handoff.
+	emptyScan := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var calls atomic.Int32
+	var original func(*manifestIndexBackfillInspector, context.Context) ([]segmentManifestIndexBackfill, int)
+	patch := mockey.Mock((*manifestIndexBackfillInspector).scan).Origin(&original).To(
+		func(receiver *manifestIndexBackfillInspector, ctx context.Context) ([]segmentManifestIndexBackfill, int) {
+			work, pending := original(receiver, ctx)
+			if calls.Add(1) == 1 && pending == 0 {
+				close(emptyScan)
+				<-release
+			}
+			return work, pending
+		}).Build()
+	t.Cleanup(func() {
+		inspector.cancel()
+		once.Do(func() { close(release) })
+		inspector.Stop()
+		patch.UnPatch()
+	})
+	inspector.Start()
+	select {
+	case <-emptyScan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial empty scan did not finish")
+	}
+	record, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	record.BuildID++
+	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, record))
+	once.Do(func() { close(release) })
+	require.Eventually(t, func() bool {
+		current, ok := m.indexMeta.GetIndexJob(record.BuildID)
+		return ok && current.ManifestPublished
+	}, 5*time.Second, time.Millisecond, "late copy installation must wake without waiting for the 60 second interval")
+}
+
+func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.Background()
+	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	seedLegacyBackfillRecord(t, m, restartSegID+1, restartBuildID+1)
+	// Retain the old catalog row for GC but replace its current slot with a
+	// manifest-resident build. Neither record should cause a segment lookup.
+	replacement, ok := m.indexMeta.GetIndexJob(restartBuildID + 1)
+	require.True(t, ok)
+	replacement.BuildID++
+	require.NoError(t, m.indexMeta.AddSegmentIndexFromManifest(ctx, replacement))
+	var segmentLookups atomic.Int32
+	patch := mockey.Mock((*meta).GetSegment).When(func(_ *meta, _ context.Context, _ int64) bool {
+		segmentLookups.Add(1)
+		return false
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	segmentScan := mockey.Mock((*meta).SelectSegments).To(func(*meta, context.Context, ...SegmentFilter) []*SegmentInfo {
+		t.Error("backfill must not enumerate segments")
+		return nil
+	}).Build()
+	t.Cleanup(func() { segmentScan.UnPatch() })
+	work, pending := newManifestIndexBackfillInspector(ctx, m).scan(ctx)
+	require.Equal(t, 1, pending)
+	require.Len(t, work, 1)
+	require.Equal(t, restartBuildID, work[0].records[0].BuildID)
+	assert.EqualValues(t, 1, segmentLookups.Load())
 }

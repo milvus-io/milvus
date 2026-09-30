@@ -32,15 +32,14 @@ its replacement. Separating publication and pruning would recreate a
 read-then-delete window and require a second convergence protocol for no gain.
 
 The independent rollback migration restores manifest-resident index records to
-etcd before a downgrade that requires catalog-backed indexes. It retracts their
-manifest entries in the same publication transaction. Records already retired
-by GC are not recreated; their remaining manifest entries are only retracted.
+etcd. It retracts only their matching manifest entries in the same publication
+transaction. Manifest entries without in-memory records are left to GC.
 Neither direction moves index files or changes artifact paths or build IDs.
 
 | Direction | Source | Destination | Activation |
 |---|---|---|---|
 | Backfill | Historical finished `SegmentIndex` catalog rows | Manifest entries; corresponding catalog rows retired | Publication and backfill enabled, rollback disabled |
-| Rollback | Current manifest entries and catalog-absent records retained in memory | Existing records restored to etcd; manifest entries retracted | Independent rollback switch overrides forward publication and backfill |
+| Rollback | Manifest-resident index records retained in memory | Existing records restored to etcd; manifest entries retracted | Independent rollback switch overrides forward publication and backfill |
 
 - [Backfill to manifest](#backfill-to-manifest)
 - [Rollback to etcd](#rollback-to-etcd)
@@ -95,7 +94,7 @@ it out of the next scan.
 - Reading every manifest to discover work. Durable placement is already known
   from the source that supplied each in-memory record.
 - Automatically reversing placement when publication is disabled. Explicit
-  [rollback](#rollback-to-etcd) uses an independent switch in a later stack layer.
+  [rollback](#rollback-to-etcd) uses an independent switch.
 
 ### Candidate Definition
 
@@ -112,8 +111,10 @@ staged under the publication locks:
 
 The file-key test matches foreground publication. A Finished record with no
 files is the small-segment/fake-Finished case and has no artifact to publish.
-Filtering through `GetSegmentIndexes` excludes records already owned by
-dropped-index GC. The commit repeats the mutable-record checks under the
+The scan starts from index records, rejects manifest-resident and task-only
+records before looking up their segments, and checks the live definition and
+current slot to exclude dropped-index GC and superseded builds. The commit
+repeats the mutable-record checks under the
 BuildID lock so scan results are only hints, never authorization to publish.
 An index definition may be dropped after staging; the record remains available
 to GC, whose segment lock orders cleanup after publication.
@@ -125,23 +126,25 @@ completion signal to reach zero while a historical artifact was never moved.
 
 ### Commit Protocol
 
-One candidate produces one `SegmentIndexBackfill` catalog mutation and one
-typed `ManifestUpdates.Indexes` entry. The framework enforces that the update
-contains the same BuildID and that the manifest entry is an exact projection of
-the current task record.
+Each candidate produces one `SegmentIndexBackfill` catalog mutation and one
+typed `ManifestUpdates.Indexes` entry. Candidates for the same segment share
+one manifest revision and one atomic catalog transaction, within the transaction
+operation limit. The framework enforces that each update contains the same
+BuildID and that the manifest entry is an exact projection of the current task
+record.
 
 The protocol is:
 
 ```text
 segmentManifestLock(segmentID)
-  -> keyLock(buildID)
-     -> snapshot current segment and current finished record
+  -> keyLock(all selected BuildIDs, sorted)
+     -> snapshot current segment and all selected finished records
      -> validate live definition/current slot/entry projection
      -> commit next immutable manifest revision
      -> segMu
         -> catalog.Update(
              AlterSegment(new manifest_path, manifest_has_index=true),
-             DropSegmentIndex(historical row),
+             DropSegmentIndex(each selected historical row),
            )
         -> install new segment pointer and catalog-absent provenance in memory
 ```
@@ -152,11 +155,14 @@ separately. Installation updates the locked record through a clone with
 `ManifestPublished = true`. It updates the `(segment, index)` slot only if the
 slot still belongs to that BuildID, preserving a newer occupant.
 
-Several selected records for the same segment are committed sequentially.
-Different segments use a bounded worker pool. This preserves the framework's
-single-record transaction and lock invariants, keeps every etcd transaction to
-one segment write plus one row deletion, and avoids workers blocking one
-another on the same segment lock.
+All selected indexes of a segment are published together when they fit in one
+transaction. Only groups exceeding `maxEtcdTxnNum - 1` records are split into
+sequential batches, reserving one operation for the healthy segment pointer PUT.
+Different segments use a bounded worker pool. A failed batch publishes none of
+its catalog mutations or in-memory placement flags and is retried on a later
+scan; other batches and segments can continue. Every record is revalidated
+under its BuildID lock before manifest I/O. Mixed foreground/backfill mutations
+and duplicate index IDs in a backfill batch are rejected.
 
 ### Crash and Retry Semantics
 
@@ -190,19 +196,12 @@ supplied by etcd are installed as Finished records and marked catalog-absent in
 process. An unreadable or unusable marked manifest still aborts startup; the
 backfill does not weaken that GC-safety contract.
 
-#### Rolling upgrade and rollback
+#### Placement controls
 
-Both publication and backfill default off. They must be enabled only after
-every DataCoord replica that can become leader runs a version that reloads
-manifest-resident indexes. Otherwise an older leader would see neither an
-etcd row nor the manifest entry as an index record.
-
-After the first record is migrated, DataCoord must not be downgraded to a
-version without manifest-index reload until the independent
-[rollback migration](#rollback-to-etcd) has completed.
-Disabling publication or forward backfill alone changes future work only; it
-does not recreate retired etcd rows. Mixed placement remains supported by
-manifest-aware DataCoord versions throughout the rollout.
+Both publication and backfill default off. Disabling either changes future
+work only; it does not recreate retired etcd rows. The independent
+[rollback migration](#rollback-to-etcd) restores manifest-resident records to
+etcd. Mixed placement remains supported throughout either migration.
 
 #### Garbage collection
 
@@ -256,16 +255,32 @@ dataCoord:
       concurrency: 16
 ```
 
-`batchSize` counts records, while `concurrency` counts segments. Both are
-clamped to at least one; concurrency is also capped at `MaxInt32`, matching the
+`batchSize` is a target record budget, while `concurrency` counts segments.
+Selection always includes a whole segment, so the final selected segment may
+exceed the remaining record budget. Both are clamped to at least one;
+concurrency is also capped at `MaxInt32`, matching the
 pool backend. Interval, batch size, and concurrency are refreshable. Enabling
 the inspector and choosing manifest publication require a DataCoord restart.
 
-Candidates are sorted by BuildID and each bounded scan starts after the last
-selected BuildID, wrapping at the end. Thus one deterministic failure cannot
-occupy the first batch forever and starve the rest of a large cluster.
+Candidate groups are sorted by SegmentID and each scan starts after the last
+selected SegmentID, wrapping at the end. Records within each group are sorted
+by BuildID. Thus one deterministic failure cannot occupy the first batch
+forever and starve the rest of a large cluster.
 The loop runs its first scan immediately so the pending gauge does not retain
 Prometheus's default zero value for a full interval after DataCoord starts.
+
+After a complete scan finds no eligible records, periodic scanning stops. The
+inspector waits only for shutdown or a coalesced index-record notification; no
+segment-completion flag or completed-segment set is maintained. A successful
+catalog write that installs a finished, artifact-bearing record sends that
+notification after publishing the record in memory. This includes late legacy
+copy/restore results and rewrites of previously manifest-resident records.
+Notifications arriving during a scan survive its transition to idle. While
+work remains, retries and later batches follow the configured interval.
+
+On restart, the immediate scan derives work from the recovered records and
+`ManifestPublished` provenance. Atomic catalog-row deletion remains the durable
+migration progress; task-only rows need not disappear before scanning stops.
 
 ### Observability and Runbook
 
@@ -287,12 +302,9 @@ Recommended rollout:
 4. Watch pending and failed outcomes. Zero means no *eligible historical
    catalog row* remains; task-only, legacy-storage, and GC-owned rows are not
    migration debt.
-5. Disable the backfill inspector in a later restart if desired. No prune phase
-   or additional destructive switch follows.
-
-Once step 2 or 3 has published a manifest-only record, complete the independent
-rollback migration before downgrading to a version without manifest-index
-reload. Turning the forward switches off alone does not reverse migration.
+5. Periodic scanning stops automatically when no eligible records remain.
+   New catalog-backed finished records wake it again. Disable the inspector in
+   a later restart if desired; no separate prune phase follows.
 
 Mixed placement is supported throughout and after this sequence. Disabling
 foreground manifest publication later affects only new completions; the
@@ -302,22 +314,17 @@ manifest contains no index entries, as implemented by #53048.
 
 ## Rollback to etcd
 
-### Goal and compatibility boundary
+### Goal and scope
 
-Provide an independently enabled reverse migration for operators preparing to
-run a DataCoord version that supports StorageV3 and the existing index artifact
-path layouts, but does not recover index records from segment manifests.
-Restore the durable `SegmentIndex` records required by that version, including
-records on retained Dropped segments and records whose definitions were deleted.
-Keep artifact paths, build IDs, files, segment state, and unrelated manifest
-sections intact.
+Provide an independently enabled reverse metadata migration. Restore existing
+in-memory manifest-resident `SegmentIndex` records to etcd, including records on
+retained Dropped segments and records whose definitions were deleted. Keep
+artifact paths, build IDs, files, segment state, and unrelated manifest sections
+intact. No index rebuild or artifact copy is required.
 
-This does not downgrade StorageV3, index formats, or snapshot formats. The
-target must understand the existing artifact layout and index engine version.
-Manifest entries do not store the historical worker assignment or task timing;
-recovered records retain those fields when available in memory, otherwise use
-the existing Finished-record projection used during startup. No index rebuild
-or artifact copy is required.
+Rollback does not discover work by enumerating manifest entries. Entries with
+no in-memory record belong to GC; rollback neither restores nor retracts them.
+Version downgrade and old-version readability are outside this migration's scope.
 
 ### Controls
 
@@ -335,8 +342,7 @@ dataCoord:
 over `writeSegmentIndexToManifest` and `manifestIndexBackfill.enabled`:
 foreground completions and newly dispatched copy tasks choose etcd, and the
 forward inspector is inactive. Operators need only this independent switch to
-enter rollback mode. Before downgrading, also persist both forward switches as
-false because the target version will not understand the new rollback switch.
+enter rollback mode.
 
 `interval`, `batchSize`, and `concurrency` are refreshable. Batch size bounds
 segments processed per scan; one visit migrates at most `maxEtcdTxnNum - 1`
@@ -345,24 +351,34 @@ the amount of selected work. A rotating segment-ID cursor prevents one broken
 manifest from starving later segments. Native read concurrency also uses the
 existing process-wide manifest-read budget.
 
+Like forward backfill, rollback discovers ordinary work from in-memory index
+records and groups it by SegmentID. Its predicate is `ManifestPublished=true`;
+superseded builds and dropped definitions are retained because their catalog
+rows must also be restored. Catalog-backed records are skipped before segment
+lookup. No segment-marker sweep follows the record scan, and copy task state
+does not participate in candidate selection or readiness.
+
+Both inspectors use the same scan/retry/idle loop. Rollback continues periodic
+checks while manifest-resident records remain. After an empty scan it stops the
+timer and waits for record notifications. Installing a manifest-resident record
+clears readiness and wakes the inspector. Restart always performs an immediate
+scan from recovered placement metadata.
+
 ### Durable transition
 
 ```text
-Before: SegmentInfo -> manifest with index; no SegmentIndex catalog row
-After:  SegmentInfo -> manifest without index; durable SegmentIndex row
+Before: selected record is manifest-resident, with no catalog row
+After:  selected record has a catalog row; only its manifest entry is removed
 ```
 
 For each selected segment, acquire the existing segment manifest lock and
-read the current manifest, then acquire selected BuildID locks in sorted order.
-Validate segment identity, artifact paths, and the authoritative in-memory
-records. A selected entry must match the current artifact when its only durable
-source is the manifest. An already catalog-backed record wins a conflict,
-preserving its current state, version and timestamps rather than replacing it
-with historical manifest metadata. After active copy targets are excluded, a
-record missing under its BuildID lock has already been retired. Retract its
-remaining manifest entry without recreating a catalog row; index GC can leave
-such entries on retained Dropped segments. Count only actual catalog PUTs as
-restored records, after their publication succeeds.
+resolve only the selected BuildIDs in the current manifest. This read determines
+which selected records still have an entry; it never adds records to the batch.
+Acquire selected BuildID locks in sorted order and revalidate the records.
+If a record disappeared or became catalog-backed, abandon the batch before
+manifest publication and let the next scan select the remaining work. Validate
+segment identity, artifact paths, and the selected records' manifest projection.
+Unselected manifest entries remain untouched.
 
 Construct a structured revision with conditional `DropIndexes` entries using
 both IndexID and ExpectedBuildID. Do not delete any artifact files. Reuse the
@@ -425,69 +441,56 @@ segment manifest locks that serialize the full manifest transaction.
 
 Rollback includes retained Dropped segments, including snapshot-pinned parents.
 Snapshot references continue to pin the same build IDs and physical files.
-Historical immutable snapshot revisions remain untouched. Unreadable or invalid
-manifests remain pending, including partially deleted Dropped segments; ordinary
-GC can finish retiring those segments, after which they leave the backlog.
-An empty but marked manifest is verified and its marker cleared without
-creating any index row.
+Historical immutable snapshot revisions remain untouched. Unreadable manifests
+or invalid selected entries remain pending while their records exist. Entries whose records GC has retired are not rollback work, and
+marker-only segments are not scanned. `manifest_has_index` may therefore remain
+true after rollback completes; it still accurately describes the remaining
+manifest entries.
 
-Copy tasks retain their dispatch-time placement. Rollback must not reinterpret
-an existing worker result by changing that saved mode. The inspector obtains
-active copy/restore targets before scanning segments, skips those targets, and
-reports unfinished copy tasks separately. After their existing installation or
-cleanup protocol finishes, their published segments are migrated normally.
-This prevents rollback from racing a result installer between pointer adoption
-and in-memory index installation, or reporting completion before an old task
-publishes a manifest. New tasks use the effective etcd mode.
+Copy tasks retain their dispatch-time placement. The inspector does not depend
+on `CopySegmentMeta` or wait for tasks to complete. If a result has published a
+manifest but installed only some of its index records, rollback migrates only
+those installed records and leaves other entries intact. Each later
+`AddSegmentIndexFromManifest` installation wakes rollback, including after an
+empty scan. New tasks use the effective etcd mode.
 
 Result synchronization checks the current persisted task state under the copy
 result lock. Repeated results for a completed task cannot reinstall a manifest
 pointer that rollback has already advanced. Failed tasks are also rejected in
 rollback mode, including historical tasks without a cleanup plan, so a late
-result cannot invalidate a scan that already treated that task as terminal.
+result cannot republish data belonging to a failed task.
 Rejected results continue to re-arm durable cleanup where the task still exists.
 
 On restart, partial progress is derived from durable metadata: catalog rows
 load first; remaining manifest entries recover normally. There is no separate
 checkpoint to commit and no dual-write cleanup phase. A migrated segment with
 an empty index section has `manifest_has_index=false` and needs no manifest
-index read, matching the target version's catalog-only startup behavior.
+index read. Remaining GC-owned entries retain their existing recovery lifecycle.
 
-### Completion and downgrade runbook
+### Completion and operation
 
 Expose bounded-cardinality metrics:
 
-- `manifest_index_rollback_pending_segments`: all marked segments and segments
-  with catalog-absent records, including unsupported/unreadable/temporarily
-  blocked ones, before batch limiting;
-- `manifest_index_rollback_pending_copy_tasks`: unfinished copy/restore tasks;
-- `manifest_index_rollback_pending_records`: remaining catalog-absent records
-  in memory, including inconsistent records without a marked segment;
-- `manifest_index_rollback_ready`: 0 until an active complete scan observes all
-  three counts at zero; reset on start/stop and before each scan;
+- `manifest_index_rollback_pending_segments`: segments discovered from
+  manifest-resident records before batch limiting;
+- `manifest_index_rollback_pending_records`: remaining manifest-resident records
+  in memory, including inconsistent records without a segment;
+- `manifest_index_rollback_ready`: 1 after an active complete scan observes no
+  pending records; reset on start/stop, before each scan, and when a new
+  manifest-resident record is installed;
 - `manifest_index_rollback_records_total`: successfully restored records;
 - `manifest_index_rollback_segments_total{status=success|failed|stale}`:
   segment migration attempts by outcome.
 
-Readiness requires a subsequent complete scan after the final batch. A failed
-or canceled scan never reports ready. Zero is a migration observation, not a
-cluster-wide version gate: verify every potential leader is running rollback
-mode and prevent new external manifest adoption while preparing the downgrade.
+Readiness requires a subsequent complete scan after the final batch. A canceled
+scan never reports ready. This is an observation of the current record backlog,
+not a guarantee that manifests are empty or that no new copy results can arrive.
+Later record installations wake migration again.
 
-1. Deploy this version to every potential DataCoord leader and enable rollback.
-2. Quiesce copy/restore and external data-manifest adoption jobs during the
-   downgrade window. Existing copy tasks finish under their captured mode.
-3. Wait for `ready=1` and all pending gauges to reach zero. Resolve failed
-   manifests or let ordinary GC finish terminal cleanup; do not bypass failures.
-4. Persist `writeSegmentIndexToManifest=false` and forward backfill disabled.
-5. Restart the current version and verify the catalog-only recovery boundary,
-   then roll to the intended StorageV3-compatible target version.
-
-The rollback switch remains active until disabled in a later restart. Disabling
-it does not re-migrate anything; forward migration resumes only if the separate
-forward choices are enabled. Existing external stale-manifest adoption issues
-#53328/#53329 are not a reason to bypass the source-pointer checks and must be
-quiesced for either migration direction.
+Enable rollback and watch the record backlog and failure counts. Resolve failed
+migrations or let ordinary GC retire their records. The switch remains active
+until disabled in a later restart. Disabling it does not re-migrate anything;
+forward migration resumes only if the separate forward choices are enabled.
 
 ## Verification
 
@@ -498,8 +501,7 @@ race tests. Go race does not instrument native C++/Rust operations.
 
 A real local packed-manifest round trip should verify that artifact paths and
 records survive metadata restart. Unit/fault-injection results do not establish
-cluster failover, snapshot restore, QueryNode end-to-end acceptance, or actual
-target-binary downgrade acceptance.
+cluster failover, snapshot restore, or QueryNode end-to-end acceptance.
 
 ### Backfill
 
@@ -513,7 +515,11 @@ target-binary downgrade acceptance.
   manifest-resident records.
 - Copy/restore installation seeds manifest-resident provenance and is not
   mistaken for historical etcd work.
-- Bounded scans rotate across BuildIDs while reporting the entire backlog.
+- Bounded scans rotate across SegmentIDs while reporting the entire record
+  backlog and keeping each selected segment together.
+- Completed and superseded records are rejected before segment lookup.
+- Empty scans stop the timer; catalog additions and rewrites wake migration,
+  including a write between the final empty scan and the idle wait.
 - Commit validation rejects a backfill mutation without its matching entry.
 - Candidate tests cover healthy exact-StorageV3 selection, reject L0/legacy/
   dropped segments, and reject a catalog record whose segment identity is
@@ -545,17 +551,16 @@ row, then retry or restart. Test source pointer advancement and segment drop
 during I/O; conditional build replacement; existing catalog rows with newer
 task state; multiple indexes over several atomic batches; deleted definitions;
 retained Dropped/snapshot-pinned segments; GC selected before/during rollback;
-GC-retired records whose entries still need retraction, including all-retired
-and mixed batches, catalog failure/retry, readiness, and restart without
-recreating the retired records;
+GC-retired records whose entries must remain untouched, including all-retired
+and mixed batches, catalog failure/retry, and readiness; selected records
+retired or rewritten to etcd before their BuildID locks are acquired;
 superseded build restoration and retirement; late copy installation and repeated
 completed/failed results; cancellation and bounded worker concurrency.
 
 Use real packed manifests for both supported artifact layouts and verify the
 same bytes remain readable, other manifest sections survive, forward/reverse
 round trips converge, and a full metadata reload succeeds with manifest reads
-disabled after migration. That last test models the target's catalog-only index
-recovery boundary; actual target-binary/cluster acceptance is recorded separately.
+disabled after all records in the fixture have migrated.
 
 ## Base and PR Dependency Order
 
@@ -572,10 +577,12 @@ index backfill, reverse migration, configuration/metrics, GC/copy coordination,
 and their regression tests. Both migration directions build on the already
 merged publication framework; neither requires a separate unmerged PR.
 
-Each backfill supplies exactly one `SegmentIndexBackfill` in
+Each segment batch supplies one `SegmentIndexBackfill` per selected record in
 `SegmentCatalogMutation.SegmentIndexes`. It must satisfy the same publication
-validation as a foreground upsert; multi-record publication and Noop adoption
-are rejected. Existing multi-record GC removals retain their merged contract.
+validation as a foreground upsert. A batch may contain only backfill
+publications, with one distinct index entry per record; mixed mutations and
+Noop adoption are rejected. Existing multi-record GC removals retain their
+merged contract.
 
 This migration concerns historical **index metadata**. Spark/add-field backfill
 and external refresh can adopt independently generated data manifests through
