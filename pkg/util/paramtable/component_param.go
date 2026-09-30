@@ -7851,7 +7851,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.snapshot.restoreBrokerTimeout",
 		Version:      "3.0.2",
 		DefaultValue: "60000",
-		Doc:          "Timeout in milliseconds for the RootCoord CreateCollection/CreatePartition RPCs issued by snapshot restore. Kept separate from queryCoord.brokerTimeout because these DDLs go through the WAL and can legitimately take longer than a metadata RPC.",
+		Doc:          "Timeout in milliseconds for the RootCoord CreateCollection/CreatePartition/DropCollection RPCs issued by snapshot restore (DropCollection is the restore rollback). Kept separate from queryCoord.brokerTimeout because these DDLs go through the WAL and can legitimately take longer than a metadata RPC.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || parsed <= 0 {
