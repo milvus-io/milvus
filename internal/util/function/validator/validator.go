@@ -20,6 +20,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -34,68 +35,63 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
-	for _, function := range coll.GetFunctions() {
-		if err := CheckFunctionBasicParams(function); err != nil {
-			return err
-		}
+	// Targeted validation (add/alter paths pass the new function's name)
+	// grandfathers already-persisted functions: per-function rules judge only
+	// the target, because rejecting a legacy function here cannot repair it and
+	// only bricks unrelated DDL on the collection (e.g. a pre-tightening
+	// MinHash function with a TEXT input). Cross-function invariants keep
+	// seeing the full schema: every function's names are collected below, only
+	// judged functions go through validateFunctionSchema.
+	targeted := needValidateFunctionName != ""
 
+	for _, function := range coll.GetFunctions() {
 		if usedFunctionName.Contain(function.GetName()) {
 			return merr.WrapErrParameterInvalidMsg("duplicate function name: %s", function.GetName())
 		}
-
 		usedFunctionName.Insert(function.GetName())
-		inputFields := []*schemapb.FieldSchema{}
-		for _, name := range function.GetInputFieldNames() {
-			inputField, ok := nameMap[name]
-			if !ok {
-				return merr.WrapErrParameterInvalidMsg("function input field not found: %s", name)
-			}
-			inputFields = append(inputFields, inputField)
-		}
 
-		if err := CheckFunctionInputField(function, inputFields); err != nil {
-			return err
-		}
-
-		outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
-		for i, name := range function.GetOutputFieldNames() {
-			outputField, ok := nameMap[name]
-			if !ok {
-				return merr.WrapErrParameterInvalidMsg("function output field not found: %s", name)
-			}
-
-			if outputField.GetIsPrimaryKey() {
-				return merr.WrapErrParameterInvalidMsg("function output field cannot be primary key: function %s, field %s", function.GetName(), outputField.GetName())
-			}
-
-			if outputField.GetIsPartitionKey() || outputField.GetIsClusteringKey() {
-				return merr.WrapErrParameterInvalidMsg("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), outputField.GetName())
-			}
-
-			if outputField.GetNullable() {
-				return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
-			}
-
-			outputFields[i] = outputField
+		for _, name := range function.GetOutputFieldNames() {
 			if usedOutputField.Contain(name) {
 				return merr.WrapErrParameterInvalidMsg("duplicate function output field: function %s, field %s", function.GetName(), name)
 			}
 			usedOutputField.Insert(name)
 		}
 
-		if err := CheckFunctionOutputField(function, outputFields); err != nil {
+		if targeted && function.GetName() != needValidateFunctionName {
+			continue
+		}
+		if err := validateFunctionSchema(function, nameMap); err != nil {
 			return err
 		}
 	}
 	// No cascade: a function's input must not be another function's output. A field
 	// cannot be a function's own input and output (rejected above), so any input in
 	// usedOutputField belongs to a different function. Enforced here so it holds on
-	// every path (create, legacy add, alter), not only add_function_field.
+	// every path (create, legacy add, alter), not only add_function_field. On the
+	// targeted path only the target function is judged; a persisted legacy pair
+	// stays grandfathered.
 	for _, function := range coll.GetFunctions() {
+		if targeted && function.GetName() != needValidateFunctionName {
+			continue
+		}
 		for _, name := range function.GetInputFieldNames() {
 			if usedOutputField.Contain(name) {
 				return merr.WrapErrParameterInvalidMsg("function %s input field %s is the output of another function; function cascade is not supported", function.GetName(), name)
 			}
+		}
+	}
+	// MinHash parameter validation (num_hashes vs output dim relation) is pure
+	// schema checking with no external calls; it must run even when the model
+	// runtime checks below are disabled.
+	for _, fn := range coll.GetFunctions() {
+		if fn.GetType() != schemapb.FunctionType_MinHash {
+			continue
+		}
+		if needValidateFunctionName != "" && fn.GetName() != needValidateFunctionName {
+			continue
+		}
+		if err := function.ValidateMinHashFunction(coll, fn); err != nil {
+			return err
 		}
 	}
 	if !disableRuntimeCheck {
@@ -104,6 +100,46 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 		}
 	}
 	return nil
+}
+
+// validateFunctionSchema runs the per-function rules against one function:
+// basic params, input resolution and type rules, output resolution and
+// property rules.
+func validateFunctionSchema(function *schemapb.FunctionSchema, nameMap map[string]*schemapb.FieldSchema) error {
+	if err := CheckFunctionBasicParams(function); err != nil {
+		return err
+	}
+
+	inputFields := make([]*schemapb.FieldSchema, 0, len(function.GetInputFieldNames()))
+	for _, name := range function.GetInputFieldNames() {
+		inputField, ok := nameMap[name]
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("function input field not found: %s", name)
+		}
+		inputFields = append(inputFields, inputField)
+	}
+	if err := CheckFunctionInputField(function, inputFields); err != nil {
+		return err
+	}
+
+	outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
+	for i, name := range function.GetOutputFieldNames() {
+		outputField, ok := nameMap[name]
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("function output field not found: %s", name)
+		}
+		if outputField.GetIsPrimaryKey() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be primary key: function %s, field %s", function.GetName(), outputField.GetName())
+		}
+		if outputField.GetIsPartitionKey() || outputField.GetIsClusteringKey() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be partition key or clustering key: function %s, field %s", function.GetName(), outputField.GetName())
+		}
+		if outputField.GetNullable() {
+			return merr.WrapErrParameterInvalidMsg("function output field cannot be nullable: function %s, field %s", function.GetName(), outputField.GetName())
+		}
+		outputFields[i] = outputField
+	}
+	return CheckFunctionOutputField(function, outputFields)
 }
 
 func NormalizeFunctionOutputFields(coll *schemapb.CollectionSchema) error {
@@ -176,9 +212,11 @@ func CheckFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be a VARCHAR/TEXT field, got %d field with type %s",
-				len(fields), fields[0].DataType.String())
+		if len(fields) != 1 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function only need 1 input field, but got %d", len(fields))
+		}
+		if fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be a VARCHAR/TEXT field, but got %s", fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableAnalyzer() {
@@ -189,9 +227,16 @@ func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return err
 		}
 	case schemapb.FunctionType_MinHash:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR/TEXT field, got %d field with type %s",
-				len(fields), fields[0].DataType.String())
+		if len(fields) != 1 {
+			return merr.WrapErrParameterInvalidMsg("MinHash function only need 1 input field, but got %d", len(fields))
+		}
+		// VarChar only: TEXT persists as LOB references, so every path that
+		// recomputes the output from the STORED input (add-function backfill,
+		// schema-bump materialization) reads *array.Binary refs and hard-fails
+		// without LOB decoding. Wire-path inserts would run, but the lifecycle
+		// cannot complete, so admission stays VarChar-only.
+		if fields[0].DataType != schemapb.DataType_VarChar {
+			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR field, but got %s", fields[0].DataType.String())
 		}
 	default:
 		return merr.WrapErrParameterInvalidMsg("check input field with unknown function type")
