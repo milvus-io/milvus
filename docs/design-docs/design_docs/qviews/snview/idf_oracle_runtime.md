@@ -39,12 +39,15 @@ A worker holds its permit through both decoding and merging, preventing an
 unbounded queue of decoded segment statistics. Growing
 statistics come from persisted stats and snapshot inserts and remain in memory.
 RecoveryStorage may capture WAL inserts before its asynchronous pack writer has
-materialized BM25 outputs. Both the growing search segment and IDF recovery fill
-missing function outputs on a privately decoded request, preserving existing outputs
-and never mutating retained WAL bodies. Each `MustBody` call already decodes an
-independent request, so materialization does not clone that body again.
-They use the existing local runner
-fallback, with managed runners when available.
+materialized BM25 outputs. `Body`/`MustBody` return a shared read-only decode
+result under the [Immutable Message Body Cache](../../wal/message_body_cache.md)
+contract. Both the growing search segment and IDF recovery use
+`MaterializeInsertRequest` and `storage.CopyInsertRequestMetadata` to own the
+request metadata and field wrappers before filling missing function outputs.
+Large column values remain borrowed read-only; existing outputs are preserved,
+and neither consumer modifies the cached Body. Missing outputs use the local
+function-runner fallback. This schema-dependent materialization remains outside
+the Body cache and is not deduplicated by it.
 Only loaded BM25 output fields contribute. Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
@@ -75,8 +78,11 @@ or per-version prepared-resource map.
 Initialization and refresh use the exact-version resource RPC and validate its
 response. Equal or older targets reuse the aggregate without a fetch. Coordinator
 progress alone does not select a different version; seal notifications supply
-handoff metadata only. Retryable preparation failures remain Preparing and retry
-through NodeScheduler. Permanent failures invoke OnUnrecoverable. An in-progress
+handoff metadata only. Failures classified as locally retryable remain Preparing
+and retry through NodeScheduler; failures requiring Coordinator intervention
+invoke OnUnrecoverable. The intended ownership and current classification gaps
+are recorded in [Preparation failure ownership](../../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership).
+An in-progress
 preparation returns the scheduler delay sentinel to another preparation instead
 of blocking a scheduler worker behind it.
 
