@@ -513,6 +513,16 @@ class VectorArrayView {
         return physical_length_;
     }
 
+    const char*
+    data() const {
+        return data_;
+    }
+
+    size_t
+    byte_size() const {
+        return size_;
+    }
+
  private:
     char* data_{nullptr};
     int64_t dim_ = 0;

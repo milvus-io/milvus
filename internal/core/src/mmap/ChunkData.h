@@ -199,6 +199,123 @@ struct VariableLengthChunk<ArrayValue> {
     std::vector<ColumnarArrayChunk::Ptr> blocks_;
 };
 
+template <>
+struct VariableLengthChunk<VectorArray> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(
+        const uint64_t size, storage::MmapChunkDescriptorPtr descriptor)
+        : size_(size),
+          data_(size),
+          mmap_descriptor_(std::move(descriptor)) {
+    }
+
+    void
+    set(const VectorArray* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(begin <= size_ && length <= size_ - begin,
+                   "failed to set VECTOR_ARRAY mmap chunk with length {} "
+                   "from begin {}, chunk size={}",
+                   length,
+                   begin,
+                   size_);
+        if (length == 0) {
+            return;
+        }
+
+        size_t payload_bytes = 0;
+        size_t bitmap_bytes = 0;
+        for (uint32_t i = 0; i < length; ++i) {
+            if (check_data_valid && !(*check_data_valid)(begin + i)) {
+                continue;
+            }
+            payload_bytes += src[i].byte_size();
+            bitmap_bytes += src[i].element_validity_view().size_in_bytes();
+        }
+
+        auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+        char* payload = nullptr;
+        char* bitmap = nullptr;
+        if (payload_bytes > 0) {
+            payload = static_cast<char*>(
+                mcm->Allocate(mmap_descriptor_, payload_bytes));
+            if (payload == nullptr) {
+                ThrowInfo(ErrorCode::MmapError,
+                          "failed to allocate VECTOR_ARRAY mmap payload");
+            }
+        }
+        if (bitmap_bytes > 0) {
+            bitmap = static_cast<char*>(
+                mcm->Allocate(mmap_descriptor_, bitmap_bytes));
+            if (bitmap == nullptr) {
+                ThrowInfo(ErrorCode::MmapError,
+                          "failed to allocate VECTOR_ARRAY mmap validity");
+            }
+        }
+
+        size_t payload_offset = 0;
+        size_t bitmap_offset = 0;
+        for (uint32_t i = 0; i < length; ++i) {
+            if (check_data_valid && !(*check_data_valid)(begin + i)) {
+                data_[begin + i] = VectorArrayView();
+                continue;
+            }
+            const auto& row = src[i];
+            const auto row_bytes = row.byte_size();
+            char* row_payload = nullptr;
+            if (row_bytes > 0) {
+                row_payload = payload + payload_offset;
+                milvus::fastmem::FastMemcpy(
+                    row_payload, row.data(), row_bytes);
+                payload_offset += row_bytes;
+            }
+
+            auto validity = row.element_validity_view();
+            TargetBitmapView mmap_validity;
+            if (row.is_element_nullable()) {
+                const auto row_bitmap_bytes = validity.size_in_bytes();
+                if (row_bitmap_bytes > 0) {
+                    char* row_bitmap = bitmap + bitmap_offset;
+                    milvus::fastmem::FastMemcpy(
+                        row_bitmap, validity.data(), row_bitmap_bytes);
+                    mmap_validity = TargetBitmapView(row_bitmap, row.length());
+                    bitmap_offset += row_bitmap_bytes;
+                }
+            }
+            data_[begin + i] = VectorArrayView(row_payload,
+                                               row.dim(),
+                                               row.length(),
+                                               row_bytes,
+                                               row.get_element_type(),
+                                               mmap_validity,
+                                               row.is_element_nullable());
+        }
+    }
+
+    const VectorArrayView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    FixedVector<VectorArrayView> data_;
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+};
+
 // Template specialization for string
 template <>
 inline void

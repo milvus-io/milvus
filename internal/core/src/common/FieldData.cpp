@@ -55,7 +55,7 @@ FieldData<ArrayValue>::FieldData(
     ColumnarArrayChunk::ValidateArrayType(*array_type_);
     AssertInfo(nullable, "default value field data must be nullable");
     AssertInfo(!default_value.has_value(),
-               "nested ARRAY default values are not supported");
+               "native-list ARRAY default values are not supported");
 
     ScalarFieldProto null_row;
     const auto null_value = ArrayValue::FromProto(null_row, array_type_);
@@ -68,10 +68,10 @@ FieldData<ArrayValue>::FieldData(
 void
 FieldData<ArrayValue>::FillFieldData(
     const std::shared_ptr<arrow::Array> array) {
-    AssertInfo(array != nullptr, "null Arrow array for nested ARRAY field");
+    AssertInfo(array != nullptr, "null Arrow array for native-list ARRAY field");
     AssertInfo(array->type_id() == arrow::Type::BINARY ||
                    array->type_id() == arrow::Type::LIST,
-               "nested ARRAY field expects Arrow BinaryArray or ListArray, got {}",
+               "native-list ARRAY field expects Arrow BinaryArray or ListArray, got {}",
                array->type()->ToString());
     auto binary_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
     auto list_array = std::dynamic_pointer_cast<arrow::ListArray>(array);
@@ -91,11 +91,11 @@ FieldData<ArrayValue>::FillFieldData(
             if (binary_array->IsValid(index)) {
                 const auto value = binary_array->GetView(index);
                 AssertInfo(row.ParseFromArray(value.data(), value.size()),
-                           "failed to parse nested ARRAY row {}",
+                           "failed to parse native-list ARRAY row {}",
                            index);
                 AssertInfo(
                     row.data_case() != ScalarFieldProto::DATA_NOT_SET,
-                    "valid nested ARRAY row {} has no ScalarField payload",
+                    "valid native-list ARRAY row {} has no ScalarField payload",
                     index);
             }
             values.emplace_back(ArrayValue::FromProto(row, array_type_));
@@ -111,7 +111,7 @@ FieldData<ArrayValue>::FillFieldData(
     }
 
     AssertInfo(array->null_count() == 0,
-               "non-nullable nested ARRAY field contains {} null rows",
+               "non-nullable native-list ARRAY field contains {} null rows",
                array->null_count());
     return Base::FillFieldData(values.data(), element_count);
 }
