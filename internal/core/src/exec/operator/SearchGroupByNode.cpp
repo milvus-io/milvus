@@ -49,7 +49,6 @@ PhySearchGroupByNode::PhySearchGroupByNode(
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     segment_ = query_context_->get_segment();
-    snapshot_ = query_context_->get_read_snapshot().get();
     search_info_ = query_context_->get_search_info();
 }
 
@@ -106,7 +105,7 @@ PhySearchGroupByNode::GetOutput() {
                                         ? &search_result.element_indices_
                                         : nullptr,
                                     &search_result,
-                                    snapshot_);
+                                    query_context_->get_read_snapshot().get());
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;

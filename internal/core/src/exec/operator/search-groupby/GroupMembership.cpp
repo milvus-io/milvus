@@ -41,7 +41,8 @@ ScanRawField(milvus::OpContext* op_ctx,
              const segcore::SegmentInternalInterface& segment,
              FieldId field_id,
              size_t row_count,
-             Visitor&& visitor) {
+             Visitor&& visitor,
+             const segcore::SegmentReadSnapshot* snapshot = nullptr) {
     segcore::CheckCancellation(op_ctx,
                                segment.get_segment_id(),
                                field_id.get(),
@@ -81,14 +82,19 @@ ScanRawField(milvus::OpContext* op_ctx,
         }
         return true;
     }
-    auto raw_chunk_count = segment.num_chunk_data(field_id);
-    if (raw_chunk_count == 0 ||
-        segment.num_rows_until_chunk(field_id, 0) != 0) {
+    // Bind the request snapshot to the reader up front; its NumChunkData /
+    // NumRowsUntilChunk / ChunkSize metadata helpers then select the pinned
+    // snapshot or the segment exactly like the accessor below, keeping the
+    // generation-selection logic in one place.
+    segcore::SegmentChunkReader reader(op_ctx, &segment, row_count);
+    reader.SetSnapshot(snapshot);
+    auto raw_chunk_count = reader.NumChunkData(field_id);
+    if (raw_chunk_count == 0 || reader.NumRowsUntilChunk(field_id, 0) != 0) {
         return false;
     }
     size_t raw_row_count = 0;
     for (int64_t chunk = 0; chunk < raw_chunk_count; ++chunk) {
-        raw_row_count += segment.chunk_size(field_id, chunk);
+        raw_row_count += reader.ChunkSize(field_id, chunk);
     }
     if (raw_row_count < row_count) {
         // A partially indexed field may only retain raw data for a suffix of
@@ -98,7 +104,6 @@ ScanRawField(milvus::OpContext* op_ctx,
 
     int64_t chunk_id = 0;
     int64_t chunk_pos = 0;
-    segcore::SegmentChunkReader reader(op_ctx, &segment, row_count);
     auto accessor =
         reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
                                             field_id,
@@ -131,7 +136,8 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
                   FieldId field_id,
                   int64_t row_count,
                   const std::vector<GroupKey<T>>& groups,
-                  const TargetBitmap* base_filter) {
+                  const TargetBitmap* base_filter,
+                  const segcore::SegmentReadSnapshot* snapshot) {
     if (row_count < 0 || (base_filter && base_filter->size() !=
                                              static_cast<size_t>(row_count))) {
         return std::nullopt;
@@ -143,18 +149,20 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
         }
     }
     std::vector<std::vector<int64_t>> offsets(groups.size());
-    if (!ScanRawField<T>(op_ctx,
-                         segment,
-                         field_id,
-                         row_count,
-                         [&](size_t offset, const auto& group) {
-                             if (IsEligible(base_filter, offset)) {
-                                 auto it = group_ids.find(group);
-                                 if (it != group_ids.end()) {
-                                     offsets[it->second].push_back(offset);
-                                 }
-                             }
-                         })) {
+    if (!ScanRawField<T>(
+            op_ctx,
+            segment,
+            field_id,
+            row_count,
+            [&](size_t offset, const auto& group) {
+                if (IsEligible(base_filter, offset)) {
+                    auto it = group_ids.find(group);
+                    if (it != group_ids.end()) {
+                        offsets[it->second].push_back(offset);
+                    }
+                }
+            },
+            snapshot)) {
         return std::nullopt;
     }
     return offsets;
@@ -167,7 +175,8 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
                          FieldId,                                  \
                          int64_t,                                  \
                          const std::vector<std::optional<T>>&,     \
-                         const TargetBitmap*);
+                         const TargetBitmap*,                      \
+                         const segcore::SegmentReadSnapshot*);
 
 INSTANTIATE_GROUP_OFFSETS(bool)
 INSTANTIATE_GROUP_OFFSETS(int8_t)

@@ -47,10 +47,10 @@ static std::function<GroupByValueType(int64_t)>
 CreateFieldGetter(milvus::OpContext* op_ctx,
                   const segcore::SegmentInternalInterface& segment,
                   FieldId field_id,
+                  const segcore::SegmentReadSnapshot* snapshot,
                   std::optional<std::string> json_path = std::nullopt,
                   std::optional<DataType> json_type = std::nullopt,
-                  bool strict_cast = false,
-                  const segcore::SegmentReadSnapshot* snapshot = nullptr) {
+                  bool strict_cast = false) {
     auto getter = GetDataGetter<T, InnerRawType>(
         op_ctx, segment, field_id, json_path, json_type, strict_cast, snapshot);
     return
@@ -74,59 +74,29 @@ MultiFieldDataGetter::MultiFieldDataGetter(
 
         switch (data_type) {
             case DataType::INT8:
-                getter = CreateFieldGetter<int8_t>(op_ctx,
-                                                   segment,
-                                                   field_id,
-                                                   std::nullopt,
-                                                   std::nullopt,
-                                                   false,
-                                                   snapshot);
+                getter = CreateFieldGetter<int8_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT16:
-                getter = CreateFieldGetter<int16_t>(op_ctx,
-                                                    segment,
-                                                    field_id,
-                                                    std::nullopt,
-                                                    std::nullopt,
-                                                    false,
-                                                    snapshot);
+                getter = CreateFieldGetter<int16_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT32:
-                getter = CreateFieldGetter<int32_t>(op_ctx,
-                                                    segment,
-                                                    field_id,
-                                                    std::nullopt,
-                                                    std::nullopt,
-                                                    false,
-                                                    snapshot);
+                getter = CreateFieldGetter<int32_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::INT64:
             case DataType::TIMESTAMPTZ:
-                getter = CreateFieldGetter<int64_t>(op_ctx,
-                                                    segment,
-                                                    field_id,
-                                                    std::nullopt,
-                                                    std::nullopt,
-                                                    false,
-                                                    snapshot);
+                getter = CreateFieldGetter<int64_t>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::BOOL:
-                getter = CreateFieldGetter<bool>(op_ctx,
-                                                 segment,
-                                                 field_id,
-                                                 std::nullopt,
-                                                 std::nullopt,
-                                                 false,
-                                                 snapshot);
+                getter = CreateFieldGetter<bool>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::VARCHAR:
-                getter = CreateFieldGetter<std::string>(op_ctx,
-                                                        segment,
-                                                        field_id,
-                                                        std::nullopt,
-                                                        std::nullopt,
-                                                        false,
-                                                        snapshot);
+                getter = CreateFieldGetter<std::string>(
+                    op_ctx, segment, field_id, snapshot);
                 break;
             case DataType::JSON:
                 if (json_type.has_value()) {
@@ -136,50 +106,50 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast,
-                                snapshot);
+                                strict_cast);
                             break;
                         case DataType::INT8:
                             getter = CreateFieldGetter<int8_t, milvus::Json>(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast,
-                                snapshot);
+                                strict_cast);
                             break;
                         case DataType::INT16:
                             getter = CreateFieldGetter<int16_t, milvus::Json>(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast,
-                                snapshot);
+                                strict_cast);
                             break;
                         case DataType::INT32:
                             getter = CreateFieldGetter<int32_t, milvus::Json>(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast,
-                                snapshot);
+                                strict_cast);
                             break;
                         case DataType::INT64:
                             getter = CreateFieldGetter<int64_t, milvus::Json>(
                                 op_ctx,
                                 segment,
                                 field_id,
+                                snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast,
-                                snapshot);
+                                strict_cast);
                             break;
                         case DataType::VARCHAR:
                             getter =
@@ -187,10 +157,10 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                     op_ctx,
                                     segment,
                                     field_id,
+                                    snapshot,
                                     json_path,
                                     json_type,
-                                    strict_cast,
-                                    snapshot);
+                                    strict_cast);
                             break;
                         default:
                             ThrowInfo(Unsupported,
@@ -203,10 +173,10 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                         op_ctx,
                         segment,
                         field_id,
+                        snapshot,
                         json_path,
                         json_type,
-                        strict_cast,
-                        snapshot);
+                        strict_cast);
                 }
                 break;
             default:

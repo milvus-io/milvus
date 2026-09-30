@@ -205,16 +205,27 @@ class SealedDataGetter : public DataGetter<OutputType> {
     GetStringRow(int64_t chunk_id, int64_t inner_offset) const {
         auto it = string_chunk_pins_.find(chunk_id);
         if (it == string_chunk_pins_.end()) {
-            std::shared_ptr<ChunkedColumnInterface> column;
+            PinWrapper<Chunk*> pin;
             if (snapshot_) {
-                column = snapshot_->GetDataScanResources(field_id_).first;
+                // Snapshot-backed path borrows the column from the frozen
+                // published state; the snapshot owns it for the request.
+                auto* column = snapshot_->GetColumn(field_id_);
+                AssertInfo(column != nullptr,
+                           "group-by field {} has no raw string column",
+                           field_id_.get());
+                pin = column->GetChunk(op_ctx_, chunk_id);
             } else {
-                column = segment_.GetChunkedColumn(field_id_);
+                // Non-pinned fallback must keep the column's shared_ptr alive
+                // until GetChunk() pins the chunk: GetChunkedColumn() returns
+                // a temporary owner that is destroyed at the semicolon, so a
+                // concurrent publication could retire the column before
+                // pinning.
+                auto column = segment_.GetChunkedColumn(field_id_);
+                AssertInfo(column != nullptr,
+                           "group-by field {} has no raw string column",
+                           field_id_.get());
+                pin = column->GetChunk(op_ctx_, chunk_id);
             }
-            AssertInfo(column != nullptr,
-                       "group-by field {} has no raw string column",
-                       field_id_.get());
-            auto pin = column->GetChunk(op_ctx_, chunk_id);
             it = string_chunk_pins_.emplace(chunk_id, std::move(pin)).first;
         }
         const auto* chunk = static_cast<const StringChunk*>(it->second.get());
@@ -286,8 +297,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     "non-json/string field group by");
                 auto pw = [&]() -> PinWrapper<Span<InnerRawType>> {
                     if (snapshot_) {
-                        auto column =
-                            snapshot_->GetDataScanResources(field_id_).first;
+                        auto* column = snapshot_->GetColumn(field_id_);
                         AssertInfo(column != nullptr,
                                    "group-by field {} has no raw data column",
                                    field_id_.get());

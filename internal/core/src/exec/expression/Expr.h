@@ -600,7 +600,7 @@ class SegmentExpr : public Expr {
     PinWrapper<Span<T>>
     GetChunkData(FieldId field_id, int64_t chunk_id) const {
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} must exist when getting chunk data",
                        field_id.get());
@@ -622,7 +622,7 @@ class SegmentExpr : public Expr {
                  std::optional<std::pair<int64_t, int64_t>> offset_len =
                      std::nullopt) const {
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} must exist when getting chunk view",
                        field_id.get());
@@ -661,7 +661,7 @@ class SegmentExpr : public Expr {
                            int64_t chunk_id,
                            const FixedVector<int32_t>& offsets) const {
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} must exist when getting chunk views by "
                        "offsets",
@@ -690,38 +690,6 @@ class SegmentExpr : public Expr {
             }
         }
         return segment_->chunk_views_by_offsets<ViewType>(
-            op_ctx_, field_id, chunk_id, offsets);
-    }
-
-    // Pinned sealed batch views. Sealed-only (growing throws, mirroring the
-    // segment contract); snapshot-present paths read from the frozen column.
-    template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
-    GetBatchViews(FieldId field_id,
-                  int64_t chunk_id,
-                  int64_t start_offset,
-                  int64_t length) const {
-        if (snapshot_) {
-            return GetChunkView<ViewType>(
-                field_id, chunk_id, std::make_pair(start_offset, length));
-        }
-        return segment_->get_batch_views<ViewType>(
-            op_ctx_, field_id, chunk_id, start_offset, length);
-    }
-
-    // Pinned sealed views by offsets. Sealed-only (growing throws, mirroring
-    // the segment contract); snapshot-present paths read from the frozen
-    // column.
-    template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    GetViewsByOffsets(FieldId field_id,
-                      int64_t chunk_id,
-                      const FixedVector<int32_t>& offsets) const {
-        if (snapshot_) {
-            return GetChunkViewsByOffsets<ViewType>(
-                field_id, chunk_id, offsets);
-        }
-        return segment_->get_views_by_offsets<ViewType>(
             op_ctx_, field_id, chunk_id, offsets);
     }
 
@@ -829,7 +797,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -853,7 +821,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -2104,8 +2072,8 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else if (segment_->type() == SegmentType::Sealed) {
-            auto pw =
-                GetViewsByOffsets<ArrayView>(field_id_, chunk_id, row_offsets);
+            auto pw = GetChunkViewsByOffsets<ArrayView>(
+                field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
                        "ARRAY row count mismatch: {} vs {}",
@@ -2180,8 +2148,8 @@ class SegmentExpr : public Expr {
             emit_rows(rows.data(), valid_data);
         } else if (segment_->type() == SegmentType::Sealed) {
             // Legacy ARRAY rows from a Sealed segment's chunked storage.
-            auto pw = GetBatchViews<ArrayView>(
-                field_id_, chunk_id, start_offset, length);
+            auto pw = GetChunkView<ArrayView>(
+                field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
                        "ARRAY row count mismatch: {} vs {}",
@@ -2831,8 +2799,10 @@ class SegmentExpr : public Expr {
                 int64_t batch_size = std::min(
                     {batch_size_, chunk_size - chunk_offset, remaining});
 
-                auto pw = GetBatchViews<T>(
-                    field_id_, chunk_id, chunk_offset, batch_size);
+                auto pw =
+                    GetChunkView<T>(field_id_,
+                                    chunk_id,
+                                    std::make_pair(chunk_offset, batch_size));
                 auto data_vec = std::move(pw.get().first);
 
                 func(data_vec.data(), batch_size, res + processed_size);

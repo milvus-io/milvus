@@ -190,7 +190,7 @@ class SegmentChunkReader {
     PinWrapper<Span<T>>
     ChunkData(FieldId field_id, int64_t chunk_id) const {
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} must exist when getting chunk data",
                        field_id.get());
@@ -211,7 +211,7 @@ class SegmentChunkReader {
                     std::optional<std::pair<int64_t, int64_t>> offset_len =
                         std::nullopt) const {
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} must exist when getting string chunk view",
                        field_id.get());
@@ -265,7 +265,7 @@ class SegmentChunkReader {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -289,7 +289,7 @@ class SegmentChunkReader {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());

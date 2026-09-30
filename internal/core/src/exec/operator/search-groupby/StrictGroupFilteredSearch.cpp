@@ -254,6 +254,7 @@ struct StrictGroupPhase2Stats {
 struct StrictGroupPhase2Context {
     milvus::OpContext* op_ctx;
     const segcore::SegmentInternalInterface& segment;
+    const segcore::SegmentReadSnapshot* snapshot{nullptr};
     FieldId group_by_field_id;
     SearchResult* search_result;
     bool eligible;
@@ -553,7 +554,8 @@ TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
             context->group_by_field_id,
             context->search_result->total_data_cnt_,
             groups,
-            context->search_result->GetVectorSearchBaseFilter());
+            context->search_result->GetVectorSearchBaseFilter(),
+            context->snapshot);
         stats.membership_build_us =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - start)
@@ -698,6 +700,7 @@ TrySingleFieldStrictGroup(
     StrictGroupPhase2Context context{
         op_ctx,
         segment,
+        snapshot,
         info.group_by_field_ids_.front(),
         result,
         query::CanUseStrictGroupSearch(info, iterators.size()),
