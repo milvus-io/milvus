@@ -57,11 +57,6 @@ type ImportTask struct {
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
-
-	// The predicate is immutable job metadata. Validate it once when the worker
-	// receives the task instead of reparsing it for every imported batch.
-	rlsPredicate    *planpb.Expr
-	rlsPredicateErr error
 }
 
 func NewImportTask(req *datapb.ImportRequest,
@@ -70,11 +65,6 @@ func NewImportTask(req *datapb.ImportRequest,
 	cm storage.ChunkManager,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
-	rlsPredicate := req.GetRlsCheckPredicate()
-	var rlsPredicateErr error
-	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
-		rlsPredicateErr = merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
-	}
 	// During binlog import, even if the primary key's autoID is set to true,
 	// the primary key from the binlog should be used instead of being reassigned.
 	if importutilv2.IsBackup(req.GetOptions()) {
@@ -91,16 +81,14 @@ func NewImportTask(req *datapb.ImportRequest,
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
-		ctx:             ctx,
-		cancel:          cancel,
-		segmentsInfo:    make(map[int64]*datapb.ImportSegmentInfo),
-		req:             req,
-		allocator:       alloc,
-		manager:         manager,
-		syncMgr:         syncMgr,
-		cm:              cm,
-		rlsPredicate:    rlsPredicate,
-		rlsPredicateErr: rlsPredicateErr,
+		ctx:          ctx,
+		cancel:       cancel,
+		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
+		req:          req,
+		allocator:    alloc,
+		manager:      manager,
+		syncMgr:      syncMgr,
+		cm:           cm,
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -168,29 +156,29 @@ func (t *ImportTask) Clone() Task {
 	// cancels whatever the map entry carries; a derived context would make
 	// that cancellation a no-op on the work actually in flight.
 	return &ImportTask{
-		ImportTaskV2:    typeutil.Clone(t.ImportTaskV2),
-		ctx:             t.ctx,
-		cancel:          t.cancel,
-		segmentsInfo:    infos,
-		req:             t.req,
-		allocator:       t.allocator,
-		manager:         t.manager,
-		syncMgr:         t.syncMgr,
-		cm:              t.cm,
-		metaCaches:      t.metaCaches,
-		rlsPredicate:    t.rlsPredicate,
-		rlsPredicateErr: t.rlsPredicateErr,
+		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
+		ctx:          t.ctx,
+		cancel:       t.cancel,
+		segmentsInfo: infos,
+		req:          t.req,
+		allocator:    t.allocator,
+		manager:      t.manager,
+		syncMgr:      t.syncMgr,
+		cm:           t.cm,
+		metaCaches:   t.metaCaches,
 	}
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-	if t.rlsPredicateErr != nil {
-		mlog.Warn(t.ctx, "invalid import RLS predicate", WrapLogFields(t, mlog.Err(t.rlsPredicateErr))...)
+	rlsPredicate := t.req.GetRlsCheckPredicate()
+	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
+		err := merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
+		mlog.Warn(t.ctx, "invalid import RLS predicate", WrapLogFields(t, mlog.Err(err))...)
 		t.manager.Update(t.GetTaskID(),
 			UpdateState(datapb.ImportTaskStateV2_Failed),
-			UpdateReason(t.rlsPredicateErr.Error()))
+			UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) {
-			return nil, t.rlsPredicateErr
+			return nil, err
 		})}
 	}
 
@@ -225,7 +213,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 				WrapLogFields(t, mlog.String("file", file.String()))...)
 		}
 		start := time.Now()
-		err = t.importFile(reader, cur)
+		err = t.importFile(reader, cur, rlsPredicate)
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -255,7 +243,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileIDRange) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileIDRange, rlsPredicate *planpb.Expr) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -289,8 +277,10 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 		if err != nil {
 			return err
 		}
-		if err = t.validateRLSRows(data, rowNum); err != nil {
-			return err
+		if rlsPredicate != nil {
+			if err = rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, rlsPredicate, "import", "check"); err != nil {
+				return err
+			}
 		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)
@@ -323,13 +313,6 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 		mlog.Info(t.ctx, "sync import data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
-}
-
-func (t *ImportTask) validateRLSRows(data *storage.InsertData, rowNum int) error {
-	if t.rlsPredicate == nil {
-		return nil
-	}
-	return rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, t.rlsPredicate, "import", "check")
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {

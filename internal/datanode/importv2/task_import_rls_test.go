@@ -61,7 +61,7 @@ func TestImportTaskRLSPredicate(t *testing.T) {
 			}
 			req := importRLSTestRequest(t, schema, test.expression)
 			task := NewImportTask(req, manager, syncMgr, nil).(*ImportTask)
-			require.NotNil(t, task.rlsPredicate)
+			require.NotNil(t, req.GetRlsCheckPredicate())
 
 			reader := importutilv2.NewMockReader(t)
 			var once sync.Once
@@ -76,7 +76,7 @@ func TestImportTaskRLSPredicate(t *testing.T) {
 				return nil, io.EOF
 			})
 
-			err := task.importFile(reader, nil)
+			err := task.importFile(reader, nil, req.GetRlsCheckPredicate())
 			if test.wantErr {
 				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 			} else {
@@ -95,7 +95,8 @@ func TestImportTaskRLSPredicateWithAutoIDVarCharPrimaryKey(t *testing.T) {
 	syncMgr := syncmgr.NewMockSyncManager(t)
 	syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
 		Return(conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil).Once()
-	task := NewImportTask(importRLSTestRequest(t, schema, `pk == "100"`), manager, syncMgr, nil).(*ImportTask)
+	req := importRLSTestRequest(t, schema, `pk == "100"`)
+	task := NewImportTask(req, manager, syncMgr, nil).(*ImportTask)
 
 	reader := importutilv2.NewMockReader(t)
 	var once sync.Once
@@ -111,7 +112,7 @@ func TestImportTaskRLSPredicateWithAutoIDVarCharPrimaryKey(t *testing.T) {
 		return nil, io.EOF
 	})
 
-	require.NoError(t, task.importFile(reader, nil))
+	require.NoError(t, task.importFile(reader, nil, req.GetRlsCheckPredicate()))
 }
 
 func TestImportTaskEmptyRLSPredicateFailsDuringExecution(t *testing.T) {
