@@ -57,6 +57,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
+#include "query/SearchOnGrowing.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
@@ -452,6 +453,125 @@ TEST(Growing, MissingStructElementOffsetsReturnsEmptyForOldRows) {
         auto [start, end] = offsets->ElementIDRangeOfRow(i);
         EXPECT_EQ(start, 0);
         EXPECT_EQ(end, 0);
+    }
+}
+
+TEST(Growing, AddNativeListAndVectorArrayFieldsBackfillsNullRows) {
+    auto old_schema = std::make_shared<Schema>();
+    old_schema->set_schema_version(1);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    auto vec = FieldId(pk.get() + 1);
+    new_schema->AddField(FieldMeta(FieldName("vectors[items]"),
+                                   vec,
+                                   DataType::VECTOR_ARRAY,
+                                   DataType::VECTOR_FLOAT,
+                                   4,
+                                   knowhere::metric::L2,
+                                   true,
+                                   true));
+    auto native = FieldId(pk.get() + 2);
+    new_schema->AddField(FieldName("scalars[items]"),
+                         native,
+                         DataType::ARRAY,
+                         DataType::INT64,
+                         true,
+                         true);
+    proto::schema::TypeSchema nested_type;
+    nested_type.set_nullable(true);
+    auto* inner = nested_type.mutable_array_element();
+    inner->set_nullable(true);
+    auto* leaf = inner->mutable_array_element();
+    leaf->set_nullable(true);
+    leaf->set_leaf_type(proto::schema::DataType::Int64);
+    auto nested = FieldId(pk.get() + 3);
+    new_schema->AddField(FieldMeta(FieldName("nested[items]"),
+                                   nested,
+                                   DataType::ARRAY,
+                                   DataType::ARRAY,
+                                   true,
+                                   true,
+                                   std::nullopt,
+                                   "",
+                                   LOCAL_FORMAT_RAW,
+                                   nested_type));
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool previous_mmap = mmap_config.GetEnableGrowingMmap();
+    auto restore_mmap = std::shared_ptr<void>(
+        nullptr,
+        [&](void*) { mmap_config.growing_enable_mmap = previous_mmap; });
+    std::array<int64_t, 3> offsets{0, 1, 2};
+    for (bool enable_mmap : {false, true}) {
+        mmap_config.growing_enable_mmap = enable_mmap;
+        auto config = SegcoreConfig::default_config();
+        config.set_chunk_rows(2);
+        config.set_enable_interim_segment_index(false);
+        auto segment =
+            CreateGrowingSegment(old_schema, empty_index_meta, 1, config);
+        auto dataset = DataGen(old_schema, offsets.size());
+        auto start = segment->PreInsert(offsets.size());
+        segment->Insert(start,
+                        offsets.size(),
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
+        ASSERT_NO_THROW(segment->Reopen(new_schema));
+        auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(growing, nullptr);
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<milvus::VectorArray>(vec)
+                      ->is_mmap(),
+                  enable_mmap);
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<ArrayValue>(native)
+                      ->is_mmap(),
+                  enable_mmap);
+        EXPECT_TRUE(growing->get_insert_record()
+                        .get_data<ArrayValue>(native)
+                        ->view_element(0)
+                        .is_null());
+        EXPECT_TRUE(growing->get_insert_record()
+                        .get_data<ArrayValue>(nested)
+                        ->view_element(0)
+                        .is_null());
+
+        auto vector_result = segment->bulk_subscript(
+            nullptr, vec, offsets.data(), offsets.size());
+        auto scalar_result = segment->bulk_subscript(
+            nullptr, native, offsets.data(), offsets.size());
+        auto nested_result = segment->bulk_subscript(
+            nullptr, nested, offsets.data(), offsets.size());
+        for (const auto* result :
+             {vector_result.get(), scalar_result.get(), nested_result.get()}) {
+            const auto& valid = GetFieldDataRowValidData(*result);
+            ASSERT_EQ(valid.size(), offsets.size());
+            for (bool row_valid : valid) {
+                EXPECT_FALSE(row_valid);
+            }
+        }
+        const auto& vector_rows = vector_result->vectors().vector_array();
+        ASSERT_EQ(vector_rows.data_size(), offsets.size());
+        for (const auto& row : vector_rows.data()) {
+            EXPECT_EQ(row.dim(), 4);
+            EXPECT_EQ(row.data_case(), VectorFieldProto::kFloatVector);
+            EXPECT_EQ(row.valid_data_size(), 0);
+            EXPECT_TRUE(row.float_vector().data().empty());
+            EXPECT_NO_THROW(milvus::VectorArray(row, true));
+        }
+        for (const auto* result : {scalar_result.get(), nested_result.get()}) {
+            const auto& rows = result->scalars().array_data().data();
+            ASSERT_EQ(rows.size(), offsets.size());
+            for (const auto& row : rows) {
+                EXPECT_EQ(row.data_case(), ScalarFieldProto::DATA_NOT_SET);
+            }
+        }
     }
 }
 
@@ -1547,6 +1667,307 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
     EXPECT_FLOAT_EQ(row.float_vector().data(7), 8.0F);
 }
 
+TEST(GrowingTest, VectorArrayGrowingMmapMatchesHeap) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto plain = schema->AddDebugVectorArrayField("chunks[plain]",
+                                                  DataType::VECTOR_FLOAT,
+                                                  4,
+                                                  knowhere::metric::L2);
+    auto nullable = schema->AddDebugVectorArrayField("other[nullable]",
+                                                     DataType::VECTOR_FLOAT,
+                                                     4,
+                                                     knowhere::metric::L2,
+                                                     true,
+                                                     true);
+    schema->set_primary_field_id(pk);
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(5);
+    auto* pk_data = insert->add_fields_data();
+    pk_data->set_field_id(pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    for (int64_t i = 0; i < 5; ++i) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(i);
+    }
+    auto* plain_data = insert->add_fields_data();
+    plain_data->set_field_id(plain.get());
+    plain_data->set_type(proto::schema::DataType::ArrayOfVector);
+    plain_data->mutable_vectors()->set_dim(4);
+    auto* plain_array =
+        plain_data->mutable_vectors()->mutable_vector_array();
+    plain_array->set_dim(4);
+    plain_array->set_element_type(proto::schema::DataType::FloatVector);
+    auto* nullable_data = insert->add_fields_data();
+    nullable_data->set_field_id(nullable.get());
+    nullable_data->set_type(proto::schema::DataType::ArrayOfVector);
+    nullable_data->mutable_vectors()->set_dim(4);
+    auto* nullable_array =
+        nullable_data->mutable_vectors()->mutable_vector_array();
+    nullable_array->set_dim(4);
+    nullable_array->set_element_type(proto::schema::DataType::FloatVector);
+
+    const std::array<std::vector<float>, 5> plain_values{{
+        {1, 0, 0, 0, 0, 1, 0, 0}, {}, {0, 0, 1, 0}, {0, 0, 0, 1}, {1, 1, 0, 0}}};
+    const std::array<std::vector<float>, 5> nullable_values{{
+        {1, 0, 0, 0, 0, 1, 0, 0}, {}, {}, {}, {0, 0, 1, 0}}};
+    const std::array<std::vector<bool>, 5> element_valid{{
+        {true, false, true}, {}, {}, {false}, {true}}};
+    for (int i = 0; i < 5; ++i) {
+        auto* plain_row = plain_array->add_data();
+        plain_row->set_dim(4);
+        plain_row->mutable_float_vector()->mutable_data()->Add(
+            plain_values[i].begin(), plain_values[i].end());
+
+        nullable_data->mutable_vectors()->add_valid_data(i != 1);
+        auto* nullable_row = nullable_array->add_data();
+        nullable_row->set_dim(4);
+        nullable_row->mutable_float_vector()->mutable_data()->Add(
+            nullable_values[i].begin(), nullable_values[i].end());
+        for (bool valid : element_valid[i]) {
+            nullable_row->add_valid_data(valid);
+        }
+    }
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool previous_mmap = mmap_config.GetEnableGrowingMmap();
+    auto restore_mmap = std::shared_ptr<void>(
+        nullptr,
+        [&](void*) { mmap_config.growing_enable_mmap = previous_mmap; });
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(2);
+    config.set_enable_interim_segment_index(false);
+
+    std::array<int64_t, 5> offsets{0, 1, 2, 3, 4};
+    std::array<int64_t, 5> row_ids{0, 1, 2, 3, 4};
+    std::array<Timestamp, 5> timestamps{100, 100, 100, 100, 100};
+    std::string heap_plain;
+    std::string heap_nullable;
+    std::vector<int64_t> heap_element_offsets;
+    std::vector<int32_t> heap_element_indices;
+    std::vector<float> heap_distances;
+    for (bool enable_mmap : {false, true}) {
+        mmap_config.growing_enable_mmap = enable_mmap;
+        auto segment =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(growing, nullptr);
+        auto offset = segment->PreInsert(5);
+        segment->Insert(offset,
+                        5,
+                        row_ids.data(),
+                        timestamps.data(),
+                        std::make_shared<InsertRecordProto>(*insert));
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<milvus::VectorArray>(plain)
+                      ->is_mmap(),
+                  enable_mmap);
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<milvus::VectorArray>(nullable)
+                      ->is_mmap(),
+                  enable_mmap);
+
+        auto plain_result = segment->bulk_subscript(
+            nullptr, plain, offsets.data(), offsets.size());
+        auto nullable_result = segment->bulk_subscript(
+            nullptr, nullable, offsets.data(), offsets.size());
+        ASSERT_EQ(plain_result->vectors().vector_array().data_size(), 5);
+        ASSERT_EQ(nullable_result->vectors().vector_array().data_size(), 5);
+        const auto& valid = GetFieldDataRowValidData(*nullable_result);
+        ASSERT_EQ(valid.size(), 5);
+        EXPECT_TRUE(valid[0]);
+        EXPECT_FALSE(valid[1]);
+        EXPECT_TRUE(valid[2]);
+        EXPECT_TRUE(valid[3]);
+        EXPECT_TRUE(valid[4]);
+        const auto& rows = nullable_result->vectors().vector_array();
+        EXPECT_EQ(rows.data(0).valid_data_size(), 3);
+        EXPECT_FALSE(rows.data(0).valid_data(1));
+        EXPECT_EQ(rows.data(0).float_vector().data_size(), 8);
+        EXPECT_EQ(rows.data(1).data_case(),
+                  VectorFieldProto::kFloatVector);
+        EXPECT_EQ(rows.data(2).valid_data_size(), 0);
+        EXPECT_EQ(rows.data(3).valid_data_size(), 1);
+        EXPECT_FALSE(rows.data(3).valid_data(0));
+        EXPECT_EQ(rows.data(3).float_vector().data_size(), 0);
+
+        auto views = segment->chunk_view<VectorArrayView>(
+            nullptr, nullable, 0, std::make_pair(0, 2));
+        const auto& [chunk_rows, chunk_valid] = views.get();
+        ASSERT_EQ(chunk_rows.size(), 2);
+        EXPECT_TRUE(chunk_valid[0]);
+        EXPECT_FALSE(chunk_valid[1]);
+        EXPECT_EQ(chunk_rows[0].length(), 3);
+        EXPECT_EQ(chunk_rows[0].physical_length(), 2);
+        EXPECT_EQ(chunk_rows[0].output_data().SerializeAsString(),
+                  rows.data(0).SerializeAsString());
+
+        SearchInfo info;
+        info.field_id_ = plain;
+        info.topk_ = 2;
+        info.round_decimal_ = -1;
+        info.metric_type_ = knowhere::metric::L2;
+        info.search_params_ = knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+        info.active_count_ = 5;
+        info.struct_element_offsets_ = segment->GetStructElementOffsets(plain);
+        ASSERT_NE(info.struct_element_offsets_, nullptr);
+        float query_vec[4]{1, 0, 0, 0};
+        SearchResult search_result;
+        query::SearchOnGrowing(*growing,
+                               info,
+                               query_vec,
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               nullptr,
+                               search_result);
+        EXPECT_TRUE(search_result.element_level_);
+        ASSERT_FALSE(search_result.seg_offsets_.empty());
+        EXPECT_EQ(search_result.seg_offsets_.front(), 0);
+        EXPECT_EQ(search_result.element_indices_.front(), 0);
+        info.field_id_ = nullable;
+        info.struct_element_offsets_.reset();
+        SearchResult unsupported_result;
+        try {
+            query::SearchOnGrowing(*growing,
+                                   info,
+                                   query_vec,
+                                   nullptr,
+                                   1,
+                                   MAX_TIMESTAMP,
+                                   BitsetView{},
+                                   nullptr,
+                                   unsupported_result);
+            FAIL() << "element-nullable VECTOR_ARRAY search must reject";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::NotImplemented);
+        }
+        if (enable_mmap) {
+            EXPECT_EQ(plain_result->SerializeAsString(), heap_plain);
+            EXPECT_EQ(nullable_result->SerializeAsString(), heap_nullable);
+            EXPECT_EQ(search_result.seg_offsets_, heap_element_offsets);
+            EXPECT_EQ(search_result.element_indices_, heap_element_indices);
+            EXPECT_EQ(search_result.distances_, heap_distances);
+        } else {
+            heap_plain = plain_result->SerializeAsString();
+            heap_nullable = nullable_result->SerializeAsString();
+            heap_element_offsets = search_result.seg_offsets_;
+            heap_element_indices = search_result.element_indices_;
+            heap_distances = search_result.distances_;
+        }
+    }
+}
+
+TEST(GrowingTest, VectorArraySearchIteratorMmapMatchesHeap) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vectors = schema->AddDebugVectorArrayField("items[vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    4,
+                                                    knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(3);
+    auto* pk_data = insert->add_fields_data();
+    pk_data->set_field_id(pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    auto* vector_data = insert->add_fields_data();
+    vector_data->set_field_id(vectors.get());
+    vector_data->set_type(proto::schema::DataType::ArrayOfVector);
+    vector_data->mutable_vectors()->set_dim(4);
+    auto* vector_array =
+        vector_data->mutable_vectors()->mutable_vector_array();
+    vector_array->set_dim(4);
+    vector_array->set_element_type(proto::schema::DataType::FloatVector);
+    const std::array<std::vector<float>, 3> values{{
+        {1, 0, 0, 0, 0, 1, 0, 0}, {}, {0.5F, 0, 0, 0}}};
+    for (int i = 0; i < 3; ++i) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(i);
+        auto* row = vector_array->add_data();
+        row->set_dim(4);
+        row->mutable_float_vector()->mutable_data()->Add(values[i].begin(),
+                                                          values[i].end());
+    }
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool previous_mmap = mmap_config.GetEnableGrowingMmap();
+    auto restore_mmap = std::shared_ptr<void>(
+        nullptr,
+        [&](void*) { mmap_config.growing_enable_mmap = previous_mmap; });
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(2);
+    config.set_enable_interim_segment_index(false);
+    std::array<int64_t, 3> row_ids{0, 1, 2};
+    std::array<Timestamp, 3> timestamps{100, 100, 100};
+    std::vector<int64_t> heap_offsets;
+    std::vector<int32_t> heap_indices;
+    std::vector<float> heap_distances;
+    float query_vec[4]{1, 0, 0, 0};
+    for (bool enable_mmap : {false, true}) {
+        mmap_config.growing_enable_mmap = enable_mmap;
+        auto segment =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(growing, nullptr);
+        auto start = segment->PreInsert(3);
+        segment->Insert(start,
+                        3,
+                        row_ids.data(),
+                        timestamps.data(),
+                        std::make_shared<InsertRecordProto>(*insert));
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<milvus::VectorArray>(vectors)
+                      ->is_mmap(),
+                  enable_mmap);
+
+        SearchInfo info;
+        info.field_id_ = vectors;
+        info.topk_ = 3;
+        info.round_decimal_ = -1;
+        info.metric_type_ = knowhere::metric::L2;
+        info.search_params_ = knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+        info.active_count_ = 3;
+        info.struct_element_offsets_ =
+            segment->GetStructElementOffsets(vectors);
+        ASSERT_NE(info.struct_element_offsets_, nullptr);
+        SearchIteratorV2Info iterator_info;
+        iterator_info.batch_size = 2;
+        info.iterator_v2_info_ = iterator_info;
+
+        SearchResult result;
+        query::SearchOnGrowing(*growing,
+                               info,
+                               query_vec,
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               nullptr,
+                               result);
+        ASSERT_EQ(result.unity_topK_, iterator_info.batch_size);
+        ASSERT_EQ(result.seg_offsets_.size(), 2);
+        ASSERT_EQ(result.element_indices_.size(), 2);
+        EXPECT_TRUE(result.element_level_);
+        EXPECT_EQ(result.seg_offsets_[0], 0);
+        EXPECT_EQ(result.element_indices_[0], 0);
+        EXPECT_EQ(result.seg_offsets_[1], 2);
+        EXPECT_EQ(result.element_indices_[1], 0);
+        if (enable_mmap) {
+            EXPECT_EQ(result.seg_offsets_, heap_offsets);
+            EXPECT_EQ(result.element_indices_, heap_indices);
+            EXPECT_EQ(result.distances_, heap_distances);
+        } else {
+            heap_offsets = result.seg_offsets_;
+            heap_indices = result.element_indices_;
+            heap_distances = result.distances_;
+        }
+    }
+}
+
 TEST(GrowingTest, LoadVectorArrayData) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::MAX_SIM;
@@ -1634,20 +2055,12 @@ TEST(GrowingTest, SearchVectorArray) {
 
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
-    auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
 
     // Insert data
     int64_t N = 100;
     uint64_t seed = 42;
     int emb_list_len = 5;  // Each row contains 5 vectors
     auto dataset = DataGen(schema, N, seed, 0, 1, emb_list_len);
-
-    auto offset = 0;
-    segment->Insert(offset,
-                    N,
-                    dataset.row_ids_.data(),
-                    dataset.timestamps_.data(),
-                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // Prepare search query
     int vec_num = 10;  // Total number of query vectors
@@ -1677,11 +2090,38 @@ TEST(GrowingTest, SearchVectorArray) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    // Execute search
-    Timestamp timestamp = 10000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
-    auto sr_parsed = SearchResultToJson(*sr);
-    std::cout << sr_parsed.dump(1) << std::endl;
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const bool previous_mmap = mmap_config.GetEnableGrowingMmap();
+    auto restore_mmap = std::shared_ptr<void>(
+        nullptr,
+        [&](void*) { mmap_config.growing_enable_mmap = previous_mmap; });
+    std::optional<nlohmann::json> heap_result;
+    for (bool enable_mmap : {false, true}) {
+        mmap_config.growing_enable_mmap = enable_mmap;
+        auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
+        auto offset = segment->PreInsert(N);
+        segment->Insert(offset,
+                        N,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
+        auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(growing, nullptr);
+        EXPECT_EQ(growing->get_insert_record()
+                      .get_data<milvus::VectorArray>(array_vec)
+                      ->is_mmap(),
+                  enable_mmap);
+        auto sr = segment->Search(plan.get(), ph_group.get(), 10000000);
+        ASSERT_NE(sr, nullptr);
+        ASSERT_FALSE(sr->seg_offsets_.empty());
+        auto result = SearchResultToJson(*sr);
+        if (enable_mmap) {
+            ASSERT_TRUE(heap_result.has_value());
+            EXPECT_EQ(result, *heap_result);
+        } else {
+            heap_result = std::move(result);
+        }
+    }
 }
 
 TEST(Growing, TestMaskWithTTLField) {

@@ -1790,7 +1790,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             if (field_meta.is_native_list_array() &&
                 infos.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "nested ARRAY field {} is supported only by Storage "
+                          "native-list ARRAY field {} is supported only by "
+                          "Storage "
                           "V2/V3",
                           field_id.get());
             }
@@ -2307,7 +2308,7 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                       field_meta.get_name().get());
         }
         ThrowInfo(ErrorCode::Unsupported,
-                  "Span API does not support nested ARRAY field {}",
+                  "Span API does not support native-list ARRAY field {}",
                   field_id.get());
     }
     return cachinglayer::PinWrapper<SpanBase>(
@@ -2582,19 +2583,9 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
     size_t next_physical = 0;
-    auto append_valid_view = [&](int64_t logical_offset) {
-        auto vector_array = vector_data->get_physical_element(
-            physical_offsets[next_physical++]);
-        AssertInfo(vector_array != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   logical_offset);
-        views.emplace_back(const_cast<char*>(vector_array->data()),
-                           vector_array->dim(),
-                           vector_array->length(),
-                           vector_array->byte_size(),
-                           vector_array->get_element_type(),
-                           vector_array->element_validity_view(),
-                           vector_array->is_element_nullable());
+    auto append_valid_view = [&] {
+        views.push_back(vector_data->view_physical_element(
+            physical_offsets[next_physical++]));
     };
 
     if (nullable) {
@@ -2606,7 +2597,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                 views.emplace_back();
                 continue;
             }
-            append_valid_view(logical_offsets[i]);
+            append_valid_view();
         }
         std::pair<std::vector<VectorArrayView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(valid_data->data())};
@@ -2620,7 +2611,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                logical_start,
                logical_start + len);
     for (int64_t i = 0; i < len; ++i) {
-        append_valid_view(logical_offsets[i]);
+        append_valid_view();
     }
     std::pair<std::vector<VectorArrayView>, ValidityView> content{
         std::move(views), ValidityView{}};
@@ -3368,11 +3359,7 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
         if (valid_data != nullptr && !valid_data[i]) {
             continue;
         }
-        auto value = vec.get_physical_element(physical_offset);
-        AssertInfo(value != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   seg_offsets[i]);
-        dst->at(i) = value->output_data();
+        dst->at(i) = vec.view_physical_element(physical_offset).output_data();
     }
 }
 
@@ -3517,7 +3504,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
         case DataType::ARRAY: {
             if (field_meta.is_native_list_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "raw Array* API does not support nested ARRAY field "
+                          "raw Array* API does not support native-list ARRAY "
+                          "field "
                           "{}; use protobuf retrieve output",
                           field_id.get());
             }

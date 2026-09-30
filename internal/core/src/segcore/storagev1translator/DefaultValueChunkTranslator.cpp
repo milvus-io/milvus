@@ -240,12 +240,12 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
     int64_t num_rows, const std::string& suffix) const {
     auto data_type = field_meta_.get_data_type();
     arrow::ArrayVector array_vec;
-    if (data_type == DataType::ARRAY && field_meta_.is_native_list_array()) {
+    if (field_meta_.is_native_list_array()) {
         AssertInfo(field_meta_.is_nullable(),
-                   "only nullable native-list ARRAY fields can be "
+                   "only nullable native-list array fields can be "
                    "dynamically added");
         AssertInfo(!field_meta_.has_default_value(),
-                   "native-list ARRAY default values are not supported");
+                   "native-list array default values are not supported");
         auto result =
             arrow::MakeArrayOfNull(GetArrowDataType(field_meta_), num_rows);
         if (!result.ok()) {

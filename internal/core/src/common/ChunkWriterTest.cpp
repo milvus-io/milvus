@@ -19,8 +19,10 @@
 #include <arrow/array/builder_base.h>
 #include <arrow/array/builder_binary.h>
 #include <gtest/gtest.h>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <random>
@@ -34,8 +36,10 @@
 #include "common/Chunk.h"
 #include "common/ChunkTarget.h"
 #include "common/ChunkWriter.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
+#include "test_utils/Constants.h"
 
 using milvus::DataType;
 using milvus::MemChunkTarget;
@@ -501,6 +505,106 @@ TEST(VectorArrayChunkWriterTest, ElementNullableCompactBinaryList) {
     EXPECT_EQ(views[3].physical_length(), 0);
     EXPECT_FALSE(views[3].output_data().valid_data(0));
     EXPECT_EQ(chunk.Offsets()[4], 2);  // physical vectors only
+}
+
+TEST(VectorArrayChunkWriterTest, ElementNullableBinaryListMmap) {
+    constexpr int dim = 2;
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::BinaryBuilder>());
+    auto* values = static_cast<arrow::BinaryBuilder*>(builder.value_builder());
+    const float first[] = {1.0F, 2.0F};
+    const float second[] = {3.0F, 4.0F};
+    const float third[] = {5.0F, 6.0F};
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(first),
+                               sizeof(first)).ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(second),
+                               sizeof(second)).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append().ok());  // empty row
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(third),
+                               sizeof(third)).ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+
+    milvus::FieldMeta field_meta(milvus::FieldName("profile[embeddings]"),
+                                 milvus::FieldId(1302),
+                                 DataType::VECTOR_ARRAY,
+                                 DataType::VECTOR_FLOAT,
+                                 dim,
+                                 std::nullopt,
+                                 true,
+                                 true);
+    const auto file_path =
+        TestLocalPath + "nullable_vector_array_chunk_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+    {
+        auto buffer =
+            milvus::create_chunk_buffer(field_meta, {array}, true, file_path);
+        ASSERT_NE(buffer.guard, nullptr);
+        EXPECT_TRUE(buffer.guard->is_file_backed());
+        EXPECT_TRUE(std::filesystem::exists(file_path));
+        auto owned_chunk = milvus::make_chunk_from_buffer(field_meta, buffer);
+        auto* chunk = dynamic_cast<VectorArrayChunk*>(owned_chunk.get());
+        ASSERT_NE(chunk, nullptr);
+        ASSERT_EQ(chunk->RowNums(), 5);
+        EXPECT_TRUE(chunk->IsElementNullable());
+
+        auto [views, row_validity] = chunk->Views();
+        ASSERT_EQ(views.size(), 5);
+        ASSERT_TRUE(row_validity);
+        EXPECT_TRUE(row_validity[0]);
+        EXPECT_FALSE(row_validity[1]);
+        EXPECT_TRUE(row_validity[2]);
+        EXPECT_TRUE(row_validity[3]);
+        EXPECT_TRUE(row_validity[4]);
+        EXPECT_EQ(views[0].length(), 3);
+        EXPECT_EQ(views[0].physical_length(), 2);
+        EXPECT_EQ(views[1].length(), 0);
+        EXPECT_EQ(views[2].length(), 0);
+        EXPECT_EQ(views[2].physical_length(), 0);
+        EXPECT_EQ(views[3].length(), 1);
+        EXPECT_EQ(views[3].physical_length(), 0);
+        EXPECT_EQ(views[4].length(), 2);
+        EXPECT_EQ(views[4].physical_length(), 1);
+
+        EXPECT_ANY_THROW(chunk->View(1));
+        EXPECT_EQ(chunk->View(2).length(), 0);
+        const auto first_row = chunk->View(0).output_data();
+        ASSERT_EQ(first_row.valid_data_size(), 3);
+        EXPECT_TRUE(first_row.valid_data(0));
+        EXPECT_FALSE(first_row.valid_data(1));
+        EXPECT_TRUE(first_row.valid_data(2));
+        ASSERT_EQ(first_row.float_vector().data_size(), 4);
+        EXPECT_FLOAT_EQ(first_row.float_vector().data(0), first[0]);
+        EXPECT_FLOAT_EQ(first_row.float_vector().data(3), second[1]);
+        const auto all_null_row = views[3].output_data();
+        ASSERT_EQ(all_null_row.valid_data_size(), 1);
+        EXPECT_FALSE(all_null_row.valid_data(0));
+        EXPECT_EQ(all_null_row.float_vector().data_size(), 0);
+        const auto last_row = chunk->View(4).output_data();
+        ASSERT_EQ(last_row.valid_data_size(), 2);
+        EXPECT_TRUE(last_row.valid_data(0));
+        EXPECT_FALSE(last_row.valid_data(1));
+        ASSERT_EQ(last_row.float_vector().data_size(), 2);
+        EXPECT_FLOAT_EQ(last_row.float_vector().data(0), third[0]);
+        EXPECT_FLOAT_EQ(last_row.float_vector().data(1), third[1]);
+
+        const auto* offsets = chunk->Offsets();
+        ASSERT_NE(offsets, nullptr);
+        const size_t expected_offsets[] = {0, 2, 2, 2, 2, 3};
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(offsets[i], expected_offsets[i]);
+        }
+    }
+    EXPECT_FALSE(std::filesystem::exists(file_path));
 }
 
 TEST(VectorArrayChunkWriterTest, RejectsWrongElementTypeAndWidth) {
