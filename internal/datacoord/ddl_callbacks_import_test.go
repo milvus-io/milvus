@@ -1214,6 +1214,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
+	// Import messages target the job's data vchannels; the broadcaster adds the
+	// control-channel copy that anchors the ack-callback order.
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -1241,7 +1243,7 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels, not the control channel")
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 }
 
 // TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
@@ -1336,4 +1338,44 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "backup")
+}
+
+// TestImportAckCallback_DropsControlChannelFromJobChannels pins the filter in
+// importV1AckCallback: the broadcaster stamps the control channel into every
+// broadcast, so the ack result carries a control-channel entry that must not
+// become one of the job's data vchannels, while its time tick still counts
+// toward DataTimestamp.
+func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	// The request is read inside the hook: its memory is not valid after the call returns.
+	var channelNames []string
+	var dataTimestamp uint64
+	mockey.Mock((*Server).createImportJobFromAck).To(
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+			channelNames = append([]string{}, in.GetChannelNames()...)
+			dataTimestamp = in.GetDataTimestamp()
+			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
+		}).Build()
+
+	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
+	broadcastMsg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{CollectionID: 100, JobID: 1}).
+		WithBroadcast([]string{"vchannel1"}).
+		MustBuildBroadcast().
+		OverwriteBroadcastHeader(1)
+	broadcastMsg = message.WithBroadcastControlChannel(broadcastMsg, cchannel)
+	result := message.BroadcastResultImportMessageV1{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+		Results: map[string]*message.AppendResult{
+			"vchannel1": {TimeTick: 100},
+			cchannel:    {TimeTick: 200},
+		},
+	}
+
+	callbacks := &DDLCallbacks{Server: &Server{}}
+	assert.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	assert.Equal(t, []string{"vchannel1"}, channelNames)
+	assert.Equal(t, uint64(200), dataTimestamp)
 }

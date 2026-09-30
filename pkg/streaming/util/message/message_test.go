@@ -1,6 +1,7 @@
 package message
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -232,4 +233,85 @@ func TestWithWALTermIdempotent(t *testing.T) {
 	assert.NotPanics(t, func() {
 		msg.WithWALTerm(2)
 	})
+}
+
+func TestBroadcastControlChannelOnly(t *testing.T) {
+	// WithControlChannelBroadcast builds a header with no vchannel.
+	// The broadcaster adds the control channel later.
+	msg, err := NewCreateDatabaseMessageBuilderV2().
+		WithHeader(&CreateDatabaseMessageHeader{}).
+		WithBody(&CreateDatabaseMessageBody{}).
+		WithControlChannelBroadcast(OptBuildBroadcastAckSyncUp()).
+		BuildBroadcast()
+	assert.NoError(t, err)
+	assert.Empty(t, msg.BroadcastHeader().VChannels)
+	assert.True(t, msg.BroadcastHeader().AckSyncUp)
+
+	// A message that skipped the broadcaster must not be split.
+	msg.WithBroadcastID(1)
+	assert.Panics(t, func() { msg.SplitIntoMutableMessage() })
+
+	// A builder that chose neither WithBroadcast nor WithControlChannelBroadcast is not a broadcast builder.
+	assert.Panics(t, func() {
+		NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&CreateDatabaseMessageHeader{}).
+			WithBody(&CreateDatabaseMessageBody{}).
+			MustBuildBroadcast()
+	})
+
+	// Data vchannels are required when WithBroadcast is used.
+	assert.Panics(t, func() {
+		NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&CreateDatabaseMessageHeader{}).
+			WithBody(&CreateDatabaseMessageBody{}).
+			WithBroadcast(nil)
+	})
+
+	// A single-vchannel builder is not a broadcast builder.
+	assert.Panics(t, func() {
+		NewCreateDatabaseMessageBuilderV2().
+			WithHeader(&CreateDatabaseMessageHeader{}).
+			WithBody(&CreateDatabaseMessageBody{}).
+			WithVChannel("v1").
+			MustBuildBroadcast()
+	})
+}
+
+func TestWithBroadcastControlChannel(t *testing.T) {
+	build := func(vchannels []string) BroadcastMutableMessage {
+		b := NewCreateCollectionMessageBuilderV1().
+			WithHeader(&CreateCollectionMessageHeader{}).
+			WithBody(&msgpb.CreateCollectionRequest{})
+		if len(vchannels) > 0 {
+			b.WithBroadcast(vchannels, OptBuildBroadcastAckSyncUp())
+		} else {
+			b.WithControlChannelBroadcast(OptBuildBroadcastAckSyncUp())
+		}
+		return b.MustBuildBroadcast()
+	}
+	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
+
+	// Missing: appended at the end, the other header fields survive.
+	msg := WithBroadcastControlChannel(build([]string{"v1", "v2"}).OverwriteBroadcastHeader(7, NewExclusiveClusterResourceKey()), cchannel)
+	assert.Equal(t, []string{"v1", "v2", cchannel}, sortedExceptLast(msg.BroadcastHeader().VChannels))
+	assert.Equal(t, uint64(7), msg.BroadcastHeader().BroadcastID)
+	assert.True(t, msg.BroadcastHeader().AckSyncUp)
+	assert.Len(t, msg.BroadcastHeader().ResourceKeys, 1)
+	assert.Len(t, msg.SplitIntoMutableMessage(), 3)
+
+	// Present: no duplicate.
+	msg = WithBroadcastControlChannel(build([]string{"v1", cchannel}), cchannel)
+	assert.ElementsMatch(t, []string{"v1", cchannel}, msg.BroadcastHeader().VChannels)
+
+	// Control channel only: the control channel is the only vchannel.
+	msg = WithBroadcastControlChannel(build(nil), cchannel)
+	assert.Equal(t, []string{cchannel}, msg.BroadcastHeader().VChannels)
+}
+
+// sortedExceptLast sorts all but the last element. WithBroadcast deduplicates through a set,
+// so the order of the caller's vchannels is not stable. The control channel must be last.
+func sortedExceptLast(in []string) []string {
+	out := append([]string{}, in...)
+	sort.Strings(out[:len(out)-1])
+	return out
 }

@@ -150,6 +150,7 @@ func initStreamingSystem() {
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()

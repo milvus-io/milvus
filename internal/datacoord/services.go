@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -2336,8 +2335,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
@@ -2387,8 +2386,8 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 		WithBody(&message.BatchUpdateManifestMessageBody{
 			Items: items,
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "BatchUpdateManifest broadcast failed", mlog.Err(err))
@@ -2491,8 +2490,8 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 			CollectionId: req.GetCollectionId(),
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "DropSnapshot broadcast failed", mlog.Err(err))
@@ -2975,8 +2974,8 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 			ExternalSpec:   req.GetExternalSpec(),
 		}).
 		WithBody(&message.RefreshExternalCollectionMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 
 	if _, err := b.Broadcast(ctx, msg); err != nil {
@@ -3073,7 +3072,6 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3108,7 +3106,6 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	if len(vchannels) == 0 {
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
-
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
