@@ -672,6 +672,49 @@ func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionI
 	if !ok {
 		return merr.WrapErrCollectionNotFound(collectionID)
 	}
+	return m.setReplicaNumberLocked(ctx, collection, replicaNumber, userSpecifiedReplicaMode)
+}
+
+// SyncReplicaNumber sets the collection's ReplicaNumber, and its partitions',
+// to what count returns, and answers the number the collection then holds.
+//
+// count is evaluated INSIDE the manager's critical section, so that reading
+// how many replicas there are and writing their number is one step. A writer
+// that reads the replicas first and calls UpdateReplicaNumber afterwards can
+// be overtaken in between: a resource group's teardown reads two replicas, a
+// concurrent expansion spawns a third and writes three, and the teardown's
+// two lands last - a count one short of the replicas that exist, with nothing
+// left to correct it. Every writer whose number IS the number of replicas
+// goes through here; a writer spawns or removes its replicas before it calls,
+// so whichever of two writers lands last has counted the other's replicas.
+// count must not call back into this manager.
+//
+// userSpecifiedReplicaMode is written with the number when it is not nil, and
+// nil keeps the stored one: a writer that only follows the replicas has no
+// say in how they were asked for. Nothing is written when neither changes.
+func (m *CollectionManager) SyncReplicaNumber(ctx context.Context, collectionID typeutil.UniqueID, count func() int32, userSpecifiedReplicaMode *bool) (int32, error) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return 0, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	replicaNumber := count()
+	mode := collection.GetUserSpecifiedReplicaMode()
+	if userSpecifiedReplicaMode != nil {
+		mode = *userSpecifiedReplicaMode
+	}
+	if collection.GetReplicaNumber() == replicaNumber && collection.GetUserSpecifiedReplicaMode() == mode {
+		return replicaNumber, nil
+	}
+	return replicaNumber, m.setReplicaNumberLocked(ctx, collection, replicaNumber, mode)
+}
+
+// setReplicaNumberLocked writes the replica number and mode to the collection
+// and its partitions. The caller holds rwmutex.
+func (m *CollectionManager) setReplicaNumberLocked(ctx context.Context, collection *Collection, replicaNumber int32, userSpecifiedReplicaMode bool) error {
+	collectionID := collection.GetCollectionID()
 	newCollection := collection.Clone()
 	newCollection.ReplicaNumber = replicaNumber
 	newCollection.UserSpecifiedReplicaMode = userSpecifiedReplicaMode
