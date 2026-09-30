@@ -53,6 +53,21 @@ type SearchTask struct {
 
 	tr           *timerecord.TimeRecorder
 	scheduleSpan trace.Span
+	diagnostics  *scheduler.TaskDiagnostics
+}
+
+// SetSchedulerDiagnostics is called before admission, on the schedule goroutine.
+// SearchTask keeps ownership of business merge reasons and child outcomes.
+func (t *SearchTask) SetSchedulerDiagnostics(d *scheduler.TaskDiagnostics) int64 {
+	t.diagnostics = d
+	return t.groupSize
+}
+
+func (t *SearchTask) rejectMerge(reason scheduler.MergeRejectReason) bool {
+	if t.diagnostics != nil {
+		t.diagnostics.RecordMergeRejected(reason)
+	}
+	return false
 }
 
 func NewSearchTask(ctx context.Context,
@@ -425,18 +440,29 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	ratio := float64(after) / float64(pre)
 
 	// Check mergeable
-	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
-		t.req.GetEnableExprCache() != other.req.GetEnableExprCache() ||
-		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
-		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
-		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
-		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
-		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
-		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
-		!funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()) ||
-		!funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()) ||
-		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
-		return false
+	switch {
+	case t.req.GetFilterOnly() != other.req.GetFilterOnly():
+		return other.rejectMerge(scheduler.MergeFilterOnly)
+	case t.req.GetEnableExprCache() != other.req.GetEnableExprCache():
+		return other.rejectMerge(scheduler.MergeExprCache)
+	case t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID():
+		return other.rejectMerge(scheduler.MergeDatabase)
+	case t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID():
+		return other.rejectMerge(scheduler.MergeCollection)
+	case t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp():
+		return other.rejectMerge(scheduler.MergeMVCC)
+	case t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType():
+		return other.rejectMerge(scheduler.MergeDSL)
+	case t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0]:
+		return other.rejectMerge(scheduler.MergeChannel)
+	case diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat():
+		return other.rejectMerge(scheduler.MergeTopK)
+	case !funcutil.SliceSetEqual(t.req.GetReq().GetPartitionIDs(), other.req.GetReq().GetPartitionIDs()):
+		return other.rejectMerge(scheduler.MergePartitions)
+	case !funcutil.SliceSetEqual(t.req.GetSegmentIDs(), other.req.GetSegmentIDs()):
+		return other.rejectMerge(scheduler.MergeSegments)
+	case !bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()):
+		return other.rejectMerge(scheduler.MergePlan)
 	}
 
 	// Merge
@@ -452,6 +478,9 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 }
 
 func (t *SearchTask) Done(err error) {
+	if t.merged && t.diagnostics != nil {
+		t.diagnostics.ChildDone(t.ctx, err)
+	}
 	if !t.merged {
 		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.groupSize))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.nq))

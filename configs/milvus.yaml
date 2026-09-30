@@ -640,6 +640,10 @@ queryNode:
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     unsolvedQueueSize: 1024
+    diagnostics:
+      enabled: false # Startup-only bounded scheduler/merge metrics, identical for FIFO and EDF.
+      logEnabled: false # Optional one-line summary per 30s; requires diagnostics.enabled.
+    requeryUnsolvedQueueSize: 1024 # Independent requery-edf lane capacity, captured at scheduler creation; restart to change it. Values below 1024 or invalid values fall back to 1024; ignored by other policies.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -650,6 +654,7 @@ queryNode:
     maxTimestampLag: 86400
     scheduleReadPolicy:
       # fifo: A FIFO queue support the schedule.
+      # requery-edf: Compare regular/requery FIFO head deadlines when an execution slot is available; equal deadlines favor requery.
       # user-task-polling:
       # 	The user's tasks will be polled one by one and scheduled.
       # 	Scheduling is fair on task granularity.

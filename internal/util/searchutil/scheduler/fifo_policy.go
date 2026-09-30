@@ -1,8 +1,10 @@
 package scheduler
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -20,8 +22,23 @@ type fifoPolicy struct {
 	queue *mergeTaskQueue
 }
 
+func (p *fifoPolicy) CheckAdmission(_ Task, waitingTotal int64) error {
+	return checkWaitingTaskCapacity(waitingTotal)
+}
+
+// Shared-queue policies count all waiting tasks, including the staged task.
+func checkWaitingTaskCapacity(waitingTotal int64) error {
+	cfg := &paramtable.Get().QueryNodeCfg
+	capacity := cfg.MaxUnsolvedQueueSize.GetAsInt64()
+	if capacity > 0 && waitingTotal >= capacity {
+		return merr.WrapErrTooManyRequests(int32(capacity), fmt.Sprintf("limit by %s", cfg.MaxUnsolvedQueueSize.Key))
+	}
+	return nil
+}
+
 func (p *fifoPolicy) Cleanup(now time.Time) []*queuedTask {
-	return p.queue.cleanup(now)
+	advance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+	return p.queue.cleanup(now.Add(advance))
 }
 
 func (p *fifoPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTask {

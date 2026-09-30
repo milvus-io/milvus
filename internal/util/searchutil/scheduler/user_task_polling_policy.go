@@ -22,8 +22,13 @@ type userTaskPollingPolicy struct {
 	queue *fairPollingTaskQueue
 }
 
+func (p *userTaskPollingPolicy) CheckAdmission(_ Task, waitingTotal int64) error {
+	return checkWaitingTaskCapacity(waitingTotal)
+}
+
 func (p *userTaskPollingPolicy) Cleanup(now time.Time) []*queuedTask {
-	return p.queue.cleanup(now)
+	advance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
+	return p.queue.cleanup(now.Add(advance))
 }
 
 func (p *userTaskPollingPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTask {
