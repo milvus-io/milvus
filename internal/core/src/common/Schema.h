@@ -504,12 +504,14 @@ class Schema {
     std::string
     GetPhysicalColumnName(FieldId field_id) const;
 
-    // Resolve a column group column name to a FieldId.
+    // Resolve a column group column name to a FieldId. Unknown external columns
+    // return std::nullopt so dropped source columns can be filtered. Invalid
+    // normal-collection column names raise DataFormatBroken.
     // Normal collections: column name is the numeric field ID string.
     // External collections: milvus-table source columns prefer numeric field
     // ID strings; other source formats use external_field metadata; function
     // outputs use numeric field ID strings.
-    FieldId
+    std::optional<FieldId>
     ResolveColumnFieldId(const std::string& column_name) const;
 
     proto::schema::CollectionSchema

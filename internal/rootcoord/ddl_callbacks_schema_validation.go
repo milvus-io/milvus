@@ -22,10 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 )
 
-func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema) error {
+func validateSchemaEvolution(oldColl *model.Collection, newSchema *schemapb.CollectionSchema, allowedHistoricalFieldIDs ...int64) error {
 	var oldSchema *schemapb.CollectionSchema
 	if oldColl != nil {
 		oldSchema = oldColl.ToCollectionSchemaPB()
 	}
-	return schemautil.ValidateSchemaEvolution(oldSchema, newSchema)
+	return schemautil.ValidateSchemaEvolution(oldSchema, newSchema, allowedHistoricalFieldIDs...)
 }

@@ -30,8 +30,9 @@ import (
 
 // ValidateSchemaEvolution validates that a proposed schema can safely replace
 // the committed schema without reinterpreting existing rows or leaving an
-// inconsistent field graph.
-func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) error {
+// inconsistent field graph. allowedHistoricalFieldIDs must only contain IDs
+// validated against an authoritative external physical schema.
+func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema, allowedHistoricalFieldIDs ...int64) error {
 	if oldSchema == nil || newSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("old and new collection schemas must not be nil")
 	}
@@ -63,7 +64,7 @@ func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) er
 	if err := validateEvolutionDynamicGraph(newSchema); err != nil {
 		return err
 	}
-	return validateMaxFieldIDEvolution(oldSchema, newSchema, oldFields, newFields)
+	return validateMaxFieldIDEvolution(oldSchema, newSchema, oldFields, newFields, typeutil.NewSet(allowedHistoricalFieldIDs...))
 }
 
 type evolutionFieldMaps struct {
@@ -414,7 +415,11 @@ func evolutionNumericValue(params []*commonpb.KeyValuePair, key string) (int64, 
 	return 0, false, nil
 }
 
-func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema, oldFields, newFields *evolutionFieldMaps) error {
+func validateMaxFieldIDEvolution(
+	oldSchema, newSchema *schemapb.CollectionSchema,
+	oldFields, newFields *evolutionFieldMaps,
+	allowedHistoricalFieldIDs typeutil.Set[int64],
+) error {
 	oldProperty, err := evolutionSchemaIntProperty(oldSchema, common.MaxFieldIDKey)
 	if err != nil {
 		return err
@@ -443,7 +448,7 @@ func validateMaxFieldIDEvolution(oldSchema, newSchema *schemapb.CollectionSchema
 	}
 
 	for id := range newFields.allIDs {
-		if _, existed := oldFields.allIDs[id]; !existed && id <= oldFloor {
+		if _, existed := oldFields.allIDs[id]; !existed && id <= oldFloor && !allowedHistoricalFieldIDs.Contain(id) {
 			return merr.WrapErrParameterInvalidMsg("new field id %d reuses an already allocated field id", id)
 		}
 	}
