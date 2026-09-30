@@ -3507,13 +3507,6 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil, nil
 	}
-	// apply limiter for http/http2 server
-	limiter, err := pxy.GetRateLimiter()
-	if err != nil {
-		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
-		return nil, err
-	}
-
 	request, ok := req.(proto.Message)
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
@@ -3522,6 +3515,15 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	metaCache := getProxyMetaCache(pxy)
 	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	// Resolve the limiter only for requests that consume quota.
+	limiter, err := pxy.GetRateLimiter()
+	if err != nil {
+		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
 		return nil, err
 	}
 	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
