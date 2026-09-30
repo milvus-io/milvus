@@ -1413,32 +1413,9 @@ ChunkedSegmentSealedImpl::GetStructElementOffsets(FieldId field_id) const {
     return GetStructElementOffsetsFromState(*CapturePublishedState(), field_id);
 }
 
-namespace {
-
-// Struct element offsets are not built from, or served for, element-nullable
-// array sub-fields yet.
-bool
-IsElementNullableArrayField(const FieldMeta& field_meta) {
-    return field_meta.has_nullable_array_element() ||
-           (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
-            field_meta.is_element_nullable());
-}
-
-}  // namespace
-
 std::shared_ptr<const IStructElementOffsets>
 ChunkedSegmentSealedImpl::GetStructElementOffsetsFromState(
     const PublishedSegmentState& state, FieldId field_id) {
-    if (state.schema != nullptr && state.schema->has_field(field_id)) {
-        const auto& field_meta = (*state.schema)[field_id];
-        if (IsElementNullableArrayField(field_meta)) {
-            ThrowInfo(
-                ErrorCode::NotImplemented,
-                "struct element offsets on element-nullable array field {} "
-                "are not supported yet",
-                field_meta.get_name().get());
-        }
-    }
     if (state.runtime == nullptr) {
         return nullptr;
     }
@@ -1465,40 +1442,17 @@ ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
             if (offsets) {
                 continue;
             }
-            const FieldMeta* source_meta = nullptr;
-            const ChunkedColumnInterface* source_column = nullptr;
-            // All aliases reference the same struct generation. Select from the
-            // complete staged runtime, preferring scalar arrays, then the lowest field ID;
-            // loading/commit order cannot choose a cold vector column for us.
-            for (const auto& [candidate_id, column] : runtime.fields) {
-                if (!column || !schema.has_field(candidate_id) ||
-                    load_info.IsFieldFilledWithDefault(candidate_id)) {
-                    continue;
-                }
-                const auto& meta = schema[candidate_id];
-                if (GetStructNameForArrayField(meta) != struct_name ||
-                    IsElementNullableArrayField(meta)) {
-                    continue;
-                }
-                const bool vector =
-                    meta.get_data_type() == DataType::VECTOR_ARRAY;
-                const bool source_vector =
-                    source_meta &&
-                    source_meta->get_data_type() == DataType::VECTOR_ARRAY;
-                if (!source_meta || (source_vector && !vector) ||
-                    (source_vector == vector &&
-                     candidate_id.get() < source_meta->get_id().get())) {
-                    source_meta = &meta;
-                    source_column = column.get();
-                }
-            }
-
-            AssertInfo(source_column != nullptr,
+            auto source = SelectStructElementOffsetsSource(
+                runtime, schema, load_info, struct_name, {}, {});
+            AssertInfo(source.has_value(),
                        "no column available to build struct element offsets "
                        "for struct {}",
                        struct_name);
             offsets = StructElementOffsetsSealed::BuildFromColumn(
-                *source_column, *source_meta, runtime.row_count, op_ctx);
+                *runtime.fields.at(*source),
+                schema[*source],
+                runtime.row_count,
+                op_ctx);
             for (auto& [field_id, alias] : runtime.struct_element_offsets_map) {
                 if (schema.has_field(field_id) &&
                     GetStructNameForArrayField(schema[field_id]) ==
@@ -1687,7 +1641,8 @@ BulkSubscriptWithSnapshot(
                                       pinned->schema->get_fields().end()
                                 : segment->is_field_exist(field_id);
         if (!field_exists) {
-            return segment->bulk_subscript_not_exist_field(field_meta, count);
+            return segment->bulk_subscript_not_exist_field(
+                field_meta, seg_offsets, count);
         }
     }
     if (pinned) {
@@ -4628,10 +4583,28 @@ ChunkedSegmentSealedImpl::DropFieldData(
     if (old_column) {
         old_column->CancelWarmup();
     }
+    auto prune_dropped_structs = [&](RuntimeResourceState& target_runtime) {
+        std::unordered_set<std::string> active_structs;
+        for (auto schema_field_id : schema_snapshot->get_field_ids()) {
+            if (auto name = GetStructNameForArrayField(
+                    (*schema_snapshot)[schema_field_id])) {
+                active_structs.insert(std::move(*name));
+            }
+        }
+        for (auto it = target_runtime.struct_to_element_offsets.begin();
+             it != target_runtime.struct_to_element_offsets.end();) {
+            if (active_structs.count(it->first) > 0) {
+                ++it;
+            } else {
+                it = target_runtime.struct_to_element_offsets.erase(it);
+            }
+        }
+    };
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
         runtime->geometry_caches.erase(field_id);
         runtime->struct_element_offsets_map.erase(field_id);
+        prune_dropped_structs(*runtime);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
         // resident raw column. Keep it when an index with raw data remains
@@ -4644,6 +4617,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
         next_runtime->fields.erase(field_id);
         next_runtime->geometry_caches.erase(field_id);
         next_runtime->struct_element_offsets_map.erase(field_id);
+        prune_dropped_structs(*next_runtime);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
         // field-level size metadata.
@@ -8226,47 +8200,166 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
         return;
     }
 
-    // A StructArray generation survives schema evolution when at least one of
-    // its child field IDs survives under the same struct name.  This preserves
-    // offsets for ordinary schema changes while distinguishing a dropped and
-    // re-added StructArray whose name is reused with entirely new field IDs.
-    // The flattened C++ Schema does not retain the StructArray parent field ID,
-    // so child-ID continuity is the available generation marker here.
-    std::unordered_set<std::string> surviving_structs;
-    for (const auto& [field_id, target_field_meta] :
-         target_schema->get_fields()) {
-        if (!current_schema->has_field(field_id)) {
+    std::unordered_set<std::string> affected_structs;
+    for (auto field_id : current_schema->get_field_ids()) {
+        const auto current_name =
+            GetStructNameForArrayField((*current_schema)[field_id]);
+        if (!current_name) {
             continue;
         }
-
-        auto current_struct_name =
-            GetStructNameForArrayField(current_schema->operator[](field_id));
-        auto target_struct_name = GetStructNameForArrayField(target_field_meta);
-        if (current_struct_name.has_value() &&
-            current_struct_name == target_struct_name) {
-            surviving_structs.emplace(*target_struct_name);
+        const auto target_name =
+            target_schema->has_field(field_id)
+                ? GetStructNameForArrayField((*target_schema)[field_id])
+                : std::nullopt;
+        if (current_name != target_name) {
+            affected_structs.insert(*current_name);
+            if (target_name) {
+                affected_structs.insert(*target_name);
+            }
         }
     }
-
-    for (auto it = runtime.struct_to_element_offsets.begin();
-         it != runtime.struct_to_element_offsets.end();) {
-        if (surviving_structs.find(it->first) == surviving_structs.end()) {
-            it = runtime.struct_to_element_offsets.erase(it);
-        } else {
-            ++it;
+    for (auto field_id : target_schema->get_field_ids()) {
+        const auto target_name =
+            GetStructNameForArrayField((*target_schema)[field_id]);
+        if (target_name && !current_schema->has_field(field_id)) {
+            affected_structs.insert(*target_name);
         }
     }
-
-    // Remove aliases for child fields that no longer exist in the target
-    // schema. Otherwise their shared_ptrs keep retired StructArray offsets
-    // reachable through GetStructElementOffsets().
+    for (const auto& name : affected_structs) {
+        runtime.struct_to_element_offsets.erase(name);
+    }
     for (auto it = runtime.struct_element_offsets_map.begin();
          it != runtime.struct_element_offsets_map.end();) {
-        if (!target_schema->has_field(it->first)) {
+        const auto field_id = it->first;
+        const auto name =
+            current_schema->has_field(field_id)
+                ? GetStructNameForArrayField((*current_schema)[field_id])
+                : std::nullopt;
+        if (!target_schema->has_field(field_id) ||
+            (name && affected_structs.count(*name) > 0)) {
             it = runtime.struct_element_offsets_map.erase(it);
         } else {
             ++it;
         }
+    }
+}
+
+std::optional<FieldId>
+ChunkedSegmentSealedImpl::SelectStructElementOffsetsSource(
+    const RuntimeResourceState& runtime,
+    const Schema& schema,
+    const SegmentLoadInfo& load_info,
+    const std::string& struct_name,
+    const std::unordered_set<FieldId>& newly_loaded_fields,
+    const std::unordered_set<FieldId>& excluded_fields) {
+    // Children with real data come first. Among them a scalar ARRAY beats a
+    // VECTOR_ARRAY, whose raw read is expensive, then the lowest field ID, so
+    // loading or commit order never picks a cold vector column. A child filled
+    // with defaults is used only when no child has real data: a dropped
+    // provider can leave only backfilled children, and their materialized rows
+    // still carry the original element counts.
+    std::optional<FieldId> real_source;
+    std::optional<FieldId> filled_source;
+    auto prefer = [&](const std::optional<FieldId>& current,
+                      FieldId candidate) {
+        if (!current.has_value()) {
+            return true;
+        }
+        const bool candidate_vector =
+            schema[candidate].get_data_type() == DataType::VECTOR_ARRAY;
+        const bool current_vector =
+            schema[*current].get_data_type() == DataType::VECTOR_ARRAY;
+        if (candidate_vector != current_vector) {
+            return !candidate_vector;
+        }
+        return candidate.get() < current->get();
+    };
+    for (const auto& [field_id, column] : runtime.fields) {
+        if (!column || excluded_fields.count(field_id) > 0 ||
+            !schema.has_field(field_id) ||
+            GetStructNameForArrayField(schema[field_id]) != struct_name) {
+            continue;
+        }
+        auto& source = load_info.IsFieldFilledWithDefault(field_id) &&
+                               newly_loaded_fields.count(field_id) == 0
+                           ? filled_source
+                           : real_source;
+        if (prefer(source, field_id)) {
+            source = field_id;
+        }
+    }
+    return real_source.has_value() ? real_source : filled_source;
+}
+
+void
+ChunkedSegmentSealedImpl::BuildStructElementOffsets(
+    RuntimeResourceState& runtime,
+    const SchemaPtr& schema_snapshot,
+    const SegmentLoadInfo& segment_load_info,
+    const std::unordered_set<FieldId>& affected_fields,
+    milvus::OpContext* op_ctx,
+    const std::unordered_set<FieldId>& newly_loaded_fields,
+    const std::unordered_set<FieldId>& excluded_fields,
+    bool rebuild_all) {
+    std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
+    std::unordered_set<std::string> affected_structs;
+    for (auto field_id : schema_snapshot->get_field_ids()) {
+        auto name = GetStructNameForArrayField((*schema_snapshot)[field_id]);
+        if (!name) {
+            continue;
+        }
+        struct_fields[*name].push_back(field_id);
+        if (affected_fields.count(field_id) > 0) {
+            affected_structs.insert(*name);
+        }
+    }
+
+    try {
+        for (const auto& [name, field_ids] : struct_fields) {
+            if (!rebuild_all && affected_structs.count(name) == 0 &&
+                runtime.struct_to_element_offsets.count(name) > 0) {
+                continue;
+            }
+
+            std::shared_ptr<StructElementOffsetsSealed> offsets;
+            if (auto source =
+                    SelectStructElementOffsetsSource(runtime,
+                                                     *schema_snapshot,
+                                                     segment_load_info,
+                                                     name,
+                                                     newly_loaded_fields,
+                                                     excluded_fields)) {
+                offsets = StructElementOffsetsSealed::BuildFromColumn(
+                    *runtime.fields.at(*source),
+                    (*schema_snapshot)[*source],
+                    runtime.row_count,
+                    op_ctx);
+            } else {
+                auto existing = runtime.struct_to_element_offsets.find(name);
+                bool filling_default = false;
+                for (auto field_id : field_ids) {
+                    filling_default |= excluded_fields.count(field_id) > 0;
+                }
+                if (existing != runtime.struct_to_element_offsets.end() &&
+                    existing->second != nullptr && !filling_default) {
+                    offsets = existing->second;
+                } else {
+                    // The children share the struct's nullable flag.
+                    offsets = StructElementOffsetsSealed::BuildAllZeros(
+                        runtime.row_count,
+                        !(*schema_snapshot)[field_ids.front()].is_nullable());
+                }
+            }
+            runtime.struct_to_element_offsets[name] = offsets;
+            for (auto field_id : field_ids) {
+                if (runtime.fields.count(field_id) > 0) {
+                    runtime.struct_element_offsets_map[field_id] = offsets;
+                }
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "failed to allocate struct element offsets metadata");
     }
 }
 
@@ -8475,6 +8568,47 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                            committer);
     }
 
+    std::unordered_set<FieldId> affected_fields;
+    std::unordered_set<FieldId> loaded_fields;
+    auto mark_loaded = [&](const auto& groups) {
+        for (const auto& [_, field_ids] : groups) {
+            for (auto field_id : field_ids) {
+                affected_fields.insert(field_id);
+                loaded_fields.insert(field_id);
+            }
+        }
+    };
+    mark_loaded(diff.column_groups_to_load);
+    mark_loaded(diff.column_groups_to_replace);
+    mark_loaded(diff.column_groups_to_lazyload);
+    mark_loaded(diff.column_groups_to_lazyreplace);
+    for (const auto& [field_ids, _] : diff.binlogs_to_load) {
+        affected_fields.insert(field_ids.begin(), field_ids.end());
+        loaded_fields.insert(field_ids.begin(), field_ids.end());
+    }
+    for (const auto& [field_ids, _] : diff.binlogs_to_replace) {
+        affected_fields.insert(field_ids.begin(), field_ids.end());
+        loaded_fields.insert(field_ids.begin(), field_ids.end());
+    }
+    affected_fields.insert(diff.field_data_to_drop.begin(),
+                           diff.field_data_to_drop.end());
+    affected_fields.insert(diff.fields_to_fill_default.begin(),
+                           diff.fields_to_fill_default.end());
+    std::unordered_set<FieldId> excluded_fields(
+        diff.fields_to_fill_default.begin(), diff.fields_to_fill_default.end());
+    committer.Commit(
+        [&](RuntimeResourceState& runtime, PublishedSegmentState&) {
+            BuildStructElementOffsets(
+                runtime,
+                schema_snapshot,
+                segment_load_info,
+                affected_fields,
+                op_ctx,
+                loaded_fields,
+                excluded_fields,
+                diff.load_external_manifest && diff.manifest_updated);
+        });
+
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.text_indexes_to_load.empty()) {
         LoadBatchTextIndexes(op_ctx,
@@ -8652,6 +8786,13 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
     new_local.ReplaceSchemaForReopen(sch);
 
     auto diff = current_mutable.ComputeDiff(new_local);
+    // LoadFieldData may publish a real column without adding binlogs to
+    // SegmentLoadInfo. Its ready bit still makes it an existing field, not a
+    // candidate for default backfill during schema-only reopen.
+    std::erase_if(diff.fields_to_fill_default, [&](FieldId field_id) {
+        return current_schema->has_field(field_id) &&
+               get_bit_if_present(current->field_data_ready_bitset, field_id);
+    });
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
     // Populate manifest cache before publishing; readers do not take
@@ -8730,6 +8871,10 @@ ChunkedSegmentSealedImpl::Reopen(
     }
 
     auto diff = current_mutable.ComputeDiff(new_local);
+    std::erase_if(diff.fields_to_fill_default, [&](FieldId field_id) {
+        return current_schema->has_field(field_id) &&
+               get_bit_if_present(current->field_data_ready_bitset, field_id);
+    });
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
     // Populate manifest cache before publishing; readers do not take
@@ -8848,6 +8993,47 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 
     auto warmup_policy = resolve_field_data_warmup_policy(
         field_id, segment_load_info, schema_snapshot);
+    std::shared_ptr<const IStructElementOffsets> struct_offsets;
+    std::shared_ptr<const ChunkedColumnInterface> struct_provider;
+    if (auto name = field_meta.is_element_nullable()
+                        ? GetStructNameForArrayField(field_meta)
+                        : std::nullopt) {
+        auto it = runtime.struct_to_element_offsets.find(*name);
+        if (it != runtime.struct_to_element_offsets.end()) {
+            AssertInfo(it->second != nullptr,
+                       "struct element offsets for struct {} must be built "
+                       "before filling sub-field {}",
+                       *name,
+                       field_id.get());
+            struct_offsets = it->second;
+        } else {
+            auto zeros = StructElementOffsetsSealed::BuildAllZeros(
+                size, !field_meta.is_nullable());
+            runtime.struct_to_element_offsets[*name] = zeros;
+            struct_offsets = zeros;
+        }
+        std::shared_ptr<const ChunkedColumnInterface> filled_provider;
+        for (auto sibling_id : schema_snapshot->get_field_ids()) {
+            if (GetStructNameForArrayField((*schema_snapshot)[sibling_id]) ==
+                    name &&
+                sibling_id != field_id) {
+                auto column = runtime.fields.find(sibling_id);
+                if (column != runtime.fields.end()) {
+                    if (!segment_load_info.IsFieldFilledWithDefault(
+                            sibling_id)) {
+                        struct_provider = column->second;
+                        break;
+                    }
+                    if (!filled_provider) {
+                        filled_provider = column->second;
+                    }
+                }
+            }
+        }
+        if (!struct_provider) {
+            struct_provider = std::move(filled_provider);
+        }
+    }
     std::unique_ptr<cachinglayer::Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(),
@@ -8856,7 +9042,9 @@ ChunkedSegmentSealedImpl::fill_empty_field(
             use_mmap,
             mmap_config.GetMmapPopulate(),
             warmup_policy,
-            writeback_mode);
+            writeback_mode,
+            struct_offsets,
+            struct_provider);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -8881,7 +9069,7 @@ ChunkedSegmentSealedImpl::RegisterStructElementOffsetsForField(
     RuntimeResourceState& runtime,
     bool is_replace) {
     auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value() || IsElementNullableArrayField(field_meta)) {
+    if (!struct_name.has_value()) {
         return;
     }
     auto& entry = runtime.struct_to_element_offsets[*struct_name];
@@ -8936,6 +9124,16 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         owned_runtime = CloneMutableRuntimeResourceState();
         target_runtime = owned_runtime.get();
     }
+
+    std::unordered_set<FieldId> fields_to_fill(field_ids.begin(),
+                                               field_ids.end());
+    BuildStructElementOffsets(*target_runtime,
+                              schema_snapshot,
+                              segment_load_info,
+                              fields_to_fill,
+                              nullptr,
+                              {},
+                              fields_to_fill);
 
     std::vector<FieldId> filled_fields;
     for (const auto& field_id : field_ids) {
@@ -9039,6 +9237,48 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
 
         auto warmup_policy = resolve_field_data_warmup_policy(
             field_id, segment_load_info, schema_snapshot);
+        std::shared_ptr<const IStructElementOffsets> struct_offsets;
+        std::shared_ptr<const ChunkedColumnInterface> struct_provider;
+        if (auto name = field_meta.is_element_nullable()
+                            ? GetStructNameForArrayField(field_meta)
+                            : std::nullopt) {
+            auto it =
+                committer.runtime()->struct_to_element_offsets.find(*name);
+            if (it != committer.runtime()->struct_to_element_offsets.end()) {
+                AssertInfo(it->second != nullptr,
+                           "struct element offsets for struct {} must be "
+                           "built before filling sub-field {}",
+                           *name,
+                           field_id.get());
+                struct_offsets = it->second;
+            } else {
+                auto zeros = StructElementOffsetsSealed::BuildAllZeros(
+                    size, !field_meta.is_nullable());
+                committer.runtime()->struct_to_element_offsets[*name] = zeros;
+                struct_offsets = zeros;
+            }
+            std::shared_ptr<const ChunkedColumnInterface> filled_provider;
+            for (auto sibling_id : schema_snapshot->get_field_ids()) {
+                if (GetStructNameForArrayField(
+                        (*schema_snapshot)[sibling_id]) == name &&
+                    sibling_id != field_id) {
+                    auto column = committer.runtime()->fields.find(sibling_id);
+                    if (column != committer.runtime()->fields.end()) {
+                        if (!segment_load_info.IsFieldFilledWithDefault(
+                                sibling_id)) {
+                            struct_provider = column->second;
+                            break;
+                        }
+                        if (!filled_provider) {
+                            filled_provider = column->second;
+                        }
+                    }
+                }
+            }
+            if (!struct_provider) {
+                struct_provider = std::move(filled_provider);
+            }
+        }
         std::unique_ptr<cachinglayer::Translator<milvus::Chunk>> translator =
             std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
                 get_segment_id(),
@@ -9047,7 +9287,9 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                 use_mmap,
                 mmap_config.GetMmapPopulate(),
                 warmup_policy,
-                writeback_mode);
+                writeback_mode,
+                struct_offsets,
+                struct_provider);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), nullptr);
         auto column =
@@ -10195,7 +10437,8 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
                                                    target_dynamic_fields);
         } else if (snapshot->schema->get_fields().find(field_id) ==
                    snapshot->schema->get_fields().end()) {
-            field_data = bulk_subscript_not_exist_field(field_meta, size);
+            field_data = bulk_subscript_not_exist_field(
+                field_meta, results.seg_offsets_.data(), size);
         } else {
             field_data = bulk_subscript_from_state(snapshot,
                                                    &local_ctx,

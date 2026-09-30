@@ -57,6 +57,7 @@
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -871,6 +872,261 @@ TEST(test_chunk_segment,
     column->ManualEvictCache();
     EXPECT_EQ(segment->GetStructElementOffsets(field), offsets);
     EXPECT_EQ(probe->calls, 4);
+}
+
+// A sibling loaded after the struct offsets were published shares them: every
+// child of a struct row has the same element count, so the mapping is not
+// rebuilt per child.
+TEST(test_chunk_segment, StructOffsetsSharedBySiblingLoadedLater) {
+    auto schema = std::make_shared<Schema>();
+    auto first =
+        schema->AddDebugArrayField("items[first]", DataType::INT32, false);
+    auto second =
+        schema->AddDebugArrayField("items[second]", DataType::INT32, false);
+    constexpr int64_t row_count = 3;
+    auto dataset = segcore::DataGen(schema,
+                                    row_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    /*array_len=*/2);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto make_load_info = [&](FieldId field_id) {
+        for (const auto& data : dataset.raw_->fields_data()) {
+            if (data.field_id() == field_id.get()) {
+                auto field_data = segcore::CreateFieldDataFromDataArray(
+                    row_count, &data, (*schema)[field_id]);
+                return PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                      kPartitionID,
+                                                      kSegmentID,
+                                                      field_id.get(),
+                                                      {field_data},
+                                                      cm);
+            }
+        }
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "field {} missing from generated test data",
+                  field_id.get());
+        return LoadFieldDataInfo{};
+    };
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(make_load_info(second));
+    auto published = segment->GetStructElementOffsets(second);
+    ASSERT_NE(published, nullptr);
+    EXPECT_EQ(published->GetTotalElementCount(), row_count * 2);
+
+    segment->LoadFieldData(make_load_info(first));
+    auto shared = segment->GetStructElementOffsets(first);
+    ASSERT_NE(shared, nullptr);
+    EXPECT_EQ(shared.get(), published.get());
+    EXPECT_EQ(segment->GetStructElementOffsets(second).get(), published.get());
+}
+
+TEST(test_chunk_segment, ReopenRebuildsOffsetsAfterProviderDrop) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto first =
+        schema->AddDebugArrayField("items[first]", DataType::INT32, false);
+    auto second =
+        schema->AddDebugArrayField("items[second]", DataType::INT32, false);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto before = segment->GetStructElementOffsets(first);
+    ASSERT_NE(before, nullptr);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[second]"),
+                   second,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   false);
+    segment->Reopen(next);
+    EXPECT_EQ(segment->GetStructElementOffsets(first), nullptr);
+    auto after = segment->GetStructElementOffsets(second);
+    ASSERT_NE(after, nullptr);
+    EXPECT_NE(after.get(), before.get());
+    EXPECT_EQ(after->GetTotalElementCount(), before->GetTotalElementCount());
+}
+
+TEST(test_chunk_segment, ReopenBackfillsNonnullableStructChildElements) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, false);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[source]"),
+                   source,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   false);
+    FieldId added(source.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   true);
+    segment->Reopen(next);
+    auto offsets = segment->GetStructElementOffsets(added);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets.get(), segment->GetStructElementOffsets(source).get());
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        const auto length = offsets->ElementIDRangeOfRow(i).second -
+                            offsets->ElementIDRangeOfRow(i).first;
+        const auto& row = result->scalars().array_data().data(i);
+        EXPECT_EQ(row.valid_data_size(), length);
+        for (bool valid : row.valid_data()) {
+            EXPECT_FALSE(valid);
+        }
+    }
+}
+
+TEST(test_chunk_segment, ReopenBackfillsNullableStructRows) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == source.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[source]"),
+                   source,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   false);
+    FieldId added(source.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   true);
+    segment->Reopen(next);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
+}
+
+TEST(test_chunk_segment, ReopenKeepsOffsetsAfterDroppingOnlyRealChild) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == source.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto make_schema = [&](int64_t version, bool keep_source, bool add_later) {
+        auto next = std::make_shared<Schema>();
+        next->set_schema_version(version);
+        next->AddField(
+            FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+        next->set_primary_field_id(pk);
+        if (keep_source) {
+            next->AddField(FieldName("items[source]"),
+                           source,
+                           DataType::ARRAY,
+                           DataType::INT32,
+                           true,
+                           false);
+        }
+        FieldId backfilled(source.get() + 1);
+        next->AddField(FieldName("items[backfilled]"),
+                       backfilled,
+                       DataType::ARRAY,
+                       DataType::INT32,
+                       true,
+                       true);
+        if (add_later) {
+            next->AddField(FieldName("items[later]"),
+                           FieldId(backfilled.get() + 1),
+                           DataType::ARRAY,
+                           DataType::INT32,
+                           true,
+                           true);
+        }
+        return next;
+    };
+
+    FieldId backfilled(source.get() + 1);
+    FieldId later(backfilled.get() + 1);
+    segment->Reopen(make_schema(2, true, false));
+    segment->Reopen(make_schema(3, false, false));
+    EXPECT_EQ(segment->GetStructElementOffsets(source), nullptr);
+    auto offsets = segment->GetStructElementOffsets(backfilled);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+
+    segment->Reopen(make_schema(4, false, true));
+    offsets = segment->GetStructElementOffsets(later);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, later, row_ids, 3);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
 }
 
 // #52877: lazy reopen may skip the drop-only schema and see the old and new

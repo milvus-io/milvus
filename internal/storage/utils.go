@@ -1921,6 +1921,16 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 // fillMissingFields fills default values or null values for missing fields in insertData
 func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData) error {
 	batchRows := int64(insertData.GetRowNum())
+	present := make(map[FieldID]struct{}, len(insertData.Data))
+	for id := range insertData.Data {
+		present[id] = struct{}{}
+	}
+	structByChild := make(map[FieldID]*schemapb.StructArrayFieldSchema)
+	for _, st := range schema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structByChild[child.GetFieldID()] = st
+		}
+	}
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, field := range allFields {
@@ -1932,6 +1942,20 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 		_, exists := insertData.Data[field.GetFieldID()]
 
 		if !exists {
+			if st := structByChild[field.GetFieldID()]; st != nil && field.GetElementNullable() {
+				sibling := pickStructSibling(st, func(id int64) bool {
+					_, ok := present[id]
+					return ok
+				})
+				if sibling != nil {
+					fieldData, err := fillMissingStructChild(field, insertData.Data[sibling.GetFieldID()], sibling, int(batchRows))
+					if err != nil {
+						return err
+					}
+					insertData.Data[field.GetFieldID()] = fieldData
+					continue
+				}
+			}
 			// Create default field data if not found
 			fieldData, err := NewFieldData(field.DataType, field, int(batchRows))
 			if err != nil {
@@ -1959,6 +1983,112 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 		}
 	}
 	return nil
+}
+
+func fillMissingStructChild(field *schemapb.FieldSchema, sibling FieldData, siblingSchema *schemapb.FieldSchema, numRows int) (FieldData, error) {
+	if sibling.RowNum() != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s has %d rows, expected %d", siblingSchema.GetName(), sibling.RowNum(), numRows)
+	}
+	if sibling.GetNullable() && len(sibling.GetValidData()) != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s has %d validity entries, expected %d", siblingSchema.GetName(), len(sibling.GetValidData()), numRows)
+	}
+	filled, err := NewFieldData(field.GetDataType(), field, numRows)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < numRows; i++ {
+		value := sibling.GetRow(i)
+		if value == nil {
+			if !sibling.GetNullable() || sibling.GetValidData()[i] {
+				return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s row %d is missing despite valid row", siblingSchema.GetName(), i)
+			}
+			if !field.GetNullable() {
+				return nil, merr.WrapErrDataIntegrityMsg("non-nullable struct sub-field %s has null sibling row %d", field.GetName(), i)
+			}
+			if err := filled.AppendRow(nil); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		var n int
+		switch row := value.(type) {
+		case *schemapb.ScalarField:
+			if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) && row.GetArrayData() == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("nested struct sibling %s row %d has no ArrayData", siblingSchema.GetName(), i)
+			}
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetArrayElementValidData(row))
+			} else if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) {
+				n = len(row.GetArrayData().GetData())
+			} else {
+				n, err = nativeArrayLength(row, siblingSchema.GetElementType())
+				if err != nil {
+					return nil, err
+				}
+			}
+		case *schemapb.VectorField:
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetVectorArrayElementValidData(row))
+			} else {
+				width, widthErr := getArrayOfVectorElementByteWidth(siblingSchema.GetElementType(), int(row.GetDim()))
+				if widthErr != nil {
+					return nil, widthErr
+				}
+				var payloadLength int
+				switch siblingSchema.GetElementType() {
+				case schemapb.DataType_FloatVector:
+					payloadLength = len(row.GetFloatVector().GetData()) * 4
+				case schemapb.DataType_BinaryVector:
+					payloadLength = len(row.GetBinaryVector())
+				case schemapb.DataType_Float16Vector:
+					payloadLength = len(row.GetFloat16Vector())
+				case schemapb.DataType_BFloat16Vector:
+					payloadLength = len(row.GetBfloat16Vector())
+				case schemapb.DataType_Int8Vector:
+					payloadLength = len(row.GetInt8Vector())
+				default:
+					return nil, merr.WrapErrDataIntegrityMsg("unsupported vector struct sibling type %s", siblingSchema.GetElementType())
+				}
+				n, err = validateVectorArrayElementCount(payloadLength, width)
+				if err != nil {
+					return nil, err
+				}
+			}
+		default:
+			return nil, merr.WrapErrDataIntegrityMsg("unsupported struct sibling row type %T", value)
+		}
+		if field.GetDataType() == schemapb.DataType_ArrayOfVector {
+			dim, dimErr := typeutil.GetDim(field)
+			if dimErr != nil {
+				return nil, dimErr
+			}
+			row, rowErr := typeutil.NewEmptyArrayOfVectorRow(dim, field.GetElementType())
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			typeutil.SetVectorArrayElementValidData(row, make([]bool, n))
+			err = filled.AppendRow(row)
+		} else {
+			leaf, _, nested, leafErr := nativeArrayLeaf(field)
+			if leafErr != nil {
+				return nil, leafErr
+			}
+			row := emptyNativeScalar(leaf)
+			if nested {
+				children := make([]*schemapb.ScalarField, n)
+				for j := range children {
+					children[j] = emptyNativeScalar(leaf)
+				}
+				row = &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: leaf, Data: children}}}
+			}
+			typeutil.SetArrayElementValidData(row, make([]bool, n))
+			err = filled.AppendRow(row)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return filled, nil
 }
 
 // sort by field binlogs key

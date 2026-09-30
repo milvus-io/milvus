@@ -82,12 +82,13 @@ NestedArrayFieldMeta(FieldId field_id,
                      bool nullable = true) {
     auto field_type = type;
     field_type.set_nullable(nullable);
+    const bool element_nullable = field_type.array_element().nullable();
     return FieldMeta(FieldName("nested_array"),
                      field_id,
                      DataType::ARRAY,
                      DataType::ARRAY,
                      nullable,
-                     field_type.array_element().nullable(),
+                     element_nullable,
                      std::nullopt,
                      std::string{},
                      LOCAL_FORMAT_RAW,
@@ -1160,7 +1161,10 @@ TEST(ArrayValue, GrowingSegmentRetrievesNullableScalarElements) {
     AssertProtoEqual(*row, result->scalars().array_data().data(0));
     EXPECT_ANY_THROW(segment->chunk_view<ArrayValueView>(
         nullptr, array_field, 0, std::make_pair(0, 1)));
-    EXPECT_ANY_THROW(segment->GetStructElementOffsets(array_field));
+    auto offsets = segment->GetStructElementOffsets(array_field);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetRowCount(), 1);
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 3));
 }
 
 TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
@@ -1742,6 +1746,101 @@ TEST(ColumnarArrayChunk, StructOffsetsBuildPropagatesContextAndReadFailures) {
     EXPECT_FALSE(offsets->IsRowValid(1));
     EXPECT_TRUE(offsets->IsRowValid(2));
     EXPECT_EQ(opens, 2);
+}
+
+TEST(ArrayValue, SealedElementNullableOffsetsUseLogicalLengths) {
+    auto build_offsets = [](const FieldMeta& meta,
+                            const std::shared_ptr<arrow::Array>& rows) {
+        auto chunk = create_chunk(meta, arrow::ArrayVector{rows});
+        std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
+        fields.emplace(meta.get_id(), std::shared_ptr<Chunk>(std::move(chunk)));
+        std::vector<std::unique_ptr<GroupChunk>> chunks;
+        chunks.push_back(std::make_unique<GroupChunk>(std::move(fields)));
+        auto translator = std::make_unique<TestGroupChunkTranslator>(
+            1,
+            std::vector<int64_t>{3},
+            "element_nullable_offsets",
+            std::move(chunks));
+        auto group =
+            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        ProxyChunkColumn column(group, meta.get_id(), meta);
+        return StructElementOffsetsSealed::BuildFromColumn(column, meta, 3);
+    };
+
+    FieldMeta scalar(FieldName("s[scalar]"),
+                     FieldId(100),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     true,
+                     true,
+                     std::nullopt);
+    auto scalar_values = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder scalar_rows(
+        arrow::default_memory_pool(), scalar_values, GetArrowDataType(scalar));
+    ASSERT_TRUE(scalar_rows.Append().ok());
+    ASSERT_TRUE(scalar_values->AppendNull().ok());
+    ASSERT_TRUE(scalar_values->Append(7).ok());
+    ASSERT_TRUE(scalar_values->AppendNull().ok());
+    ASSERT_TRUE(scalar_rows.AppendNull().ok());
+    ASSERT_TRUE(scalar_rows.Append().ok());
+    std::shared_ptr<arrow::Array> scalar_array;
+    ASSERT_TRUE(scalar_rows.Finish(&scalar_array).ok());
+    auto scalar_offsets = build_offsets(scalar, scalar_array);
+    EXPECT_EQ(scalar_offsets->ElementIDRangeOfRow(0), std::make_pair(0, 3));
+    EXPECT_EQ(scalar_offsets->ElementIDRangeOfRow(1), std::make_pair(3, 3));
+    EXPECT_EQ(scalar_offsets->ElementIDRangeOfRow(2), std::make_pair(3, 3));
+
+    auto nested_type =
+        NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
+    nested_type.mutable_array_element()->set_nullable(true);
+    auto nested = NestedArrayFieldMeta(FieldId(101), nested_type);
+    auto nested_values = std::make_shared<arrow::Int32Builder>();
+    auto inner_rows = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        nested_values,
+        arrow::list(arrow::field("item", arrow::int32(), false)));
+    arrow::ListBuilder nested_rows(
+        arrow::default_memory_pool(), inner_rows, GetArrowDataType(nested));
+    ASSERT_TRUE(nested_rows.Append().ok());
+    ASSERT_TRUE(inner_rows->AppendNull().ok());
+    ASSERT_TRUE(inner_rows->Append().ok());
+    ASSERT_TRUE(nested_values->Append(9).ok());
+    ASSERT_TRUE(nested_rows.AppendNull().ok());
+    ASSERT_TRUE(nested_rows.Append().ok());
+    std::shared_ptr<arrow::Array> nested_array;
+    ASSERT_TRUE(nested_rows.Finish(&nested_array).ok());
+    auto nested_offsets = build_offsets(nested, nested_array);
+    EXPECT_EQ(nested_offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
+    EXPECT_EQ(nested_offsets->ElementIDRangeOfRow(1), std::make_pair(2, 2));
+    EXPECT_EQ(nested_offsets->ElementIDRangeOfRow(2), std::make_pair(2, 2));
+
+    FieldMeta vectors(FieldName("s[vectors]"),
+                      FieldId(102),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      2,
+                      knowhere::metric::L2,
+                      true,
+                      true);
+    auto vector_values = std::make_shared<arrow::BinaryBuilder>();
+    arrow::ListBuilder vector_rows(
+        arrow::default_memory_pool(), vector_values, GetArrowDataType(vectors));
+    ASSERT_TRUE(vector_rows.Append().ok());
+    ASSERT_TRUE(vector_values->AppendNull().ok());
+    const float one_vector[2] = {1.0F, 2.0F};
+    ASSERT_TRUE(vector_values
+                    ->Append(reinterpret_cast<const uint8_t*>(one_vector),
+                             sizeof(one_vector))
+                    .ok());
+    ASSERT_TRUE(vector_values->AppendNull().ok());
+    ASSERT_TRUE(vector_rows.AppendNull().ok());
+    ASSERT_TRUE(vector_rows.Append().ok());
+    std::shared_ptr<arrow::Array> vector_array;
+    ASSERT_TRUE(vector_rows.Finish(&vector_array).ok());
+    auto vector_offsets = build_offsets(vectors, vector_array);
+    EXPECT_EQ(vector_offsets->ElementIDRangeOfRow(0), std::make_pair(0, 3));
+    EXPECT_EQ(vector_offsets->ElementIDRangeOfRow(1), std::make_pair(3, 3));
+    EXPECT_EQ(vector_offsets->ElementIDRangeOfRow(2), std::make_pair(3, 3));
 }
 
 TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMemoryChunk) {
