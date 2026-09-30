@@ -568,6 +568,8 @@ class ArrayChunk : public Chunk {
 //         [element_bitmap for all logical elements][compact valid vectors].
 // Null rows have zero logical and physical elements. The offsets exposed by
 // Offsets() count physical vectors, not logical elements.
+// offsets_ and logical_offsets_ are prefix sums computed on the heap when the
+// chunk is constructed; neither vector is stored in the mmap file.
 //
 // Example:
 // Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to

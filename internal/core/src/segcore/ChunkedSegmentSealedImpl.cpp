@@ -3603,10 +3603,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             const auto& field_meta = schema_snapshot->operator[](field_id);
             if (field_meta.is_native_list_array() &&
                 load_info.storage_version < STORAGE_V2) {
-                ThrowInfo(ErrorCode::Unsupported,
-                          "nested ARRAY field {} is supported only by Storage "
-                          "V2/V3",
-                          field_id.get());
+                ThrowInfo(
+                    ErrorCode::Unsupported,
+                    "native-list ARRAY field {} is supported only by Storage "
+                    "V2/V3",
+                    field_id.get());
             }
             std::unique_ptr<cachinglayer::Translator<milvus::Chunk>>
                 translator =
@@ -5642,10 +5643,11 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         }
         case DataType::ARRAY: {
             if (field_meta.is_native_list_array()) {
-                ThrowInfo(ErrorCode::Unsupported,
-                          "raw Array* API does not support nested ARRAY field "
-                          "{}; use protobuf retrieve output",
-                          field_id.get());
+                ThrowInfo(
+                    ErrorCode::Unsupported,
+                    "raw Array* API does not support native-list ARRAY field "
+                    "{}; use protobuf retrieve output",
+                    field_id.get());
             }
             // dst must have at least count elements; the callback's index
             // parameter is guaranteed to be in [0, count)

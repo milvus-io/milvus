@@ -2034,7 +2034,8 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         }
 
         const auto physical_offset = physical_offsets[next_physical++];
-        const auto& vector_array = (*vector_array_vec)[physical_offset];
+        const auto vector_array =
+            vector_array_vec->view_physical_element(physical_offset);
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
         }
