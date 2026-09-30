@@ -283,6 +283,13 @@ QueryViews reacquire their persisted DataVersion; a genuinely missing version
 enters terminal cleanup. Production runtime wiring must complete this recovery
 before enabling DataView GC; that wiring is outside this PR.
 
+Both `Get` and `Deref` can wait on the per-Collection mutation lock, which may
+be held across persistence. QueryView consumers must call them without holding
+a shard-manager lock. AddPreparing revalidates manager lifecycle and version
+ordering after acquiring the reference; removal detaches reference ownership
+under the manager lock and dereferences after unlocking. The DataView mutation
+and GC serialization contract is unchanged.
+
 ### View consumer interfaces
 
 The current implementation exposes two consumer contracts:

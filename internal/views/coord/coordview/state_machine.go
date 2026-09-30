@@ -150,10 +150,17 @@ func (sm *CoordQueryViewStateMachine) Version() qviews.QueryViewVersion {
 // Idempotent: each acquirer must release exactly once, so a second call is a
 // no-op.
 func (sm *CoordQueryViewStateMachine) ReleaseRef() {
-	if sm.ref != nil {
-		sm.ref.Deref()
-		sm.ref = nil
+	if ref := sm.takeRef(); ref != nil {
+		ref.Deref()
 	}
+}
+
+// takeRef transfers ownership to the caller. Managers detach under their lock
+// and Deref after unlocking: the provider may wait on a collection mutation.
+func (sm *CoordQueryViewStateMachine) takeRef() qviews.DataViewRef {
+	ref := sm.ref
+	sm.ref = nil
+	return ref
 }
 
 // Ref returns the attached DataView reference, or nil when the DataView

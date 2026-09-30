@@ -771,6 +771,15 @@ refactor permits temporary stale plans that subsequent reconciliation corrects;
 stronger serialization of desired-state writes against plan acceptance is
 outside scope.
 
+Apply does not hold a registry-wide Begin/Commit window: exact-version reference
+acquisition may wait for a DataView collection mutation that is doing I/O.
+Each accepted action still submits an ordered shard event, including its old
+view teardown and replacement together. The flush scheduler coalesces pending
+events and preserves persistence-before-sync ordering. Another shard's events
+can therefore flush while an acquisition waits. This preserves batch planning;
+it does not promise that the single reconcile loop itself never waits on the
+reference provider.
+
 ## 5. Event Processing Examples
 
 ### 5.1 Node Crash Recovery

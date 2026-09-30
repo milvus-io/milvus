@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -287,4 +290,66 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 	require.Nil(t, first.manager.Stats().PreparingVersion)
 	require.NotNil(t, second.manager.Stats().PreparingVersion)
 	require.Empty(t, attempts)
+}
+
+func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.T) {
+	flushed := make(chan struct{}, 1)
+	registry := emptyRegistry(t, func(context.Context, syncer.SyncGroup) error {
+		select {
+		case flushed <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	blockedShard, otherShard := cacheShard(1, 10), cacheShard(1, 11)
+	blockedManager := registry.Ensure(blockedShard)
+	started, unblock := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(unblock) }) }
+	defer release()
+	var prepare func(*coordview.ShardViewManager, context.Context, *qviews.QueryViewAtCoordBuilder) error
+	patch := mockey.Mock((*coordview.ShardViewManager).AddPreparing).Origin(&prepare).To(func(manager *coordview.ShardViewManager, ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
+		if manager == blockedManager {
+			// Emulate the provider wait inside AddPreparing. The real provider
+			// and manager lock behavior are covered in coordview's tests.
+			close(started)
+			<-unblock
+		}
+		return prepare(manager, ctx, builder)
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	controller := NewDefaultBalancer(nil, registry, nil)
+	// Use a DataVersion retained by the real registry fixture.
+	builder := qviews.NewQueryViewAtCoordBuilder(blockedShard.ReplicaID, &viewpb.DataViewOfCollection{
+		CollectionId: 1,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1},
+		Shards:       []*viewpb.DataViewOfShard{{Vchannel: blockedShard.VChannel}},
+	}, blockedShard.VChannel)
+	done := make(chan error, 1)
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		done <- controller.apply(t.Context(), &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{blockedShard: builder}})
+	})
+	defer func() {
+		release()
+		workers.Wait()
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply did not reach reference acquisition")
+	}
+	addShardWithPreparingView(t, registry, otherShard, map[int64]map[int64][]int64{1: {100: {101}}})
+	select {
+	case <-flushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("one blocked acquisition held another shard's flush")
+	}
+	release()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply did not finish after reference acquisition resumed")
+	}
 }

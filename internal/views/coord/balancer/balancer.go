@@ -196,8 +196,9 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		return nil
 	}
 	var errs []error
-	batch := b.viewRegistry.Begin()
-	defer batch.Commit()
+	// Planning is batched, but applying a view may wait for its DataView ref.
+	// Do not hold a registry-wide flush window across that wait. Each manager
+	// submits one ordered shard event; the scheduler still coalesces pending work.
 	for _, shardID := range plan.Releases {
 		mgr := b.viewRegistry.Get(shardID)
 		if mgr == nil {

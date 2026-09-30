@@ -321,15 +321,19 @@ teardown can unload them. ShardStats now publishes per-view assignments/rows and
 evidence separately from merged segment statistics. Concrete node-side sharing
 remains an injected resource-manager contract.
 
-1. Validate the new DataVersion against all resident views.
-2. Preempt an existing Preparing or Ready view by entering Unrecoverable.
-3. Advance Unrecoverable views to Dropping so their Dropped sync can be batched
-   with the replacement Preparing sync.
-4. Assign `max(QueryVersion for the same DataVersion) + 1`, or 1 when the
-   DataVersion is new.
-5. Build and register the new state machine.
-6. Update in-memory pointers and stats.
-7. Emit and submit one shard event, then unlock.
+1. Under the manager lock, reject a released/closed manager or a DataVersion
+   older than any resident view.
+2. Unlock, build the view, and acquire its exact DataView reference. Acquisition
+   may wait for a collection mutation that is performing I/O; manager reads,
+   node callbacks and release must remain available during that wait.
+3. Re-lock and revalidate lifecycle and DataVersion, then check cancellation.
+   A rejected acquisition releases its reference after unlocking. A failed
+   first preparation retires the manager only if it is still empty.
+4. Assign `max(QueryVersion for the same DataVersion) + 1`, or 1 for a new
+   DataVersion, using the current state after acquisition.
+5. Preempt an existing Preparing/Ready view and advance Unrecoverable views to
+   Dropping. Register the replacement and collect both effects in one event.
+6. Update pointers and stats, submit the event under the lock, then unlock.
 
 ### 4.8 RequestRelease
 
@@ -356,7 +360,11 @@ recovery completes. Recovered Unrecoverable views with valid DataView references
 remain retained until replacement or explicit release; only views whose exact
 DataView is missing start terminal cleanup. Recovery failure first cancels and
 waits for flush work, then disables late manager callbacks and releases refs
-under each manager lock.
+by detaching ownership under each manager lock and calling `Deref` after
+unlocking. Normal durable removal uses the same detach-then-release pattern.
+The provider's `Deref` may wait on a collection mutation, so it must not run
+while holding the shard-manager lock. Registry removal and stats publication
+complete before that wait; the extra reference only delays DataView GC.
 
 On shutdown, the owner closes the Registry and its flush scheduler, then closes
 `ReliableSyncer`. This prevents a flush task

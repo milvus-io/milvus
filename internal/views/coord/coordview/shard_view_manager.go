@@ -147,7 +147,7 @@ func RecoverShardViewManager(
 		// recovery; error = provider failure -> abort recovery.
 		ref, err := m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), version.DataVersion.IntoProto())
 		if err != nil {
-			m.releaseAllRefs()
+			m.abortRecovery()
 			return nil, err
 		}
 
@@ -399,41 +399,46 @@ func segmentSet(segments []int64) map[int64]bool {
 //
 // Validation: The new DataVersion must not be lower than any existing view's DataVersion.
 func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
-	m.mu.Lock()
-	if m.releaseRequested || m.closed {
-		m.mu.Unlock()
-		return merr.WrapErrServiceUnavailableMsg("shard %s is being released; retry with its current manager", m.shardID.String())
-	}
-
 	newDV := builder.DataVersion()
-
-	// Validate no DataVersion rollback.
-	if err := m.validateDataVersionLocked(newDV); err != nil {
-		m.mu.Unlock()
+	m.mu.Lock()
+	err := m.validatePreparingLocked(newDV)
+	m.mu.Unlock()
+	if err != nil {
 		return err
 	}
 
-	// Assign and build the new view before mutating any existing state. The
-	// DataView ref acquisition is the linearization point against
-	// collection-scoped GC; the acquired ref is bound to the state machine
-	// at construction. A snapshot used for planning does not itself pin the
-	// version, so GC may have collected it before this acquisition.
-	qv := m.nextQueryVersion(newDV)
-	builder.SetQueryVersion(qv)
+	// Get pins the exact version against GC, but may wait for collection I/O.
+	// Keep both construction and acquisition outside the manager lock so node
+	// callbacks, Stats and RequestRelease can continue while it waits.
 	view := builder.Build()
 	var ref qviews.DataViewRef
 	if m.dataViewRefs != nil {
-		var err error
 		ref, err = m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), newDV.IntoProto())
-		if err != nil {
-			m.releaseEmptyAfterFailedPrepareLocked()
-			return err
-		}
-		if ref == nil {
-			m.releaseEmptyAfterFailedPrepareLocked()
-			return merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
+		if err == nil && ref == nil {
+			err = merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
 		}
 	}
+	m.mu.Lock()
+	if err != nil {
+		m.releaseEmptyAfterFailedPrepareLocked()
+		return err
+	}
+	// The manager may have been retired, or a newer view accepted, during Get.
+	// QueryVersion must also be assigned from the state observed after Get.
+	err = m.validatePreparingLocked(newDV)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		m.releaseEmptyAfterFailedPrepareLocked()
+		if ref != nil {
+			ref.Deref()
+		}
+		return err
+	}
+	qv := m.nextQueryVersion(newDV)
+	builder.SetQueryVersion(qv)
+	view.Meta.Version.QueryVersion = qv
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
 
 	// Preempt existing Preparing/Ready view.
@@ -716,7 +721,7 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 		return
 	}
 	m.removeView(target)
-	target.ReleaseRef()
+	ref := target.takeRef()
 	m.publishStatsLocked()
 	empty := m.releaseRequested && len(m.views) == 0
 	onEmpty := m.onReleasedEmpty
@@ -724,6 +729,9 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 
 	if empty && onEmpty != nil {
 		onEmpty(m.shardID, m)
+	}
+	if ref != nil {
+		ref.Deref()
 	}
 }
 
@@ -734,14 +742,6 @@ func (m *ShardViewManager) hasPendingRemoval(target *CoordQueryViewStateMachine)
 		}
 	}
 	return false
-}
-
-// releaseAllRefs releases every resident QueryView's DataView ref (recovery
-// abort path). Must be called with m.mu held.
-func (m *ShardViewManager) releaseAllRefs() {
-	for _, sm := range m.views {
-		sm.ReleaseRef()
-	}
 }
 
 func (m *ShardViewManager) prepareTerminalRecovery(sm *CoordQueryViewStateMachine) {
@@ -764,6 +764,14 @@ func (m *ShardViewManager) validateDataVersionLocked(newDV qviews.DataVersion) e
 		}
 	}
 	return nil
+}
+
+// validatePreparingLocked must be checked again after an unlocked acquisition.
+func (m *ShardViewManager) validatePreparingLocked(newDV qviews.DataVersion) error {
+	if m.releaseRequested || m.closed {
+		return merr.WrapErrServiceUnavailableMsg("shard %s is being released; retry with its current manager", m.shardID.String())
+	}
+	return m.validateDataVersionLocked(newDV)
 }
 
 // nextQueryVersion computes the next QueryVersion for a given DataVersion.
@@ -798,7 +806,15 @@ func (m *ShardViewManager) releaseEmptyAfterFailedPrepareLocked() {
 // abortRecovery prevents late sync callbacks from touching a failed instance.
 func (m *ShardViewManager) abortRecovery() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.closed = true
-	m.releaseAllRefs()
+	refs := make([]qviews.DataViewRef, 0, len(m.views))
+	for _, sm := range m.views {
+		if ref := sm.takeRef(); ref != nil {
+			refs = append(refs, ref)
+		}
+	}
+	m.mu.Unlock()
+	for _, ref := range refs {
+		ref.Deref()
+	}
 }
