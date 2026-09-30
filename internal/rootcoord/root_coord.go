@@ -271,6 +271,9 @@ func (c *Core) ServerExist(serverID int64) bool {
 
 func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 	c.proxyClientManager.SetProxyClients(sessions)
+	if len(sessions) > 0 {
+		c.invalidateProxyRLSCache(0)
+	}
 	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
@@ -278,8 +281,28 @@ func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 
 func (c *Core) addProxyClient(session *sessionutil.Session) {
 	c.proxyClientManager.AddProxyClient(session)
+	c.invalidateProxyRLSCache(session.GetServerID())
 	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
+	}
+}
+
+func (c *Core) invalidateProxyRLSCache(proxyID int64) {
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	req := &proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{Properties: map[string]string{common.RLSClearAllCacheKey: "true"}},
+	}
+	var opts []proxyutil.ExpireCacheOpt
+	if proxyID != 0 {
+		opts = append(opts, proxyutil.SetTargetProxyID(proxyID))
+	}
+	if err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, req, opts...); err != nil {
+		mlog.Warn(ctx, "failed to invalidate RLS cache on proxy registration",
+			mlog.FieldNodeID(proxyID),
+			mlog.Err(err))
 	}
 }
 

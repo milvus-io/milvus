@@ -19,8 +19,8 @@ passes it to Milvus. Policies may reference the principal and its tags.
 
 RLS fails closed when required metadata, a required tag, or an applicable
 permissive policy is unavailable. Sub-search principal overrides, atomic tag
-upsert-and-delete in one request, bulk import enforcement, and external
-collection refresh enforcement are outside the initial scope.
+upsert-and-delete in one request, and external collection refresh enforcement
+are outside the initial scope.
 
 ## Collection Switch
 
@@ -33,10 +33,11 @@ collection and invalidates Proxy RLS state. These synchronization steps are
 performed by Milvus as part of the property transition; users do not manage
 Proxy caches directly.
 
-Every row-bearing request on an enabled collection must provide a non-blank
-top-level `rls_principal` or request `skip_rls=true`. Sub-searches inherit the
-top-level decision. A skip is allowed only when authorization is disabled or
-the authenticated Milvus user has `SkipRLS` on the collection.
+Every row-bearing request on an enabled collection must provide request-level
+RLS context. Most APIs use top-level `rls_principal` and `skip_rls`; bulk import
+carries the same values in its existing `options` map. Sub-searches inherit the
+top-level decision. A skip is allowed only when authorization is disabled or the
+authenticated Milvus user has `SkipRLS` on the collection.
 
 `rls.force=true` rejects `skip_rls=true` and is meaningful only while RLS is
 enabled.
@@ -155,7 +156,9 @@ request plan with logical AND. For insert and the written side of upsert, Proxy
 compiles the restricted `check_expr` into the same plan expression nodes and
 evaluates those nodes directly against each input row's `FieldData`; this is a
 small RLS evaluator, not a second general SQL engine. Existing rows selected by
-upsert must also pass `using_expr`.
+upsert must also pass `using_expr`. Bulk import uses the insert semantics: its
+job persists the applicable `check_expr`, and DataNode validates every imported
+batch before routing or writing it.
 
 Local checks use SQL three-valued logic consistent with Segcore filtering.
 Comparisons involving NULL produce UNKNOWN, and only a final TRUE admits a row.
@@ -241,6 +244,8 @@ recovery validation remains follow-up work.
 There is no previously released RLS metadata to migrate. RLS may be enabled
 only after all serving Proxy and RootCoord instances understand its API, WAL
 messages, dynamic property transition, and cache invalidation contract. A
+cluster-wide version gate rejects bulk imports into RLS-enabled collections
+until DataCoord and DataNode also support the persisted import predicate. A
 cluster with enabled collections must not roll back to a version that cannot
 enforce RLS.
 

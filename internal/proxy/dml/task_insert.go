@@ -233,7 +233,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, it.rlsPrincipal, "insert")
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, it.rlsPrincipal, "insert")
 	if err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if enforceRLS {
-		if err := rls.ValidateRowsByPredicate(ctx, it.insertMsg.GetFieldsData(), int(it.insertMsg.NRows()),
+		if err := rlsutil.ValidateRowsByPredicate(ctx, it.insertMsg.GetFieldsData(), int(it.insertMsg.NRows()),
 			rlsCheckPredicate, "insert", "check"); err != nil {
 			log.Warn(ctx, "RLS check expression validation failed for insert", mlog.Err(err))
 			return err

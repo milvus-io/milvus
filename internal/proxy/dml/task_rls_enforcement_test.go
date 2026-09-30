@@ -583,6 +583,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		const collectionID = int64(991006)
 		ctx := context.Background()
 		task := newTask(collectionID)
+		task.partitionKeyMode = true
 
 		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
 			PolicyName: "upsert_check",
@@ -623,9 +624,33 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		require.Equal(t, []int64{1}, task.deletePKs.GetIntId().GetData())
 	})
 
+	mockey.PatchConvey("partition-key upsert rejects a non-trivial using policy for existing rows", t, func() {
+		const collectionID = int64(991012)
+		task := newTask(collectionID)
+		task.partitionKeyMode = true
+		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
+			PolicyName: "upsert_partition_key",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+			UsingExpr:  "id == 1",
+			CheckExpr:  "true",
+		}})
+		resolvePredicates(task)
+		existingPK := proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)
+		existingPK.GetScalars().GetLongData().Data = []int64{1}
+		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{existingPK},
+		}, segcore.StorageCost{}, nil).Build()
+
+		err := task.prepareUpsert(context.Background())
+		require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	})
+
 	mockey.PatchConvey("always-true using policy preserves direct full upsert", t, func() {
 		const collectionID = int64(991007)
 		task := newTask(collectionID)
+		task.partitionKeyMode = true
 		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
 			PolicyName: "upsert_allow_all",
 			PolicyType: rlsutil.PolicyTypePermissive,

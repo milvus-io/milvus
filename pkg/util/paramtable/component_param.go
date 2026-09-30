@@ -216,6 +216,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.ProxyCfg.RLSImportEnforcementEnabled,
 	}
 }
 
@@ -2627,6 +2628,7 @@ type proxyConfig struct {
 	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
 	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
 	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
+	RLSImportEnforcementEnabled       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -3389,6 +3391,26 @@ Disabled if the value is less or equal to 0.`,
 		Formatter:    positiveProxyLimitFormatter("3600"),
 	}
 	p.RLSMetaRefreshInterval.Init(base.mgr)
+
+	// Import RLS spans Proxy, DataCoord, and DataNode. Keep it fail-closed until
+	// every live component is new enough to preserve and enforce the predicate.
+	p.RLSImportEnforcementEnabled = ParamItem{
+		Key:          "proxy.rls.importEnforcementEnabled",
+		Version:      "3.1.0-beta",
+		DefaultValue: "auto",
+		Export:       false,
+		Doc: "Whether RLS enforcement is available for bulk import. auto: enable after every live " +
+			"cluster component reaches the gate version; false: reject RLS-enforced imports; true: " +
+			"force enable and bypass the mixed-version safety gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0-beta",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.RLSImportEnforcementEnabled.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",

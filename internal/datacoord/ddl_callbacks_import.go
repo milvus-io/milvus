@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -40,9 +41,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
+const (
+	importRLSContextVersionProperty = "_irv"
+	importRLSContextVersion         = "1"
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
+	options := funcutil.Map2KeyValuePair(body.GetOptions())
+	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
+	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
+	var rlsPrincipal string
+	var skipRLS bool
+	var err error
+	if trustedRLSContext {
+		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
+	}
+	if !trustedRLSContext || err != nil {
+		// Import options predate RLS and were client-controlled. Only a message
+		// marked after DataCoord sanitizes the options may carry authorized RLS
+		// context. Malformed marked context also fails closed without wedging the
+		// indefinitely retried ACK callback.
+		if err != nil {
+			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
+		}
+		rlsPrincipal, skipRLS = "", false
+	}
+	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
+		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
+	})
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.
@@ -81,9 +109,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				Paths: file.GetPaths(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+		Options:       options,
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
+		RlsPrincipal:  rlsPrincipal,
+		SkipRls:       skipRLS,
 	}, result.Message.Header().GetCommitByCoordinator())
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -256,15 +286,15 @@ func jobIDFromDuplicatedBroadcast(ctx context.Context, msg message.BroadcastMuta
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
-	collectionName string,
 	collectionID int64,
 	partitionIDs []int64,
 	files []*internalpb.ImportFile,
 	options []*commonpb.KeyValuePair,
-	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
+	rlsPrincipal string,
+	skipRLS bool,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
@@ -301,6 +331,22 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
+	schema := coll.GetSchema()
+	if schema == nil || schema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !common.IsSystemField(field.GetFieldID())
+	})
+	msgOptions := funcutil.KeyValuePair2Map(options)
+	delete(msgOptions, importutilv2.RLSPrincipal)
+	delete(msgOptions, importutilv2.SkipRLS)
+	if rlsPrincipal != "" {
+		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
+	}
+	if skipRLS {
+		msgOptions[importutilv2.SkipRLS] = "true"
+	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
@@ -310,14 +356,15 @@ func (s *Server) broadcastImport(ctx context.Context,
 				Timestamp: 0,
 			},
 			DbName:         coll.DbName,
-			CollectionName: collectionName,
+			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
+			Options:        msgOptions,
 			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
+			Schema:         schema,
 			JobID:          jobID,
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off
 		// the collection it was bound to: a retry naming the renamed collection still

@@ -35,10 +35,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -79,7 +79,7 @@ func TestQueryTaskPreservesRawTimestamptzForInternalRLS(t *testing.T) {
 	require.NoError(t, err)
 	predicate, err := planparserv2.ParseExpr(helper, `ts == ISO '2025-01-01 00:00:00'`, nil)
 	require.NoError(t, err)
-	require.NoError(t, rls.ValidateRowsByPredicate(context.Background(), []*schemapb.FieldData{fieldData}, 1, predicate, "upsert", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(context.Background(), []*schemapb.FieldData{fieldData}, 1, predicate, "upsert", "using"))
 }
 
 // Exercise real preprocessing: Strong and ordinary queries honor schema fences,
