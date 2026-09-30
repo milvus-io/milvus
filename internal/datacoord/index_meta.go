@@ -722,7 +722,6 @@ func (m *indexMeta) AddSegmentIndexFromManifest(ctx context.Context, segIndex *m
 }
 
 func (m *indexMeta) addSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex, persist bool) error {
-	segIndex = model.CloneSegmentIndex(segIndex)
 	buildID := segIndex.BuildID
 
 	m.keyLock.Lock(buildID)

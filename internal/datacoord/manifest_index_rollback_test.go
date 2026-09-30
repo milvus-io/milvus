@@ -279,6 +279,9 @@ func TestManifestIndexRollbackRestoresSupersededBuilds(t *testing.T) {
 	replacement.BuildID = 10000 // sorts before 8100 as an etcd key, but is newer
 	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, replacement))
 	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, replacement.BuildID))
+	replacement, ok := m.indexMeta.GetIndexJob(replacement.BuildID)
+	require.True(t, ok)
+	require.True(t, replacement.ManifestPublished)
 	// Model real index_id replacement (the shared fake appends instead).
 	current := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	entries := store.backfillEntriesAt(current)

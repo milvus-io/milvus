@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -256,11 +257,15 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	inspector := newIndexInspector(ctx, nil, meta, scheduler, alloc, handler, storage, versionManager)
 	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	queued := task.NewGlobalTaskScheduler(ctx, nil)
+	t.Cleanup(queued.Stop)
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled task.Task) {
 		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
+		queued.Enqueue(scheduled)
 	}).Return()
 
 	assert.NoError(t, inspector.createIndexForSegment(ctx, segment, 5))
+	assert.Equal(t, 1, queued.GetPendingTaskCount(taskcommon.Index))
 }
 
 func TestIndexInspector_isExternalCollection(t *testing.T) {
