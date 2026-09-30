@@ -393,7 +393,7 @@ func (m *BM25Stats) Clone() *BM25Stats {
 }
 
 func (m *BM25Stats) Serialize() ([]byte, error) {
-	buffer := bytes.NewBuffer(make([]byte, 0, len(m.rowsWithToken)*8+20))
+	buffer := bytes.NewBuffer(make([]byte, 0, bm25StatsHeaderSize+len(m.rowsWithToken)*bm25StatsEntrySize))
 
 	if err := binary.Write(buffer, common.Endian, BM25VERSION); err != nil {
 		return nil, err
