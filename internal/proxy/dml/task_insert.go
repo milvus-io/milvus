@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -8,15 +8,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,10 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type insertTask struct {
+type InsertTask struct {
 	baseTask
 	// req *milvuspb.InsertRequest
 	Condition
+	node      taskmodel.TaskNode
 	insertMsg *BaseInsertTask
 	ctx       context.Context
 
@@ -46,41 +51,88 @@ type insertTask struct {
 	schemaVersion   int32
 }
 
-// TraceCtx returns insertTask context
-func (it *insertTask) TraceCtx() context.Context {
+// NewInsertTask constructs an insert task. It takes the host node and the
+// request plus the allocator input that is not part of the taskmodel.TaskNode
+// contract, so the root package does not reach into private fields.
+func NewInsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.InsertRequest, idAllocator *allocator.IDAllocator) *InsertTask {
+	return &InsertTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
+		node:      node,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		insertMsg: &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: request.HashKeys,
+			},
+			InsertRequest: &msgpb.InsertRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				DbName:         request.GetDbName(),
+				CollectionName: request.CollectionName,
+				PartitionName:  request.PartitionName,
+				FieldsData:     request.FieldsData,
+				NumRows:        uint64(request.NumRows),
+				Version:        msgpb.InsertDataVersion_ColumnBased,
+				Namespace:      request.Namespace,
+			},
+		},
+		idAllocator:     idAllocator,
+		chMgr:           node.ChMgr(),
+		schemaTimestamp: request.SchemaTimestamp,
+		rlsPrincipal:    request.GetRlsPrincipal(),
+		skipRLS:         request.GetSkipRls(),
+	}
+}
+
+// Result returns the mutation result after execution.
+func (it *InsertTask) Result() *milvuspb.MutationResult {
+	return it.result
+}
+
+// InsertMsg returns the underlying insert message.
+func (it *InsertTask) InsertMsg() *msgstream.InsertMsg {
+	return it.insertMsg
+}
+
+// TraceCtx returns InsertTask context
+func (it *InsertTask) TraceCtx() context.Context {
 	return it.ctx
 }
 
-func (it *insertTask) ID() UniqueID {
+func (it *InsertTask) ID() UniqueID {
 	return it.insertMsg.Base.MsgID
 }
 
-func (it *insertTask) SetID(uid UniqueID) {
+func (it *InsertTask) SetID(uid UniqueID) {
 	it.insertMsg.Base.MsgID = uid
 }
 
-func (it *insertTask) Name() string {
-	return InsertTaskName
+func (it *InsertTask) Name() string {
+	return taskmodel.InsertTaskName
 }
 
-func (it *insertTask) Type() commonpb.MsgType {
+func (it *InsertTask) Type() commonpb.MsgType {
 	return it.insertMsg.Base.MsgType
 }
 
-func (it *insertTask) BeginTs() Timestamp {
+func (it *InsertTask) BeginTs() Timestamp {
 	return it.insertMsg.BeginTimestamp
 }
 
-func (it *insertTask) SetTs(ts Timestamp) {
+func (it *InsertTask) SetTs(ts Timestamp) {
 	it.insertMsg.BeginTimestamp = ts
 	it.insertMsg.EndTimestamp = ts
 }
 
-func (it *insertTask) EndTs() Timestamp {
+func (it *InsertTask) EndTs() Timestamp {
 	return it.insertMsg.EndTimestamp
 }
 
-func (it *insertTask) SetChannels() error {
+func (it *InsertTask) SetChannels() error {
 	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), it.insertMsg.CollectionName)
 	if err != nil {
 		return err
@@ -93,11 +145,11 @@ func (it *insertTask) SetChannels() error {
 	return nil
 }
 
-func (it *insertTask) GetChannels() []pChan {
+func (it *InsertTask) GetChannels() []pChan {
 	return it.pChannels
 }
 
-func (it *insertTask) OnEnqueue() error {
+func (it *InsertTask) OnEnqueue() error {
 	if it.insertMsg.Base == nil {
 		it.insertMsg.Base = commonpbutil.NewMsgBase()
 	}
@@ -106,7 +158,7 @@ func (it *insertTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *insertTask) PreExecute(ctx context.Context) error {
+func (it *InsertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()
 
@@ -120,12 +172,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.insertMsg.CollectionName
 	log := mlog.With(mlog.String("collectionName", collectionName))
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := dql.ValidateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
 
-	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
+	maxInsertSize := paramtable.Get().QuotaConfig.MaxInsertSize.GetAsInt()
 	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
 		log.Warn(ctx, "insert request size exceeds maxInsertSize",
 			mlog.Int("request size", it.insertMsg.Size()), mlog.Int("maxInsertSize", maxInsertSize))
@@ -154,7 +206,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID
 	if rlsEnabled && it.skipRLS {
-		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
+		rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
 			canonicalDBName, collectionName, "insert")
 		if err != nil {
 			return err
@@ -180,7 +232,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	schema := colInfo.Schema
 	it.schema = schema.CollectionSchema
 	it.schemaVersion = schema.Version
-	if err := validateTextStorageV3Enabled(it.schema); err != nil {
+	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {
 		return err
 	}
 	var rlsCheckPredicate *planpb.Expr
@@ -197,11 +249,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	rowNums := uint32(it.insertMsg.NRows())
-	// set insertTask.rowIDs
+	// set InsertTask.rowIDs
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	tr := timerecord.NewTimeRecorder("applyPK")
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	clusterID := paramtable.Get().CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, AllocErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if AllocErr != nil {
@@ -218,7 +270,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		offset := i - rowIDBegin
 		it.insertMsg.RowIDs[offset] = i
 	}
-	// set insertTask.timeStamps
+	// set InsertTask.timeStamps
 	rowNum := it.insertMsg.NRows()
 	it.insertMsg.Timestamps = make([]uint64, rowNum)
 	for index := range it.insertMsg.Timestamps {
@@ -279,7 +331,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Info(ctx, "fill field properties failed", mlog.Err(err))
 		return err
 	}
-	err = NormalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
+	err = dql.NormalizeFP32ToFP16BF16VectorFieldData(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info(ctx, "normalize fp32 to fp16/bf16 vector field data failed", mlog.Err(err))
 		return err
@@ -306,7 +358,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 			it.insertMsg.PartitionName = partitionTag
 		}
 
-		if err := validatePartitionTag(partitionTag, true); err != nil {
+		if err := dql.ValidatePartitionTag(partitionTag, true); err != nil {
 			log.Warn(ctx, "valid partition name failed", mlog.String("partition name", partitionTag), mlog.Err(err))
 			return err
 		}
@@ -330,6 +382,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *insertTask) PostExecute(ctx context.Context) error {
+func (it *InsertTask) PostExecute(ctx context.Context) error {
 	return nil
 }
