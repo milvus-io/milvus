@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -326,9 +327,17 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		return err
 	}
 	if existRowNum := typeutil.GetSizeOfIDs(existIDs); existRowNum > 0 && it.rlsEnabled {
-		if err := rls.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, it.rlsUsingPredicate, "upsert", "using"); err != nil {
+		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, it.rlsUsingPredicate, "upsert", "using"); err != nil {
 			log.Warn("RLS using expression validation failed for upsert", zap.Error(err))
 			return err
+		}
+		if it.partitionKeyMode && it.rlsUsingPredicate != nil {
+			// Query reduction keeps one row per PK, while partition-key upsert
+			// deletes that PK from every physical partition. Until internal
+			// retrieval preserves every (partition, PK) copy, a non-trivial USING
+			// predicate cannot authorize all rows that the delete will affect.
+			return merr.WrapErrOperationNotSupportedMsg(
+				"RLS upsert with a USING predicate is not supported for partition-key collections")
 		}
 		if partialUpdate && it.rlsUsingPredicate != nil {
 			// Internal RLS evaluation keeps TIMESTAMPTZ values in their raw int64
@@ -714,7 +723,7 @@ func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryFiel
 
 	outputFields := []string{primaryField.GetName()}
 	seen := map[int64]struct{}{primaryField.GetFieldID(): {}}
-	for _, fieldID := range rls.ReferencedFieldIDs(usingExpr) {
+	for _, fieldID := range rlsutil.ReferencedFieldIDs(usingExpr) {
 		if _, ok := seen[fieldID]; ok {
 			continue
 		}
@@ -733,7 +742,7 @@ func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryFiel
 // request-local CHECK predicate.
 func (it *upsertTask) prepareUpsert(ctx context.Context) error {
 	if it.rlsEnabled {
-		if err := rls.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
+		if err := rlsutil.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
 			return err
 		}
 	}
@@ -1561,7 +1570,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if it.rlsEnabled {
-		if err := rls.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
+		if err := rlsutil.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
 			it.rlsCheckPredicate, "upsert", "check"); err != nil {
 			log.Warn("RLS check expression validation failed for upsert", zap.Error(err))
 			return err
@@ -1669,7 +1678,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := rls.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
+	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
 		return err
 	}
 	if it.schemaTimestamp != 0 {

@@ -49,8 +49,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -2086,6 +2088,34 @@ func (s *RootCoordSuite) TestRestore() {
 		withTsoAllocator(tsoAllocator),
 		withMeta(meta))
 	core.restore(context.Background())
+}
+
+func TestCoreInvalidateRLSCacheOnProxySession(t *testing.T) {
+	clearRequest := mock.MatchedBy(func(req *proxypb.InvalidateCollMetaCacheRequest) bool {
+		return req.GetBase().GetProperties()[common.RLSClearAllCacheKey] == "true"
+	})
+
+	t.Run("add proxy", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
+
+		core := newTestCore()
+		core.proxyClientManager = proxyManager
+		core.addProxyClient(session)
+	})
+
+	t.Run("set proxies", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		sessions := []*sessionutil.Session{{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}}
+		proxyManager.EXPECT().SetProxyClients(sessions)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest).Return(nil)
+
+		core := newTestCore()
+		core.proxyClientManager = proxyManager
+		core.setProxyClients(sessions)
+	})
 }
 
 func TestRootCoordSuite(t *testing.T) {

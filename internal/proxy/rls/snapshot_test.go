@@ -293,18 +293,29 @@ func TestMetadataRefreshErrorClassification(t *testing.T) {
 		status.Error(codes.DeadlineExceeded, "deadline exceeded"),
 		status.Error(codes.Unavailable, "unavailable"),
 	} {
-		wrapped := wrapMetadataRefreshError(err, "refresh failed")
+		wrapped := rlsutil.WrapMetadataRefreshError(err, "refresh failed")
 		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
 		require.True(t, merr.IsRetryableErr(wrapped))
 	}
 
 	typed := merr.WrapErrDataIntegrity(context.DeadlineExceeded, "corrupted metadata")
-	wrapped := wrapMetadataRefreshError(typed, "refresh failed")
+	wrapped := rlsutil.WrapMetadataRefreshError(typed, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrDataIntegrity)
 	require.False(t, merr.IsRetryableErr(wrapped))
 
+	for _, transient := range []error{
+		merr.WrapErrIoFailedMsg("etcd read failed"),
+		merr.WrapErrNodeNotFound(0, "mixcoord is unavailable"),
+		merr.WrapErrNodeNotMatch(1, 2, "mixcoord leader changed"),
+	} {
+		wrapped = rlsutil.WrapMetadataRefreshError(transient, "refresh failed")
+		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, wrapped, transient)
+		require.True(t, merr.IsRetryableErr(wrapped))
+	}
+
 	raw := errors.New("raw dependency failure")
-	wrapped = wrapMetadataRefreshError(raw, "refresh failed")
+	wrapped = rlsutil.WrapMetadataRefreshError(raw, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrServiceInternal)
 	require.ErrorIs(t, wrapped, raw)
 	require.False(t, merr.IsRetryableErr(wrapped))
@@ -909,16 +920,26 @@ func TestManagerPrincipalRefreshUsesManagerContext(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
-func TestManagerPrincipalRefreshLimitFailsClosed(t *testing.T) {
+func TestManagerPrincipalRefreshLimitQueues(t *testing.T) {
 	m := newManager()
 	m.principalRefreshSlots = make(chan struct{}, 1)
-	coord := &blockingPrincipalCoord{
-		metadataTestCoord: &metadataTestCoord{},
-		started:           make(chan struct{}),
-		release:           make(chan struct{}),
-	}
+	started := make(chan string, 2)
+	releaseAlice := make(chan struct{})
+	var calls atomic.Int32
+	coord := &managerTestCoordClient{getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		calls.Add(1)
+		started <- req.GetPrincipalName()
+		if req.GetPrincipalName() == "alice" {
+			select {
+			case <-releaseAlice:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return principalMetadataResponse(req.GetCollectionId(), req.GetPrincipalName(), map[string]string{"tenant": "fresh"}), nil
+	}}
 	require.NoError(t, m.init(context.Background(), coord))
-	require.NoError(t, m.refreshPolicies(100))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
 
 	firstDone := make(chan error, 1)
 	go func() {
@@ -926,18 +947,67 @@ func TestManagerPrincipalRefreshLimitFailsClosed(t *testing.T) {
 		firstDone <- err
 	}()
 	select {
-	case <-coord.started:
+	case principal := <-started:
+		require.Equal(t, "alice", principal)
 	case <-time.After(time.Second):
 		t.Fatal("principal refresh did not start")
 	}
 
-	_, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Equal(t, int32(1), coord.principalCalls.Load())
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("queued principal refresh returned before capacity was available: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.Equal(t, int32(1), calls.Load())
 
-	close(coord.release)
+	close(releaseAlice)
 	require.NoError(t, <-firstDone)
+	select {
+	case principal := <-started:
+		require.Equal(t, "bob", principal)
+	case <-time.After(time.Second):
+		t.Fatal("queued principal refresh did not start")
+	}
+	require.NoError(t, <-secondDone)
+	require.Equal(t, int32(2), calls.Load())
 	require.Empty(t, m.principalRefreshSlots)
+}
+
+func TestManagerInvalidateAllClearsSnapshotsAndInflightRefreshes(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{PolicyName: "policy"}}}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("old")}))
+	m.markCollectionDropped(200)
+
+	state := m.getCollectionState(100)
+	state.mu.Lock()
+	oldGeneration := state.policyGeneration
+	state.principalRefreshSequence++
+	oldToken := state.principalRefreshSequence
+	state.principalRefreshTokens["bob"] = oldToken
+	state.mu.Unlock()
+
+	m.invalidateAll()
+
+	state.mu.RLock()
+	require.Nil(t, state.policies)
+	require.Empty(t, state.compiled)
+	require.Empty(t, state.principalTags)
+	require.Empty(t, state.principalRefreshTokens)
+	require.Zero(t, state.positivePrincipalCacheOrder.Len())
+	require.Zero(t, state.negativePrincipalCacheOrder.Len())
+	require.Greater(t, state.policyGeneration, oldGeneration)
+	state.mu.RUnlock()
+	require.True(t, m.isCollectionDropped(200))
+	require.False(t, m.finishPolicyRefresh(100, state, oldGeneration, map[string]*rlsutil.RowPolicy{"stale": {PolicyName: "stale"}}))
+	current, err := m.finishPrincipalRefresh(principalKey{collectionID: 100, principalName: "bob"}, state, oldToken, &principalTagsEntry{tags: map[string]rlsutil.TagValue{}}, true)
+	require.NoError(t, err)
+	require.False(t, current)
 }
 
 func TestManagerPrincipalInvalidationWinsOverInflightRefresh(t *testing.T) {
@@ -1525,7 +1595,7 @@ func TestManagerPrincipalRefreshDoesNotRecreateRemovedCollection(t *testing.T) {
 func TestManagerSnapshotsOwnImmutableData(t *testing.T) {
 	m := newManager()
 	policy := validPolicyInfo("tenant")
-	policies, err := rowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
+	policies, err := rlsutil.RowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
 	require.NoError(t, err)
 	state := getOrCreateCollectionStateForTest(m, 100)
 	state.mu.Lock()

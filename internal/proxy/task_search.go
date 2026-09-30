@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -226,7 +227,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, _, err := rls.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation); err != nil {
+		if _, _, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation); err != nil {
 			return err
 		}
 	}
@@ -1010,7 +1011,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 }
 
 func (t *searchTask) resolveRLSUsingPredicate(operation string, isIterator bool) (*planpb.Expr, error) {
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation)
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation)
 	if err != nil {
 		return nil, err
 	}

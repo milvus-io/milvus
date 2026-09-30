@@ -18,7 +18,6 @@ package rls
 
 import (
 	"context"
-	"sort"
 
 	"github.com/cockroachdb/errors"
 
@@ -46,7 +45,7 @@ type compiledCacheEntry struct {
 	schemaVersion int32
 	timezone      string
 	maxLength     int
-	expression    *compiledExpression
+	expression    *rlsutil.CompiledExpression
 	err           error
 }
 
@@ -80,7 +79,7 @@ func (m *manager) resolveUpsertPredicates(ctx context.Context, collectionID Uniq
 	if collectionID == 0 {
 		return nil, nil, merr.WrapErrServiceInternalMsg("failed to resolve RLS predicates with empty collection id")
 	}
-	if _, _, err := ResolveRuntimePrincipal(true, principalName, "upsert"); err != nil {
+	if _, _, err := rlsutil.ResolveRuntimePrincipal(true, principalName, "upsert"); err != nil {
 		return nil, nil, err
 	}
 
@@ -99,14 +98,20 @@ func (m *manager) resolveUpsertPredicates(ctx context.Context, collectionID Uniq
 		generation := state.policyGeneration
 		state.mu.RUnlock()
 
-		usingCompiled, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, usingExprKind, schema)
+		usingCompiled, loaded, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, usingExprKind, schema)
+		if !loaded {
+			continue
+		}
 		if err != nil {
 			if !m.policyRefreshCurrent(collectionID, state, generation) {
 				continue
 			}
 			return nil, nil, err
 		}
-		checkCompiled, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, checkExprKind, schema)
+		checkCompiled, loaded, err := state.getCompiledExpression(rlsutil.PolicyActionUpsert, checkExprKind, schema)
+		if !loaded {
+			continue
+		}
 		if !m.policyRefreshCurrent(collectionID, state, generation) {
 			continue
 		}
@@ -118,7 +123,7 @@ func (m *manager) resolveUpsertPredicates(ctx context.Context, collectionID Uniq
 		}
 
 		var tags map[string]rlsutil.TagValue
-		if (usingCompiled != nil && usingCompiled.needsTags) || checkCompiled.needsTags {
+		if (usingCompiled != nil && usingCompiled.NeedsTags()) || checkCompiled.NeedsTags() {
 			tags, err = m.ensurePrincipalTags(ctx, collectionID, principalName)
 			if !m.policyRefreshCurrent(collectionID, state, generation) {
 				continue
@@ -170,45 +175,53 @@ func (m *manager) resolvePredicate(ctx context.Context, collectionID UniqueID, p
 	if collectionID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("failed to resolve RLS predicate with empty collection id")
 	}
-	if _, _, err := ResolveRuntimePrincipal(true, principalName, rlsActionOperation(action)); err != nil {
+	if _, _, err := rlsutil.ResolveRuntimePrincipal(true, principalName, rlsutil.PolicyActionOperation(action)); err != nil {
 		return nil, err
 	}
-	if err := m.ensurePoliciesFresh(ctx, collectionID); err != nil {
-		return nil, merr.Wrapf(err, "failed to validate RLS metadata for collection %d", collectionID)
-	}
-	state := m.getCollectionState(collectionID)
-	if state == nil {
-		return nil, merr.WrapErrServiceUnavailableMsg("RLS metadata is unavailable for collection %d", collectionID)
-	}
-	compiled, err := state.getCompiledExpression(action, kind, schema)
-	if err != nil {
-		return nil, err
-	}
-	if compiled == nil {
-		return nil, denyNoApplicableRLSPolicy(action, kind)
-	}
-
-	var tags map[string]rlsutil.TagValue
-	if compiled.needsTags {
-		tags, err = m.ensurePrincipalTags(ctx, collectionID, principalName)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := m.ensurePoliciesFresh(ctx, collectionID); err != nil {
+			return nil, merr.Wrapf(err, "failed to validate RLS metadata for collection %d", collectionID)
+		}
+		state := m.getCollectionState(collectionID)
+		if state == nil {
+			return nil, merr.WrapErrServiceUnavailableMsg("RLS metadata is unavailable for collection %d", collectionID)
+		}
+		compiled, loaded, err := state.getCompiledExpression(action, kind, schema)
+		if !loaded {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
+		if compiled == nil {
+			return nil, denyNoApplicableRLSPolicy(action, kind)
+		}
+
+		var tags map[string]rlsutil.TagValue
+		if compiled.NeedsTags() {
+			tags, err = m.ensurePrincipalTags(ctx, collectionID, principalName)
+			if err != nil {
+				return nil, err
+			}
+		}
+		expr, err := compiled.Instantiate(principalName, tags)
+		if err != nil {
+			return nil, err
+		}
+		if expr == nil {
+			return nil, denyNoApplicableRLSPolicy(action, kind)
+		}
+		if rewriter.IsAlwaysTrueExpr(expr) {
+			return nil, nil
+		}
+		return expr, nil
 	}
-	expr, err := compiled.Instantiate(principalName, tags)
-	if err != nil {
-		return nil, err
-	}
-	if expr == nil {
-		return nil, denyNoApplicableRLSPolicy(action, kind)
-	}
-	if rewriter.IsAlwaysTrueExpr(expr) {
-		return nil, nil
-	}
-	return expr, nil
 }
 
-func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction, kind exprKind, schema *typeutil.SchemaHelper) (*compiledExpression, error) {
+func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction, kind exprKind, schema *typeutil.SchemaHelper) (*rlsutil.CompiledExpression, bool, error) {
 	key := compiledKey{action: action, kind: kind}
 	var schemaVersion int32
 	var timezone string
@@ -219,13 +232,17 @@ func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction,
 
 	maxLength := paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt()
 	state.mu.RLock()
+	if state.policies == nil {
+		state.mu.RUnlock()
+		return nil, false, nil
+	}
 	if len(state.policies) == 0 {
 		state.mu.RUnlock()
-		return nil, nil
+		return nil, true, nil
 	}
 	if entry := state.compiled[key]; entry.matches(schemaVersion, timezone, maxLength) {
 		state.mu.RUnlock()
-		return entry.expression, entry.err
+		return entry.expression, true, entry.err
 	}
 	state.mu.RUnlock()
 
@@ -234,14 +251,18 @@ func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction,
 	for {
 		maxLength = paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt()
 		state.mu.RLock()
+		if state.policies == nil {
+			state.mu.RUnlock()
+			return nil, false, nil
+		}
 		if len(state.policies) == 0 {
 			state.mu.RUnlock()
-			return nil, nil
+			return nil, true, nil
 		}
 		generation := state.policyGeneration
 		if entry := state.compiled[key]; entry.matches(schemaVersion, timezone, maxLength) {
 			state.mu.RUnlock()
-			return entry.expression, entry.err
+			return entry.expression, true, entry.err
 		}
 		policies := make([]*rlsutil.RowPolicy, 0, len(state.policies))
 		for _, policy := range state.policies {
@@ -249,16 +270,12 @@ func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction,
 		}
 		state.mu.RUnlock()
 
-		sort.Slice(policies, func(i, j int) bool {
-			return policies[i].GetPolicyName() < policies[j].GetPolicyName()
-		})
-		templates, combinedLength := preparePolicyExprTemplates(policies, action, kind)
-		var compiled *compiledExpression
+		var compiled *rlsutil.CompiledExpression
 		var compileErr error
-		if combinedLength > maxLength {
-			compileErr = merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxLength)
+		if kind == checkExprKind {
+			compiled, compileErr = rlsutil.CompileCheckExpression(policies, action, schema, maxLength)
 		} else {
-			compiled, compileErr = compileExprTemplates(schema, templates, timezone)
+			compiled, compileErr = rlsutil.CompileUsingExpression(policies, action, schema, maxLength)
 		}
 
 		state.mu.Lock()
@@ -268,11 +285,11 @@ func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction,
 		}
 		if entry := state.compiled[key]; entry.matches(schemaVersion, timezone, maxLength) {
 			state.mu.Unlock()
-			return entry.expression, entry.err
+			return entry.expression, true, entry.err
 		}
 		if compileErr != nil && !cacheableCompileError(compileErr) {
 			state.mu.Unlock()
-			return nil, compileErr
+			return nil, true, compileErr
 		}
 		if state.compiled == nil {
 			state.compiled = make(map[compiledKey]*compiledCacheEntry)
@@ -285,7 +302,7 @@ func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction,
 			err:           compileErr,
 		}
 		state.mu.Unlock()
-		return compiled, compileErr
+		return compiled, true, compileErr
 	}
 }
 
@@ -294,7 +311,7 @@ func cacheableCompileError(err error) bool {
 }
 
 func denyNoApplicableRLSPolicy(action rlsutil.PolicyAction, kind exprKind) error {
-	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: no applicable %s policies", rlsActionOperation(action), kind.policyLabel())
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: no applicable %s policies", rlsutil.PolicyActionOperation(action), kind.policyLabel())
 }
 
 func (kind exprKind) policyLabel() string {
@@ -302,34 +319,4 @@ func (kind exprKind) policyLabel() string {
 		return "check"
 	}
 	return "using"
-}
-
-func (kind exprKind) expression(policy *rlsutil.RowPolicy) string {
-	if kind == checkExprKind {
-		return policy.GetCheckExpr()
-	}
-	return policy.GetUsingExpr()
-}
-
-func rlsActionOperation(action rlsutil.PolicyAction) string {
-	switch action {
-	case rlsutil.PolicyActionQuery:
-		return "query"
-	case rlsutil.PolicyActionQueryIterator:
-		return "query iterator"
-	case rlsutil.PolicyActionSearch:
-		return "search"
-	case rlsutil.PolicyActionSearchIterator:
-		return "search iterator"
-	case rlsutil.PolicyActionHybridSearch:
-		return "hybrid search"
-	case rlsutil.PolicyActionDelete:
-		return "delete"
-	case rlsutil.PolicyActionInsert:
-		return "insert"
-	case rlsutil.PolicyActionUpsert:
-		return "upsert"
-	default:
-		return "unknown"
-	}
 }
