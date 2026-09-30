@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const bufSize = 1024 * 1024
@@ -897,6 +898,9 @@ func TestZillizClient_ResponseStatus(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "model deployment not ready")
+				assert.Contains(t, err.Error(), "code: 1")
+				assert.ErrorIs(t, err, merr.ErrFunctionFailed)
+				assert.Equal(t, int32(2400), merr.Code(err))
 				return
 			}
 			require.NoError(t, err)
