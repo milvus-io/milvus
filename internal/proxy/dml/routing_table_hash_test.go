@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package dml
 
 import (
 	"context"
@@ -164,9 +164,9 @@ func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
 		)
 	}
 
-	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, "-1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxDeleteSize.Key, "-1"))
 	t.Cleanup(func() {
-		Params.Reset(Params.QuotaConfig.MaxDeleteSize.Key)
+		paramtable.Get().Reset(paramtable.Get().QuotaConfig.MaxDeleteSize.Key)
 	})
 	result, rows, err := repack()
 	require.NoError(t, err)
@@ -179,11 +179,11 @@ func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
 	}
 	require.Positive(t, materializedSize)
 
-	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize)))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize)))
 	_, _, err = repack()
 	require.NoError(t, err, "the exact maxDeleteSize boundary must be accepted")
 
-	require.NoError(t, Params.Save(Params.QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize-1)))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxDeleteSize.Key, strconv.Itoa(materializedSize-1)))
 	result, rows, err = repack()
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
@@ -193,13 +193,13 @@ func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
 
 func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
 	paramtable.Init()
-	oldMaxMessageSize := Params.PulsarCfg.MaxMessageSize.SwapTempValue("512")
-	oldMaxDeleteSize := Params.QuotaConfig.MaxDeleteSize.SwapTempValue("-1")
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
+	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue("512")
+	oldMaxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue("-1")
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("true")
 	t.Cleanup(func() {
-		Params.PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize)
-		Params.QuotaConfig.MaxDeleteSize.SwapTempValue(oldMaxDeleteSize)
-		Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy)
+		paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize)
+		paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue(oldMaxDeleteSize)
+		paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy)
 	})
 
 	primaryKeys := &schemapb.IDs{
@@ -220,7 +220,7 @@ func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
 	result := repack()
 	require.Len(t, result[0], 2)
 
-	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	result = repack()
 	require.Len(t, result[0], 1)
 }

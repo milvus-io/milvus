@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -6,16 +6,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// prepareIdempotencyKey enables request-level deduplication only for an explicit key.
-func (it *insertTask) prepareIdempotencyKey(collectionProperties []*commonpb.KeyValuePair) error {
+func (it *InsertTask) prepareIdempotencyKey(collectionProperties []*commonpb.KeyValuePair) error {
 	it.idempotencyEnabled = it.idempotencyKey != ""
 	if !it.idempotencyEnabled {
 		return nil
@@ -27,19 +28,19 @@ func (it *insertTask) prepareIdempotencyKey(collectionProperties []*commonpb.Key
 		return merr.WrapErrParameterInvalidMsg(
 			"idempotent write is not supported for an encrypted collection: the duplicate result and the key would be stored unencrypted")
 	}
-	if limit := Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(); limit > 0 && len(it.idempotencyKey) > limit {
+	if limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(); limit > 0 && len(it.idempotencyKey) > limit {
 		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(it.idempotencyKey), limit)
 	}
 	return nil
 }
 
-func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, excludeAutoIDPrimary bool, primaryFieldSchema *schemapb.FieldSchema) error {
+func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, excludeAutoIDPrimary bool, primaryFieldSchema *schemapb.FieldSchema) error {
 	if !it.idempotencyEnabled || !excludeAutoIDPrimary {
 		return nil
 	}
 	// Namespace partition-key mode routes the WAL shard by namespace, not by the
 	// generated primary key, so PK-hash-stable auto IDs buy nothing here.
-	if namespacePartitionKeyModeEnabled(it.schema) && it.insertMsg.Namespace != nil {
+	if dql.NamespacePartitionKeyModeEnabled(it.schema) && it.insertMsg.Namespace != nil {
 		return nil
 	}
 
@@ -77,7 +78,7 @@ type insertIdempotencyDecoration struct {
 // idempotentInsertDecoration returns the idempotency decoration for this insert,
 // or nil when idempotency is disabled for it. The transaction commit message,
 // synthesized later in the producer, gets the key applied there.
-func (it *insertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
+func (it *InsertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
 	if !it.idempotencyEnabled {
 		return nil
 	}

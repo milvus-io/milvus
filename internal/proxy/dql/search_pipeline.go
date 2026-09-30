@@ -1298,7 +1298,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		partitionIDs:       t.GetPartitionIDs(),
 		node:               t.node,
 		namespace:          t.request.Namespace,
-		planNamespace:      namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
+		planNamespace:      NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace),
 	}, nil
 }
 
