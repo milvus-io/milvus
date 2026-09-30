@@ -18,12 +18,15 @@ package compactor
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -40,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -47,6 +51,10 @@ const (
 	w6bCompactionStruct = int64(200)
 	w6bCompactionArray  = int64(201)
 	w6bCompactionVector = int64(202)
+	w14LegacyArray      = int64(103)
+	w14FloatVector      = int64(104)
+	w14JSON             = int64(105)
+	w14TTL              = int64(106)
 )
 
 func w6bCompactionSchema() *schemapb.CollectionSchema {
@@ -143,6 +151,150 @@ func w6bWriteCompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *
 		CollectionID: CollectionID, PartitionID: PartitionID, SegmentID: segmentID,
 		FieldBinlogs: storage.SortFieldBinlogs(logs), StorageVersion: storage.StorageV3,
 		Manifest: manifest, IsSorted: sorted,
+	}
+}
+
+func w14ArrowCompactionRecord(t *testing.T, schema *schemapb.CollectionSchema) storage.Record {
+	t.Helper()
+	arrowSchema, err := storage.ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer b.Release()
+	fields := typeutil.GetAllFieldSchemas(schema)
+	builders := make(map[int64]array.Builder, len(fields))
+	fieldToColumn := make(map[int64]int, len(fields))
+	for i, field := range fields {
+		builders[field.FieldID] = b.Field(i)
+		fieldToColumn[field.FieldID] = i
+	}
+	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
+	for _, pk := range []int64{1, 2, 3, 4} {
+		builders[common.RowIDField].(*array.Int64Builder).Append(pk + 10)
+		builders[common.TimeStampField].(*array.Int64Builder).Append(ts)
+		builders[w6bCompactionPK].(*array.Int64Builder).Append(pk)
+
+		outer := builders[w6bCompactionArray].(*array.ListBuilder)
+		inner := outer.ValueBuilder().(*array.ListBuilder)
+		leaf := inner.ValueBuilder().(*array.StringBuilder)
+		switch pk {
+		case 1:
+			outer.Append(true)
+			inner.Append(true)
+			leaf.Append("a")
+			leaf.AppendNull()
+			inner.AppendNull()
+			inner.Append(true)
+		case 2:
+			outer.AppendNull()
+		case 3:
+			outer.Append(true)
+		case 4:
+			outer.Append(true)
+			inner.Append(true)
+			leaf.Append("z")
+		}
+
+		vectors := builders[w6bCompactionVector].(*array.ListBuilder)
+		vector := vectors.ValueBuilder().(*array.BinaryBuilder)
+		switch pk {
+		case 1:
+			vectors.Append(true)
+			vector.Append(arrow.Float32Traits.CastToBytes([]float32{1, 2}))
+			vector.AppendNull()
+			vector.Append(arrow.Float32Traits.CastToBytes([]float32{3, 4}))
+		case 2:
+			vectors.AppendNull()
+		case 3:
+			vectors.Append(true)
+		case 4:
+			vectors.Append(true)
+			vector.Append(arrow.Float32Traits.CastToBytes([]float32{5, 6}))
+		}
+
+		if legacy, ok := builders[w14LegacyArray]; ok {
+			payload, err := proto.Marshal(&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{pk, pk + 10}},
+			}})
+			require.NoError(t, err)
+			legacy.(*array.BinaryBuilder).Append(payload)
+			builders[w14FloatVector].(*array.FixedSizeBinaryBuilder).Append(arrow.Float32Traits.CastToBytes([]float32{float32(pk), float32(-pk)}))
+			json := builders[w14JSON].(*array.BinaryBuilder)
+			if pk == 2 {
+				json.AppendNull()
+			} else {
+				json.Append([]byte(fmt.Sprintf(`{"pk":%d}`, pk)))
+			}
+			ttl := builders[w14TTL].(*array.Int64Builder)
+			if pk == 2 {
+				ttl.AppendNull()
+			} else if pk == 4 {
+				ttl.Append(time.Now().Add(-time.Hour).UnixMicro())
+			} else {
+				ttl.Append(time.Now().Add(time.Hour).UnixMicro())
+			}
+		}
+	}
+	return storage.NewSimpleArrowRecord(b.NewRecord(), fieldToColumn)
+}
+
+func w14WriteArrowCompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema,
+	segmentID int64, record storage.Record,
+) *datapb.CompactionSegmentBinlogs {
+	t.Helper()
+	writer, err := storage.NewBinlogRecordWriter(context.Background(), CollectionID, PartitionID, segmentID,
+		schema, allocator.NewLocalAllocator(100000+segmentID*100, math.MaxInt64), 1<<20, int64(record.Len()),
+		storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(cfg), storage.WithWriterFormat("parquet"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	logs, _, _, manifest, _ := writer.GetLogs()
+	require.NotEmpty(t, manifest)
+	return &datapb.CompactionSegmentBinlogs{
+		CollectionID: CollectionID, PartitionID: PartitionID, SegmentID: segmentID,
+		FieldBinlogs: storage.SortFieldBinlogs(logs), StorageVersion: storage.StorageV3, Manifest: manifest,
+	}
+}
+
+func w14AssertArrowCompactionRows(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema,
+	segments []*datapb.CompactionSegment, source storage.Record, wantPKs []int64,
+) {
+	t.Helper()
+	want := make(map[int64]int, source.Len())
+	for i := 0; i < source.Len(); i++ {
+		want[source.Column(w6bCompactionPK).(*array.Int64).Value(i)] = i
+	}
+	seen := make(map[int64]bool, len(wantPKs))
+	for _, segment := range segments {
+		require.NotEmpty(t, segment.GetManifest())
+		rr, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), schema,
+			storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(cfg))
+		require.NoError(t, err)
+		for {
+			record, err := rr.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			for row := 0; row < record.Len(); row++ {
+				pk := record.Column(w6bCompactionPK).(*array.Int64).Value(row)
+				sourceRow, ok := want[pk]
+				require.True(t, ok, "unexpected pk %d", pk)
+				require.False(t, seen[pk], "duplicate pk %d", pk)
+				seen[pk] = true
+				for _, field := range typeutil.GetAllFieldSchemas(schema) {
+					before := array.NewSlice(source.Column(field.FieldID), int64(sourceRow), int64(sourceRow+1))
+					after := array.NewSlice(record.Column(field.FieldID), int64(row), int64(row+1))
+					require.True(t, array.Equal(before, after), "pk=%d field=%d", pk, field.FieldID)
+					before.Release()
+					after.Release()
+				}
+			}
+		}
+		require.NoError(t, rr.Close())
+	}
+	require.Len(t, seen, len(wantPKs))
+	for _, pk := range wantPKs {
+		require.True(t, seen[pk], "missing pk %d", pk)
 	}
 }
 
@@ -302,7 +454,7 @@ func (s *SortCompactionTaskSuite) TestNativeArraySortWithDelete() {
 	s.nativeArraySort(true)
 }
 
-func (s *ClusteringCompactionTaskStorageV3Suite) TestNativeArrayValueSerdeThroughCompaction() {
+func (s *ClusteringCompactionTaskStorageV3Suite) nativeArrayArrowCompaction(mixed, withDelete bool) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	initcore.CleanArrowFileSystem()
@@ -317,12 +469,38 @@ func (s *ClusteringCompactionTaskStorageV3Suite) TestNativeArrayValueSerdeThroug
 	s.task.plan.MaxSize = 1 << 30
 	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{Begin: 3000, End: 4000}
 	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{Begin: 5000, End: 6000}
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
-		w6bWriteCompactionSource(s.T(), cfg, schema, 10, []int64{1, 2, 3, 4}, false),
+	if mixed {
+		schema.Fields = append(schema.Fields,
+			&schemapb.FieldSchema{FieldID: w14LegacyArray, Name: "legacy_array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			&schemapb.FieldSchema{FieldID: w14FloatVector, Name: "vector", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+			&schemapb.FieldSchema{FieldID: w14JSON, Name: "json", DataType: schemapb.DataType_JSON, Nullable: true},
+			&schemapb.FieldSchema{FieldID: w14TTL, Name: "expire_at", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		)
+		schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{Key: common.CollectionTTLFieldKey, Value: "expire_at"})
 	}
+	source := w14ArrowCompactionRecord(s.T(), schema)
+	defer source.Release()
+	segment := w14WriteArrowCompactionSource(s.T(), cfg, schema, 10, source)
+	if withDelete {
+		w6bWriteCompactionDelete(s.T(), cfg, segment, 3)
+	}
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{segment}
 	s.task.plan.TotalRows = 4
 	result, err := s.task.Compact()
 	s.Require().NoError(err)
 	s.Require().NotEmpty(result.GetSegments())
-	w6bAssertCompactionOutput(s.T(), cfg, schema, result.GetSegments(), []int64{1, 2, 3, 4}, false)
+	want := []int64{1, 2, 3, 4}
+	if withDelete {
+		want = []int64{1, 2}
+	}
+	w14AssertArrowCompactionRows(s.T(), cfg, schema, result.GetSegments(), source, want)
+}
+
+func (s *ClusteringCompactionTaskStorageV3Suite) TestNativeArrayArrowCopyThroughCompaction() {
+	s.nativeArrayArrowCompaction(false, false)
+}
+
+func (s *ClusteringCompactionTaskStorageV3Suite) TestMixedArrowColumnsThroughClusteringCompaction() {
+	s.nativeArrayArrowCompaction(true, true)
 }

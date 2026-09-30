@@ -82,25 +82,24 @@ FieldData<ArrayValue>::FillFieldData(
     }
 
     std::vector<ArrayValue> values;
-    values.reserve(element_count);
-    std::vector<ScalarFieldProto> list_rows;
     if (list_array != nullptr) {
-        list_rows = ArrowListToScalarFieldProto(*list_array, *array_type_);
-    }
-    for (int64_t index = 0; index < element_count; ++index) {
-        ScalarFieldProto row = list_array != nullptr
-                                   ? std::move(list_rows[index])
-                                   : ScalarFieldProto{};
-        if (binary_array != nullptr && binary_array->IsValid(index)) {
-            const auto value = binary_array->GetView(index);
-            AssertInfo(row.ParseFromArray(value.data(), value.size()),
-                       "failed to parse nested ARRAY row {}",
-                       index);
-            AssertInfo(row.data_case() != ScalarFieldProto::DATA_NOT_SET,
-                       "valid nested ARRAY row {} has no ScalarField payload",
-                       index);
+        values = ArrowListToArrayValues(*list_array, array_type_);
+    } else {
+        values.reserve(element_count);
+        for (int64_t index = 0; index < element_count; ++index) {
+            ScalarFieldProto row;
+            if (binary_array->IsValid(index)) {
+                const auto value = binary_array->GetView(index);
+                AssertInfo(row.ParseFromArray(value.data(), value.size()),
+                           "failed to parse nested ARRAY row {}",
+                           index);
+                AssertInfo(
+                    row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                    "valid nested ARRAY row {} has no ScalarField payload",
+                    index);
+            }
+            values.emplace_back(ArrayValue::FromProto(row, array_type_));
         }
-        values.emplace_back(ArrayValue::FromProto(row, array_type_));
     }
 
     if (this->nullable_) {

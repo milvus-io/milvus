@@ -1015,6 +1015,32 @@ MaterializeMmapColumnarArrayChunk(
         nullptr);
 }
 
+std::shared_ptr<const ArrayValueStorage>
+CreateArrayValueStorage(std::unique_ptr<ColumnarArrayBuildNode> root,
+                        std::shared_ptr<const proto::schema::TypeSchema> type,
+                        bool is_null) {
+    auto storage = std::make_shared<ArrayValueStorage>();
+    storage->type = std::move(type);
+    storage->length = root->offsets.back();
+    storage->is_null = is_null;
+
+    const auto child_size = ColumnarArrayChildByteSize(*root, *storage->type);
+    // Reserve the same block-level trailing padding as a complete column
+    // buffer, but exclude it from the child Chunk's logical size below.
+    const auto storage_size = child_size + MMAP_ARRAY_PADDING;
+    storage->buffer.resize(storage_size);
+    auto target = std::make_shared<BorrowedArrayChunkTarget>(
+        storage->buffer.data(), storage->buffer.size());
+    WriteColumnarArrayChild(*root, *storage->type, target);
+    char padding[MMAP_ARRAY_PADDING] = {};
+    target->write(padding, MMAP_ARRAY_PADDING);
+
+    auto* data = target->release();
+    storage->child = array_detail::CreateColumnarArrayChildChunk(
+        storage->type, storage->length, data, child_size, nullptr);
+    return storage;
+}
+
 }  // namespace
 
 std::shared_ptr<const ColumnarArrayChunk>
@@ -1125,27 +1151,27 @@ CreateArrayValueStorageFromProto(
     std::shared_ptr<const proto::schema::TypeSchema> type) {
     AssertInfo(type != nullptr, "ArrayValue type must not be null");
     auto root = BuildColumnarArrayNode({&row}, *type);
+    return CreateArrayValueStorage(
+        std::move(root),
+        std::move(type),
+        row.data_case() == ScalarFieldProto::DATA_NOT_SET);
+}
 
-    auto storage = std::make_shared<ArrayValueStorage>();
-    storage->type = std::move(type);
-    storage->length = root->offsets.back();
-    storage->is_null = row.data_case() == ScalarFieldProto::DATA_NOT_SET;
-
-    const auto child_size = ColumnarArrayChildByteSize(*root, *storage->type);
-    // Reserve the same block-level trailing padding as a complete column
-    // buffer, but exclude it from the child Chunk's logical size below.
-    const auto storage_size = child_size + MMAP_ARRAY_PADDING;
-    storage->buffer.resize(storage_size);
-    auto target = std::make_shared<BorrowedArrayChunkTarget>(
-        storage->buffer.data(), storage->buffer.size());
-    WriteColumnarArrayChild(*root, *storage->type, target);
-    char padding[MMAP_ARRAY_PADDING] = {};
-    target->write(padding, MMAP_ARRAY_PADDING);
-
-    auto* data = target->release();
-    storage->child = array_detail::CreateColumnarArrayChildChunk(
-        storage->type, storage->length, data, child_size, nullptr);
-    return storage;
+std::vector<ArrayValue>
+ArrowListToArrayValues(
+    const arrow::ListArray& rows,
+    std::shared_ptr<const proto::schema::TypeSchema> type) {
+    AssertInfo(type != nullptr, "ArrayValue type must not be null");
+    ColumnarArrayChunk::ValidateArrayType(*type);
+    std::vector<ArrayValue> result;
+    result.reserve(rows.length());
+    for (int64_t i = 0; i < rows.length(); ++i) {
+        auto row = std::static_pointer_cast<arrow::ListArray>(rows.Slice(i, 1));
+        auto root = BuildNodeFromArrow(*row, *type);
+        result.push_back(ArrayValue(CreateArrayValueStorage(
+            std::move(root), type, rows.IsNull(i))));
+    }
+    return result;
 }
 
 std::vector<ScalarFieldProto>

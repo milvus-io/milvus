@@ -28,6 +28,10 @@
 #include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
 
+namespace arrow {
+class ListArray;
+}
+
 namespace milvus {
 
 // Heap-backed storage for one logical Array value. The root value is described
@@ -54,6 +58,10 @@ CreateArrayValueStorageFromProto(
 // materialize the redundant root offsets [0, length].
 class ArrayValue {
     friend class ArrayValueView;
+    friend std::vector<ArrayValue>
+    ArrowListToArrayValues(
+        const arrow::ListArray& rows,
+        std::shared_ptr<const proto::schema::TypeSchema> type);
 
  public:
     ArrayValue() = default;
