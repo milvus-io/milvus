@@ -688,6 +688,7 @@ type ChunkedBlobsReader func() ([]*Blob, error)
 
 type CompositeBinlogRecordReader struct {
 	fields  map[FieldID]*schemapb.FieldSchema
+	structs map[FieldID]*schemapb.StructArrayFieldSchema
 	index   map[FieldID]int16
 	brs     []*BinlogReader
 	rrs     []array.RecordReader
@@ -746,8 +747,20 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		return nil, io.EOF
 	}
 	for _, f := range nonExistingFields {
-		// If the field is not in the current batch, fill with null array
-		arr, err := GenerateEmptyArrayFromSchema(f, nRows)
+		var arr arrow.Array
+		var err error
+		if st := crr.structs[f.GetFieldID()]; st != nil && f.GetElementNullable() {
+			sibling := pickStructSibling(st, func(id int64) bool {
+				idx, ok := crr.index[id]
+				return ok && recs[idx] != nil
+			})
+			if sibling != nil {
+				arr, err = GenerateNullElementsArrayFromSibling(f, recs[crr.index[sibling.GetFieldID()]], sibling, nRows)
+			}
+		}
+		if arr == nil && err == nil {
+			arr, err = GenerateEmptyArrayFromSchema(f, nRows)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -790,9 +803,10 @@ func (crr *CompositeBinlogRecordReader) releaseCurrent() {
 
 // NewAbsentFieldFillRecordReader completes a partial record to full read-schema
 // width the way V1's CompositeBinlogRecordReader does: every read-schema field NOT
-// physically present (FieldID not in presentFields) is filled via
-// GenerateEmptyArrayFromSchema -- its declared default when it has one, else null,
-// erroring on a non-nullable absent field. Present columns pass through from inner.
+// physically present (FieldID not in presentFields) is filled from its schema
+// default or with nulls. An element-nullable struct child inherits a present
+// sibling's row validity and element counts. Other absent fields retain the
+// GenerateEmptyArrayFromSchema behavior. Present columns pass through from inner.
 // This gives the packed StorageV3 manifest reader the same default-for-absent
 // semantic the V1 binlog reader already applies, so it stops presenting declared
 // defaults as NULL (issue #52771). presentFields is the physically-present field
@@ -801,6 +815,12 @@ func (crr *CompositeBinlogRecordReader) releaseCurrent() {
 // nothing is absent.
 func NewAbsentFieldFillRecordReader(inner RecordReader, neededSchema *schemapb.CollectionSchema, presentFields map[FieldID]struct{}) RecordReader {
 	fill := make([]*schemapb.FieldSchema, 0)
+	structs := make(map[FieldID]*schemapb.StructArrayFieldSchema)
+	for _, st := range neededSchema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structs[child.GetFieldID()] = st
+		}
+	}
 	for _, f := range typeutil.GetAllFieldSchemas(neededSchema) {
 		if _, present := presentFields[f.GetFieldID()]; present {
 			continue
@@ -810,13 +830,15 @@ func NewAbsentFieldFillRecordReader(inner RecordReader, neededSchema *schemapb.C
 	if len(fill) == 0 {
 		return inner
 	}
-	return &absentFieldFillRecordReader{inner: inner, fill: fill}
+	return &absentFieldFillRecordReader{inner: inner, fill: fill, structs: structs, present: presentFields}
 }
 
 type absentFieldFillRecordReader struct {
-	inner RecordReader
-	fill  []*schemapb.FieldSchema
-	cur   *absentFilledRecord
+	inner   RecordReader
+	fill    []*schemapb.FieldSchema
+	structs map[FieldID]*schemapb.StructArrayFieldSchema
+	present map[FieldID]struct{}
+	cur     *absentFilledRecord
 }
 
 var _ RecordReader = (*absentFieldFillRecordReader)(nil)
@@ -829,7 +851,20 @@ func (r *absentFieldFillRecordReader) Next() (Record, error) {
 	}
 	computed := make(map[FieldID]arrow.Array, len(r.fill))
 	for _, f := range r.fill {
-		arr, genErr := GenerateEmptyArrayFromSchema(f, base.Len())
+		var arr arrow.Array
+		var genErr error
+		if st := r.structs[f.GetFieldID()]; st != nil && f.GetElementNullable() {
+			sibling := pickStructSibling(st, func(id int64) bool {
+				_, ok := r.present[id]
+				return ok
+			})
+			if sibling != nil {
+				arr, genErr = GenerateNullElementsArrayFromSibling(f, base.Column(sibling.GetFieldID()), sibling, base.Len())
+			}
+		}
+		if arr == nil && genErr == nil {
+			arr, genErr = GenerateEmptyArrayFromSchema(f, base.Len())
+		}
 		if genErr != nil {
 			for _, a := range computed {
 				a.Release()

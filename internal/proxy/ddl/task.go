@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -1080,6 +1081,12 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	}
 
 	if plan.HasField() {
+		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+			if err := validateAddStructSubFieldRequest(t.oldSchema, plan.StructPath, plan.Field); err != nil {
+				return err
+			}
+			return validateNativeListArrayGrowingSourceFlush(t.oldSchema, plan.Field)
+		}
 		if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
 			return err
 		}
@@ -1149,6 +1156,88 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	return nil
 }
 
+func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, structPath string, field *schemapb.FieldSchema) error {
+	var parent *schemapb.StructArrayFieldSchema
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == structPath {
+			parent = structField
+			break
+		}
+	}
+	if parent == nil {
+		return merr.WrapErrParameterInvalidMsg("struct field %q not found", structPath)
+	}
+
+	rawName := field.GetName()
+	if name, ok := strings.CutPrefix(rawName, structPath+"["); ok {
+		if stripped, valid := strings.CutSuffix(name, "]"); valid {
+			rawName = stripped
+		}
+	}
+	if err := validateFieldName(rawName); err != nil {
+		return err
+	}
+	storedName := typeutil.ConcatStructFieldName(structPath, rawName)
+	for _, existing := range schema.GetFields() {
+		if existing.GetName() == rawName || existing.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == rawName || structField.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+		}
+		for _, existing := range structField.GetFields() {
+			if structField.GetName() == structPath && (existing.GetName() == rawName || storedStructSubFieldName(structPath, existing.GetName()) == storedName) {
+				return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+			}
+		}
+	}
+	if !field.GetElementNullable() {
+		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), structPath)
+	}
+	if field.GetIsDynamic() {
+		return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
+	}
+	newField := proto.Clone(field).(*schemapb.FieldSchema)
+	newField.Name = rawName
+	if err := validateAddStructSubFieldProperties(&schemapb.StructArrayFieldSchema{Fields: []*schemapb.FieldSchema{newField}}); err != nil {
+		return err
+	}
+	if typeutil.GetTotalFieldsNum(schema)+1 > paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt())
+	}
+	if typeutil.IsVectorType(field.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema))+1 > paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	}
+
+	mergedParent := proto.Clone(parent).(*schemapb.StructArrayFieldSchema)
+	for _, sibling := range mergedParent.GetFields() {
+		prefix := structPath + "["
+		if name, ok := strings.CutPrefix(sibling.GetName(), prefix); ok {
+			if stripped, valid := strings.CutSuffix(name, "]"); valid {
+				sibling.Name = stripped
+			}
+		}
+	}
+	mergedParent.Fields = append(mergedParent.Fields, newField)
+	if err := ValidateStructArrayField(mergedParent, schema); err != nil {
+		return err
+	}
+	field.Nullable = newField.Nullable
+	if newField.GetTypeSchema() != nil {
+		field.TypeSchema = newField.GetTypeSchema()
+	}
+	mergedSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	for i, structField := range mergedSchema.GetStructArrayFields() {
+		if structField.GetName() == structPath {
+			mergedSchema.StructArrayFields[i].Fields = append(mergedSchema.StructArrayFields[i].Fields, proto.Clone(field).(*schemapb.FieldSchema))
+			break
+		}
+	}
+	return validateTextStorageV3Enabled(mergedSchema)
+}
+
 func (t *AlterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 	dropReq := t.GetAction().GetDropRequest()
 
@@ -1162,17 +1251,14 @@ func (t *AlterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 				return validateDropField(t.oldSchema, f.Name)
 			}
 		}
-		// Struct array field and its sub-fields share the FieldID namespace but
-		// live outside schema.Fields. Route struct-level drops to the normal
-		// by-name path; sub-field drops are not supported in this change.
+		// Struct array fields and sub-fields share the FieldID namespace.
 		for _, sf := range t.oldSchema.StructArrayFields {
 			if sf.FieldID == id.FieldId {
 				return validateDropField(t.oldSchema, sf.Name)
 			}
 			for _, sub := range sf.Fields {
 				if sub.FieldID == id.FieldId {
-					return merr.WrapErrParameterInvalidMsg(
-						"cannot drop sub-field of struct array field: %s.%s", sf.Name, sub.Name)
+					return validateDropStructSubField(t.oldSchema, sf, sub)
 				}
 			}
 		}
@@ -1202,17 +1288,14 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		return merr.WrapErrParameterInvalidMsg("field name is empty")
 	}
 
-	// Struct array fields share the name namespace with top-level fields but
-	// live in schema.StructArrayFields. Dropping the whole struct is allowed;
-	// dropping a single sub-field is not (no symmetric add-sub-field support).
+	// Struct array fields share the name namespace with top-level fields.
 	for _, sf := range schema.StructArrayFields {
 		if sf.Name == fieldName {
 			return validateDropStructArrayField(schema, sf)
 		}
 		for _, sub := range sf.Fields {
-			if sub.Name == fieldName {
-				return merr.WrapErrParameterInvalidMsg(
-					"cannot drop sub-field of struct array field: %s.%s", sf.Name, fieldName)
+			if storedStructSubFieldName(sf.GetName(), sub.GetName()) == fieldName {
+				return validateDropStructSubField(schema, sf, sub)
 			}
 		}
 	}
@@ -1282,6 +1365,32 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		}
 	}
 
+	return nil
+}
+
+func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schemapb.StructArrayFieldSchema, sub *schemapb.FieldSchema) error {
+	storedName := storedStructSubFieldName(parent.GetName(), sub.GetName())
+	if len(parent.GetFields()) <= 1 {
+		return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", storedName, parent.GetName())
+	}
+	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
+	}
+	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", storedName)
+	}
+	for _, fn := range schema.GetFunctions() {
+		for _, name := range fn.GetInputFieldNames() {
+			if name == storedName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as input, drop function first", fn.GetName())
+			}
+		}
+		for _, name := range fn.GetOutputFieldNames() {
+			if name == storedName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as output, drop function first", fn.GetName())
+			}
+		}
+	}
 	return nil
 }
 

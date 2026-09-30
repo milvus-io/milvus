@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -456,6 +457,352 @@ TEST(Growing, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     }
 }
 
+TEST(Growing, StructArrayRepresentativeFollowsSchemaOrder) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto first =
+        schema->AddDebugArrayField("items[first]", DataType::INT32, false);
+    auto second =
+        schema->AddDebugArrayField("items[second]", DataType::INT32, false);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    InsertRecordProto insert;
+    insert.set_num_rows(1);
+    auto* pk_data = insert.add_fields_data();
+    pk_data->set_field_id(pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(1);
+    // Send the later schema field first and give it a different length so the
+    // provider is observable in this test.
+    for (auto [id, count] : {std::pair{second, 3}, std::pair{first, 2}}) {
+        auto* data = insert.add_fields_data();
+        data->set_field_id(id.get());
+        data->set_type(proto::schema::DataType::Array);
+        auto* rows = data->mutable_scalars()->mutable_array_data();
+        rows->set_element_type(proto::schema::DataType::Int32);
+        auto* row = rows->add_data();
+        for (int i = 0; i < count; ++i) {
+            row->mutable_int_data()->add_data(i);
+        }
+    }
+    const int64_t row_id = 1;
+    const Timestamp timestamp = 1;
+    segment->Insert(segment->PreInsert(1),
+                    1,
+                    &row_id,
+                    &timestamp,
+                    std::make_shared<InsertRecordProto>(insert));
+    auto offsets = segment->GetStructElementOffsets(first);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets.get(), segment->GetStructElementOffsets(second).get());
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
+}
+
+TEST(Growing, ReopenBackfillsStructChildBeforeInsertLengths) {
+    const FieldId pk(100);
+    const FieldId source(101);
+    const FieldId added(102);
+    auto make_schema = [&](int64_t version, bool include_added) {
+        auto schema = std::make_shared<Schema>();
+        schema->set_schema_version(version);
+        schema->AddField(
+            FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+        schema->set_primary_field_id(pk);
+        schema->AddField(FieldName("items[source]"),
+                         source,
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         false,
+                         false);
+        if (include_added) {
+            schema->AddField(FieldName("items[added]"),
+                             added,
+                             DataType::ARRAY,
+                             DataType::INT32,
+                             false,
+                             true);
+        }
+        return schema;
+    };
+    auto segment =
+        CreateGrowingSegment(make_schema(1, false), empty_index_meta);
+    auto append = [&](int64_t row_id, int length) {
+        InsertRecordProto insert;
+        insert.set_num_rows(1);
+        auto* pk_data = insert.add_fields_data();
+        pk_data->set_field_id(pk.get());
+        pk_data->set_type(proto::schema::DataType::Int64);
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(row_id);
+        auto* source_data = insert.add_fields_data();
+        source_data->set_field_id(source.get());
+        source_data->set_type(proto::schema::DataType::Array);
+        auto* rows = source_data->mutable_scalars()->mutable_array_data();
+        rows->set_element_type(proto::schema::DataType::Int32);
+        auto* row = rows->add_data();
+        for (int i = 0; i < length; ++i) {
+            row->mutable_int_data()->add_data(i);
+        }
+        const Timestamp timestamp = row_id;
+        segment->Insert(segment->PreInsert(1),
+                        1,
+                        &row_id,
+                        &timestamp,
+                        std::make_shared<InsertRecordProto>(insert));
+    };
+    append(1, 2);
+    auto next = make_schema(2, true);
+    segment->Reopen(next);
+    append(2, 3);
+
+    auto offsets = segment->GetStructElementOffsets(added);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(1), std::make_pair(2, 5));
+    const int64_t rows[] = {0, 1};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, rows, 2);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 3);
+    auto fallback =
+        segment->bulk_subscript_not_exist_field((*next)[added], 0, 2, *offsets);
+    EXPECT_EQ(fallback->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(fallback->scalars().array_data().data(1).valid_data_size(), 3);
+}
+
+TEST(Growing, ReopenBackfillsNullableStructRows) {
+    auto make_schema = [](int64_t version, bool include_added) {
+        auto schema = std::make_shared<Schema>();
+        schema->set_schema_version(version);
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+        if (include_added) {
+            schema->AddDebugArrayField(
+                "items[added]", DataType::INT32, true, true);
+        }
+        return schema;
+    };
+    auto schema = make_schema(1, false);
+    auto source = schema->get_field_ids().back();
+    auto dataset = DataGen(schema, 3, 42, 0, 1, 2);
+    for (auto& field : *dataset.raw_->mutable_fields_data()) {
+        if (field.field_id() == source.get()) {
+            MutableFieldDataRowValidData(&field)->Set(1, false);
+            auto* null_row =
+                field.mutable_scalars()->mutable_array_data()->mutable_data(1);
+            null_row->Clear();
+            null_row->mutable_int_data();
+        }
+    }
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->Insert(segment->PreInsert(3),
+                    3,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
+    auto next = make_schema(2, true);
+    auto added = next->get_field_ids().back();
+    segment->Reopen(next);
+
+    auto offsets = segment->GetStructElementOffsets(added);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
+}
+
+TEST(Growing, DroppingStructSubFieldsKeepsOffsetsContinuous) {
+    const FieldId pk(100);
+    const FieldId first(101);
+    const FieldId middle(102);
+    const FieldId last(103);
+    const FieldId readded_first(104);
+    auto make_schema =
+        [&](int64_t version,
+            std::initializer_list<std::pair<FieldId, const char*>> children) {
+            auto schema = std::make_shared<Schema>();
+            schema->set_schema_version(version);
+            schema->AddField(
+                FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+            schema->set_primary_field_id(pk);
+            for (auto [id, name] : children) {
+                schema->AddField(FieldName(name),
+                                 id,
+                                 DataType::ARRAY,
+                                 DataType::INT32,
+                                 true,
+                                 false);
+            }
+            return schema;
+        };
+    auto initial = make_schema(1,
+                               {{first, "items[first]"},
+                                {middle, "items[middle]"},
+                                {last, "items[last]"}});
+    auto segment = CreateGrowingSegment(initial, empty_index_meta);
+    auto append = [&](int64_t row_id,
+                      int count,
+                      std::initializer_list<FieldId> children) {
+        InsertRecordProto insert;
+        insert.set_num_rows(1);
+        auto* pk_data = insert.add_fields_data();
+        pk_data->set_field_id(pk.get());
+        pk_data->set_type(proto::schema::DataType::Int64);
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(row_id);
+        for (auto id : children) {
+            auto* data = insert.add_fields_data();
+            data->set_field_id(id.get());
+            data->set_type(proto::schema::DataType::Array);
+            auto* scalar = data->mutable_scalars();
+            scalar->add_valid_data(true);
+            auto* rows = scalar->mutable_array_data();
+            rows->set_element_type(proto::schema::DataType::Int32);
+            auto* row = rows->add_data();
+            for (int i = 0; i < count; ++i) {
+                row->mutable_int_data()->add_data(i);
+            }
+        }
+        const Timestamp timestamp = row_id;
+        segment->Insert(segment->PreInsert(1),
+                        1,
+                        &row_id,
+                        &timestamp,
+                        std::make_shared<InsertRecordProto>(insert));
+    };
+
+    append(1, 2, {first, middle, last});
+    auto original_offsets = segment->GetStructElementOffsets(first);
+    ASSERT_NE(original_offsets, nullptr);
+    segment->Reopen(
+        make_schema(2, {{middle, "items[middle]"}, {last, "items[last]"}}));
+    EXPECT_EQ(segment->GetStructElementOffsets(first), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(middle).get(),
+              original_offsets.get());
+    append(2, 3, {middle, last});
+    EXPECT_EQ(original_offsets->ElementIDRangeOfRow(1), std::make_pair(2, 5));
+
+    segment->Reopen(make_schema(3,
+                                {{middle, "items[middle]"},
+                                 {last, "items[last]"},
+                                 {readded_first, "items[first]"}}));
+    EXPECT_EQ(segment->GetStructElementOffsets(readded_first).get(),
+              original_offsets.get());
+    append(3, 1, {middle, last, readded_first});
+    EXPECT_EQ(original_offsets->ElementIDRangeOfRow(2), std::make_pair(5, 6));
+
+    segment->Reopen(make_schema(
+        4, {{middle, "items[middle]"}, {readded_first, "items[first]"}}));
+    EXPECT_EQ(segment->GetStructElementOffsets(last), nullptr);
+    append(4, 2, {middle, readded_first});
+    EXPECT_EQ(original_offsets->ElementIDRangeOfRow(3), std::make_pair(6, 8));
+}
+
+TEST(Growing, ElementNullableStructSubFieldsHaveLogicalOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto scalar = schema->AddDebugArrayField(
+        "scalar[items]", DataType::INT64, false, true);
+    proto::schema::TypeSchema nested_type;
+    nested_type.set_nullable(false);
+    auto* inner = nested_type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int32);
+    auto nested = FieldId(scalar.get() + 1);
+    schema->AddField(FieldMeta(FieldName("nested[items]"),
+                               nested,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               true,
+                               std::nullopt,
+                               "",
+                               LOCAL_FORMAT_RAW,
+                               nested_type));
+    auto vectors = FieldId(nested.get() + 1);
+    schema->AddField(FieldMeta(FieldName("vectors[items]"),
+                               vectors,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               2,
+                               knowhere::metric::L2,
+                               false,
+                               true));
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    InsertRecordProto insert;
+    insert.set_num_rows(1);
+    auto* pk_data = insert.add_fields_data();
+    pk_data->set_field_id(pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(1);
+
+    auto* scalar_data = insert.add_fields_data();
+    scalar_data->set_field_id(scalar.get());
+    scalar_data->set_type(proto::schema::DataType::Array);
+    auto* scalar_rows = scalar_data->mutable_scalars()->mutable_array_data();
+    scalar_rows->set_element_type(proto::schema::DataType::Int64);
+    auto* scalar_row = scalar_rows->add_data();
+    for (int i = 0; i < 3; ++i) {
+        scalar_row->mutable_long_data()->add_data(0);
+        scalar_row->add_valid_data(false);
+    }
+
+    auto* nested_data = insert.add_fields_data();
+    nested_data->set_field_id(nested.get());
+    nested_data->set_type(proto::schema::DataType::Array);
+    auto* nested_rows = nested_data->mutable_scalars()->mutable_array_data();
+    nested_rows->set_element_type(proto::schema::DataType::Array);
+    auto* nested_row = nested_rows->add_data();
+    nested_row->mutable_array_data()->set_element_type(
+        proto::schema::DataType::Int32);
+    for (int i = 0; i < 2; ++i) {
+        nested_row->mutable_array_data()->add_data()->mutable_int_data();
+        nested_row->add_valid_data(false);
+    }
+
+    auto* vector_data = insert.add_fields_data();
+    vector_data->set_field_id(vectors.get());
+    vector_data->set_type(proto::schema::DataType::ArrayOfVector);
+    vector_data->mutable_vectors()->set_dim(2);
+    auto* vector_rows = vector_data->mutable_vectors()->mutable_vector_array();
+    vector_rows->set_dim(2);
+    vector_rows->set_element_type(proto::schema::DataType::FloatVector);
+    auto* vector_row = vector_rows->add_data();
+    vector_row->set_dim(2);
+    vector_row->mutable_float_vector();
+    for (int i = 0; i < 4; ++i) {
+        vector_row->add_valid_data(false);
+    }
+
+    const int64_t row_id = 1;
+    const Timestamp timestamp = 1;
+    segment->Insert(segment->PreInsert(1),
+                    1,
+                    &row_id,
+                    &timestamp,
+                    std::make_shared<InsertRecordProto>(insert));
+    for (auto [field_id, count] :
+         {std::pair{scalar, 3}, std::pair{nested, 2}, std::pair{vectors, 4}}) {
+        auto offsets = segment->GetStructElementOffsets(field_id);
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, count));
+    }
+}
+
 TEST(Growing, AddNativeListAndVectorArrayFieldsBackfillsNullRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
@@ -611,6 +958,44 @@ TEST(Growing, LoadMissingStructElementOffsetsReturnsEmptyForOldRows) {
         auto [start, end] = offsets->ElementIDRangeOfRow(i);
         EXPECT_EQ(start, 0);
         EXPECT_EQ(end, 0);
+    }
+}
+
+TEST(Growing, LoadSelectsRealStructProviderBeforeBackfill) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto added = schema->AddDebugArrayField(
+        "items[added]", DataType::INT32, false, true);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, false);
+    // Cross the 4096-row recovery batch boundary.
+    constexpr int64_t rows = 4097;
+    auto dataset = DataGen(schema, rows, 42, 0, 1, 2);
+    auto config = SegcoreConfig::default_config();
+    auto segment =
+        CreateGrowingWithFieldDataLoaded(schema,
+                                         empty_index_meta,
+                                         config,
+                                         dataset,
+                                         false,
+                                         std::vector<int64_t>{added.get()});
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    growing->FillAbsentFields();
+    auto offsets = growing->GetStructElementOffsets(added);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets.get(), growing->GetStructElementOffsets(source).get());
+    EXPECT_EQ(offsets->GetTotalElementCount(), rows * 2);
+    for (int64_t i : {int64_t{0}, int64_t{4095}, int64_t{4096}}) {
+        auto range = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(range.second - range.first, 2);
+    }
+    const int64_t row_ids[] = {0, 4095, 4096};
+    auto result = growing->bulk_subscript(nullptr, added, row_ids, 3);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    for (const auto& row : result->scalars().array_data().data()) {
+        EXPECT_EQ(row.valid_data_size(), 2);
     }
 }
 

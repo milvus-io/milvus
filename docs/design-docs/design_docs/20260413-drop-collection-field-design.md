@@ -216,8 +216,8 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
             dropReq.GetDropFunctionOutputFields(),
         )
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
-        // Resolve field ID across top-level fields and struct array fields.
-        // Struct sub-field drops are rejected.
+        // Resolve ID across top-level fields, whole struct array fields,
+        // and individual struct sub-fields.
         return validateDropFieldByID(t.oldSchema, id.FieldId)
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
         return validateDropField(t.oldSchema, id.FieldName)
@@ -239,12 +239,12 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 | Last vector field in schema | `cannot drop the last vector field: {name}` |
 | Field is function input | `field is referenced by function {fn} as input` |
 | Field is function output | `field is referenced by function {fn} as output, drop function first` |
-| Target is a sub-field of a struct array field | `cannot drop sub-field of struct array field: {struct}.{sub}` |
+| Target is the last sub-field of a struct array field | `cannot drop the last sub-field "s[b]" of struct field "s", drop the struct field instead` |
 | Dropping whole struct array field would leave no vector | `cannot drop struct array field {name}: it would leave no vector field in the collection` |
 
 **Struct array field scope**:
 - Dropping a **whole struct array field by name or ID** is supported; it is equivalent to batch-dropping the struct entry plus all its sub-fields (`droppedFieldIds` covers the struct ID and every sub-field ID). The existing index cascade and segcore `has_field()` filtering cover the removal without any C++ changes.
-- Dropping an **individual sub-field** is not supported in this change. Milvus has no runtime API for adding a struct array field or an individual sub-field to an existing collection — struct array fields and their sub-fields are declared once at collection creation (neither `add_collection_field` nor `AlterCollectionSchema.AddRequest` accepts a struct-shaped payload). Dropping a single sub-field would therefore be asymmetric with no restore path, and is explicitly rejected.
+- An **individual sub-field** can be dropped by its stored name (`DropRequest{field_name:"s[b]"}`) or field ID; the raw name `b` is not accepted. The last sub-field cannot be dropped individually; drop the whole struct instead. The last vector field and a function-referenced sub-field remain protected. A successful sub-field drop puts only its ID in `droppedFieldIds`, so the index cascade targets that column. `AlterCollectionSchema.AddRequest` can also append an `element_nullable=true` sub-field through `FieldInfo.struct_path`. See [Adding and dropping sub-fields of an existing struct array field](./20260930-struct-subfield-evolution.md) for the current API and backfill rules.
 
 #### validateDropFunction Constraints
 

@@ -347,3 +347,43 @@ func TestArrayFeatureGate_Import(t *testing.T) {
 		}
 	}
 }
+
+func TestArrayFeatureGate_AlterCollectionSchemaAddStructSubField(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range gatedSubFields() {
+		t.Run(tc.name, func(t *testing.T) {
+			newTask := func() *AlterCollectionSchemaTask {
+				// An added sub-field must be element-nullable; a nested Array
+				// mirrors that on its second level.
+				field := tc.field()
+				field.ElementNullable = true
+				if element := field.GetTypeSchema().GetArrayElement(); element != nil {
+					element.Nullable = true
+				}
+				return &AlterCollectionSchemaTask{
+					ctx:       ctx,
+					oldSchema: structSubFieldDDLTestSchema(true),
+					AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+						Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+							Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+								AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+									FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+										StructPath:  "profile",
+										FieldSchema: field,
+									}},
+								},
+							},
+						},
+					},
+				}
+			}
+			setArrayFeatureGate(t, true)
+			err := newTask().PreExecute(ctx)
+			requireGateRejects(t, err)
+			assert.Contains(t, err.Error(), arrayFeatureGateMessage)
+
+			setArrayFeatureGate(t, false)
+			requireNotGated(t, newTask().PreExecute(ctx))
+		})
+	}
+}

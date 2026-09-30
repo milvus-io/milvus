@@ -861,6 +861,17 @@ class SegmentInternalInterface : public SegmentInterface {
     bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
                                    int64_t count) const;
 
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t row_begin,
+                                   int64_t count,
+                                   const IStructElementOffsets& offsets) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   const int64_t* row_ids,
+                                   int64_t count) const;
+
  protected:
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span

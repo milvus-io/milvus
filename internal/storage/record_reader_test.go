@@ -418,6 +418,46 @@ func TestAbsentFieldFillReaderFillsStructChildren(t *testing.T) {
 	require.Equal(t, int64(2), rec.Column(100).(*array.Int64).Value(1)) // present passthrough
 }
 
+func TestAbsentFieldFillReaderUsesStructSiblingCounts(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "required struct", true: "nullable struct"}[nullable], func(t *testing.T) {
+			builder := array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+			builder.Append(true)
+			builder.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+			builder.Append(true)
+			if nullable {
+				builder.AppendNull()
+			}
+			sibling := builder.NewArray()
+			builder.Release()
+			base := &compositeRecord{index: map[FieldID]int16{201: 0}, recs: []arrow.Array{sibling}}
+			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 200, Name: "s", Nullable: nullable, Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, ElementNullable: true},
+					{FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, ElementNullable: true},
+				},
+			}}}
+			rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, schema, map[FieldID]struct{}{201: {}})
+			defer rr.Close()
+			rec, err := rr.Next()
+			require.NoError(t, err)
+			filled := rec.Column(202).(*array.List)
+			require.Equal(t, sibling.Len(), filled.Len())
+			for i, want := range []int64{2, 0} {
+				start, end := filled.ValueOffsets(i)
+				require.Equal(t, want, end-start)
+			}
+			if nullable {
+				require.True(t, filled.IsNull(2))
+				start, end := filled.ValueOffsets(2)
+				require.Equal(t, start, end)
+			}
+			require.True(t, filled.ListValues().IsNull(0))
+			require.True(t, filled.ListValues().IsNull(1))
+		})
+	}
+}
+
 // TestAbsentFieldFillReaderReturnsInnerWhenAllPresent pins the short-circuit: when
 // every read-schema field is present there is nothing to fill, so inner is returned
 // unwrapped (no per-record overlay allocation).

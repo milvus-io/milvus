@@ -7591,7 +7591,7 @@ func TestValidateDropField(t *testing.T) {
 		assert.Contains(t, err.Error(), "sub-field para_text is referenced by function embed_func as input")
 	})
 
-	t.Run("reject drop sub-field of struct array field by name", func(t *testing.T) {
+	t.Run("drop sub-field of struct array field by stored name", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -7602,15 +7602,16 @@ func TestValidateDropField(t *testing.T) {
 				{
 					FieldID: 102, Name: "paragraphs",
 					Fields: []*schemapb.FieldSchema{
-						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+						{FieldID: 103, Name: "paragraphs[para_text]", DataType: schemapb.DataType_Array},
+						{FieldID: 104, Name: "paragraphs[other]", DataType: schemapb.DataType_Array},
 					},
 				},
 			},
 		}
 		err := validateDropField(schema, "para_text")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot drop sub-field of struct array field")
-		assert.Contains(t, err.Error(), "paragraphs.para_text")
+		assert.Contains(t, err.Error(), "field not found")
+		assert.NoError(t, validateDropField(schema, "paragraphs[para_text]"))
 	})
 }
 
@@ -7902,7 +7903,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("drop by field_id - reject sub-field of struct array field", func(t *testing.T) {
+	t.Run("drop by field_id - sub-field of struct array field", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Name: "test_collection",
 			Fields: []*schemapb.FieldSchema{
@@ -7913,7 +7914,8 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 				{
 					FieldID: 102, Name: "paragraphs",
 					Fields: []*schemapb.FieldSchema{
-						{FieldID: 103, Name: "para_text", DataType: schemapb.DataType_Array},
+						{FieldID: 103, Name: "paragraphs[para_text]", DataType: schemapb.DataType_Array},
+						{FieldID: 104, Name: "paragraphs[other]", DataType: schemapb.DataType_Array},
 					},
 				},
 			},
@@ -7935,9 +7937,7 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 			},
 		}
 		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot drop sub-field of struct array field")
-		assert.Contains(t, err.Error(), "paragraphs.para_text")
+		assert.NoError(t, err)
 	})
 
 	t.Run("unknown action type", func(t *testing.T) {
@@ -7953,6 +7953,165 @@ func TestAlterCollectionSchemaTask_PreExecute(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown action type")
 	})
+}
+
+func structSubFieldDDLTestSchema(nullable bool) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 102, Name: "profile", Nullable: nullable,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 103, Name: "profile[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}},
+				{FieldID: 104, Name: "profile[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}},
+			},
+		}},
+	}
+}
+
+func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
+	newField := func(name string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: name, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+		}
+	}
+	preExecute := func(schema *schemapb.CollectionSchema, path string, field *schemapb.FieldSchema, fn *schemapb.FunctionSchema, indexName string) error {
+		request := &milvuspb.AlterCollectionSchemaRequest_AddRequest{FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+			StructPath: path, FieldSchema: field, IndexName: indexName,
+		}}}
+		if fn != nil {
+			request.FuncSchema = []*schemapb.FunctionSchema{fn}
+		}
+		task := &AlterCollectionSchemaTask{
+			oldSchema: schema,
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{AddRequest: request}},
+			},
+		}
+		return task.PreExecute(context.Background())
+	}
+
+	t.Run("valid raw and stored names", func(t *testing.T) {
+		for _, name := range []string{"c", "profile[c]"} {
+			field := newField(name)
+			field.FieldID = 103 // RootCoord assigns the real ID; proxy ignores this value.
+			require.NoError(t, preExecute(structSubFieldDDLTestSchema(true), "profile", field, nil, ""))
+			assert.True(t, field.GetNullable())
+			assert.Equal(t, name, field.GetName())
+		}
+	})
+	t.Run("non nullable parent", func(t *testing.T) {
+		field := newField("c")
+		require.NoError(t, preExecute(structSubFieldDDLTestSchema(false), "profile", field, nil, ""))
+		assert.False(t, field.GetNullable())
+	})
+	t.Run("nested array nullability propagation", func(t *testing.T) {
+		for _, nullable := range []bool{false, true} {
+			field := newField("nested")
+			field.ElementType = schemapb.DataType_Array
+			field.TypeSchema = &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable:   true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			}
+			require.NoError(t, preExecute(structSubFieldDDLTestSchema(nullable), "profile", field, nil, ""))
+			assert.Equal(t, nullable, field.GetNullable())
+			assert.Equal(t, nullable, field.GetTypeSchema().GetNullable())
+			assert.True(t, field.GetTypeSchema().GetArrayElement().GetNullable())
+		}
+	})
+	for _, test := range []struct {
+		name, path, message string
+		mutate              func(*schemapb.CollectionSchema, *schemapb.FieldSchema)
+	}{
+		{"missing parent", "missing", "struct field \"missing\" not found", nil},
+		{"nested path", "profile[inner]", "nested struct is not supported", nil},
+		{"element nullable false", "profile", "must set element_nullable=true", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.ElementNullable = false }},
+		{"default value", "profile", "default value is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) {
+			f.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 1}}
+		}},
+		{"primary key", "profile", "primary key is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsPrimaryKey = true }},
+		{"auto ID", "profile", "autoID is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.AutoID = true }},
+		{"partition key", "profile", "partition key is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsPartitionKey = true }},
+		{"clustering key", "profile", "clustering key is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsClusteringKey = true }},
+		{"function output", "profile", "function output is not supported", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsFunctionOutput = true }},
+		{"dynamic", "profile", "protected role", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsDynamic = true }},
+		{"external", "profile", "does not support external field mapping", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.ExternalField = "source" }},
+		{"duplicate raw name", "profile", "duplicated field name", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.Name = "a" }},
+		{"duplicate stored name", "profile", "duplicated field name", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.Name = "profile[a]" }},
+		{"duplicate top level", "profile", "duplicated field name", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.Name = "vec" }},
+		{"capacity mismatch", "profile", "same max_capacity", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.TypeParams[0].Value = "32" }},
+		{"nullable child of non nullable parent", "profile", "cannot be nullable individually", func(s *schemapb.CollectionSchema, f *schemapb.FieldSchema) {
+			s.StructArrayFields[0].Nullable = false
+			s.StructArrayFields[0].Fields[0].Nullable = false
+			s.StructArrayFields[0].Fields[1].Nullable = false
+			f.Nullable = true
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schema := structSubFieldDDLTestSchema(true)
+			field := newField("c")
+			if test.mutate != nil {
+				test.mutate(schema, field)
+			}
+			require.ErrorContains(t, preExecute(schema, test.path, field, nil, ""), test.message)
+		})
+	}
+	t.Run("field limit", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxFieldNum.Key, "5")
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxFieldNum.Key)
+		require.ErrorContains(t, preExecute(structSubFieldDDLTestSchema(true), "profile", newField("c"), nil, ""), "maximum field's number")
+	})
+	t.Run("vector limit", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxVectorFieldNum.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxVectorFieldNum.Key)
+		field := newField("c")
+		field.DataType = schemapb.DataType_ArrayOfVector
+		field.ElementType = schemapb.DataType_FloatVector
+		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}, {Key: common.DimKey, Value: "8"}}
+		require.ErrorContains(t, preExecute(structSubFieldDDLTestSchema(true), "profile", field, nil, ""), "maximum vector field's number")
+	})
+	t.Run("function with path", func(t *testing.T) {
+		require.ErrorContains(t, preExecute(structSubFieldDDLTestSchema(true), "profile", newField("c"), &schemapb.FunctionSchema{Name: "f"}, ""), "struct_path cannot be combined with a function")
+	})
+	t.Run("index with path", func(t *testing.T) {
+		require.ErrorContains(t, preExecute(structSubFieldDDLTestSchema(true), "profile", newField("c"), nil, "idx"), "binding an index while adding a struct sub-field is not supported yet")
+	})
+}
+
+func TestValidateDropStructSubField(t *testing.T) {
+	schema := structSubFieldDDLTestSchema(true)
+	require.NoError(t, validateDropField(schema, "profile[b]"))
+	require.ErrorContains(t, validateDropField(schema, "b"), "field not found")
+
+	last := proto.Clone(schema).(*schemapb.CollectionSchema)
+	last.StructArrayFields[0].Fields = last.StructArrayFields[0].Fields[:1]
+	require.ErrorContains(t, validateDropField(last, "profile[a]"), "cannot drop the last sub-field")
+
+	vector := proto.Clone(schema).(*schemapb.CollectionSchema)
+	vector.Fields = vector.Fields[:1]
+	vector.StructArrayFields[0].Fields[1].DataType = schemapb.DataType_ArrayOfVector
+	require.ErrorContains(t, validateDropField(vector, "profile[b]"), "cannot drop the last vector field")
+
+	used := proto.Clone(schema).(*schemapb.CollectionSchema)
+	used.Functions = []*schemapb.FunctionSchema{{Name: "f", InputFieldNames: []string{"profile[b]"}}}
+	require.ErrorContains(t, validateDropField(used, "profile[b]"), "referenced by function f as input")
+	used.Functions[0].InputFieldNames = nil
+	used.Functions[0].OutputFieldNames = []string{"profile[b]"}
+	require.ErrorContains(t, validateDropField(used, "profile[b]"), "referenced by function f as output")
+
+	protected := proto.Clone(schema).(*schemapb.CollectionSchema)
+	protected.StructArrayFields[0].Fields[1].IsPartitionKey = true
+	require.ErrorContains(t, validateDropField(protected, "profile[b]"), "protected role")
 }
 
 func TestValidateDropFunction(t *testing.T) {
