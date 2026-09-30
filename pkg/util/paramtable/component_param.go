@@ -9297,10 +9297,10 @@ type streamingConfig struct {
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
-	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
-	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
-	TransformLogCatchupConcurrencyPerStream ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow                     ParamItem `refreshable:"false"`
+	IdempotencyChunkMaxBytes                         ParamItem `refreshable:"false"`
+	IdempotencyMaxStagingInterval                    ParamItem `refreshable:"false"`
+	TransformLogCatchupConcurrencyPerStream          ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"false"`
 
 	// wal rate limit

@@ -31,7 +31,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 			serverID, ok := contextutil.GetPickServerID(ctx)
 			require.True(t, ok)
 			require.Equal(t, int64(101), serverID)
-			pchannel, err := worknodehandler.DecodeQueryViewPChannelFromOutgoingContext(ctx)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
 			require.NoError(t, err)
 			require.Equal(t, types.PChannelInfo{
 				Name:       "p0",
@@ -58,7 +58,7 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 			serverID, ok := contextutil.GetPickServerID(ctx)
 			require.True(t, ok)
 			require.Equal(t, int64(101), serverID)
-			pchannel, err := worknodehandler.DecodeQueryViewPChannelFromOutgoingContext(ctx)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
 			require.NoError(t, err)
 			require.Equal(t, types.PChannelInfo{
 				Name:       "p0",
@@ -98,7 +98,7 @@ func TestHandlerClientViewSyncRoutesByPChannelAssignment(t *testing.T) {
 			serverID, ok := contextutil.GetPickServerID(ctx)
 			require.True(t, ok)
 			require.Equal(t, int64(101), serverID)
-			pchannel, err := worknodehandler.DecodeQueryViewPChannelFromOutgoingContext(ctx)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
 			require.NoError(t, err)
 			require.Equal(t, types.PChannelInfo{
 				Name:       "p0",
@@ -242,4 +242,9 @@ func (s *noopViewSyncClientStream) SendMsg(interface{}) error {
 
 func (s *noopViewSyncClientStream) RecvMsg(interface{}) error {
 	return io.EOF
+}
+
+func decodeOutgoingQueryViewPChannel(ctx context.Context) (types.PChannelInfo, error) {
+	md, _ := metadata.FromOutgoingContext(ctx)
+	return worknodehandler.DecodeQueryViewPChannelFromIncomingContext(metadata.NewIncomingContext(ctx, md))
 }

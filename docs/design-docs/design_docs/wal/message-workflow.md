@@ -29,7 +29,7 @@ raw message M
        -> route to every affected VChannel
        -> each actual async Segment consumer clones its own handle
        -> after Segment/L1 updates, WALMaterializer retains Delete and explicit completion handles
-       -> QueryRuntime receives a plain immutable copy when needed (future)
+       -> QueryRuntime receives immutable events through the ordered VChannel dispatcher
   -> D.Release()
   -> BroadcastAck.Accept(O)
 ```

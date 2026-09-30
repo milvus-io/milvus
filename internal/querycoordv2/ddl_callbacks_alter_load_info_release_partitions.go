@@ -66,7 +66,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				CollectionId: coll.CollectionID,
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
-			WithBroadcast([]string{loadConfigBroadcastChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 		collectionReleased = true
 	} else {
@@ -74,7 +74,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 		alterLoadConfigReq := &job.AlterLoadConfigRequest{
 			Meta:           s.meta,
 			CollectionInfo: coll,
-			ControlChannel: loadConfigBroadcastChannel(),
 			Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
 			Expected: job.ExpectedLoadConfig{
 				ExpectedPartitionIDs:             partitionIDsSet.Collect(),

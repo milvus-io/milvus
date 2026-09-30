@@ -121,7 +121,7 @@ func (m *QueryViewSegmentReadinessManager) acquire(req AcquireSegments) {
 	m.scheduler.Submit(schedulerTaskFunc(func(schedulerCtx context.Context) error {
 		ctx, stop := mergeTaskContext(schedulerCtx, ctx)
 		defer stop()
-		return m.continueAcquire(req, ref, view, ctx, cancel)
+		return m.continueAcquire(ctx, req, ref, view, cancel)
 	}))
 }
 
@@ -135,7 +135,7 @@ func (m *QueryViewSegmentReadinessManager) submitCallback(callback func()) {
 	}))
 }
 
-func (m *QueryViewSegmentReadinessManager) continueAcquire(req AcquireSegments, ref *transformViewRef, view *qviews.QueryViewAtQueryNode, ctx context.Context, cancel context.CancelFunc) error {
+func (m *QueryViewSegmentReadinessManager) continueAcquire(ctx context.Context, req AcquireSegments, ref *transformViewRef, view *qviews.QueryViewAtQueryNode, cancel context.CancelFunc) error {
 	collectionGuard, retryable, err := m.acquireCollectionRuntime(ctx, view)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -178,7 +178,7 @@ For this bounded SN bootstrap, SyncUp(T) proves delivery through the captured
 snapshot boundary T. GrowingRuntime applies all collected Delete entries before
 publishing its base frontiers; SyncUp receipt alone does not complete resource
 preparation. The subsequent live-event barrier provides additional applied
-progress before reporting the view Ready. This is distinct from the planned QN
+progress before reporting the view Ready. This is distinct from the QN
 use of unbounded SyncUp to establish catch-up to a sampled current tail. Neither
 path guarantees zero lag from new writes between readiness and Up. See
 [SyncUp's two roles](transform_log.md#3-entry-and-syncup-semantics).

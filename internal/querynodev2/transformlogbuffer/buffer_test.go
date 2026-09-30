@@ -4,13 +4,13 @@ package transformlogbuffer
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

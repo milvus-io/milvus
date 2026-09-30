@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -36,7 +35,7 @@ func TestAckWaitsForCallbackWithoutHoldingTaskOrManagerLock(t *testing.T) {
 
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	task := newBroadcastTaskFromProto(createNewBroadcastTask(100, []string{"v1", "v2"}), metrics, ackScheduler)
+	task := newBroadcastTaskFromProto(createTruncateBroadcastTask(100, []string{"v1", "v2"}), metrics, ackScheduler)
 	task.SetLogger(mlog.With())
 
 	managerCtx, managerCancel := context.WithCancel(context.Background())
@@ -50,7 +49,7 @@ func TestAckWaitsForCallbackWithoutHoldingTaskOrManagerLock(t *testing.T) {
 	}
 	bm.SetLogger(mlog.With())
 
-	ackMsg := newDropCollectionAckMessage(100, "v1")
+	ackMsg := newTruncateCollectionAckMessage(100, "v1")
 	ackDone := make(chan error, 2)
 	go func() { ackDone <- bm.Ack(context.Background(), ackMsg) }()
 	go func() { ackDone <- bm.Ack(context.Background(), ackMsg) }()
@@ -79,7 +78,7 @@ func TestAckWaitsForCallbackWithoutHoldingTaskOrManagerLock(t *testing.T) {
 
 	var callbackCalls atomic.Int32
 	callbackVChannels := make(chan string, 2)
-	registry.RegisterDropCollectionV1AckOnceCallback(func(ctx context.Context, result message.AckResultDropCollectionMessageV1) error {
+	registry.RegisterTruncateCollectionV2AckOnceCallback(func(ctx context.Context, result message.AckResultTruncateCollectionMessageV2) error {
 		callbackCalls.Add(1)
 		callbackVChannels <- result.Message.VChannel()
 		return nil
@@ -106,14 +105,14 @@ func TestGetOrCreateDoesNotHoldManagerLockWhileInspectingTask(t *testing.T) {
 	paramtable.Init()
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	task := newBroadcastTaskFromProto(createNewBroadcastTask(101, []string{"v1"}), metrics, ackScheduler)
+	task := newBroadcastTaskFromProto(createTruncateBroadcastTask(101, []string{"v1"}), metrics, ackScheduler)
 	task.SetLogger(mlog.With())
 	bm := &broadcastTaskManager{
 		mu:    &sync.Mutex{},
 		tasks: map[uint64]*broadcastTask{101: task},
 	}
 	bm.SetLogger(mlog.With())
-	ackMsg := newDropCollectionAckMessage(101, "v1")
+	ackMsg := newTruncateCollectionAckMessage(101, "v1")
 
 	task.mu.Lock()
 	bm.mu.Lock()
@@ -159,7 +158,7 @@ func TestPendingSchemaScanSkipsLockedUnrelatedTask(t *testing.T) {
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
 
-	dropTask := newBroadcastTaskFromProto(createNewBroadcastTask(102, []string{"v1"}), metrics, ackScheduler)
+	dropTask := newBroadcastTaskFromProto(createTruncateBroadcastTask(102, []string{"v1"}), metrics, ackScheduler)
 	createMsg := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 10}).
 		WithBody(&msgpb.CreateCollectionRequest{
@@ -206,9 +205,9 @@ func TestFastAckResolvesCallbackOutsideTaskLock(t *testing.T) {
 
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	commitMsg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{CollectionId: 10, JobId: 20}).
-		WithBody(&messagespb.CommitImportMessageBody{}).
+	commitMsg := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{CollectionId: 10}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast().
 		WithBroadcastID(104)
@@ -235,7 +234,7 @@ func TestFastAckResolvesCallbackOutsideTaskLock(t *testing.T) {
 	}
 
 	var callbackCalls atomic.Int32
-	registry.RegisterCommitImportV2AckOnceCallback(func(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
+	registry.RegisterTruncateCollectionV2AckOnceCallback(func(ctx context.Context, result message.AckResultTruncateCollectionMessageV2) error {
 		callbackCalls.Add(1)
 		return nil
 	})
@@ -254,9 +253,9 @@ func TestFastAckWithAckSyncUpDoesNotWaitForCallback(t *testing.T) {
 
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	dropMsg := message.NewDropCollectionMessageBuilderV1().
-		WithHeader(&message.DropCollectionMessageHeader{}).
-		WithBody(&msgpb.DropCollectionRequest{}).
+	dropMsg := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
 		WithBroadcast([]string{"v1"}, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast().
 		WithBroadcastID(105)
@@ -281,7 +280,7 @@ func TestAckOnceCallbackFailureRemainsRetryable(t *testing.T) {
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	var callbackCalls atomic.Int32
-	registry.RegisterDropCollectionV1AckOnceCallback(func(ctx context.Context, result message.AckResultDropCollectionMessageV1) error {
+	registry.RegisterTruncateCollectionV2AckOnceCallback(func(ctx context.Context, result message.AckResultTruncateCollectionMessageV2) error {
 		if callbackCalls.Add(1) == 1 {
 			return errors.New("injected callback failure")
 		}
@@ -290,9 +289,9 @@ func TestAckOnceCallbackFailureRemainsRetryable(t *testing.T) {
 
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(mlog.With())
-	task := newBroadcastTaskFromProto(createNewBroadcastTask(106, []string{"v1"}), metrics, ackScheduler)
+	task := newBroadcastTaskFromProto(createTruncateBroadcastTask(106, []string{"v1"}), metrics, ackScheduler)
 	task.SetLogger(mlog.With())
-	ackMsg := newDropCollectionAckMessage(106, "v1")
+	ackMsg := newTruncateCollectionAckMessage(106, "v1")
 
 	err := task.Ack(context.Background(), ackMsg)
 	require.EqualError(t, err, "injected callback failure")
@@ -308,7 +307,7 @@ func TestCloseCancelsAckWaitingForCallbackRegistration(t *testing.T) {
 	metrics := newBroadcasterMetrics()
 	ackScheduler := newAckCallbackScheduler(logger)
 	broadcastScheduler := newBroadcasterScheduler(nil, logger)
-	task := newBroadcastTaskFromProto(createNewBroadcastTask(107, []string{"v1", "v2"}), metrics, ackScheduler)
+	task := newBroadcastTaskFromProto(createTruncateBroadcastTask(107, []string{"v1", "v2"}), metrics, ackScheduler)
 	task.SetLogger(logger)
 
 	managerCtx, managerCancel := context.WithCancel(context.Background())
@@ -327,7 +326,7 @@ func TestCloseCancelsAckWaitingForCallbackRegistration(t *testing.T) {
 
 	ackDone := make(chan error, 1)
 	go func() {
-		ackDone <- bm.Ack(context.WithoutCancel(context.Background()), newDropCollectionAckMessage(107, "v1"))
+		ackDone <- bm.Ack(context.WithoutCancel(context.Background()), newTruncateCollectionAckMessage(107, "v1"))
 	}()
 	requireNoResult(t, ackDone, 50*time.Millisecond, "ack should be waiting before Close")
 
@@ -349,10 +348,10 @@ func TestCloseCancelsAckWaitingForCallbackRegistration(t *testing.T) {
 	}
 }
 
-func newDropCollectionAckMessage(broadcastID uint64, vchannel string) message.ImmutableMessage {
-	return message.NewDropCollectionMessageBuilderV1().
-		WithHeader(&message.DropCollectionMessageHeader{}).
-		WithBody(&msgpb.DropCollectionRequest{}).
+func newTruncateCollectionAckMessage(broadcastID uint64, vchannel string) message.ImmutableMessage {
+	return message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
 		WithBroadcast([]string{vchannel}).
 		MustBuildBroadcast().
 		WithBroadcastID(broadcastID).
@@ -369,4 +368,9 @@ func requireNoResult[T any](t *testing.T, ch <-chan T, wait time.Duration, messa
 		t.Fatal(message)
 	case <-time.After(wait):
 	}
+}
+
+func createTruncateBroadcastTask(id uint64, vchannels []string) *streamingpb.BroadcastTask {
+	msg := message.NewTruncateCollectionMessageBuilderV2().WithHeader(&message.TruncateCollectionMessageHeader{}).WithBody(&message.TruncateCollectionMessageBody{}).WithBroadcast(vchannels).MustBuildBroadcast().WithBroadcastID(id)
+	return &streamingpb.BroadcastTask{Message: msg.IntoMessageProto(), State: streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, AckedVchannelBitmap: make([]byte, len(vchannels))}
 }

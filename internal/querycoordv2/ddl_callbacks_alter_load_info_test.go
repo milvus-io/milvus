@@ -28,15 +28,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -90,6 +94,8 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 					WithBody(&messagespb.AlterLoadConfigMessageBody{}).
 					WithBroadcast([]string{"_ctrl_channel"}).MustBuildBroadcast()
 				mockey.Mock(job.GenerateAlterLoadConfigMessage).Return(msg, nil).Build()
+				server.qviewsRuntime = &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}}
+				mockey.Mock((*Server).generateAlterLoadConfigMessageForLoadCollection).Return(msg, nil).Build()
 				bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 				bapi.EXPECT().Close().Return().Once()
 				mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(bapi, nil).Build()
@@ -145,7 +151,9 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 }
 
 func buildAlterLoadConfigBroadcastResult(collectionID int64, vchannels ...string) message.BroadcastResultAlterLoadConfigMessageV2 {
- if len(vchannels)==0 { vchannels=[]string{funcutil.GetControlChannel("test")} }
+	if len(vchannels) == 0 {
+		vchannels = []string{funcutil.GetControlChannel("test")}
+	}
 	broadcastMsg := message.NewAlterLoadConfigMessageBuilderV2().
 		WithHeader(&messagespb.AlterLoadConfigMessageHeader{
 			CollectionId: collectionID,

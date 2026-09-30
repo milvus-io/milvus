@@ -12,7 +12,8 @@ RecoveryStorage constructs and dispatches through these modules during bounded
 recovery and live observation. It separately owns [WALSummary](summary.md),
 restores the Summary index, and caps checkpoint publication at `LastAcked`.
 RecoveryStorage also restores idempotency windows from retained Summary history
-and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
+and startup replay before accepting writes. QueryRuntime resource preparation and query execution are wired through the
+VChannel query-resource manager and the SN QueryView handler.
 
 The current [WAL L0 materializer](l0_materializer.md) retains Delete handles.
 The [Summary consumer](summary_l0_materializer.md) is retained for QueryView;
@@ -34,8 +35,8 @@ The module owns:
 - one continuous VChannel metadata `checkpoint_time_tick`;
 - SegmentView creation, lookup, routing, and snapshot aggregation;
 - the VChannel WALMaterializer and its growing-registration prerequisite;
-- DataView recovery state and QueryRuntime live-event forwarding (design
-  intent, pending the qviews feature — not yet wired in the current code).
+- DataVersion summaries, QueryRuntime preparation and ordered live-event
+  forwarding through `queryresource.Manager`.
 
 It does not own the PChannel global checkpoint, AckTracker, Coordinator
 broadcast acknowledgement, or QueryView state transitions.

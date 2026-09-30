@@ -22,7 +22,8 @@ PChannelRecoveryManager
 observers, or own WALView construction APIs.
 
 `VChannelRecoveryModule` owns one VChannel's `VChannelMeta`, Segment state,
-TransformLog, DataView recovery state, query-runtime references, build task, and
+summary-backed Transform subscriptions, DataVersion summaries, query-runtime
+references, build task, and
 live DML dispatch. Once a runtime is recovered, the module continues consuming
 DML and the DataView visible to the runtime only grows while the QueryView is
 live.
@@ -91,7 +92,9 @@ Rules:
    referenced DataVersion.
 4. `Release(QueryView)` removes the corresponding reference.
 5. Resources can be closed only after all QueryView references are gone.
-6. WAL handoff close drains QueryView references through
+6. Serving leases and segment handles retain resources for in-flight queries;
+   dropping a view must not reclaim resources that a query still holds.
+7. WAL handoff close drains QueryView references through
    `QueryViewStateMachine.CloseForHandoff` before the manager is closed.
 
 ## 6. Crash Recovery
@@ -99,11 +102,11 @@ Rules:
 Recovery rebuilds state from WAL metadata and QueryView metadata:
 
 1. `RecoveryStorage` recovers `PChannelRecoveryManager` from VChannel metadata,
-   Segment metadata, TransformLog metadata, and WAL replay.
+   Segment metadata, the WALSummary manifest/index, and WAL replay.
 2. `SNQueryViewHandler` recovers persisted QueryView state.
 3. Recovered QueryView state machines call `Acquire` for local resources.
 4. `VChannelRecoveryModule` builds the WAL input view from QueryView meta and
-   its owned DataView/TransformLog state.
+   its captured Segment state and shared WALSummary reader.
 5. After runtime initialization, the module continues consuming DML and
    dispatching live resource events to the runtime.
 
@@ -125,3 +128,15 @@ type QueryRuntimeModule interface {
 
 The `walview.VChannelWALView` type remains an internal preparation DTO for
 runtime modules. It is not exposed by `RecoveryStorage`.
+
+## Current implementation references
+
+Preparation captures the WAL input view and registers the runtime under the
+same VChannel lock, preventing a gap between the snapshot and live events.
+GrowingRuntime and IDF runtime are implemented and used by SN query planning
+and execution; they are not future wiring. The detailed readiness, visibility
+and handle ownership rules are in [VChannel WAL Input View](../../wal/streamingnode_vchannel_wal_view.md)
+and [QueryView Leases](../query_view_lease.md).
+
+RecoveryStorage owns one persistence checkpoint. Runtime event buffers and
+query visibility watermarks do not introduce a second recovery checkpoint.

@@ -2,7 +2,6 @@ package transformlogbuffer
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -13,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Buffer struct {
@@ -88,7 +88,7 @@ func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSe
 	buf := b.channels[segment.VChannel()]
 	b.mu.Unlock()
 	if buf == nil {
-		return nil, fmt.Errorf("transform log buffer for vchannel %q is not acquired", segment.VChannel())
+		return nil, merr.WrapErrServiceInternalMsg("transform log buffer for vchannel %q is not acquired", segment.VChannel())
 	}
 	return buf.registerSegment(ctx, segment)
 }
@@ -352,7 +352,7 @@ func (b *vchannelBuffer) acquireLocked(startFrom uint64) error {
 		return b.err
 	}
 	if startFrom < b.retentionStart {
-		return fmt.Errorf("transform log buffer range starts from %d, cannot serve %d", b.retentionStart, startFrom)
+		return merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve %d", b.retentionStart, startFrom)
 	}
 	b.guards[startFrom]++
 	return nil
@@ -367,7 +367,7 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 	startFrom := segment.TransformStartAfterTimeTick()
 	if startFrom < b.retentionStart {
 		b.mu.Unlock()
-		return nil, fmt.Errorf("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
+		return nil, merr.WrapErrServiceInternalMsg("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
 	}
 	reg := newRegistration(b, segment)
 	b.pending[segment.ID()] = reg
@@ -672,7 +672,7 @@ type registration struct {
 }
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel ownership transfers to registration.Unregister.
 	return &registration{
 		buffer:    buffer,
 		segment:   segment,

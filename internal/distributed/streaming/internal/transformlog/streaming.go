@@ -16,7 +16,7 @@ import (
 type StreamFactory = func(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
 
 func NewResumableStream(_ context.Context, pchannel string, factory StreamFactory) wal.TransformLogStream {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel ownership transfers to resumableStream.Close.
 	stream := &resumableStream{
 		ctx:           ctx,
 		cancel:        cancel,
