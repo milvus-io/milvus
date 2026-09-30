@@ -17,6 +17,8 @@
 package schemautil
 
 import (
+	"strings"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -30,12 +32,14 @@ const (
 	AlterSchemaAddField AlterSchemaAddKind = iota + 1
 	AlterSchemaAddFunction
 	AlterSchemaAddFunctionField
+	AlterSchemaAddStructSubField
 )
 
 type AlterSchemaAddPlan struct {
-	Kind     AlterSchemaAddKind
-	Field    *schemapb.FieldSchema
-	Function *schemapb.FunctionSchema
+	Kind       AlterSchemaAddKind
+	Field      *schemapb.FieldSchema
+	Function   *schemapb.FunctionSchema
+	StructPath string
 	// Index meta bound to the newly added field, parsed from
 	// FieldInfo.index_name/extra_params. A vector-type function output field
 	// always materializes a bound index so that bump-schema-version compaction
@@ -70,6 +74,7 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	var field *schemapb.FieldSchema
 	var indexName string
 	var indexExtraParams []*commonpb.KeyValuePair
+	var structPath string
 	if len(fieldInfos) == 1 {
 		fieldInfo := fieldInfos[0]
 		if fieldInfo == nil || fieldInfo.GetFieldSchema() == nil {
@@ -78,14 +83,26 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 		field = fieldInfo.GetFieldSchema()
 		indexName = fieldInfo.GetIndexName()
 		indexExtraParams = fieldInfo.GetExtraParams()
+		structPath = fieldInfo.GetStructPath()
 	}
-
 	var function *schemapb.FunctionSchema
 	if len(funcSchemas) == 1 {
 		function = funcSchemas[0]
 		if function == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("function schema is nil")
 		}
+	}
+	if structPath != "" {
+		if err := ValidateStructPath(structPath); err != nil {
+			return nil, err
+		}
+		if function != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("struct_path cannot be combined with a function")
+		}
+		if indexName != "" || len(indexExtraParams) != 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("binding an index while adding a struct sub-field is not supported yet")
+		}
+		return &AlterSchemaAddPlan{Kind: AlterSchemaAddStructSubField, Field: field, StructPath: structPath}, nil
 	}
 
 	switch {
@@ -104,6 +121,21 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("fieldInfos and function schema are both empty")
 	}
+}
+
+// ValidateStructPath accepts only a top-level struct name in this release.
+func ValidateStructPath(path string) error {
+	if path == "" || strings.ContainsAny(path, "[]") {
+		return merr.WrapErrParameterInvalidMsg("nested struct is not supported: struct_path %q must be a single struct field name", path)
+	}
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+		letter := ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
+		if ch != '_' && !letter && (i == 0 || ch < '0' || ch > '9') {
+			return merr.WrapErrParameterInvalidMsg("invalid struct_path %q: must be a single struct field name", path)
+		}
+	}
+	return nil
 }
 
 func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
