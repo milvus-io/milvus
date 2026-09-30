@@ -99,6 +99,12 @@ func newCompositeBinlogRecordReader(
 	idx := 0
 	index := make(map[FieldID]int16)
 	fields := make(map[FieldID]*schemapb.FieldSchema)
+	structs := make(map[FieldID]*schemapb.StructArrayFieldSchema)
+	for _, st := range schema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structs[child.GetFieldID()] = st
+		}
+	}
 	for _, f := range allFields {
 		index[f.FieldID] = int16(idx)
 		fields[f.FieldID] = f
@@ -127,10 +133,11 @@ func newCompositeBinlogRecordReader(
 	}
 
 	return &CompositeBinlogRecordReader{
-		fields: fields,
-		index:  index,
-		rrs:    rrs,
-		brs:    brs,
+		fields:  fields,
+		structs: structs,
+		index:   index,
+		rrs:     rrs,
+		brs:     brs,
 	}, nil
 }
 

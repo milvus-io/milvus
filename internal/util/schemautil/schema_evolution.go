@@ -156,24 +156,6 @@ func validateKeptEvolutionFields(oldFields, newFields *evolutionFieldMaps) error
 		if oldField.GetNullable() != newField.GetNullable() {
 			return merr.WrapErrParameterInvalidMsg("cannot change the nullability of struct field %q in place", oldField.GetName())
 		}
-		oldChildren := make(map[int64]struct{}, len(oldField.GetFields()))
-		for _, child := range oldField.GetFields() {
-			oldChildren[child.GetFieldID()] = struct{}{}
-		}
-		newChildren := make(map[int64]struct{}, len(newField.GetFields()))
-		for _, child := range newField.GetFields() {
-			newChildren[child.GetFieldID()] = struct{}{}
-		}
-		for childID := range oldChildren {
-			if _, kept := newChildren[childID]; !kept {
-				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field id %d from kept struct field %q", childID, oldField.GetName())
-			}
-		}
-		for childID := range newChildren {
-			if _, existed := oldChildren[childID]; !existed {
-				return merr.WrapErrParameterInvalidMsg("cannot add sub-field id %d to kept struct field %q", childID, oldField.GetName())
-			}
-		}
 		if err := validateNumericBoundsEvolution(oldField.GetName(), oldField.GetTypeParams(), newField.GetTypeParams()); err != nil {
 			return err
 		}
@@ -270,13 +252,15 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		}
 		if _, isSubField := newFields.structSubFields[id]; isSubField {
 			parentID := newFields.structParents[id]
-			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {
-				return merr.WrapErrParameterInvalidMsg("cannot add sub-field %q to kept struct field id %d", field.GetName(), parentID)
-			}
-			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() {
+			parent := newFields.structFields[parentID]
+			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || field.GetExternalField() != "" {
 				return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
 			}
-			if !field.GetNullable() {
+			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {
+				if err := validateAddedEvolutionStructSubField(field, parent); err != nil {
+					return err
+				}
+			} else if !field.GetNullable() {
 				return merr.WrapErrParameterInvalidMsg("cannot add non-nullable sub-field %q in a new struct field", field.GetName())
 			}
 			continue
@@ -298,6 +282,40 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		if len(structField.GetFields()) == 0 {
 			return merr.WrapErrParameterInvalidMsg("new struct field %q must contain at least one sub-field", structField.GetName())
 		}
+	}
+	return nil
+}
+
+func validateAddedEvolutionStructSubField(field *schemapb.FieldSchema, parent *schemapb.StructArrayFieldSchema) error {
+	if !field.GetElementNullable() {
+		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), parent.GetName())
+	}
+	if field.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported for struct field, field name = %s", field.GetName())
+	}
+	if field.GetNullable() != parent.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("sub-field %q nullable=%t must match struct field %q nullable=%t", field.GetName(), field.GetNullable(), parent.GetName(), parent.GetNullable())
+	}
+	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.GetName(), field.GetDataType())
+	}
+	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+		return err
+	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		inner := field.GetTypeSchema().GetArrayElement()
+		if _, ok := inner.GetArrayElement().GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+			return merr.WrapErrParameterInvalidMsg("nested array field %s supports exactly one nested array level", field.GetName())
+		}
+		if field.GetTypeSchema().GetNullable() != parent.GetNullable() || inner.GetNullable() != field.GetElementNullable() {
+			return merr.WrapErrParameterInvalidMsg("nested array field %q nullability must match struct nullable and element_nullable", field.GetName())
+		}
+	} else if field.GetDataType() == schemapb.DataType_Array {
+		if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
+			return err
+		}
+	} else if !typeutil.IsFixDimVectorType(field.GetElementType()) {
+		return merr.WrapErrParameterInvalidMsg("unsupported element type %s of ArrayOfVector field %s", field.GetElementType(), field.GetName())
 	}
 	return nil
 }
@@ -345,8 +363,8 @@ func validateDroppedEvolutionFields(oldFields, newFields *evolutionFieldMaps, ne
 			continue
 		}
 		if parentID, isSubField := oldFields.structParents[id]; isSubField {
-			if _, parentKept := newFields.structFields[parentID]; parentKept {
-				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field %q from kept struct field id %d", field.GetName(), parentID)
+			if parent, parentKept := newFields.structFields[parentID]; parentKept && len(parent.GetFields()) == 0 {
+				return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", field.GetName(), parent.GetName())
 			}
 		}
 		if err := validateDroppedEvolutionField(field, newSchema); err != nil {

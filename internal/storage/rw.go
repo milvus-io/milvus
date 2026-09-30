@@ -421,9 +421,11 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		// sourcing physical presence from FieldBinlog.ChildFields (set by the
 		// flush/compaction writers, reliable for those segments). Import-reconstructed
 		// binlogs carry no ChildFields (FieldID is a column-group ID), so presence is
-		// not derivable there; pass the full schema through unchanged (the engine
-		// null-fills absent columns). Default-fill for the import path is a documented
-		// follow-up (issue #52771).
+		// not derivable there. For schemas without element-nullable struct children,
+		// pass the full schema through (the engine null-fills absent columns).
+		// Otherwise fail before the engine can silently produce null rows in place
+		// of N null elements. Default-fill for the import path remains a follow-up
+		// (issue #52771).
 		present, reliable := binlogFieldIDSet(binlogs)
 		if reliable {
 			readSchema, ferr := filterSchemaToPresentFields(schema, present)
@@ -433,6 +435,17 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
+			// Without ChildFields, packed column-group IDs do not identify
+			// individual struct children. Reading the full schema would let the
+			// packed engine turn an absent child into a null row instead of N null
+			// elements, silently changing the struct's element count.
+			for _, st := range schema.GetStructArrayFields() {
+				for _, child := range st.GetFields() {
+					if child.GetElementNullable() {
+						return nil, merr.WrapErrDataIntegrityMsg("cannot read struct field %q with element-nullable sub-field %q from packed binlogs without ChildFields", st.GetName(), child.GetName())
+					}
+				}
+			}
 			rr = newPackedChunksRecordReader(ctx, paths, schema, rwOptions, pluginContext)
 		}
 	default:
@@ -560,9 +573,8 @@ func NewTextDecodedManifestRecordReader(
 // (and struct sub-fields) whose FieldID is physically present, so the packed
 // reader is asked to read only stored columns; absent fields are then filled by
 // NewAbsentFieldFillRecordReader rather than null-synthesized by the engine.
-// A struct array field is physically all-or-nothing (add/drop/update act on the
-// whole struct), so it is kept whole or dropped whole; a partially-present struct
-// is a data-integrity violation that must never occur and is surfaced as an error.
+// A partially present struct retains its stored children so the wrapper can
+// derive the missing children's element counts from a sibling.
 func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[FieldID]struct{}) (*schemapb.CollectionSchema, error) {
 	out := proto.Clone(schema).(*schemapb.CollectionSchema)
 	fields := out.Fields[:0]
@@ -574,21 +586,15 @@ func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[
 	out.Fields = fields
 	structs := out.StructArrayFields[:0]
 	for _, st := range out.StructArrayFields {
-		presentChildren := 0
+		children := st.Fields[:0]
 		for _, f := range st.GetFields() {
 			if _, ok := present[f.GetFieldID()]; ok {
-				presentChildren++
+				children = append(children, f)
 			}
 		}
-		switch presentChildren {
-		case 0:
-			// whole struct absent: drop it here, the wrapper fills its children.
-		case len(st.GetFields()):
+		st.Fields = children
+		if len(children) > 0 {
 			structs = append(structs, st)
-		default:
-			return nil, merr.WrapErrServiceInternalMsg(
-				"struct array field %q partially present (%d of %d children): a struct array is physically all-or-nothing",
-				st.GetName(), presentChildren, len(st.GetFields()))
 		}
 	}
 	out.StructArrayFields = structs

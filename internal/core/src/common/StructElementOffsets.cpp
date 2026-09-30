@@ -417,15 +417,6 @@ StructElementOffsetsSealed::BuildFromColumn(
     const ChunkedColumnInterface& column,
     const FieldMeta& field_meta,
     int64_t row_count) {
-    if ((field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
-         field_meta.is_element_nullable()) ||
-        field_meta.has_nullable_array_element()) {
-        ThrowInfo(
-            ErrorCode::NotImplemented,
-            "struct element offsets on element-nullable array field {} are "
-            "not supported yet",
-            field_meta.get_name().get());
-    }
     if (row_count == 0) {
         LOG_INFO(
             "StructElementOffsetsSealed::BuildFromColumn: empty segment for "
@@ -473,7 +464,7 @@ StructElementOffsetsSealed::BuildFromColumn(
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
                 if (!valid_flags || valid_flags[i]) {
-                    array_len = vector_array_views[i].physical_length();
+                    array_len = vector_array_views[i].length();
                 }
 
                 append_array_length(array_len);
