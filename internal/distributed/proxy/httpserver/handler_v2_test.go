@@ -251,6 +251,132 @@ func TestTraceLogRequestFieldRedactsRESTSnapshotExternalSpec(t *testing.T) {
 	}
 }
 
+func TestTraceLogRequestFieldHandlesTypedNilRequests(t *testing.T) {
+	for _, req := range []any{
+		(*CollectionReq)(nil),
+		(*RefreshExternalCollectionReq)(nil),
+		(*ImportReq)(nil),
+		(*PasswordReq)(nil),
+		(*NewPasswordReq)(nil),
+		(*RestoreExternalSnapshotReq)(nil),
+		(*ExportSnapshotReq)(nil),
+		(*QueryReqV2)(nil),
+		(*CollectionFilterReq)(nil),
+		(*SearchReqV2)(nil),
+		(*HybridSearchReq)(nil),
+	} {
+		assert.Equal(t, req, getTraceLogRequestFieldWithoutSensitiveInfo(req).Interface)
+	}
+}
+
+func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
+	for _, req := range []*ImportReq{nil, {}, {Options: map[string]string{}}} {
+		assert.Equal(t, req, getTraceLogRequestFieldWithoutSensitiveInfo(req).Interface)
+	}
+
+	for _, spec := range []string{
+		`{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+		`{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"`,
+	} {
+		req := &ImportReq{
+			DbName:         "db",
+			CollectionName: "target",
+			PartitionName:  "p1",
+			Files:          [][]string{{"s3://bucket/snapshot.json"}},
+			Options: map[string]string{
+				"backup":        "true",
+				"source_type":   "snapshot",
+				"external_spec": spec,
+				"EXTERNAL_SPEC": spec,
+				"ezk":           "IMPORT_EZK_SENTINEL",
+				"EzK":           "IMPORT_EZK_MIXED_SENTINEL",
+			},
+		}
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		field := getTraceLogRequestFieldWithoutSensitiveInfo(req)
+		require.Equal(t, "request", field.Key)
+		redacted, ok := field.Interface.(*ImportReq)
+		require.True(t, ok)
+		want := *req
+		want.Options = map[string]string{
+			"backup":        "true",
+			"source_type":   "snapshot",
+			"external_spec": "<redacted>",
+			"EXTERNAL_SPEC": "<redacted>",
+			"ezk":           "<redacted>",
+			"EzK":           "<redacted>",
+		}
+		assert.Equal(t, &want, redacted)
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		assert.Equal(t, before, after, "logging must not change the live import request")
+		redacted.Options["backup"] = "false"
+		assert.Equal(t, "true", req.Options["backup"], "the log copy must not alias live options")
+	}
+}
+
+func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
+	type importProxy struct{ types.ProxyComponent }
+
+	params := paramtable.Get()
+	traceMode := params.CommonCfg.TraceLogMode.GetValue()
+	authEnabled := params.CommonCfg.AuthorizationEnabled.GetValue()
+	require.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, traceMode))
+		require.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, authEnabled))
+	})
+
+	for _, mode := range []string{"2", "3"} {
+		for _, importErr := range []error{nil, merr.ErrImportFailed} {
+			t.Run(fmt.Sprintf("mode_%s/error_%v", mode, importErr != nil), func(t *testing.T) {
+				require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, mode))
+				logs := captureHTTPServerLogs(t)
+				options := map[string]string{
+					"backup":        "true",
+					"source_type":   "snapshot",
+					"external_spec": `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+					"ezk":           "IMPORT_EZK_SENTINEL",
+				}
+				fakeProxy := &importProxy{}
+				called := false
+				patch := mockey.Mock((*importProxy).ImportV2).To(
+					func(_ *importProxy, _ context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+						called = true
+						assert.Equal(t, options, funcutil.KeyValuePair2Map(req.GetOptions()))
+						return &internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "123"}, importErr
+					}).Build()
+				defer patch.UnPatch()
+				testEngine := initHTTPServerV2(fakeProxy, false)
+				body, err := json.Marshal(&ImportReq{
+					CollectionName: "import_trace_target",
+					Files:          [][]string{{"s3://bucket/snapshot.json"}},
+					Options:        options,
+				})
+				require.NoError(t, err)
+				req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bytes.NewReader(body))
+				w := httptest.NewRecorder()
+				testEngine.ServeHTTP(w, req)
+
+				require.True(t, called, "the real REST import handler must forward the request")
+				require.Equal(t, http.StatusOK, w.Code)
+				var response ReturnErrMsg
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+				assert.Equal(t, merr.Code(importErr), response.Code)
+				output := logs.String()
+				assert.Contains(t, output, "trace info:")
+				assert.Contains(t, output, "import_trace_target")
+				assert.Contains(t, output, "redacted")
+				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL"} {
+					assert.NotContains(t, output, secret)
+				}
+			})
+		}
+	}
+}
+
 func TestTraceLogRequestFieldRedactsRESTExternalCollectionCredentials(t *testing.T) {
 	externalSpec := `{"format":"parquet","extfs":{"cloud_provider":"aws","access_key_id":"AKIA_EXTERNAL_SENTINEL","access_key_value":"SECRET_EXTERNAL_SENTINEL","future_password":"FUTURE_SPEC_REST_SENTINEL","region":"us-east-1"}}`
 	externalSource := "s3://SOURCE_ACCESS_REST_SENTINEL:SOURCE_SECRET_REST_SENTINEL@bucket/path"

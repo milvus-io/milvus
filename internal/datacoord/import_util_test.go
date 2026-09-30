@@ -55,6 +55,82 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
+func TestCalculateTaskSlotSnapshotBudgets(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for item, value := range map[*paramtable.ParamItem]string{
+		&params.DataNodeCfg.ImportBaseBufferSize:      "16777216",
+		&params.DataNodeCfg.ImportDeleteBufferSize:    "134217728",
+		&params.DataCoordCfg.ImportMemoryLimitPerSlot: "167772160",
+		&params.DataCoordCfg.ImportFileNumPerSlot:     "4",
+	} {
+		old := item.SwapTempValue(value)
+		t.Cleanup(func() { item.SwapTempValue(old) })
+	}
+	for _, tc := range []struct {
+		name                        string
+		version                     uint32
+		files, channels, partitions int
+		mapped, l0                  bool
+		preSlots, importSlots       int
+	}{
+		{"empty", 0, 0, 1, 1, false, false, 1, 1},
+		{"ordinary_cpu", 0, 8, 2, 3, false, false, 2, 2},
+		{"ordinary_memory", 0, 1, 20, 1, false, false, 1, 2},
+		{"legacy_l0", 0, 8, 20, 3, false, true, 2, 2},
+		{"no_shared_l0", 1, 3, 2, 3, false, false, 3, 5},
+		{"external_only", 2, 3, 2, 3, false, false, 3, 5},
+		{"mapped", 3, 3, 2, 3, true, false, 3, 3},
+		{"external_mapped", 4, 3, 2, 3, true, false, 3, 3},
+		{"shared_once", 5, 3, 2, 3, false, false, 4, 5},
+		{"external_shared", 6, 3, 2, 3, false, false, 4, 5},
+		{"shared_mapped", 7, 3, 2, 3, true, false, 4, 4},
+		{"external_shared_mapped", 8, 3, 2, 3, true, false, 4, 4},
+		{"single_shared_reader", 5, 1, 1, 1, false, false, 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := &importJob{ImportJob: &datapb.ImportJob{
+				JobID: 1, Vchannels: make([]string, tc.channels), PartitionIDs: make([]int64, tc.partitions),
+			}}
+			if tc.l0 {
+				job.Options = []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}
+			}
+			meta := &importMeta{jobs: map[int64]ImportJob{1: job}}
+			files := make([]*datapb.ImportFileStats, tc.files)
+			for i := range files {
+				file := &internalpb.ImportFile{Id: int64(i + 1)}
+				if tc.version != 0 {
+					file.SnapshotSource = &internalpb.SnapshotImportSource{Version: tc.version}
+					if tc.mapped {
+						file.SnapshotSource.TargetPartitionId = 10
+					}
+				}
+				files[i] = &datapb.ImportFileStats{ImportFile: file}
+			}
+			pre := &preImportTask{importMeta: meta}
+			pre.task.Store(&datapb.PreImportTask{JobID: 1, FileStats: files})
+			imp := &importTask{importMeta: meta}
+			imp.task.Store(&datapb.ImportTaskV2{JobID: 1, FileStats: files})
+			require.EqualValues(t, tc.preSlots, pre.GetTaskSlot())
+			require.EqualValues(t, tc.importSlots, imp.GetTaskSlot())
+		})
+	}
+	t.Run("legacy_l0_configured_budget", func(t *testing.T) {
+		oldSlot := params.DataCoordCfg.ImportMemoryLimitPerSlot.SwapTempValue("67108864")
+		defer params.DataCoordCfg.ImportMemoryLimitPerSlot.SwapTempValue(oldSlot)
+		job := &importJob{ImportJob: &datapb.ImportJob{
+			JobID: 1, Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+		}}
+		meta := &importMeta{jobs: map[int64]ImportJob{1: job}}
+		pre := &preImportTask{importMeta: meta}
+		pre.task.Store(&datapb.PreImportTask{JobID: 1})
+		require.EqualValues(t, 2, pre.GetTaskSlot(), "128 MiB uses two 64 MiB slots")
+		oldDelete := params.DataNodeCfg.ImportDeleteBufferSize.SwapTempValue("16777216")
+		defer params.DataNodeCfg.ImportDeleteBufferSize.SwapTempValue(oldDelete)
+		require.EqualValues(t, 1, pre.GetTaskSlot(), "explicit 16 MiB retains the old slot cost")
+	})
+}
+
 func TestImportUtil_NewPreImportTasks(t *testing.T) {
 	fileGroups := [][]*internalpb.ImportFile{
 		{
@@ -251,7 +327,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		importMeta: importMeta,
 	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
-	preimportReq := AssemblePreImportRequest(pt, job)
+	preimportReq, err := AssemblePreImportRequest(pt, job)
+	assert.NoError(t, err)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
 	assert.Equal(t, pt.GetTaskID(), preimportReq.GetTaskID())
 	assert.Equal(t, pt.GetCollectionID(), preimportReq.GetCollectionID())
@@ -331,7 +408,8 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		importMeta: importMeta,
 	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
-	preimportReq := AssemblePreImportRequest(pt, job)
+	preimportReq, err := AssemblePreImportRequest(pt, job)
+	assert.NoError(t, err)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
 	assert.Equal(t, pt.GetTaskID(), preimportReq.GetTaskID())
 	assert.Equal(t, pt.GetCollectionID(), preimportReq.GetCollectionID())

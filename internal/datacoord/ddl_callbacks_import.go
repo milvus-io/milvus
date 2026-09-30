@@ -27,9 +27,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -42,58 +44,33 @@ import (
 
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
-	body := result.Message.MustBody()
-
-	// Ensure Schema.DbName is populated from the broadcast message's DbName,
-	// matching the behavior in master where this was set before calling ImportV2.
-	if body.Schema != nil {
-		body.Schema.DbName = body.DbName
-	}
-
-	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
-	// Each vchannel gets its own import job with the corresponding TimeTick.
-	// The control channel copy is ordering-only, not a data vchannel: it is excluded
-	// from the job's channel list. DataTs keeps using the broadcast's max tick.
-	vchannels := make([]string, 0, len(result.Results))
-	for vchannel := range result.Results {
-		if funcutil.IsControlChannel(vchannel) {
-			continue
-		}
-		vchannels = append(vchannels, vchannel)
-	}
-
 	// Call createImportJobFromAck directly instead of ImportV2
 	// ImportV2 is only for proxy broadcast, not for ack callback
-	importResp, err := c.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-		DbID:           0, // already deprecated.
-		CollectionID:   body.GetCollectionID(),
-		CollectionName: body.GetCollectionName(),
-		PartitionIDs:   body.GetPartitionIDs(),
-		ChannelNames:   vchannels,
-		Schema:         body.GetSchema(),
-		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-			// The ImportMsg broadcast carries no ID ranges (two-phase flow): every
-			// autoID range arrives later via the UpdateImport broadcast. The wire
-			// field is ignored here; a non-empty range means the peer runs an older
-			// version mid-upgrade, which the secondary-first ordering forbids.
-			return &internalpb.ImportFile{
-				Id:    file.GetId(),
-				Paths: file.GetPaths(),
-			}
-		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:         body.GetJobID(),
-	}, result.Message.Header().GetCommitByCoordinator())
+	importResp, err := c.createImportJobFromAck(ctx, result)
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		mlog.Warn(ctx, "import job creation failed because of collection not found, skip it",
-			mlog.Strings("vchannels", vchannels),
+			mlog.Strings("channels", lo.Keys(result.Results)),
 			mlog.String("job_id", importResp.GetJobID()), mlog.Err(err))
 		return nil
 	}
 	return err
+}
+
+// Snapshot WAL bodies contain one empty file and coordinator-owned reference
+// options. Reconstruct only the Pending marker, without source I/O or a second
+// positional array. ACK validates the complete reference before persisting it.
+func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.Options) []*internalpb.ImportFile {
+	files := lo.Map(msgFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+		// ID ranges arrive separately via UpdateImport after preimport. Ignore
+		// the legacy range on ImportMsg, as required by secondary-first upgrades.
+		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths()}
+	})
+	if importutilv2.IsSnapshotSource(options) && len(files) == 1 && len(files[0].GetPaths()) == 0 {
+		files[0].SnapshotSource = &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}
+	}
+	return files
 }
 
 // validateImportRequest validates the import request before broadcasting.
@@ -118,6 +95,9 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 		return err
 	}
 
+	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+		return err
+	}
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
@@ -141,7 +121,7 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	}
 
 	// Validate binlog import files if it's a backup
-	if importutilv2.IsBackup(options) {
+	if importutilv2.IsBackup(options) && !importutilv2.IsSnapshotSource(options) {
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			return err
@@ -266,6 +246,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	vchannels []string,
 	idempotencyKey string,
 ) (duplicatedJobID int64, duplicated bool, err error) {
+	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
+		return 0, false, err
+	}
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -278,6 +261,26 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
+
+	var chunkManager storage.ChunkManager
+	if s.meta != nil {
+		chunkManager = s.meta.chunkManager
+	}
+	files, options, err = prepareSnapshotImportFiles(ctx, partitionIDs, chunkManager, schema, files, options)
+	if err != nil {
+		return 0, false, merr.Wrap(err, "failed to capture snapshot import source")
+	}
+	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
+		return 0, false, err
+	}
+	// Snapshot preparation is pinned by body options. Empty legacy paths make
+	// old coordinators reject it instead of treating metadata as row data.
+	msgFiles = lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
+		return &msgpb.ImportFile{
+			Id:    file.GetId(),
+			Paths: file.GetPaths(),
+		}
+	})
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
@@ -295,6 +298,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// would otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
+	}
+	if err := s.validateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
+		return 0, false, err
 	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
@@ -328,6 +334,11 @@ func (s *Server) broadcastImport(ctx context.Context,
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
+	if importutilv2.IsSnapshotSource(options) {
+		if err := validateSnapshotImportMessageSize(msg); err != nil {
+			return 0, false, err
+		}
+	}
 
 	// Broadcast the message
 	result, err := broadcaster.Broadcast(ctx, msg)
@@ -351,6 +362,24 @@ func (s *Server) broadcastImport(ctx context.Context,
 		mlog.FieldJobID(originalJobID),
 		keyFingerprint)
 	return originalJobID, true, nil
+}
+
+func validateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) error {
+	// Count the complete encoded reference message, including schema/options
+	// and header properties. The portable ceiling leaves headroom in the default
+	// catalog/RPC envelopes. Also respect smaller configured WAL limits, using
+	// the shared selector so mq.type=default is resolved exactly as at startup.
+	limit := 512 * 1024
+	switch streamingutil.MustSelectWALName() {
+	case message.WALNamePulsar:
+		limit = min(limit, Params.PulsarCfg.MaxMessageSize.GetAsInt()/2)
+	case message.WALNameKafka:
+		limit = min(limit, Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()/2)
+	}
+	if msg.EstimateSize() > limit {
+		return merr.WrapErrImportFailedMsg("encoded snapshot Import message exceeds admission limit %d bytes", limit)
+	}
+	return nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

@@ -107,9 +107,18 @@ func (p *preImportTask) GetTaskVersion() int64 {
 func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
-	req := AssemblePreImportRequest(p, job)
+	req, err := AssemblePreImportRequest(p, job)
+	if err != nil {
+		// Source inventories are immutable. Retrying the same malformed task
+		// cannot restore its missing scope or deletes.
+		if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+		}
+		return
+	}
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++

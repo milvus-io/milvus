@@ -54,6 +54,60 @@ func InstanceConfigFromParamtable(params *paramtable.ComponentParam) *objectstor
 	return cfg
 }
 
+// ValidateInstanceSnapshotImportURI binds a public metadata URI to the client
+// that Import actually uses when external_spec is absent. Matching references
+// against the metadata URI alone is insufficient: both could name another
+// endpoint while ChunkManager still reads the instance's same-named objects.
+// Do not apply this admission check to shared readers or persisted task paths.
+func ValidateInstanceSnapshotImportURI(instanceCfg *objectstorage.Config, metadataURI string) error {
+	resolved, err := resolveForeignStorageConfig(instanceCfg, DirectionRestore, metadataURI, "")
+	if err != nil {
+		return err
+	}
+	// The resolver's cross-bucket/endpoint policy may allow another location.
+	// Without extfs, Import does not replace its reader client, so require the
+	// same bucket, effective endpoint and transport, even if allowlisted.
+	if resolved.foreignBucket != strings.TrimSpace(instanceCfg.BucketName) ||
+		effectiveEndpointHost(resolved.foreignCfg) != effectiveEndpointHost(instanceCfg) ||
+		resolved.foreignCfg.UseSSL != instanceCfg.UseSSL {
+		return merr.WrapErrParameterInvalidMsg("snapshot metadata URI must match instance storage when external_spec is absent")
+	}
+	return nil
+}
+
+// ResolveSnapshotReadStorage reuses snapshot URI, credential and endpoint
+// validation without constructing a destination-side copier. Import reads with
+// source credentials and writes through its independent target configuration.
+// Keep the existing provider/endpoint admission policy; this is not an API for
+// arbitrary cross-cloud reads.
+func ResolveSnapshotReadStorage(ctx context.Context, instanceCfg *objectstorage.Config,
+	metadataURI, externalSpec string,
+) (*ResolvedForeignStorage, error) {
+	resolved, err := resolveForeignStorageConfig(instanceCfg, DirectionRestore, metadataURI, externalSpec)
+	if err != nil {
+		return nil, err
+	}
+	cfg := resolved.foreignCfg
+	// extfs accepts "minio", whereas milvus-storage's cloud_provider enum
+	// names the S3-compatible protocol "aws". Keep the admitted endpoint and
+	// bucket unchanged; never derive an AWS endpoint from this normalization.
+	if strings.EqualFold(cfg.CloudProvider, "minio") {
+		cfg.CloudProvider = objectstorage.CloudProviderAWS
+	}
+	// These authorize provider-side copy, not ordinary source GET requests.
+	cfg.AzureSourceEndpoint = ""
+	cfg.AzureSourceUseSSL = false
+	cfg.AzureSourceSAS = ""
+	cm, err := milvusstorage.NewRemoteChunkManager(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &ResolvedForeignStorage{
+		ForeignBucket: resolved.foreignBucket, ForeignCM: cm,
+		ForeignStorageConfig: storageConfigFromObjectConfig(cfg, resolved.storageType),
+	}, nil
+}
+
 func ResolveForeignStorage(
 	ctx context.Context,
 	instanceCfg *objectstorage.Config,

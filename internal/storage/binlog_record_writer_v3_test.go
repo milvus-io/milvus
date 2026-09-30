@@ -11,11 +11,15 @@
 package storage
 
 import (
+	"context"
+	"path"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -418,4 +423,119 @@ func TestPackedManifestRecordWriter_LocalStorageBasePath(t *testing.T) {
 
 	assert.Equal(t, root+"/insert_log/1/2/3", w.basePath)
 	assert.Equal(t, root+"/insert_log/1/2/3", gotBasePath)
+}
+
+func TestManifestRecordReader_ResolvesOutOfLineTextLob(t *testing.T) {
+	const textFieldID = int64(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: "timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: textFieldID, Name: "text", DataType: schemapb.DataType_Text},
+	}}
+	rootPath := t.TempDir()
+	segmentPath := SegmentManifestBasePath(rootPath, 1, 2, 3)
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: rootPath}
+	columnGroups := []storagecommon.ColumnGroup{{
+		GroupID: 0,
+		Columns: []int{0, 1, 2, 3},
+		Fields:  []int64{common.RowIDField, common.TimeStampField, 100, textFieldID},
+	}}
+	textConfig := []packed.TextColumnConfig{{
+		FieldID:             textFieldID,
+		LobBasePath:         path.Join(SegmentPartitionBasePath(rootPath, 1, 2), "lobs", "101"),
+		InlineThreshold:     1,
+		MaxLobFileBytes:     1 << 20,
+		FlushThresholdBytes: 1,
+	}}
+
+	w, err := NewPackedTextBatchWriter("", segmentPath, schema, 0, 0,
+		columnGroups, config, textConfig, "parquet", []string{"parquet"})
+	require.NoError(t, err)
+
+	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+	builder.Field(1).(*array.Int64Builder).AppendValues([]int64{10, 20}, nil)
+	builder.Field(2).(*array.Int64Builder).AppendValues([]int64{1000, 2000}, nil)
+	wantText := []string{"external text one", "external text two"}
+	builder.Field(3).(*array.StringBuilder).AppendValues(wantText, nil)
+	rawRecord := builder.NewRecord()
+	builder.Release()
+	record := NewSimpleArrowRecord(rawRecord, map[FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+		100:                   2,
+		textFieldID:           3,
+	})
+	defer record.Release()
+	require.NoError(t, w.Write(record))
+	output, err := w.Close()
+	require.NoError(t, err)
+	require.NotNil(t, output)
+	defer output.Destroy()
+
+	manifest, err := packed.CommitManifestUpdates(segmentPath, packed.ManifestEarliest, config,
+		&packed.ManifestUpdates{NewFiles: output})
+	require.NoError(t, err)
+	lobFiles, err := packed.GetManifestLobFiles(manifest, config)
+	require.NoError(t, err)
+	require.NotEmpty(t, lobFiles)
+
+	// Snapshot import derives LOB paths from the manifest, while compaction
+	// supplies source-specific paths. Both must retain logical TEXT decoding.
+	for _, tc := range []struct {
+		name string
+		open func() (RecordReader, error)
+	}{
+		{"snapshot import", func() (RecordReader, error) {
+			return NewManifestRecordReader(context.Background(), manifest, schema,
+				WithVersion(StorageV3), WithStorageConfig(config), WithResolveTextLob())
+		}},
+		{"explicit source LOB paths", func() (RecordReader, error) {
+			return NewTextDecodedManifestReader(manifest, schema, 1024, config, textConfig)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, err := tc.open()
+			require.NoError(t, err)
+			defer reader.Close()
+
+			got, err := reader.Next()
+			require.NoError(t, err)
+			textColumn, ok := got.Column(textFieldID).(*array.String)
+			require.True(t, ok)
+			gotText := make([]string, textColumn.Len())
+			for i := range gotText {
+				gotText[i] = textColumn.Value(i)
+			}
+			assert.Equal(t, wantText, gotText)
+		})
+	}
+}
+
+func TestManifestRecordReader_RejectsCMEKTextLob(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+	}}
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 1,
+		CollectionId:     2,
+		EncryptionKey:    "key",
+	}
+
+	reader, err := NewManifestRecordReader(
+		context.Background(),
+		packed.MarshalManifestPath("insert_log/1/2/3", 1),
+		schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}),
+		WithPluginContext(pluginContext),
+		WithResolveTextLob(),
+	)
+	require.Nil(t, reader)
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.Contains(t, err.Error(), "CMEK-protected StorageV3 import does not support TEXT/LOB fields")
 }
