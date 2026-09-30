@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"strconv"
 
@@ -75,6 +76,7 @@ func newPackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	opts ...packed.ReaderOption,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -85,7 +87,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader)
+	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +197,36 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
+}
+
+// newPackedChunksRecordReader reads the packed chunks at paths in order. Callers
+// that opted into WithParallelChunkRead get several chunks read at once;
+// everyone else gets the serial reader, unchanged.
+func newPackedChunksRecordReader(
+	ctx context.Context,
+	paths [][]string,
+	schema *schemapb.CollectionSchema,
+	options *rwOptions,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) RecordReader {
+	parallel := options.parallelChunkRead
+	if parallel.Concurrency <= 1 {
+		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
+	}
+	bufferSize := parallel.BufferSize
+	if bufferSize <= 0 {
+		// The packed reader reads a non-positive buffer size as "no limit", and
+		// one round would then keep a whole chunk file resident per worker.
+		bufferSize = packed.DefaultReadBufferSize
+	}
+	return newParallelChunkRecordReader(ctx, len(paths), parallel.Concurrency, func(chunk int) (RecordReader, error) {
+		reader, err := newPackedRecordReader(paths[chunk], schema, bufferSize, options.storageConfig,
+			storagePluginContext, options.externalReader, packed.WithEagerPrebuffer())
+		if err != nil {
+			return nil, err
+		}
+		return reader, nil
+	})
 }
 
 func newIterativePackedRecordReader(
