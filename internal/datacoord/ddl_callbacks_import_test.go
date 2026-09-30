@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -612,7 +613,14 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "canonical_collection",
-		Schema:         &schemapb.CollectionSchema{Name: "canonical_collection", Version: 2},
+		Schema: &schemapb.CollectionSchema{
+			Name:    "canonical_collection",
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
+				{FieldID: common.StartOfUserFieldID, Name: "id"},
+			},
+		},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -653,6 +661,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.False(hasSkipRLS)
 	s.Equal("canonical_collection", body.GetCollectionName())
 	s.Equal(int32(2), body.GetSchema().GetVersion())
+	s.Require().Len(body.GetSchema().GetFields(), 1)
+	s.Equal(int64(common.StartOfUserFieldID), body.GetSchema().GetFields()[0].GetFieldID())
 }
 
 // --------------------------------
