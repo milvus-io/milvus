@@ -808,6 +808,28 @@ func TestCreateCollection_UsesSnapshotRestoreBrokerTimeout(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestDropCollection_UsesSnapshotRestoreBrokerTimeout(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	oldQueryCoordTimeout := paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue("1")
+	defer paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue(oldQueryCoordTimeout)
+	oldRestoreTimeout := paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue("30000")
+	defer paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue(oldRestoreTimeout)
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DropCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			assert.True(t, time.Until(deadline) > time.Second)
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	assert.NoError(t, broker.DropCollection(ctx, "test_db", "test_collection"))
+}
+
 func TestCreatePartition_Success(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()

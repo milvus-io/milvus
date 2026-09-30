@@ -299,7 +299,9 @@ func (b *coordinatorBroker) CreatePartition(ctx context.Context, req *milvuspb.C
 // DropCollection drops a collection via RootCoord.
 // Used for rollback when snapshot restore fails.
 func (b *coordinatorBroker) DropCollection(ctx context.Context, dbName, collectionName string) error {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	// Only used to roll back a failed snapshot restore. Like CreateCollection above, this is a
+	// WAL-broadcast DDL, so it shares the restore timeout to avoid leaving an orphan collection.
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := mlog.With(
 		mlog.FieldDbName(dbName),
