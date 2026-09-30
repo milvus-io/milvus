@@ -32,6 +32,13 @@ namespace milvus {
 class ArrayValue;
 class ColumnarArrayChunk;
 
+// Copy native-list rows directly into owning ArrayValues without materializing
+// intermediate ScalarFieldProto rows.
+std::vector<ArrayValue>
+ArrowListToArrayValues(
+    const arrow::ListArray& rows,
+    std::shared_ptr<const proto::schema::TypeSchema> type);
+
 // Materialize Arrow native-list rows using the same validity and placeholder
 // rules as ColumnarArrayChunk::OutputRange.
 std::vector<ScalarFieldProto>

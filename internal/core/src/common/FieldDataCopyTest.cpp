@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/FieldData.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 
 namespace milvus {
 namespace {
@@ -83,6 +84,131 @@ TEST(FieldDataOwnershipTest, NativeListArrayPreservesElementValidity) {
     wrong_type.mutable_array_element()->set_leaf_type(proto::schema::Float);
     FieldData<ArrayValue> wrong(wrong_type, true);
     EXPECT_ANY_THROW(wrong.FillFieldData(array));
+}
+
+TEST(FieldDataOwnershipTest, NativeListArrayMatchesProtoProjectionAfterSlice) {
+    proto::schema::TypeSchema type;
+    type.set_nullable(true);
+    type.mutable_array_element()->set_leaf_type(proto::schema::Int64);
+    type.mutable_array_element()->set_nullable(true);
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::Int64Builder>());
+    auto* values = static_cast<arrow::Int64Builder*>(builder.value_builder());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(99).ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(7).ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append().ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    auto sliced = std::static_pointer_cast<arrow::ListArray>(array->Slice(1, 3));
+    ASSERT_NE(sliced->offset(), 0);
+    const auto expected = ArrowListToScalarFieldProto(*sliced, type);
+
+    FieldData<ArrayValue> data(type, true);
+    data.FillFieldData(sliced);
+    ASSERT_EQ(data.Length(), expected.size());
+    const auto* rows = static_cast<const ArrayValue*>(data.Data());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(rows[i].output_data().SerializeAsString(),
+                  expected[i].SerializeAsString())
+            << i;
+        EXPECT_EQ(data.is_valid(i), !sliced->IsNull(i));
+    }
+    ASSERT_EQ(expected[0].valid_data_size(), 2);
+    EXPECT_EQ(expected[0].long_data().data(1), 0);
+    EXPECT_FALSE(expected[0].valid_data(1));
+    EXPECT_EQ(expected[1].data_case(), ScalarFieldProto::DATA_NOT_SET);
+    EXPECT_EQ(expected[2].long_data().data_size(), 0);
+}
+
+TEST(FieldDataOwnershipTest, NativeNestedListMatchesProtoProjection) {
+    for (bool row_nullable : {false, true}) {
+        for (bool inner_nullable : {false, true}) {
+            for (bool leaf_nullable : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "row=" << row_nullable
+                             << " inner=" << inner_nullable
+                             << " leaf=" << leaf_nullable);
+                proto::schema::TypeSchema type;
+                type.set_nullable(row_nullable);
+                auto* child_type = type.mutable_array_element();
+                child_type->set_nullable(inner_nullable);
+                auto* leaf_type = child_type->mutable_array_element();
+                leaf_type->set_leaf_type(proto::schema::Int64);
+                leaf_type->set_nullable(leaf_nullable);
+
+                auto inner_builder = std::make_shared<arrow::ListBuilder>(
+                    arrow::default_memory_pool(),
+                    std::make_shared<arrow::Int64Builder>());
+                arrow::ListBuilder outer_builder(arrow::default_memory_pool(),
+                                                 inner_builder);
+                auto* inner = static_cast<arrow::ListBuilder*>(
+                    outer_builder.value_builder());
+                auto* values = static_cast<arrow::Int64Builder*>(
+                    inner->value_builder());
+                ASSERT_TRUE(outer_builder.Append().ok());
+                ASSERT_TRUE(inner->Append().ok());
+                ASSERT_TRUE(values->Append(99).ok());
+                ASSERT_TRUE(outer_builder.Append().ok());
+                ASSERT_TRUE(inner->Append().ok());
+                ASSERT_TRUE(values->Append(7).ok());
+                ASSERT_TRUE((leaf_nullable ? values->AppendNull()
+                                           : values->Append(8))
+                                .ok());
+                ASSERT_TRUE((inner_nullable ? inner->AppendNull()
+                                            : inner->Append())
+                                .ok());
+                ASSERT_TRUE(inner->Append().ok());
+                ASSERT_TRUE((row_nullable ? outer_builder.AppendNull()
+                                          : outer_builder.Append())
+                                .ok());
+                ASSERT_TRUE(outer_builder.Append().ok());
+                std::shared_ptr<arrow::Array> array;
+                ASSERT_TRUE(outer_builder.Finish(&array).ok());
+                auto sliced = std::static_pointer_cast<arrow::ListArray>(
+                    array->Slice(1, 3));
+                ASSERT_NE(sliced->offset(), 0);
+                const auto expected =
+                    ArrowListToScalarFieldProto(*sliced, type);
+
+                FieldData<ArrayValue> data(type, row_nullable);
+                data.FillFieldData(sliced);
+                ASSERT_EQ(data.Length(), expected.size());
+                const auto* rows = static_cast<const ArrayValue*>(data.Data());
+                for (size_t i = 0; i < expected.size(); ++i) {
+                    EXPECT_EQ(rows[i].output_data().SerializeAsString(),
+                              expected[i].SerializeAsString())
+                        << i;
+                    EXPECT_EQ(data.is_valid(i), !sliced->IsNull(i));
+                }
+                const auto& first = rows[0].output_data();
+                ASSERT_EQ(first.array_data().data_size(), 3);
+                EXPECT_EQ(first.valid_data_size(), inner_nullable ? 3 : 0);
+                const auto& first_inner = first.array_data().data(0);
+                ASSERT_EQ(first_inner.long_data().data_size(), 2);
+                EXPECT_EQ(first_inner.long_data().data(1),
+                          leaf_nullable ? 0 : 8);
+                EXPECT_EQ(first_inner.valid_data_size(),
+                          leaf_nullable ? 2 : 0);
+                if (leaf_nullable) {
+                    EXPECT_FALSE(first_inner.valid_data(1));
+                }
+                if (inner_nullable) {
+                    EXPECT_FALSE(first.valid_data(1));
+                    EXPECT_EQ(first.array_data().data(1).data_case(),
+                              ScalarFieldProto::kLongData);
+                    EXPECT_EQ(first.array_data().data(1).long_data().data_size(),
+                              0);
+                }
+                EXPECT_EQ(rows[1].is_null(), row_nullable);
+                EXPECT_EQ(rows[2].size(), 0);
+            }
+        }
+    }
 }
 
 TEST(FieldDataOwnershipTest, BinaryVectorListKeepsCompactPayload) {
