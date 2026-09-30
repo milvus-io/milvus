@@ -54,7 +54,11 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
   inside SN, with `querypb` request and collection/segment adapters. This reuses
   task execution and reduction, not the old QueryNode scheduler. TODO(#40451):
   replace these adapters with shared execution accepting plans and pinned
-  segcore handles directly.
+  segcore handles directly. With `common.interface.zeroCopy` enabled, both SN
+  adapters and legacy `LocalSegment` objects use Arrow batch field refill.
+  `fetchFieldsAsRecord` pins/unpins LocalSegments locally and borrows SN
+  CSegments protected by the outer query task handles. These handles remain held
+  through execution and Arrow-to-proto conversion; the adapter does not release them.
 - **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
   complete SN/QN end-to-end flow above remain integration work.
 

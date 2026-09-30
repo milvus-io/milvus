@@ -3,6 +3,7 @@ package queryresource
 import (
 	"context"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/growingruntime"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -711,4 +713,115 @@ func TestManagerDropWaitsForSharedResourceTransition(t *testing.T) {
 	require.Eventually(t, dropped.Load, time.Second, time.Millisecond)
 	_, ok := manager.QueryRuntime(key2)
 	require.True(t, ok)
+}
+
+func TestManagerReleaseWaitsForInitialPreparation(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+	started, canceled, finish := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(finish) })
+	defer unblock()
+	var closes atomic.Int32
+	prepare := mockey.Mock((*growingruntime.Runtime).Prepare).To(func(_ *growingruntime.Runtime, ctx context.Context, _ walview.VChannelWALView) error {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		<-finish // Simulates a C call that cannot be interrupted by cancellation.
+		return ctx.Err()
+	}).Build()
+	defer prepare.UnPatch()
+	closeModule := mockey.Mock((*growingruntime.Runtime).Close).To(func(*growingruntime.Runtime) {
+		closes.Add(1)
+	}).Build()
+	defer closeModule.UnPatch()
+	manager := NewManager(Config{
+		Scheduler: scheduler, Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{NewGrowingRuntimeModuleBuilder(nil)},
+	})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	var ready atomic.Int32
+	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { ready.Add(1) }}, testManagerViewBuilder)
+	<-started
+	dropped := make(chan struct{})
+	manager.Release(snview.ReleaseResource{Key: key, OnDropped: func() {
+		assert.Equal(t, int32(1), closes.Load())
+		close(dropped)
+	}})
+	<-canceled
+	require.Zero(t, closes.Load(), "cancellation must not release resources still used by Prepare")
+	closed := make(chan struct{})
+	go func() { manager.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close did not wait for a detached build")
+	case <-time.After(20 * time.Millisecond):
+	}
+	unblock()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not drain the detached build")
+	}
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("Release did not report Dropped")
+	}
+	require.Equal(t, int32(1), closes.Load())
+	require.Zero(t, ready.Load())
+}
+
+func TestManagerReleaseCancelsQueuedBuild(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+	started, finish := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(finish) })
+	defer unblock()
+	scheduler.Submit(queryResourceTaskFunc(func(context.Context) error {
+		close(started)
+		<-finish
+		return nil
+	}))
+	<-started
+	var prepares, closes atomic.Int32
+	prepare := mockey.Mock((*growingruntime.Runtime).Prepare).To(func(*growingruntime.Runtime, context.Context, walview.VChannelWALView) error {
+		prepares.Add(1)
+		return nil
+	}).Build()
+	defer prepare.UnPatch()
+	closeModule := mockey.Mock((*growingruntime.Runtime).Close).To(func(*growingruntime.Runtime) { closes.Add(1) }).Build()
+	defer closeModule.UnPatch()
+	manager := NewManager(Config{
+		Scheduler: scheduler, Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{NewGrowingRuntimeModuleBuilder(nil)},
+	})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta}, testManagerViewBuilder)
+	dropped := make(chan struct{})
+	manager.Release(snview.ReleaseResource{Key: key, OnDropped: func() { close(dropped) }})
+	// A new view can build immediately, without inheriting the canceled task.
+	meta2, key2 := testManagerQueryViewMetaAndKey(2)
+	ready := make(chan struct{})
+	manager.AcquireLocked(snview.AcquireResource{Key: key2, Meta: meta2, OnReady: func() { close(ready) }}, testManagerViewBuilder)
+	unblock()
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("canceling a queued build must not wait for Execute")
+	}
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("new view inherited the canceled build")
+	}
+	_, ok := manager.QueryRuntime(key2)
+	require.True(t, ok)
+	require.Equal(t, int32(1), prepares.Load(), "only the new build should execute")
+	require.Equal(t, int32(1), closes.Load(), "old cleanup must not close the new runtime")
+	manager.Close()
+	require.Equal(t, int32(2), closes.Load())
 }

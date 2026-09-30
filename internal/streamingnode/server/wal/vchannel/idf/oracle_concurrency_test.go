@@ -8,8 +8,10 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -100,4 +102,50 @@ func TestOracleConcurrentSealingPreparationAndQueries(t *testing.T) {
 			require.Contains(t, r.growingStore.segments, int64(2000))
 		})
 	}
+}
+
+func TestOracleInsertConversionDoesNotBlockQueries(t *testing.T) {
+	r, _ := newTestOracle(t)
+	ctx := context.Background()
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 2)})
+	started, finish := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(finish) })
+	defer unblock()
+	var original func(bm25Stats, *schemapb.CollectionSchema, walview.SegmentInsertMessage) error
+	patch := mockey.Mock(collectGrowingInsertStats).Origin(&original).To(func(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {
+		close(started)
+		<-finish
+		return original(stats, schema, insert)
+	}).Build()
+	defer patch.UnPatch()
+	inserted := make(chan struct{})
+	msg := bm25Insert(t, 20, 6)
+	go func() {
+		r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: msg})
+		close(inserted)
+	}()
+	<-started
+	queried := make(chan struct{})
+	go func() {
+		defer close(queried)
+		batch, err := r.BuildIDFBatch(ctx, []queryresource.IDFRequest{{FieldID: 102}})
+		if assert.NoError(t, err) {
+			assert.Equal(t, float64(2), batch[0].Avgdl, "the private delta must not be published yet")
+		}
+	}()
+	select {
+	case <-queried:
+	case <-time.After(time.Second):
+		unblock()
+		<-inserted
+		<-queried
+		t.Fatal("insert conversion blocked an IDF query")
+	}
+	unblock()
+	<-inserted
+	batch, err := r.BuildIDFBatch(ctx, []queryresource.IDFRequest{{FieldID: 102}})
+	require.NoError(t, err)
+	require.Equal(t, float64(4), batch[0].Avgdl)
+	require.Equal(t, int64(2), r.currentStats[102].NumRow())
+	require.Equal(t, int64(2), r.growingStore.segments[20].stats[102].NumRow())
 }

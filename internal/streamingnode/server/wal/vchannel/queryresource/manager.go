@@ -29,6 +29,8 @@ type Config struct {
 
 type Manager struct {
 	mu sync.Mutex
+	// Detached builds must stop before their resources can be closed.
+	releasing sync.WaitGroup
 
 	builders         []QueryRuntimeModuleBuilder
 	scheduler        nodescheduler.Scheduler
@@ -130,6 +132,9 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	if len(m.refs) == 0 {
 		runtime, task = m.takeRuntimeLocked()
 	}
+	if task != nil {
+		m.releasing.Add(1)
+	}
 	// Keep reference removal and watermark delivery ordered across replicas.
 	// BeforeRelease may read object storage and remains outside this lock.
 	if hasAdvance && advanceRuntime != nil {
@@ -137,6 +142,17 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	m.mu.Unlock()
 	cancelTask(task)
+	if task != nil {
+		// Release can run under the shard/owner lock. Neither that caller nor
+		// a scheduler worker may wait for a build that needs the same lock/worker.
+		go func() {
+			defer m.releasing.Done()
+			_, _ = task.Result()
+			runtime.Close()
+			m.submitCallback(req.OnDropped)
+		}()
+		return
+	}
 	runtime.Close()
 	if hasAdvance && advanceRuntime != nil {
 		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, version: advance, onDropped: req.OnDropped})
@@ -191,6 +207,7 @@ func (m *Manager) Close() {
 		_, _ = task.Result()
 	}
 	runtime.Close()
+	m.releasing.Wait()
 }
 
 func (m *Manager) ObserveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
