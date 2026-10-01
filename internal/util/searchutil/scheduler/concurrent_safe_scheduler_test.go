@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -568,8 +569,13 @@ func (s *SchedulerSuite) TestPruneCanceledRightBeforeExec() {
 		s.Eventually(func() bool {
 			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
 		}, time.Second, 10*time.Millisecond)
-		s.Contains(logs.String(), "task canceled before executing")
-		s.Contains(logs.String(), context.Canceled.Error())
+		// The dropped task is told inside the prune, before the scheduler gets
+		// to log it, so the log line may not be there yet when Wait returns.
+		s.Eventually(func() bool {
+			out := logs.String()
+			return strings.Contains(out, "task canceled before executing") &&
+				strings.Contains(out, context.Canceled.Error())
+		}, time.Second, 10*time.Millisecond)
 	})
 
 	s.Run("part of a group dropped, the rest runs", func() {
@@ -654,6 +660,113 @@ func (s *SchedulerSuite) TestExpirySweepAsksTheGroup() {
 	s.Equal(1, group.finished, "once all of it is done it is taken out, as a group")
 	s.Zero(sched.GetWaitingTaskTotal())
 	s.Zero(sched.GetWaitingTaskTotalNQ())
+}
+
+// unrunMock is a task that, like a search group, can be finished without
+// having run.
+type unrunMock struct {
+	*MockTask
+	finishedWith []error
+}
+
+func (m *unrunMock) FinishUnrun(err error) {
+	m.finishedWith = append(m.finishedWith, err)
+	m.Done(err)
+}
+
+// TestClearFinishesTasksUnrun checks that a task cleared from the queue is
+// finished as one that never ran, so that a cleared group is not counted in
+// the group histograms that describe the groups the executor runs.
+func (s *SchedulerSuite) TestClearFinishesTasksUnrun() {
+	paramtable.Init()
+	now := time.Now()
+	sched := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+	task := &unrunMock{MockTask: newMockTask(mockTaskConfig{nq: 3}).(*MockTask)}
+	queued := newQueuedTask(task, now.Add(-time.Second))
+	added, err := sched.policy.Push(queued)
+	s.NoError(err)
+	sched.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	result, _ := sched.clearQueuedTasks(nil, "maintenance", nil, now)
+
+	s.Equal(int64(1), result.QueuedCleared)
+	s.Require().Len(task.finishedWith, 1, "finished once, as a task that never ran")
+	s.Error(task.finishedWith[0])
+	s.Zero(sched.GetWaitingTaskTotal())
+	s.Zero(sched.GetWaitingTaskTotalNQ())
+}
+
+// TestPruneCanceledAtDequeueIsLogged checks that the pruning point where a
+// task leaves the queue says what it dropped and why, as the point before
+// execution does, so a request whose client saw a cancellation can be found
+// in the log whichever point dropped it.
+func (s *SchedulerSuite) TestPruneCanceledAtDequeueIsLogged() {
+	paramtable.Init()
+	logs := mlog.CaptureGlobalLogs(s.T(), &mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	})
+	scheduler := newScheduler(newFIFOPolicy())
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	s.Run("part of a group dropped as it leaves the queue", func() {
+		survivor := newMockTask(mockTaskConfig{
+			nq:          2,
+			executeCost: time.Millisecond,
+			execution:   func(ctx context.Context) error { return nil },
+		})
+		group := newMockTask(mockTaskConfig{
+			nq:          5,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				s.Fail("the canceled owner must not run")
+				return nil
+			},
+		})
+		group.(*MockTask).prune = func() (Task, int, error) {
+			group.(*MockTask).Done(context.Canceled)
+			return survivor, 1, context.Canceled
+		}
+		s.NoError(scheduler.Add(group))
+		s.ErrorIs(group.(*MockTask).Wait(), context.Canceled)
+		s.NoError(survivor.(*MockTask).Wait())
+		s.Contains(logs.String(), "canceled requests dropped from a search group as it left the queue")
+		s.Contains(logs.String(), context.Canceled.Error())
+	})
+
+	s.Run("dropped whole as it leaves the queue", func() {
+		task := newMockTask(mockTaskConfig{
+			nq:          4,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				s.Fail("a canceled task must not run")
+				return nil
+			},
+		})
+		mock := task.(*MockTask)
+		mock.prune = func() (Task, int, error) {
+			mock.Done(context.DeadlineExceeded)
+			return nil, 1, context.DeadlineExceeded
+		}
+		s.NoError(scheduler.Add(task))
+		s.ErrorIs(mock.Wait(), context.DeadlineExceeded)
+		// As above: the task is told inside the prune, before the log is written.
+		s.Eventually(func() bool {
+			out := logs.String()
+			return strings.Contains(out, "task canceled before it left the queue") &&
+				strings.Contains(out, context.DeadlineExceeded.Error())
+		}, time.Second, 10*time.Millisecond)
+		s.Eventually(func() bool {
+			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
+		}, time.Second, 10*time.Millisecond)
+	})
 }
 
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {

@@ -41,6 +41,9 @@ var (
 	// Likewise for the queue's expiry sweep, which would otherwise decide on
 	// the owner's context alone and end every request merged behind it.
 	_ scheduler.ExpirableGroup = &SearchTask{}
+	// And for an administrator clearing the queue, so that a group cleared
+	// before it ran is not counted in the group histograms.
+	_ scheduler.UnrunTask = &SearchTask{}
 )
 
 type SearchTask struct {
@@ -583,12 +586,19 @@ func (t *SearchTask) dueBy(cleanupTime time.Time) bool {
 // own reason: its context error if it has one, otherwise DeadlineExceeded for
 // a request taken out a little ahead of its deadline.
 func (t *SearchTask) FinishExpired() {
+	t.FinishUnrun(context.DeadlineExceeded)
+}
+
+// FinishUnrun implements scheduler.UnrunTask. Every request is told its own
+// context error if it has one, otherwise err, and none of them is counted in
+// the group histograms, which describe the groups that reach the executor.
+func (t *SearchTask) FinishUnrun(err error) {
 	for _, m := range t.members() {
-		err := cancellationOf(m.ctx)
-		if err == nil {
-			err = context.DeadlineExceeded
+		reason := cancellationOf(m.ctx)
+		if reason == nil {
+			reason = err
 		}
-		m.finishPruned(err)
+		m.finishPruned(reason)
 	}
 }
 

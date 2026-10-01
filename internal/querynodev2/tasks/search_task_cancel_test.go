@@ -18,6 +18,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -413,4 +415,38 @@ func TestSearchTaskAnswersTheExpirySweepThroughTheSchedulerInterface(t *testing.
 	var asTask scheduler.Task = newGroupMember(context.Background(), 1)
 	_, ok := asTask.(scheduler.ExpirableGroup)
 	assert.True(t, ok, "the sweep must recognize a search group, or it falls back to the owner's context")
+}
+
+// An administrator clearing the queue gives up on groups that never ran. Each
+// request is told its own reason, and none of them is counted in the group
+// histograms, which describe the groups that reach the executor.
+func TestFinishUnrunTellsEachRequestItsReasonAndCountsNothing(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	owner := newGroupMember(ownerCtx, 1)
+	member := newGroupMember(context.Background(), 2)
+	require.True(t, owner.Merge(member))
+	groupSize := metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(owner.GetNodeID()))
+	before := histogramSampleCount(t, groupSize)
+
+	cancelOwner()
+	cleared := errors.New("read task queue cleared by an administrator")
+	owner.FinishUnrun(cleared)
+
+	assert.ErrorIs(t, waitResult(t, owner), context.Canceled, "the owner's client had already gone")
+	assert.ErrorIs(t, waitResult(t, member), cleared, "the member is told the queue was cleared")
+	assertNotNotified(t, owner)
+	assertNotNotified(t, member)
+	assert.Equal(t, before, histogramSampleCount(t, groupSize), "a group that never ran is not counted")
+
+	// The same histogram does move when a group is finished by the executor,
+	// so the assertion above is not vacuous.
+	ran := newGroupMember(context.Background(), 1)
+	ran.Done(nil)
+	assert.Equal(t, before+1, histogramSampleCount(t, groupSize))
+}
+
+func TestSearchTaskCanBeFinishedUnrunThroughTheSchedulerInterface(t *testing.T) {
+	var asTask scheduler.Task = newGroupMember(context.Background(), 1)
+	_, ok := asTask.(scheduler.UnrunTask)
+	assert.True(t, ok, "clearing the queue must recognize a search group, or it would count it as run")
 }
