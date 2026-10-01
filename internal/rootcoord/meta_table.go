@@ -3062,6 +3062,8 @@ func validateRLSArrayLiteralLimit(expr *planpb.Expr) error {
 	maxElements := Params.ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt()
 	var elements int
 	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		return validateRLSArrayLiteralLimit(node.UnaryExpr.GetChild())
 	case *planpb.Expr_TermExpr:
 		elements = len(node.TermExpr.GetValues())
 	case *planpb.Expr_JsonContainsExpr:

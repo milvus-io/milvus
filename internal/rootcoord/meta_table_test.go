@@ -616,6 +616,10 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			"array_contains(scores, $current_principal_tags['score'])",
 			`array_contains_all(tags, ["sales", "engineering"])`,
 			"array_contains_all(scores, [1, 2])",
+			"array_contains_all(tags, $current_principal_tags['groups'])",
+			"array_contains_any(scores, $current_principal_tags['scores'])",
+			`not (dept == "sales")`,
+			`not array_contains(tags, "blocked")`,
 		}
 		for _, expr := range validExprs {
 			require.NoError(t, validateRLSPolicyExpressions(coll, expr, ""), expr)
@@ -655,7 +659,6 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		invalidExprs := []string{
 			`dept == "sales" and owner == "alice"`,
 			`dept == "sales" or owner == "alice"`,
-			`not (dept == "sales")`,
 			"missing == 'sales'",
 			"dept == $principal.name",
 			"dept == $current_principal_tags['x'y'] and dept == {raw}",
@@ -668,7 +671,6 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			"dept in $current_principal_tags['dept']",
 			"json_contains(metadata, \"sales\")",
 			"array_contains(scores, $current_principal)",
-			"array_contains_all(tags, $current_principal_tags['tags'])",
 			"array_contains_all(scores, [1.0])",
 			"array_contains_any(scores, [1, 1.5])",
 			"ts == $current_principal_tags['ts']",
@@ -682,12 +684,12 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		for _, expr := range []string{
 			`dept == "sales" and owner == "alice"`,
 			`dept == "sales" or owner == "alice"`,
-			`not (dept == "sales")`,
 		} {
 			err := validateRLSPolicyExpressions(coll, expr, "")
 			require.ErrorContains(t, err, "compound RLS expressions are not supported")
 		}
 		require.NoError(t, validateRLSPolicyExpressions(coll, "", `array_contains(nullable_tags, "red")`))
+		require.ErrorIs(t, validateRLSPolicyExpressions(coll, `not array_contains(nullable_tags, "red")`, ""), merr.ErrParameterInvalid)
 		require.ErrorIs(t, rlsutil.ValidateParsedExpression(&planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
 			ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_VarChar},
 			Op:         planpb.OpType_Equal,
@@ -702,6 +704,9 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		paramtable.Get().Save(Params.ProxyCfg.RLSMaxArrayLiteralElements.Key, "1")
 		defer paramtable.Get().Reset(Params.ProxyCfg.RLSMaxArrayLiteralElements.Key)
 		err := validateRLSPolicyExpressions(coll, `dept in ["sales", "engineering"]`, "")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "max array literal elements")
+		err = validateRLSPolicyExpressions(coll, `not (dept in ["sales", "engineering"])`, "")
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.Contains(t, err.Error(), "max array literal elements")
 	})
@@ -1185,7 +1190,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.Equal(t, int64(20), collectionID)
 
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
-			return principal.PrincipalName == "alice" && principal.Tags["dept"] == rlsutil.NewStringTagValue("engineering")
+			return principal.PrincipalName == "alice" && assert.ObjectsAreEqual(principal.Tags["dept"], rlsutil.NewStringTagValue("engineering"))
 		})).Return(nil).Once()
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(&model.RLSPrincipal{PrincipalName: "alice"}, nil).Once()
 		setReq.Tags["dept"] = rlsutil.NewStringTagValue("engineering")
@@ -1222,7 +1227,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		defer paramtable.Get().Reset(Params.ProxyCfg.RLSMaxPrincipalNameLength.Key)
 		catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(&model.RLSPrincipal{PrincipalName: "alice"}, nil).Once()
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
-			return principal.PrincipalName == "alice" && principal.Tags["dept"] == rlsutil.NewStringTagValue("support")
+			return principal.PrincipalName == "alice" && assert.ObjectsAreEqual(principal.Tags["dept"], rlsutil.NewStringTagValue("support"))
 		})).Return(nil).Once()
 		setReq.Tags["dept"] = rlsutil.NewStringTagValue("support")
 		collectionID, err = meta.SetRLSPrincipalTags(ctx, setReq)
@@ -1312,7 +1317,7 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			},
 		}, nil).Once()
 		catalog.EXPECT().SaveRLSPrincipal(mock.Anything, mock.MatchedBy(func(principal *model.RLSPrincipal) bool {
-			return len(principal.Tags) == 1 && principal.Tags["tier"] == rlsutil.NewStringTagValue("gold")
+			return len(principal.Tags) == 1 && assert.ObjectsAreEqual(principal.Tags["tier"], rlsutil.NewStringTagValue("gold"))
 		})).Return(nil).Once()
 		collectionID, err = meta.DeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 			DbName:         "db1",

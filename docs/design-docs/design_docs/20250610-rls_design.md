@@ -83,23 +83,26 @@ keys must otherwise be non-blank. Configured byte limits apply to tag-binding
 writes; existing identifiers remain addressable for reads and deletes after
 those limits are lowered.
 
-If a policy references a missing tag, that policy predicate evaluates to
-false.
+If a policy references a missing or type-incompatible tag, that policy
+predicate evaluates to false, including when the predicate is wrapped in
+`not`.
 
 ### JSON Number Semantics
 
-Tag payloads are JSON objects whose values are strings or numbers. Milvus maps
-an integral token such as `3` to `int64` when it is in range, and a token with
-a decimal point or exponent such as `3.0` or `3e0` to IEEE-754 binary64
-(`double`). An integral token outside the int64 range is represented as a
-double when it is finite and representable. When Milvus serializes tags again,
-it preserves the numeric kind, including emitting an integral double with a
-decimal point.
+Tag payloads are JSON objects whose values are strings, numbers, or
+one-dimensional arrays of those scalar types. Nested arrays, objects, booleans,
+and null are unsupported. Milvus maps an integral token such as `3` to `int64`
+when it is in range, and a token with a decimal point or exponent such as `3.0`
+or `3e0` to IEEE-754 binary64 (`double`). An integral token outside the int64
+range is represented as a double when it is finite and representable. When
+Milvus serializes tags again, it preserves each numeric kind, including
+emitting an integral double with a decimal point.
 
 String tags match only string fields. Integer and double tags may match either
-numeric field family when conversion preserves the value exactly. An
-incompatible, overflowing, or lossy conversion evaluates the predicate to
-false; Milvus never coerces between strings and numbers.
+numeric field family when conversion preserves the value exactly; the same
+rules apply element-wise to array tags. An incompatible, overflowing, or lossy
+conversion evaluates the predicate to false; Milvus never coerces between
+strings and numbers.
 
 The usable boundaries differ: int64 covers `[-2^63, 2^63-1]`, while double has
 a wider magnitude range but cannot exactly represent every large integer.
@@ -174,12 +177,14 @@ RLS accepts a deliberately restricted expression subset:
 - `array_contains`, `array_contains_all`, and `array_contains_any` on primitive
   array fields. `using_expr` excludes element-nullable arrays, and integer-array
   `array_contains_all` and `array_contains_any` accept only integer literals;
+- unary `not` around a supported simple predicate;
 - `$current_principal` as a string template value;
-- `$current_principal_tags['key']` as a string, int64, or double template value.
+- `$current_principal_tags['key']` as a scalar template value, or as an array
+  template value for `array_contains_all` and `array_contains_any`.
 
-Each `using_expr` or `check_expr` contains one simple predicate. Policy authors
-compose predicates through multiple permissive or restrictive policies rather
-than inline `and`, `or`, or boolean `not`.
+Each `using_expr` or `check_expr` contains one simple predicate, optionally
+wrapped in unary `not`. Policy authors compose predicates through multiple
+permissive or restrictive policies rather than inline `and` or `or`.
 
 RLS variables follow normal Milvus template syntax: only unquoted variable
 tokens become template variables; identical text inside normal or raw string
@@ -233,10 +238,10 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxPolicyDescriptionLength` | Maximum policy-description length in bytes. |
 | `proxy.rls.maxPrincipalNameLength` | Maximum principal-name length in bytes. |
 | `proxy.rls.maxTagKeyLength` | Maximum tag-key length in bytes. |
-| `proxy.rls.maxTagValueLength` | Maximum string tag-value length in bytes. |
-| `proxy.rls.maxArrayLiteralElements` | Maximum literal elements in supported array expressions. |
+| `proxy.rls.maxTagValueLength` | Maximum string tag-value or array string-element length in bytes. |
+| `proxy.rls.maxArrayLiteralElements` | Maximum elements in an array tag or supported array literal. |
 | `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
-| `proxy.rls.maxPrincipalCacheBytes` | Maximum logical bytes of principal names, tag keys, and tag values cached per collection or materialized by one non-paginated principal list. |
+| `proxy.rls.maxPrincipalCacheBytes` | Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per collection or materialized by one non-paginated principal list. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
 
 ## Compatibility And Rollout

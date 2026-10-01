@@ -64,6 +64,7 @@ type compiledPolicyExpression struct {
 	needsPrincipal       bool
 	tagVariables         map[string]string
 	tagVariableDataTypes map[string][]schemapb.DataType
+	tagVariableArrays    map[string]bool
 }
 
 func compiledExpressionNeedsTags(e *CompiledExpression) bool {
@@ -303,12 +304,16 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 		}
 	}
 	var tagVariableDataTypes map[string][]schemapb.DataType
+	var tagVariableArrays map[string]bool
 	if len(template.tagVariables) > 0 {
 		tagVariableDataTypes = make(map[string][]schemapb.DataType, len(template.tagVariables))
+		tagVariableArrays = make(map[string]bool, len(template.tagVariables))
 		for _, variable := range template.tagVariables {
 			dataTypes := make([]schemapb.DataType, 0, 1)
-			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes)
+			expectsArray := false
+			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes, &expectsArray)
 			tagVariableDataTypes[variable] = dataTypes
+			tagVariableArrays[variable] = expectsArray
 		}
 	}
 	return &compiledPolicyExpression{
@@ -316,6 +321,7 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 		needsPrincipal:       template.needsPrincipal,
 		tagVariables:         template.tagVariables,
 		tagVariableDataTypes: tagVariableDataTypes,
+		tagVariableArrays:    tagVariableArrays,
 	}, nil
 }
 
@@ -455,7 +461,7 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 		if !ok {
 			return nil, nil
 		}
-		normalizedTagValue, ok = normalizeRLSTagValue(e.tagVariableDataTypes[variable], tagValue)
+		normalizedTagValue, ok = normalizeRLSTagValue(e.tagVariableDataTypes[variable], e.tagVariableArrays[variable], tagValue)
 		if !ok {
 			return nil, nil
 		}
@@ -485,6 +491,22 @@ func rlsTagValueToGenericValue(value TagValue) *planpb.GenericValue {
 		return planparserv2.NewInt(value.Int64Value)
 	case TagValueKindDouble:
 		return planparserv2.NewFloat(value.DoubleValue)
+	case TagValueKindArray:
+		if value.arrayValue == nil {
+			return nil
+		}
+		elements := make([]*planpb.GenericValue, len(value.arrayValue))
+		for i, element := range value.arrayValue {
+			elements[i] = rlsTagValueToGenericValue(element)
+			if elements[i] == nil || element.Kind == TagValueKindArray {
+				return nil
+			}
+		}
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{Array: elements, SameType: true},
+			},
+		}
 	default:
 		return nil
 	}
@@ -506,8 +528,29 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 // every occurrence of a tag variable in an expression. Numeric conversions are
 // allowed only when they preserve the value exactly; otherwise the policy is
 // treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
+func normalizeRLSTagValue(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (TagValue, bool) {
 	if len(dataTypes) == 0 {
+		return TagValue{}, false
+	}
+	if expectsArray {
+		if value.Kind != TagValueKindArray || value.arrayValue == nil {
+			return TagValue{}, false
+		}
+		elements := make([]TagValue, len(value.arrayValue))
+		for i, element := range value.arrayValue {
+			var ok bool
+			elements[i], ok = normalizeRLSScalarTagValue(dataTypes, element)
+			if !ok {
+				return TagValue{}, false
+			}
+		}
+		return NewArrayTagValue(elements), true
+	}
+	return normalizeRLSScalarTagValue(dataTypes, value)
+}
+
+func normalizeRLSScalarTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
+	if value.Kind == TagValueKindArray {
 		return TagValue{}, false
 	}
 	for _, dataType := range dataTypes {
@@ -540,6 +583,7 @@ func normalizeRLSTagValue(dataTypes []schemapb.DataType, value TagValue) (TagVal
 				} else if int64(float64(value.Int64Value)) != value.Int64Value {
 					return TagValue{}, false
 				}
+				value = NewDoubleTagValue(float64(value.Int64Value))
 			case TagValueKindDouble:
 				if dataType == schemapb.DataType_Float && float64(float32(value.DoubleValue)) != value.DoubleValue {
 					return TagValue{}, false
@@ -569,16 +613,16 @@ func integerTagFitsDataType(value int64, dataType schemapb.DataType) bool {
 	}
 }
 
-func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *[]schemapb.DataType) {
+func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *[]schemapb.DataType, expectsArray *bool) {
 	if expr == nil {
 		return
 	}
 	switch node := expr.GetExpr().(type) {
 	case *planpb.Expr_UnaryExpr:
-		collectRLSTemplateDataTypes(node.UnaryExpr.GetChild(), variable, dataTypes)
+		collectRLSTemplateDataTypes(node.UnaryExpr.GetChild(), variable, dataTypes, expectsArray)
 	case *planpb.Expr_BinaryExpr:
-		collectRLSTemplateDataTypes(node.BinaryExpr.GetLeft(), variable, dataTypes)
-		collectRLSTemplateDataTypes(node.BinaryExpr.GetRight(), variable, dataTypes)
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetLeft(), variable, dataTypes, expectsArray)
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetRight(), variable, dataTypes, expectsArray)
 	case *planpb.Expr_UnaryRangeExpr:
 		if node.UnaryRangeExpr.GetTemplateVariableName() == variable {
 			*dataTypes = append(*dataTypes, rlsTemplateColumnDataType(node.UnaryRangeExpr.GetColumnInfo()))
@@ -586,6 +630,7 @@ func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *
 	case *planpb.Expr_JsonContainsExpr:
 		if node.JsonContainsExpr.GetTemplateVariableName() == variable {
 			*dataTypes = append(*dataTypes, node.JsonContainsExpr.GetColumnInfo().GetElementType())
+			*expectsArray = node.JsonContainsExpr.GetOp() != planpb.JSONContainsExpr_Contains
 		}
 	}
 }
@@ -1425,7 +1470,7 @@ func evalBinaryExpr(expr *planpb.BinaryExpr, rowData *rowData, rowIdx int) (trut
 }
 
 func evalUnaryRangeExpr(expr *planpb.UnaryRangeExpr, rowData *rowData, rowIdx int) (truthValue, error) {
-	if expr.GetOp() != planpb.OpType_Equal {
+	if expr.GetOp() != planpb.OpType_Equal && expr.GetOp() != planpb.OpType_NotEqual {
 		return truthUnknown, merr.WrapErrServiceInternalMsg("unsupported RLS comparison operator %s", expr.GetOp().String())
 	}
 	rowValue, err := rowData.value(expr.GetColumnInfo(), rowIdx)
@@ -1438,6 +1483,9 @@ func evalUnaryRangeExpr(expr *planpb.UnaryRangeExpr, rowData *rowData, rowIdx in
 	match, err := valueEqual(rowValue, expr.GetValue())
 	if err != nil {
 		return truthUnknown, err
+	}
+	if expr.GetOp() == planpb.OpType_NotEqual {
+		match = !match
 	}
 	return truthValueFromBool(match), nil
 }

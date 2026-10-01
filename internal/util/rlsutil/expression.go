@@ -42,7 +42,12 @@ func ValidateParsedExpression(expr *planpb.Expr, allowedTemplateVariables map[st
 			return merr.WrapErrParameterInvalidMsg("RLS value expression must be boolean")
 		}
 		return nil
-	case *planpb.Expr_UnaryExpr, *planpb.Expr_BinaryExpr:
+	case *planpb.Expr_UnaryExpr:
+		if node.UnaryExpr.GetOp() != planpb.UnaryExpr_Not {
+			return merr.WrapErrParameterInvalidMsg("unsupported RLS unary operator %s", node.UnaryExpr.GetOp().String())
+		}
+		return ValidateParsedExpression(node.UnaryExpr.GetChild(), allowedTemplateVariables)
+	case *planpb.Expr_BinaryExpr:
 		return merr.WrapErrParameterInvalidMsg("compound RLS expressions are not supported for RLS policy validation")
 	case *planpb.Expr_UnaryRangeExpr:
 		return validateUnaryRangeExpr(node.UnaryRangeExpr, allowedTemplateVariables)
@@ -62,6 +67,9 @@ func ValidateUsingExpressionSchema(schema *typeutil.SchemaHelper, expr *planpb.E
 		return merr.WrapErrParameterInvalidMsg("RLS expression requires a schema")
 	}
 	node, ok := expr.GetExpr().(*planpb.Expr_JsonContainsExpr)
+	if unary, unaryOK := expr.GetExpr().(*planpb.Expr_UnaryExpr); unaryOK {
+		return ValidateUsingExpressionSchema(schema, unary.UnaryExpr.GetChild())
+	}
 	if !ok {
 		return nil
 	}
@@ -124,8 +132,8 @@ func validateJSONContainsExpr(expr *planpb.JSONContainsExpr, allowedTemplateVari
 	switch expr.GetOp() {
 	case planpb.JSONContainsExpr_Contains:
 	case planpb.JSONContainsExpr_ContainsAll, planpb.JSONContainsExpr_ContainsAny:
-		if expr.GetTemplateVariableName() != "" {
-			return merr.WrapErrParameterInvalidMsg("RLS principal variables can only be used with array_contains")
+		if expr.GetTemplateVariableName() == funcutil.RLSPrincipalTemplateName {
+			return merr.WrapErrParameterInvalidMsg("RLS current principal can only be used with array_contains")
 		}
 		if typeutil.IsIntegerType(column.GetElementType()) {
 			for _, element := range expr.GetElements() {

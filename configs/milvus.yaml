@@ -485,10 +485,10 @@ proxy:
     maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
     maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
     maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
-    maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
-    maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
+    maxTagValueLength: 1024 # Maximum RLS principal string tag value or array string element length in bytes.
+    maxArrayLiteralElements: 1024 # Maximum elements for RLS array tags and in or array_contains* predicates.
     maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
-    maxPrincipalCacheBytes: 67108864 # Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.
+    maxPrincipalCacheBytes: 67108864 # Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.
     metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
