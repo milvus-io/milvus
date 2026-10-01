@@ -305,7 +305,9 @@ func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
 	mixc := mocks.NewMockMixCoordClient(t)
 	node.mixCoord = mixc
 
-	mixc.EXPECT().ListRunningRequests(mock.Anything, mock.Anything).Return(&milvuspb.ListRunningRequestsResponse{
+	mixc.EXPECT().ListRunningRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRunningRequestsRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_ListRunningRequests
+	})).Return(&milvuspb.ListRunningRequestsResponse{
 		Status:   merr.Success(),
 		Requests: []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999}},
 	}, nil)
@@ -315,16 +317,20 @@ func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
 	// the answer is the cluster's, not this proxy's registry
 	assert.Equal(t, int64(999), listResp.GetRequests()[0].GetProxyId())
 
-	mixc.EXPECT().CancelRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
-		Status:   merr.Success(),
-		Canceled: []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999, ElapsedMs: 42}},
-		NotFound: []int64{6},
+	mixc.EXPECT().CancelRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.CancelRequestsRequest) bool {
+		return req.GetBase().GetMsgType() == commonpb.MsgType_CancelRequests
+	})).Return(&milvuspb.CancelRequestsResponse{
+		Status:       merr.Success(),
+		Canceled:     []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999, ElapsedMs: 42}},
+		NotFound:     []int64{6},
+		Undetermined: []int64{7},
 	}, nil)
 	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{5, 6}, Reason: "r"})
 	require.NoError(t, err)
 	require.Len(t, cancelResp.GetCanceled(), 1)
 	assert.Equal(t, int64(42), cancelResp.GetCanceled()[0].GetElapsedMs())
 	assert.Equal(t, []int64{6}, cancelResp.GetNotFound())
+	assert.Equal(t, []int64{7}, cancelResp.GetUndetermined())
 }
 
 func TestCancelRequestsRejectsEmptyIDs(t *testing.T) {

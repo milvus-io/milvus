@@ -61,51 +61,31 @@ func (_c *MockProxyClientManager_AddProxyClient_Call) RunAndReturn(run func(*ses
 }
 
 // CancelRequests provides a mock function with given fields: ctx, request
-func (_m *MockProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
+func (_m *MockProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (CancelResult, error) {
 	ret := _m.Called(ctx, request)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CancelRequests")
 	}
 
-	var r0 []*milvuspb.RunningRequestInfo
-	var r1 []int64
-	var r2 []*milvuspb.RunningRequestNodeResult
-	var r3 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)); ok {
+	var r0 CancelResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) (CancelResult, error)); ok {
 		return rf(ctx, request)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) []*milvuspb.RunningRequestInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) CancelResult); ok {
 		r0 = rf(ctx, request)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*milvuspb.RunningRequestInfo)
-		}
+		r0 = ret.Get(0).(CancelResult)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest) []int64); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest) error); ok {
 		r1 = rf(ctx, request)
 	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]int64)
-		}
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, *milvuspb.CancelRequestsRequest) []*milvuspb.RunningRequestNodeResult); ok {
-		r2 = rf(ctx, request)
-	} else {
-		if ret.Get(2) != nil {
-			r2 = ret.Get(2).([]*milvuspb.RunningRequestNodeResult)
-		}
-	}
-
-	if rf, ok := ret.Get(3).(func(context.Context, *milvuspb.CancelRequestsRequest) error); ok {
-		r3 = rf(ctx, request)
-	} else {
-		r3 = ret.Error(3)
-	}
-
-	return r0, r1, r2, r3
+	return r0, r1
 }
 
 // MockProxyClientManager_CancelRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelRequests'
@@ -127,12 +107,12 @@ func (_c *MockProxyClientManager_CancelRequests_Call) Run(run func(ctx context.C
 	return _c
 }
 
-func (_c *MockProxyClientManager_CancelRequests_Call) Return(_a0 []*milvuspb.RunningRequestInfo, _a1 []int64, _a2 []*milvuspb.RunningRequestNodeResult, _a3 error) *MockProxyClientManager_CancelRequests_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3)
+func (_c *MockProxyClientManager_CancelRequests_Call) Return(_a0 CancelResult, _a1 error) *MockProxyClientManager_CancelRequests_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockProxyClientManager_CancelRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)) *MockProxyClientManager_CancelRequests_Call {
+func (_c *MockProxyClientManager_CancelRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest) (CancelResult, error)) *MockProxyClientManager_CancelRequests_Call {
 	_c.Call.Return(run)
 	return _c
 }

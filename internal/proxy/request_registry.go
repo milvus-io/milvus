@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -237,6 +238,7 @@ func (node *Proxy) ListRunningRequests(ctx context.Context, request *milvuspb.Li
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRunningRequests")
 	defer sp.End()
 
+	request.Base = commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListRunningRequests))
 	resp, err := node.mixCoord.ListRunningRequests(ctx, request)
 	if err != nil {
 		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
@@ -263,6 +265,7 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 	// So the audit trail is written here, once, over the whole cluster's
 	// answer.
 	operator := GetCurUserFromContextOrDefault(ctx)
+	request.Base = commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CancelRequests))
 	resp, err := node.mixCoord.CancelRequests(ctx, request)
 	if err != nil {
 		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
