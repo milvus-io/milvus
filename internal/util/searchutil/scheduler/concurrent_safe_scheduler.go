@@ -365,7 +365,18 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			// A canceled task is dropped; a merged group loses only its
 			// canceled members and goes on with the rest. Dropped members
 			// are completed with their own context error.
-			survivor, _, _ := pruneCanceled(lastWaitingTask.Task)
+			survivor, dropped, cause := pruneCanceled(lastWaitingTask.Task)
+			if dropped > 0 {
+				// Said here as well as before execution, so that a request
+				// whose client sees a cancellation can be found in the log
+				// whichever of the two points dropped it.
+				if survivor == nil {
+					mlog.Warn(context.TODO(), "task canceled before it left the queue", mlog.Err(cause))
+				} else {
+					mlog.Warn(context.TODO(), "canceled requests dropped from a search group as it left the queue",
+						mlog.Int("dropped", dropped), mlog.Err(cause))
+				}
+			}
 			if survivor == nil {
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
@@ -421,6 +432,12 @@ func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *que
 		result.QueuedNQCleared += nq
 		s.updateWaitingTaskCounter(-1, -nq)
 		s.recordReadTaskQueueDuration(removedTask, now, readTaskQueueOutcomeCleared)
+		// A cleared task never ran, so it is finished without the executor's
+		// bookkeeping, and each request it stands for is told its own reason.
+		if u, ok := removedTask.Task.(UnrunTask); ok {
+			u.FinishUnrun(clearErr)
+			continue
+		}
 		removedTask.Done(clearErr)
 	}
 	return result, task

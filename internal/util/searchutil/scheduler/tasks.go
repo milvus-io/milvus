@@ -199,6 +199,18 @@ type ExpirableGroup interface {
 	FinishExpired()
 }
 
+// UnrunTask is a Task that can be completed without having run. Done is how
+// the executor finishes a task and records what it ran; a task the queue gives
+// up on, cleared by an administrator for instance, never reached the executor
+// and must not be counted as if it had.
+type UnrunTask interface {
+	Task
+
+	// FinishUnrun completes every request the task stands for with that
+	// request's own context error if it has one, otherwise with err.
+	FinishUnrun(err error)
+}
+
 // pruneCanceled drops a task whose context is canceled, or the canceled
 // members of a prunable group. It returns the task to execute, or nil when
 // there is nothing left to run, together with how many requests it dropped and
