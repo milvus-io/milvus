@@ -165,8 +165,9 @@ message CancelRequestsRequest {
 message CancelRequestsResponse {
   common.Status status = 1;
   repeated RunningRequestInfo canceled = 2;   // snapshot taken at cancellation
-  repeated int64 not_found = 3;
+  repeated int64 not_found = 3;               // filled only when every proxy answered
   repeated NodeResult node_results = 4;
+  repeated int64 undetermined = 5;            // not canceled while some proxy did not answer
 }
 ```
 
@@ -179,7 +180,11 @@ message CancelRequestsResponse {
   record taken at the moment of cancellation. `elapsed_ms` is therefore how
   long the request had been running when it was canceled, and the other
   fields (user, collection, nq, topk, expr, client address) identify what was
-  canceled without a second look at an earlier `List` output.
+  canceled without a second look at an earlier `List` output. Its `state` is
+  the state the request was in before it was canceled (queued or running).
+- The proxy stamps `MsgBase.msg_type` with `ListRunningRequests` (2500) or
+  `CancelRequests` (2501) before forwarding to the coordinator, so `MsgBase`
+  alone tells the read-only list from the cancel.
 - REST v2: `POST /v2/vectordb/requests/list` and
   `POST /v2/vectordb/requests/cancel`, wired through `wrapperPost` in
   `internal/distributed/proxy/httpserver/handler_v2.go`.
@@ -225,9 +230,17 @@ answer normally. The rule is the same for both:
 - The call fails only when no proxy answered at all, including the case of no
   registered proxy. An empty list must never be mistaken for "nothing is
   running".
-- For `Cancel`, `not_found` stops being authoritative once `node_results`
-  contains a failure: an id that no answering proxy claimed may still be
-  running on the proxy that did not answer.
+- For `Cancel`, an id that no proxy canceled goes to one of two lists. If
+  every proxy answered (an `unimplemented` proxy counts as answered, since it
+  registers no requests), the id is in `not_found`: the request finished or
+  never existed. If some proxy did not answer, the id is in `undetermined`
+  instead, because a request id does not say which proxy holds it and the
+  request may still be running on the proxy that was not reached; the caller
+  retries the cancel or lists again once that proxy is back. Reporting such an
+  id as `not_found` would tell the caller a still-running request is gone.
+  This is the same shape as DynamoDB's `UnprocessedKeys` or the `unreachable`
+  field of Google AIP-217 (API Improvement Proposals): what could not be
+  settled is listed separately rather than folded into a definite answer.
 
 Returning an error instead, and letting the caller discard the rows, would be
 backwards. The reason to list running requests is usually that something is
