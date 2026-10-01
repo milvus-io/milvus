@@ -73,7 +73,7 @@ The three uses impose the constraints the design is built around:
 - **Per-collection attribution of request-level usage** ("which collections issued `group_by_field`
   searches"). A raw counter cannot answer it: ten million hits may come from one collection or ten
   thousand. Answering it requires state keyed by collection, which in turn requires a `DropCollection`
-  hook (the pattern `CleanupProxyCollectionMetrics` already implements, `internal/proxy/impl.go:275`),
+  hook (the pattern `CleanupProxyCollectionMetrics` already implements, `internal/proxy/impl.go:280`),
   alias handling, a time window, and a memory bound. That is a different design with a different cost
   model and, if wanted, gets its own MEP. This design deliberately keeps the request counters unkeyed so
   that none of that machinery is needed.
@@ -452,10 +452,10 @@ introduced:
 | Request fields (`namespace`, `highlighter.type`, `function_score`, `not_return_all_meta`, `use_default_consistency` + `consistency_level`, `travel_timestamp`, and the output fields behind `output_fields=dynamic` / `output_fields=vector`) | the start of `searchTask.PreExecute` and the end of `queryTask.PreExecute`, reading the proto fields and the output fields `translateOutputFields` resolved |
 | `primary_key_search` | `Proxy.search`, before it calls `handleIfSearchByPK`. It cannot be read in the task: that function resolves the ids into vectors and overwrites `search_input` with the placeholder group, and it returns before a task exists both when the resolution fails and when every id resolves to a null vector |
 | `auth_method=api_key` / `auth_method=password` | both entry points that authenticate, each after the credential verifies: the gRPC interceptor (`AuthenticationInterceptorWithMetaCache`) and the RESTful middleware (`authenticate` in `internal/distributed/proxy/service.go`, also reached from `metricsPortAuthMiddleware` when the console API on the metrics port authenticates that way), which is a separate code path with the opposite decision order |
-| Expression features (`text_match`, `json_contains`, `st_*`, `is null`, `like`, ...) and `filter_templating` (the `expr_template_values` map) / `expr_use_json_stats` | **after** the plan is built, by one walk over the plan's predicate tree at the three plan-creation sites (`tryGeneratePlan` for search, `QueryTask.createPlanArgs` for query, the delete runner through `tasks_alias.go`) — see below |
+| Expression features (`text_match`, `json_contains`, `st_*`, `is null`, `like`, ...) and `filter_templating` (the `expr_template_values` map) / `expr_use_json_stats` | **after** the plan is built, by one walk over the plan's predicate tree at the three plan-creation sites (`tryGeneratePlan` for search, `QueryTask.createPlanArgs` for query, `DeleteRunner.Init` in `internal/proxy/dml` for delete, on the user's filter before the row-level-security predicate is merged into it) — see below |
 | Search shape (`ef`, `nprobe`, `limit`, `nq`, `retrieval=*`, `hybrid_search_reqs`, `hybrid_search=*`) | `ef` / `nprobe` / `limit` in `tryGeneratePlan` after `parseSearchInfo`, once per ANN subrequest; `nq` and the retrieval kind where the placeholder type is known (`initSearchRequest`, and each subrequest in `initAdvancedSearchRequest`); the hybrid shape once, after the subrequest loop. The per-subrequest counters go into the task's `Tally`, the rest into its set |
 | Query aggregation, `order_by`, `search_aggregation` | `QueryTask.createPlanArgs` after `translateOutputFields` resolves the aggregates; the query params scan in `queryTask.PreExecute`; the start of `searchTask.PreExecute` |
-| Upsert and delete modes | `upsertTask.PreExecute` right after `partial_update` is normalized (`recordUpsertFeatures`); `deleteRunner.Run` where it decides between a primary-key delete and a query-then-delete (`recordDeleteMode`); both in `internal/proxy/feature_usage_hooks.go` |
+| Upsert and delete modes | `UpsertTask.PreExecute` right after `partial_update` is normalized (`recordUpsertFeatures`); `DeleteRunner.Run` where it decides between a primary-key delete and a query-then-delete (`recordDeleteMode`); both in `internal/proxy/dml/feature_usage_hooks.go` |
 | Execution features | the Proxy sets `PlanOption.collect_feature_bits` where it builds the plan of a counted search or query, and counts the OR of the results' `feature_bits` in `SearchTask.PostExecute` / `QueryTask.PostExecute`; see "Execution features" |
 | Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where it persists a compaction task (`enqueueCompaction` in `compaction_inspector.go`). The import hook counts the job's **distinct** file types once each, not once per file: one job carrying a thousand Parquet files is one use of Parquet |
 | QueryNode execution decisions | `two_stage_search` where the delegator takes the two-stage branch (`delegator.search`), `segment_prune` where pruning removed at least one segment (`PruneSegments`), `run_analyzer` at the QueryNode `RunAnalyzer` RPC |
@@ -822,7 +822,7 @@ drift. A plan without the option records nothing, and every recording site is th
 | `filter_index_declined` | the same place | the field has a scalar index but the expression ran on raw data: the operator or literal is one the index does not serve, or a cost guard declined it |
 | `expr_cache_hit` | the expression result cache and the whole-filter cache | a filter result was served from the cache |
 | `interim_index_search` | growing-segment search and the sealed binlog-index branch | the interim index served a vector search |
-| `strict_group_size_effective` | the strict grouping search | its second phase, the re-search restricted to unfinished groups, ran |
+| `strict_group_size_effective` | the strict grouping search | its second phase ran: a filtered search per group the first pass left short of `group_size` returned rows |
 | `tiered_storage_cold_read` | the QueryNode in Go, and the Proxy | the request read bytes from remote storage. The QueryNode sets the bit from the storage cost before it is split across merged requests, since the split rounds small counts to zero; the Proxy also counts it when the summed `scanned_remote_bytes` of the results is positive. Needs `queryNode.segcore.tieredStorage.storageUsageTrackingEnabled` |
 
 Semantics the consumer relies on:
@@ -1332,7 +1332,7 @@ the report.
 ### D1. A dedicated RPC, not a new `metric_type` on `GetMetrics`
 
 `GetMetrics` is a hot path: quotaCenter calls it on every Proxy, QueryNode and DataNode every
-`quotaCenterCollectInterval` (3 s, `configs/milvus.yaml:1387`). Feature usage is queried once a day.
+`quotaCenterCollectInterval` (3 s, `configs/milvus.yaml:1434`). Feature usage is queried once a day.
 Sharing the entry point couples the two, and `GetMetrics` already multiplexes more than a dozen
 `metric_type` strings over an untyped JSON request and response. `GetQuotaMetrics` set the precedent for
 splitting a purpose-specific RPC out of it.
@@ -1506,7 +1506,7 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 | Index-side static entries | `internal/datacoord/feature_usage.go` — `Server.FeatureUsageEntries`; `index_meta.go` — `indexMeta.ListAllIndexes` |
 | MixCoord merge and Proxy fan-out | `internal/coordinator/feature_usage.go` — `GetFeatureUsage`, `collectProxyFeatureUsage` |
 | Proxy RPC and HTTP handler | `internal/proxy/impl.go` — `GetFeatureUsage`; `internal/proxy/management.go` — `FeatureUsage` (route registered only when enabled); `internal/http/router.go` — `RouteFeatureUsage` |
-| Proxy counter hooks | search and query: `internal/proxy/dql/feature_usage_hooks.go`, called from `SearchTask.PreExecute` / `tryGeneratePlan` / `initSearchRequest` / `initAdvancedSearchRequest` / `PostExecute` and `QueryTask.PreExecute` / `createPlanArgs` / `PostExecute`; upsert and delete: `internal/proxy/feature_usage_hooks.go` (`recordUpsertFeatures`, `recordDeleteMode`), called from `task_upsert.go` and `task_delete.go`; the delete path's expression walk reaches `dql.RecordPlanExprFeatures` through `tasks_alias.go`; primary-key search and authentication in `internal/proxy/impl.go`, `internal/proxy/authentication_interceptor.go` and `internal/distributed/proxy/service.go` |
+| Proxy counter hooks | search and query: `internal/proxy/dql/feature_usage_hooks.go`, called from `SearchTask.PreExecute` / `tryGeneratePlan` / `initSearchRequest` / `initAdvancedSearchRequest` / `PostExecute` and `QueryTask.PreExecute` / `createPlanArgs` / `PostExecute`; upsert and delete: `internal/proxy/dml/feature_usage_hooks.go` (`recordUpsertFeatures`, `recordDeleteMode`), called from `internal/proxy/dml/task_upsert.go` and `task_delete.go`, whose expression walk calls `dql.RecordPlanExprFeatures`; primary-key search and authentication in `internal/proxy/impl.go`, `internal/proxy/authentication_interceptor.go` and `internal/distributed/proxy/service.go` |
 | Expression walk | `internal/featureusage/exprwalk.go` — `CollectExprFeatures`; the request-level wrappers `collectPlanExprFeatures` / `recordPlanExprFeatures` in `internal/proxy/dql/feature_usage_hooks.go` |
 | Per-subrequest counters | `internal/featureusage/tally.go` — `Tally`; bucket helpers in `internal/featureusage/counters.go` |
 | Execution features | segcore: `internal/core/src/common/FeatureBits.h` (`FeatureBit`, `FeatureRecorder`), `query/PlanNode.h` / `PlanProto.cpp` (the plan option), `exec/expression/Expr.h` (`RecordExecPath`, `RecordScalarIndexType`), `Expr.cpp` (binding in `CompileExpression` and the GIS split), `UnaryExpr.cpp` (NGRAM), `ExprCacheHelper.h` / `Expr.h` / `FilterBitsNode.cpp` (cache hits), `SearchOnGrowing.cpp` / `ChunkedSegmentSealedImpl.cpp` / `VectorSearchNode.cpp` (interim index), `StrictGroupFilteredSearch.cpp` / `SearchGroupByNode.cpp` (strict grouping), `segcore/plan_c.*` (`GetSearchPlanFeatureBits`, `GetRetrievePlanFeatureBits`); Go: `internal/util/segcore/plan.go` (`FeatureBits`), `internal/querynodev2/tasks/search_task.go`, `search_task_go_reduce.go` (`attributeStorageCost`), `query_task.go`, `internal/querynodev2/segments/result.go` (`orFeatureBits`, `ColdReadFeatureBit`), `segments/query_pipeline.go`, `pkg/util/fastpb/query_insert.go`; bit layout `internal/featureusage/execbits.go` |
@@ -1523,7 +1523,7 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 ## References
 
 - `pkg/proto/proxy.proto:34` — `GetQuotaMetrics`, precedent for a purpose-specific RPC
-- `internal/coordinator/mix_coord.go:859` — `GetMetrics` fan-out; `internal/coordinator/feature_usage.go` — `GetFeatureUsage`, which reaches the Proxies through `rootcoordServer.GetProxyClientManager()`
+- `internal/coordinator/mix_coord.go:891` — `GetMetrics` fan-out; `internal/coordinator/feature_usage.go` — `GetFeatureUsage`, which reaches the Proxies through `rootcoordServer.GetProxyClientManager()`
 - `internal/http/verifier.go:72` — `RegisterPasswordVerifyFunc`; `internal/proxy/meta_cache.go:80` — registration
 - `internal/http/router.go` — `/management/*` routes
 - `pkg/common/common.go` — official property, type-param and index-param keys; `pkg/common/feature_usage_keys.go` — the allowlist the report names keys from
@@ -1532,8 +1532,8 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 - `internal/proxy/dql/search_util.go` — `parseSearchInfo`, `parseGroupByInfo`, `parseRankParams`; `internal/proxy/dql/util_dql.go:174` — `translateOutputFields`
 - `internal/parser/planparserv2/plan_parser_v2.go:30` — `exprCache`
 - `internal/util/function/rerank/function_score.go` — built-in rerank function names; `GetRerankName` returns a lowercased user string
-- `internal/proxy/dql/rerank_meta.go:119` (`newRerankMetaFromLegacy`), reached through `selectHybridRerankMeta` (`internal/proxy/dql/function_chain_validator.go:54`, called at `internal/proxy/dql/task_search.go:626`) — legacy `rank_params` passed through unvalidated
-- `pkg/metrics/proxy_metrics.go` — `proxyCollectionScopedMetrics`, `CleanupProxyCollectionMetrics`, and the leak history recorded above them; `internal/proxy/impl.go:275` — the `DropCollection` cleanup hook
+- `internal/proxy/dql/rerank_meta.go:119` (`newRerankMetaFromLegacy`), reached through `selectHybridRerankMeta` (`internal/proxy/dql/function_chain_validator.go:54`, called at `internal/proxy/dql/task_search.go:685`) — legacy `rank_params` passed through unvalidated
+- `pkg/metrics/proxy_metrics.go` — `proxyCollectionScopedMetrics`, `CleanupProxyCollectionMetrics`, and the leak history recorded above them; `internal/proxy/impl.go:280` — the `DropCollection` cleanup hook
 - `internal/util/function/embedding/text_embedding_function.go` — provider switch
 - `pymilvus/client/ts_utils.py` — `construct_guarantee_ts`; `pymilvus/client/prepare.py` — default `search_params`
-- `configs/milvus.yaml:1387` — `quotaCenterCollectInterval`
+- `configs/milvus.yaml:1434` — `quotaCenterCollectInterval`
