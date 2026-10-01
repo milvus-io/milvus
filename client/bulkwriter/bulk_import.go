@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // ResponseBase is the common milvus restful response struct.
@@ -65,6 +66,14 @@ func (opt *BulkImportOption) GetRequest() ([]byte, error) {
 func (opt *BulkImportOption) WithPartition(partitionName string) *BulkImportOption {
 	opt.PartitionName = partitionName
 	return opt
+}
+
+func (opt *BulkImportOption) WithRLSPrincipal(principal string) *BulkImportOption {
+	return opt.WithOption("rls_principal", principal)
+}
+
+func (opt *BulkImportOption) WithSkipRLS(skip bool) *BulkImportOption {
+	return opt.WithOption("skip_rls", strconv.FormatBool(skip))
 }
 
 func (opt *BulkImportOption) WithAPIKey(key string) *BulkImportOption {

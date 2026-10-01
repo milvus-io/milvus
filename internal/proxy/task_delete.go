@@ -332,7 +332,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 	}
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
 	if err != nil {
 		return err
 	}
