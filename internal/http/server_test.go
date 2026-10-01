@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -349,6 +350,43 @@ func TestRegisterWebUIHandler(t *testing.T) {
 			_, err = resp.Body.Read(body)
 			assert.NoError(t, err)
 			assert.Contains(t, strings.ToLower(string(body)), tt.expectedBody)
+		})
+	}
+}
+
+func TestServeWebUIIndexResolvesAssetsFromMountPath(t *testing.T) {
+	handler := serveWebUIIndex(http.FS(staticFiles))
+	tests := []struct {
+		name         string
+		requestPath  string
+		wantBasePath string
+	}{
+		{name: "root", requestPath: "/webui/", wantBasePath: "/webui/"},
+		{name: "collection deep link", requestPath: "/webui/collections/default-knowledge", wantBasePath: "/webui/"},
+		{name: "reverse proxy prefix", requestPath: "/proxy/webui/collections/default-knowledge", wantBasePath: "/proxy/webui/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.requestPath, nil)
+			req.Header.Set("Accept", "text/html")
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+			require.Equal(t, http.StatusOK, resp.Code)
+			body := resp.Body.String()
+
+			baseTag := `<base href="` + tt.wantBasePath + `">`
+			require.Contains(t, body, baseTag)
+			require.Contains(t, body, `window.basename="`+strings.TrimSuffix(tt.wantBasePath, `/`)+`";`)
+			require.Less(t, strings.Index(body, baseTag), strings.Index(body, `src="./assets/index-nmS7rbPW.js"`))
+			require.NotContains(t, body, "<template")
+			require.Contains(t, body, `<link rel="stylesheet" crossorigin href="./assets/index-Cxslai7T.css">`)
+
+			baseURL, err := url.Parse(tt.wantBasePath)
+			require.NoError(t, err)
+			assetURL, err := baseURL.Parse("./assets/index-nmS7rbPW.js")
+			require.NoError(t, err)
+			require.Equal(t, strings.TrimSuffix(tt.wantBasePath, "/")+"/assets/index-nmS7rbPW.js", assetURL.Path)
 		})
 	}
 }
