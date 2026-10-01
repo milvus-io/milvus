@@ -125,14 +125,18 @@ func TestProxyClientManager_ListRunningRequests(t *testing.T) {
 
 func TestProxyClientManager_CancelRequests(t *testing.T) {
 	ctx := context.Background()
+	ids := func(infos []*milvuspb.RunningRequestInfo) []int64 {
+		return lo.Map(infos, func(r *milvuspb.RunningRequestInfo, _ int) int64 { return r.GetRequestId() })
+	}
 
 	t.Run("no proxy is an error, not an empty answer", func(t *testing.T) {
 		pcm := NewProxyClientManager(DefaultProxyCreator)
-		canceled, notFound, nodeResults, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
 		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
-		assert.Empty(t, canceled)
-		assert.Empty(t, notFound)
-		assert.Empty(t, nodeResults)
+		assert.Empty(t, result.Canceled)
+		assert.Empty(t, result.NotFound)
+		assert.Empty(t, result.Undetermined)
+		assert.Empty(t, result.NodeResults)
 	})
 
 	t.Run("an id is not found only when no proxy held it", func(t *testing.T) {
@@ -155,40 +159,17 @@ func TestProxyClientManager_CancelRequests(t *testing.T) {
 		pcm.proxyClient.Insert(101, p1)
 		pcm.proxyClient.Insert(102, p2)
 
-		canceled, notFound, nodeResults, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2, 9}})
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2, 9}})
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []int64{1, 2}, lo.Map(canceled, func(r *milvuspb.RunningRequestInfo, _ int) int64 {
-			return r.GetRequestId()
-		}))
-		assert.Equal(t, []int64{9}, notFound)
-		assert.Len(t, nodeResults, 2)
+		assert.ElementsMatch(t, []int64{1, 2}, ids(result.Canceled))
+		assert.Equal(t, []int64{9}, result.NotFound)
+		assert.Empty(t, result.Undetermined)
+		assert.Len(t, result.NodeResults, 2)
 	})
 
-	t.Run("a failing proxy is reported and the rest still cancel", func(t *testing.T) {
-		p1 := mocks.NewMockProxyClient(t)
-		p1.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
-			Status:   merr.Success(),
-			Canceled: []*milvuspb.RunningRequestInfo{{RequestId: 1, ProxyId: 101}},
-		}, nil)
-		p2 := mocks.NewMockProxyClient(t)
-		p2.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(nil, errors.New("proxy is down"))
-
-		pcm := NewProxyClientManager(DefaultProxyCreator)
-		pcm.proxyClient.Insert(101, p1)
-		pcm.proxyClient.Insert(102, p2)
-
-		canceled, notFound, nodeResults, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2}})
-		assert.NoError(t, err, "one unreachable proxy must not stop the others from canceling")
-		require.Len(t, canceled, 1)
-		assert.Equal(t, int64(1), canceled[0].GetRequestId())
-		// id 2 may have been held by the proxy that failed to answer
-		assert.Equal(t, []int64{2}, notFound)
-		assert.Len(t, nodeResults, 2)
-	})
-
-	t.Run("a cancel through an unreachable proxy leaves not found unreliable", func(t *testing.T) {
-		// id 2 comes back as not found only because the proxy that may hold it
-		// never answered, which is what the failed node result is there to say.
+	t.Run("an id nobody canceled is undetermined while a proxy is unreachable", func(t *testing.T) {
+		// id 2 may be running on the proxy that did not answer, so it must
+		// not be reported as finished.
 		p1 := mocks.NewMockProxyClient(t)
 		p1.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
 			Status:   merr.Success(),
@@ -202,18 +183,63 @@ func TestProxyClientManager_CancelRequests(t *testing.T) {
 		pcm.proxyClient.Insert(101, p1)
 		pcm.proxyClient.Insert(102, p2)
 
-		canceled, notFound, nodeResults, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2}})
-		assert.NoError(t, err)
-		require.Len(t, canceled, 1)
-		assert.Equal(t, []int64{2}, notFound)
-		failed := lo.Filter(nodeResults, func(r *milvuspb.RunningRequestNodeResult, _ int) bool {
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2}})
+		assert.NoError(t, err, "one unreachable proxy must not stop the others from canceling")
+		assert.Equal(t, []int64{1}, ids(result.Canceled))
+		assert.Empty(t, result.NotFound)
+		assert.Equal(t, []int64{2}, result.Undetermined)
+		failed := lo.Filter(result.NodeResults, func(r *milvuspb.RunningRequestNodeResult, _ int) bool {
 			return !merr.Ok(r.GetStatus())
 		})
-		require.Len(t, failed, 1, "the unreachable proxy must be reported, or not found would look authoritative")
+		require.Len(t, failed, 1)
 		assert.Equal(t, int64(102), failed[0].GetNodeId())
 	})
 
-	t.Run("a proxy status failure is surfaced", func(t *testing.T) {
+	t.Run("a proxy answering with a failed status counts as not answering", func(t *testing.T) {
+		p1 := mocks.NewMockProxyClient(t)
+		p1.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
+			Status:   merr.Success(),
+			NotFound: []int64{1},
+		}, nil)
+		p2 := mocks.NewMockProxyClient(t)
+		p2.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
+			Status: merr.Status(merr.WrapErrServiceNotReady("proxy", 0, "initializing")),
+		}, nil)
+
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(101, p1)
+		pcm.proxyClient.Insert(102, p2)
+
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		assert.NoError(t, err)
+		assert.Empty(t, result.NotFound)
+		assert.Equal(t, []int64{1}, result.Undetermined)
+	})
+
+	t.Run("a proxy too old to cancel still lets not found stand", func(t *testing.T) {
+		// An old proxy registers no requests, so it cannot hold the id.
+		p1 := mocks.NewMockProxyClient(t)
+		p1.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
+			Status:   merr.Success(),
+			NotFound: []int64{1},
+		}, nil)
+		p2 := mocks.NewMockProxyClient(t)
+		p2.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented)
+
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(101, p1)
+		pcm.proxyClient.Insert(102, p2)
+
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1}, result.NotFound)
+		assert.Empty(t, result.Undetermined)
+		old, ok := lo.Find(result.NodeResults, func(r *milvuspb.RunningRequestNodeResult) bool { return r.GetNodeId() == 102 })
+		require.True(t, ok)
+		assert.True(t, old.GetUnimplemented())
+	})
+
+	t.Run("no proxy answering is an error and leaves every id undetermined", func(t *testing.T) {
 		p1 := mocks.NewMockProxyClient(t)
 		p1.EXPECT().CancelLocalRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
 			Status: merr.Status(merr.WrapErrServiceNotReady("proxy", 0, "initializing")),
@@ -222,11 +248,12 @@ func TestProxyClientManager_CancelRequests(t *testing.T) {
 		pcm := NewProxyClientManager(DefaultProxyCreator)
 		pcm.proxyClient.Insert(101, p1)
 
-		canceled, notFound, nodeResults, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		result, err := pcm.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
 		assert.Error(t, err)
-		assert.Empty(t, canceled)
-		assert.Equal(t, []int64{1}, notFound)
-		require.Len(t, nodeResults, 1)
-		assert.False(t, merr.Ok(nodeResults[0].GetStatus()))
+		assert.Empty(t, result.Canceled)
+		assert.Empty(t, result.NotFound)
+		assert.Equal(t, []int64{1}, result.Undetermined)
+		require.Len(t, result.NodeResults, 1)
+		assert.False(t, merr.Ok(result.NodeResults[0].GetStatus()))
 	})
 }

@@ -19,6 +19,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,4 +69,42 @@ func TestListRunningRequestsDatabaseIsAFilter(t *testing.T) {
 			assert.Equal(t, tc.wantDB, got.GetDbName())
 		})
 	}
+}
+
+// A cancel answers with three disjoint id lists. undetermined is the one that
+// tells an operator to retry, so it must reach the HTTP body like the others.
+func TestCancelRequestsReturnsEveryIDList(t *testing.T) {
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().CancelRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
+		Status:       merr.Success(),
+		Canceled:     []*milvuspb.RunningRequestInfo{{RequestId: 1}},
+		NotFound:     []int64{2},
+		Undetermined: []int64{3},
+		NodeResults:  []*milvuspb.RunningRequestNodeResult{{NodeId: 7, Status: merr.Success()}},
+	}, nil).Once()
+	testEngine := initHTTPServerV2(mp, false)
+
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, httptest.NewRequest(
+		http.MethodPost,
+		versionalV2(RunningRequestCategory, CancelAction),
+		bytes.NewReader([]byte(`{"requestIds": [1, 2, 3]}`)),
+	))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Code int32 `json:"code"`
+		Data struct {
+			Canceled     []map[string]any `json:"canceled"`
+			NotFound     []int64          `json:"notFound"`
+			Undetermined []int64          `json:"undetermined"`
+			NodeResults  []map[string]any `json:"nodeResults"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+	assert.Equal(t, int32(0), body.Code)
+	assert.Len(t, body.Data.Canceled, 1)
+	assert.Equal(t, []int64{2}, body.Data.NotFound)
+	assert.Equal(t, []int64{3}, body.Data.Undetermined)
+	assert.Len(t, body.Data.NodeResults, 1)
 }
