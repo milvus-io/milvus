@@ -186,6 +186,7 @@ type FieldData interface {
 	GetRow(i int) any
 	GetRowSize(i int) int
 	GetDataRows() any
+	GetValidData() []bool
 	// GetValidDataRows() any
 	AppendRow(row interface{}) error
 	AppendRows(dataRows interface{}, validDataRows interface{}) error

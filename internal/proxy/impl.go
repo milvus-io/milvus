@@ -166,6 +166,11 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
+	if request.GetBase().GetProperties()[common.RLSClearAllCacheKey] == "true" {
+		rls.InvalidateAll()
+		mlog.Info(ctx, "complete to invalidate all RLS metadata caches")
+		return merr.Success(), nil
+	}
 	var aliasName []string
 	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
 	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
@@ -3597,7 +3602,7 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil {
 		return nil, err
 	}
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
 	if err != nil {
 		return nil, err
 	}

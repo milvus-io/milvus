@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -1970,15 +1971,15 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
 	duplicatedJobID, duplicated, err := s.broadcastImport(
 		ctx,
-		in.GetCollectionName(),
 		in.GetCollectionID(),
 		in.GetPartitionIDs(),
 		in.GetFiles(),
 		in.GetOptions(),
-		in.GetSchema(),
 		jobID,
 		in.GetChannelNames(),
 		interceptor.IdempotencyKeyFromContext(ctx),
+		in.GetRlsPrincipal(),
+		in.GetSkipRls(),
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
@@ -2011,15 +2012,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
-// Note: the pre-broadcast L0-import gate in ImportV2 covers only locally
-// originated imports. Replicated import messages (CDC) from a cluster with
-// enableL0Import=true land here directly without passing that gate, so it must
-// be re-checked. The gate here must NOT return an error: ack callbacks are
-// retried forever (callMessageAckCallbackUntilDone), and skipping job creation
-// would wedge the replicated CommitImport path (HandleCommitVchannel retries
-// on job-not-found). Instead the job is created directly in Failed state — a
-// terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
-// and the failure stays visible via GetImportProgress.
+// Note: pre-broadcast feature gates cover only locally originated imports.
+// Replicated or old-Proxy messages land here directly, so the gates must be
+// re-checked. A disabled gate must create a Failed job instead of returning a
+// retryable error: ack callbacks retry forever while holding the collection
+// resource guard. The terminal job also keeps the failure visible through
+// GetImportProgress.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -2047,10 +2045,15 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	var rlsPredicate *planpb.Expr
+	var rlsErr error
+	if !l0ImportDisabled {
+		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
+	}
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled {
+	if isBackup && !l0ImportDisabled && rlsErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2089,21 +2092,22 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
-			TimeoutTs:      timeoutTs,
-			CleanupTs:      math.MaxUint64,
-			State:          internalpb.ImportJobState_Pending,
-			Files:          files,
-			Options:        in.GetOptions(),
-			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
-			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			JobID:             jobID,
+			CollectionID:      in.GetCollectionID(),
+			CollectionName:    in.GetCollectionName(),
+			PartitionIDs:      in.GetPartitionIDs(),
+			Vchannels:         importCollectionInfo.VChannelNames,
+			Schema:            in.GetSchema(),
+			TimeoutTs:         timeoutTs,
+			CleanupTs:         math.MaxUint64,
+			State:             internalpb.ImportJobState_Pending,
+			Files:             files,
+			Options:           in.GetOptions(),
+			CreateTime:        createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels:    in.GetChannelNames(),
+			DataTs:            in.GetDataTimestamp(),
+			AutoCommit:        importutilv2.IsAutoCommit(in.GetOptions()),
+			RlsCheckPredicate: rlsPredicate,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -2114,6 +2118,11 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
+	} else if rlsErr != nil {
+		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(rlsErr))
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(rlsErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

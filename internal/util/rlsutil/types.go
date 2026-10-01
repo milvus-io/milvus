@@ -267,6 +267,29 @@ func (action PolicyAction) String() string {
 	}
 }
 
+func PolicyActionOperation(action PolicyAction) string {
+	switch action {
+	case PolicyActionQuery:
+		return "query"
+	case PolicyActionQueryIterator:
+		return "query iterator"
+	case PolicyActionSearch:
+		return "search"
+	case PolicyActionSearchIterator:
+		return "search iterator"
+	case PolicyActionHybridSearch:
+		return "hybrid search"
+	case PolicyActionDelete:
+		return "delete"
+	case PolicyActionInsert:
+		return "insert"
+	case PolicyActionUpsert:
+		return "upsert"
+	default:
+		return "unknown"
+	}
+}
+
 type CreateRowPolicyRequest struct {
 	DbName         string
 	CollectionName string
