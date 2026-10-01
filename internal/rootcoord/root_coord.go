@@ -2995,7 +2995,7 @@ func (c *Core) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunnin
 //
 // The ids are broadcast to every proxy: a request id does not carry the proxy
 // that serves it, and the proxies are few. An id nobody claimed comes back in
-// NotFound.
+// NotFound when every proxy answered, and in Undetermined otherwise.
 func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
 	resp := &milvuspb.CancelRequestsResponse{Status: merr.Success()}
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
@@ -3003,10 +3003,11 @@ func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsR
 		return resp, nil
 	}
 
-	canceled, notFound, nodeResults, err := c.proxyClientManager.CancelRequests(ctx, req)
-	resp.Canceled = canceled
-	resp.NotFound = notFound
-	resp.NodeResults = nodeResults
+	result, err := c.proxyClientManager.CancelRequests(ctx, req)
+	resp.Canceled = result.Canceled
+	resp.NotFound = result.NotFound
+	resp.Undetermined = result.Undetermined
+	resp.NodeResults = result.NodeResults
 	if err != nil {
 		resp.Status = merr.Status(err)
 	}
@@ -3014,9 +3015,10 @@ func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsR
 	mlog.Info(ctx, "canceled running requests",
 		mlog.Int64s("requestIDs", req.GetRequestIds()),
 		mlog.String("reason", req.GetReason()),
-		mlog.Int("canceled", len(canceled)),
-		mlog.Int("notFound", len(notFound)),
-		mlog.Int("nodes", len(nodeResults)),
+		mlog.Int("canceled", len(result.Canceled)),
+		mlog.Int("notFound", len(result.NotFound)),
+		mlog.Int("undetermined", len(result.Undetermined)),
+		mlog.Int("nodes", len(result.NodeResults)),
 		mlog.Err(err))
 	return resp, nil
 }

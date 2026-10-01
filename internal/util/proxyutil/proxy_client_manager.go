@@ -97,7 +97,7 @@ type ProxyClientManagerInterface interface {
 	SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error
 	ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error)
 	ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error)
-	CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)
+	CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (CancelResult, error)
 	GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error)
 }
 
@@ -491,21 +491,33 @@ func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *m
 	return requests, nodeResults, nil
 }
 
-// CancelRequests asks every proxy to cancel the given request ids and returns
-// the descriptions of what was canceled, the ids no proxy held, and one
-// result row per proxy.
+// CancelResult is the cluster's answer to a cancel, merged over every proxy.
+type CancelResult struct {
+	// Canceled describes each canceled request as it was when it was stopped.
+	Canceled []*milvuspb.RunningRequestInfo
+	// NotFound lists the ids no proxy holds. It is filled only when every
+	// proxy answered.
+	NotFound []int64
+	// Undetermined lists the ids nobody canceled while some proxy did not
+	// answer: any of them may be running on that proxy.
+	Undetermined []int64
+	// NodeResults has one row per proxy.
+	NodeResults []*milvuspb.RunningRequestNodeResult
+}
+
+// CancelRequests asks every proxy to cancel the given request ids.
 //
 // The call is broadcast because a request id does not say which proxy serves
-// it. An id is reported as not found only when no proxy claimed it, so a
-// single proxy's "not found" is not mistaken for the cluster's answer.
+// it. An id nobody canceled is reported as not found only when every proxy
+// answered; if some proxy did not, that proxy may hold it, so it is reported
+// as undetermined instead. A proxy too old to serve the call counts as
+// having answered, since it registers no requests.
 //
 // Like the list, this succeeds as long as one proxy answered, so that a proxy
-// that is down cannot stop the others from canceling what they hold. When
-// nodeResults contains a failure, notFound is not authoritative: an id in it
-// may still be running on the proxy that did not answer.
-func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
+// that is down cannot stop the others from canceling what they hold.
+func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (CancelResult, error) {
 	if p.proxyClient.Len() == 0 {
-		return nil, nil, nil, merr.WrapErrServiceUnavailable("no proxy is registered, cannot cancel requests")
+		return CancelResult{}, merr.WrapErrServiceUnavailable("no proxy is registered, cannot cancel requests")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, RunningRequestTimeout)
@@ -517,7 +529,7 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 	// Whatever remains was held by nobody that answered.
 	pending := typeutil.NewSet(request.GetRequestIds()...)
 	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
-	var answered int
+	var answered, silent int
 	var wg sync.WaitGroup
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID, client := key, value
@@ -531,6 +543,8 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 				nodeResults = append(nodeResults, newRunningRequestNodeResult(nodeID, err))
 				if errors.Is(err, merr.ErrServiceUnimplemented) {
 					answered++
+				} else {
+					silent++
 				}
 				return
 			}
@@ -539,6 +553,7 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 				Status: resp.GetStatus(),
 			})
 			if !merr.Ok(resp.GetStatus()) {
+				silent++
 				return
 			}
 			answered++
@@ -550,10 +565,17 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 		return true
 	})
 	wg.Wait()
-	if answered == 0 {
-		return canceled, pending.Collect(), nodeResults, noProxyAnswered("cannot cancel requests", nodeResults)
+
+	result := CancelResult{Canceled: canceled, NodeResults: nodeResults}
+	if silent > 0 {
+		result.Undetermined = pending.Collect()
+	} else {
+		result.NotFound = pending.Collect()
 	}
-	return canceled, pending.Collect(), nodeResults, nil
+	if answered == 0 {
+		return result, noProxyAnswered("cannot cancel requests", nodeResults)
+	}
+	return result, nil
 }
 
 // noProxyAnswered builds the error for a fan-out that reached nobody, naming
