@@ -408,30 +408,29 @@ func (l *RotateWriter) max() int64 {
 	return int64(l.maxSize) * int64(megabyte)
 }
 
-var allowedLogDirs = []string{
-	"/tmp",
-	"/var/lib/milvus",
-	"/milvus",
-}
-
 func validateLogPath(localPath string, fileName string) error {
-	if localPath == "" {
-		return nil
+	if strings.Contains(fileName, "..") || strings.Contains(fileName, string(filepath.Separator)) {
+		return merr.WrapErrParameterInvalidMsg("access log filename must not contain path separators or '..'")
 	}
-	cleaned := filepath.Clean(localPath)
-	allowed := false
-	for _, dir := range allowedLogDirs {
-		if cleaned == dir || strings.HasPrefix(cleaned, dir+string(filepath.Separator)) {
-			allowed = true
-			break
+
+	dir := localPath
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "milvus_accesslog")
+	}
+	cleanedDir := filepath.Clean(dir)
+	joined := filepath.Clean(filepath.Join(cleanedDir, fileName))
+	if fileName != "" && !strings.HasPrefix(joined, cleanedDir+string(filepath.Separator)) {
+		return merr.WrapErrParameterInvalidMsg("access log file path escapes the configured directory")
+	}
+
+	resolved, err := filepath.EvalSymlinks(cleanedDir)
+	if err == nil && resolved != cleanedDir {
+		joined = filepath.Clean(filepath.Join(resolved, fileName))
+		if fileName != "" && !strings.HasPrefix(joined, resolved+string(filepath.Separator)) {
+			return merr.WrapErrParameterInvalidMsg("access log file path escapes the configured directory after symlink resolution")
 		}
 	}
-	if !allowed {
-		return merr.WrapErrParameterInvalidMsg("access log path %s is not under an allowed directory", cleaned)
-	}
-	if strings.Contains(fileName, "..") || strings.Contains(fileName, string(filepath.Separator)) {
-		return merr.WrapErrParameterInvalidMsg("access log filename %s must not contain path separators or '..'", fileName)
-	}
+
 	return nil
 }
 
