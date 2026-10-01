@@ -80,7 +80,10 @@ The three uses impose the constraints the design is built around:
 - **Object-level usage** ("which index, which field is used, how often"). That needs state keyed by
   index or field ID, registration and cleanup tied to load, drop and schema changes, and an answer for
   objects that no longer exist. It is a separate feature with its own MEP, not an extension of this one:
-  the report here answers "is feature X used on this instance", never "is object Y used".
+  the report here answers "is feature X used on this instance", never "is object Y used". The
+  segcore-to-Proxy channel built for execution features (see "Execution features") is what that design
+  can reuse: the recording point that marks `filter_exec_path=scalar_index` can carry the field and
+  index identity back for attribution.
 - **Filtering-effectiveness profiling** (selectivity, rows scanned per predicate, per-query execution
   plans). This report may say that a filter ran on a scalar index; how well it filtered is a query
   profiling question.
@@ -837,6 +840,10 @@ Semantics the consumer relies on:
   the designed path (membership filters, timestamptz arithmetic, IS NULL over a JSON path index).
 - **Only searches and queries report.** The retrieval behind a delete or an upsert, and the Proxy's own
   requery, do not.
+- **Growing and sealed segments are not reported separately.** A request that used a feature on either
+  counts once; splitting every entry by segment state would double the catalog without changing whether
+  a feature takes effect. `interim_index_search` is the one entry that is about growing data in the
+  first place, and it is taken from the search that actually ran on the interim index.
 
 ### Request-level features (`request`) — **decision per row**
 
