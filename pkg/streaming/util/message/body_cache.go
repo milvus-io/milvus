@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,9 +27,10 @@ type bodyCacheSlot struct {
 }
 
 type bodyCacheAttempt struct {
-	done chan struct{}
-	body proto.Message
-	err  error
+	done     chan struct{}
+	body     proto.Message
+	err      error
+	canceled bool
 }
 
 type bodyCacheManager struct {
@@ -52,18 +54,23 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	if slot.body != nil {
-		body := slot.body
-		slot.lastAccess = time.Now()
-		m.entries.MoveToBack(slot.element)
-		m.mu.Unlock()
-		return body, nil
-	}
-	if attempt := slot.loading; attempt != nil {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		m.mu.Lock()
+		if slot.body != nil {
+			body := slot.body
+			slot.lastAccess = time.Now()
+			m.entries.MoveToBack(slot.element)
+			m.mu.Unlock()
+			return body, nil
+		}
+		attempt := slot.loading
+		if attempt == nil {
+			// Keep the lock to install this caller's construction attempt.
+			break
+		}
 		m.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -71,6 +78,10 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 		case <-attempt.done:
 			if err := ctx.Err(); err != nil {
 				return nil, err
+			}
+			if attempt.canceled {
+				// The loader's cancellation must not cancel independent callers.
+				continue
 			}
 			return attempt.body, attempt.err
 		}
@@ -101,6 +112,7 @@ func (m *bodyCacheManager) get(ctx context.Context, slot *bodyCacheSlot, decode 
 		m.bytes += size
 	}
 	attempt.body, attempt.err = body, err
+	attempt.canceled = err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err())
 	slot.loading = nil
 	close(attempt.done)
 	m.mu.Unlock()
