@@ -60,20 +60,26 @@ func computeScorerScoresOnChunkedOffsets(
 		return nil, merr.WrapErrServiceInternal("segment is nil")
 	}
 
-	local, ok := segment.(*LocalSegment)
-	if !ok {
+	var csegment segcore.CSegment
+	switch segment := segment.(type) {
+	case *LocalSegment:
+		if segment.csegment == nil {
+			return nil, merr.WrapErrServiceInternalMsg("segment %d has nil CSegment", segment.ID())
+		}
+		if !segment.ptrLock.PinIf(state.IsNotReleased) {
+			return nil, merr.WrapErrSegmentNotLoaded(segment.ID(), "segment released")
+		}
+		defer segment.ptrLock.Unpin()
+		csegment = segment.csegment
+	case *viewQueryGrowingSegment:
+		// SearchOnView retains the owning handles until scoring completes.
+		csegment = segment.csegment
+	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("segment %d does not support boost score", segment.ID()))
 	}
-	if local.csegment == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("segment %d has nil CSegment", segment.ID()))
-	}
-	if !local.ptrLock.PinIf(state.IsNotReleased) {
-		return nil, merr.WrapErrSegmentNotLoaded(segment.ID(), "segment released")
-	}
-	defer local.ptrLock.Unpin()
 
 	if async {
-		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, local.csegment, searchReq, scorer, offsets)
+		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, csegment, searchReq, scorer, offsets)
 	}
-	return segcore.ComputeScorerScoresOnChunkedOffsets(local.csegment, searchReq, scorer, offsets)
+	return segcore.ComputeScorerScoresOnChunkedOffsets(csegment, searchReq, scorer, offsets)
 }

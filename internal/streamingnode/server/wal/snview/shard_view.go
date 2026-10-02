@@ -130,6 +130,7 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 			s.applyOneLocked(&views[i])
 		}
 	}
+	s.detachIfEmptyLocked()
 	return true
 }
 
@@ -321,6 +322,10 @@ func (s *snShardView) cleanupIfDropped(version qviews.QueryViewVersion, entry *s
 		return
 	}
 	delete(s.views, version)
+	s.detachIfEmptyLocked()
+}
+
+func (s *snShardView) detachIfEmptyLocked() {
 	if len(s.views) == 0 && s.onEmpty != nil {
 		s.detached = true
 		s.onEmpty(s)

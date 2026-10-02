@@ -72,7 +72,7 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if isTxn && msgType != message.MessageTypeCommitTxn {
 		return
 	}
-	if vchannel == "" {
+	if vchannel == "" || msg.IsPChannelLevel() {
 		if messageutil.IsPChannelTransformBarrier(msgType) {
 			cm.advanceTransformingAllLocked(tt)
 		}

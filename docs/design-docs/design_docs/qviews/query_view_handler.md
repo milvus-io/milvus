@@ -75,6 +75,9 @@ Each `ApplyView` carries a coord-pushed `View` and an `OnReport` callback. All s
 
 - **Auto-create**: Unknown QueryViewKey + Preparing state → new SM + resource acquisition.
 - **Auto-destroy**: SM reaches Dropped → entry removed from shard map → `onEmpty` callback removes shard if empty.
+- **Empty batches on SN**: after applying a complete batch, a shard with no
+  entries also detaches through `onEmpty`. Unknown teardown pushes therefore
+  report completion without retaining an empty shard.
 - **Callback replacement**: Re-apply of same QueryViewKey replaces `OnReport`. Old callback is never invoked after replacement.
 - **Operation idempotency**: Duplicate Coord pushes for the same QueryViewKey
   reuse the existing handler entry and replace its callback. The SM consumes
@@ -199,6 +202,22 @@ subsequent paths only reuse and wait on that channel. Handoff detaches and
 clears the shard under its mutex, then waits without the mutex for every
 existing release callback. This guarantees one Release invocation per view and
 still waits for cleanup already in flight.
+
+WAL opening owns the recovered handler together with the recovery resources.
+All cleanup paths, including AlterWAL's explicit FLUSHING-stage close, drain
+the handler before closing recovery storage and its task scheduler. Successful
+opening transfers both to the serving WAL. A release callback must never be
+submitted after its scheduler has closed, nor invoked synchronously under the
+calling shard lock.
+
+### 4.6 SN: Phase 1 replica lookup
+
+An explicit replica selects only its own shard. Before Phase 1 resolves a
+replica, an UnknownReplicaID request snapshots the matching VChannel shards
+and tries to acquire an Up lease, skipping candidates without an Up view.
+Acquisition happens outside the handler map lock to preserve the shard-to-handler
+lock order used by `onEmpty`. The selected shard still chooses its highest Up
+version; this fallback does not implement cross-replica consistency routing.
 
 ## 5. Liveness Contracts
 
