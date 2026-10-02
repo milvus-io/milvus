@@ -21,11 +21,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -292,9 +294,34 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Get database name from collection metadata via broker
-	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	// Size autoID files from a canonical schema snapshot before taking the
+	// collection lock: sizing may perform object-store I/O for every file.
+	preparedColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(preparedColl, err); err != nil {
+		return 0, false, merr.Wrap(err, "failed to get collection metadata before import preparation")
+	}
+	preparedSchema := preparedColl.GetSchema()
+	if preparedSchema == nil || preparedSchema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(preparedSchema); pkErr == nil &&
+		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, preparedSchema, files,
+			s.allocator.AllocN,
+			Params.CommonCfg.ClusterID.GetAsUint64(),
+		); err != nil {
+			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
+		}
+		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
+		// pairing stays provable rather than assumed.
+		for i := 0; i < len(files) && i < len(msgFiles); i++ {
+			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
+		}
+	}
+
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(preparedColl.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(preparedColl.GetDbName(), preparedColl.GetCollectionName()))
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -318,24 +345,13 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if schema == nil || schema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
 	}
-
-	// Per-file PK ranges are the default path for every autoID import. Allocate
-	// them from the canonical schema while the collection resource key is held,
-	// so a concurrent schema change cannot make the allocation decision differ
-	// from the schema persisted in the import message.
-	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
-			s.allocator.AllocN,
-			Params.CommonCfg.ClusterID.GetAsUint64(),
-		); err != nil {
-			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
-		}
-		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
-		// pairing stays provable rather than assumed.
-		for i := 0; i < len(files) && i < len(msgFiles); i++ {
-			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
-		}
+	// The collection changed during the lock-free sizing window. Fail retriably
+	// instead of publishing ranges computed from a different schema snapshot.
+	if preparedColl.GetDbName() != coll.GetDbName() ||
+		preparedColl.GetCollectionName() != coll.GetCollectionName() ||
+		!proto.Equal(preparedSchema, schema) {
+		return 0, false, merr.WrapErrServiceUnavailableMsg(
+			"collection %d changed while preparing import; retry the request", collectionID)
 	}
 	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return !common.IsSystemField(field.GetFieldID())
