@@ -4577,6 +4577,7 @@ func (h *HandlersV2) cancelRequests(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.CancelRequestsRequest{
 		RequestIds: httpReq.RequestIDs,
 		Reason:     httpReq.Reason,
+		User:       httpReq.User,
 	}
 	c.Set(ContextRequest, req)
 	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CancelRequests", func(reqCtx context.Context, req any) (interface{}, error) {
