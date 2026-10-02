@@ -17,12 +17,16 @@
 package httpserver
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -444,13 +448,26 @@ func (h *Handlers) handleGetFlushState(c *gin.Context) (interface{}, error) {
 	return h.proxy.GetFlushState(c, &req)
 }
 
+// metadataRequestContext forwards only the identity verified by HTTP middleware.
+// Preserve request values, deadlines and cancellation, but replace any inherited
+// authentication/database metadata rather than appending behind its first value.
+func metadataRequestContext(c *gin.Context, dbName string) context.Context {
+	ctx := c.Request.Context()
+	md, _ := metadata.FromIncomingContext(ctx)
+	md = md.Copy()
+	md.Delete(util.HeaderAuthorize)
+	md.Delete(util.HeaderDBName)
+	return proxy.NewContextWithMetadata(metadata.NewIncomingContext(ctx, md), c.GetString(ContextUsername), dbName)
+}
+
 func (h *Handlers) handleGetPersistentSegmentInfo(c *gin.Context) (interface{}, error) {
 	req := milvuspb.GetPersistentSegmentInfoRequest{}
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetPersistentSegmentInfo(c, &req)
+	ctx := metadataRequestContext(c, req.GetDbName())
+	return h.proxy.GetPersistentSegmentInfo(ctx, &req)
 }
 
 func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error) {
@@ -459,7 +476,8 @@ func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetQuerySegmentInfo(c, &req)
+	ctx := metadataRequestContext(c, req.GetDbName())
+	return h.proxy.GetQuerySegmentInfo(ctx, &req)
 }
 
 func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
@@ -468,7 +486,8 @@ func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetReplicas(c, &req)
+	ctx := metadataRequestContext(c, req.GetDbName())
+	return h.proxy.GetReplicas(ctx, &req)
 }
 
 func (h *Handlers) handleGetMetrics(c *gin.Context) (interface{}, error) {

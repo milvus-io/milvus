@@ -98,7 +98,8 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 			return ctx, nil
 		}
 		mlog.RatedDebug(ctx, rate.Limit(60), "PrivilegeInterceptor", mlog.String("type", reflect.TypeOf(req).String()))
-		privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
+		privilegeReq := collectionMetadataPrivilegeRequest(req)
+		privilegeExt, err := funcutil.GetPrivilegeExtObj(privilegeReq)
 		if err != nil {
 			mlog.RatedInfo(ctx, rate.Limit(60), "GetPrivilegeExtObj err", mlog.Err(err))
 			return ctx, nil
@@ -112,9 +113,15 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		}
 		username, password, roleNames := subject.username, subject.password, subject.roleNames
 		ctx = SetRBACRolesToContext(ctx, roleNames)
+		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
+			privilegeReq, err = replicaPrivilegeRequestByID(ctx, GetMetaCache(), replicas)
+			if err != nil {
+				return ctx, err
+			}
+		}
 		objectType := privilegeExt.ObjectType.String()
 		objectNameIndex := privilegeExt.ObjectNameIndex
-		objectName := funcutil.GetObjectName(req, objectNameIndex)
+		objectName := funcutil.GetObjectName(privilegeReq, objectNameIndex)
 		objectPrivilege := privilegeExt.ObjectPrivilege.String()
 		// Resolve resources against the database the request actually reads from,
 		// while keeping the database used by the policy check separate. Alias
@@ -128,7 +135,7 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		//   - Database-/Collection-level privileges are scoped to the db the request
 		//     targets: the request-body DbName takes precedence, falling back to the
 		//     connection-context db.
-		dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+		dbName := GetCurDBNameFromRequestOrContext(ctx, privilegeReq)
 		policyDBName := dbName
 		if util.GetPrivilegeLevel(util.MetaStore2API(objectPrivilege)) == milvuspb.PrivilegeLevel_Cluster.String() {
 			policyDBName = util.AnyWord
@@ -166,7 +173,7 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		}
 
 		objectNameIndexs := privilegeExt.ObjectNameIndexs
-		objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
+		objectNames := funcutil.GetObjectNames(privilegeReq, objectNameIndexs)
 
 		// Resolve aliases for operations that refer to multiple resources
 		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
@@ -221,6 +228,10 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 		}
 
 		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
+
+		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
+			return ctx, replicaPrivilegeDenied()
+		}
 
 		if password == util.PasswordHolder {
 			username = "apikey user"
