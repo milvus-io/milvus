@@ -618,6 +618,18 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, clone2, collection)
 }
 
+func TestCollectionShallowCloneCopiesRLSPolicies(t *testing.T) {
+	policy := &RLSPolicy{PolicyName: "policy"}
+	collection := &Collection{
+		RLSPolicies: map[string]*RLSPolicy{"policy": policy},
+	}
+
+	clone := collection.ShallowClone()
+	clone.RLSPolicies["policy"] = &RLSPolicy{PolicyName: "updated-policy"}
+
+	assert.Same(t, policy, collection.RLSPolicies["policy"])
+}
+
 func TestApplyUpdates_ExternalSpecMaskOnlyOverwriteNonEmpty(t *testing.T) {
 	mkBody := func(src, spec string) (*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody) {
 		hdr := &message.AlterCollectionMessageHeader{
@@ -667,6 +679,23 @@ func TestApplyUpdates_ExternalSpecMaskOnlyOverwriteNonEmpty(t *testing.T) {
 		assert.Equal(t, "s3://new", c.ExternalSource)
 		assert.Equal(t, `{"format":"lance"}`, c.ExternalSpec)
 	})
+}
+
+func TestApplyUpdates_DBUpdatesRLSMetadata(t *testing.T) {
+	collection := &Collection{
+		DBID:        10,
+		DBName:      "old_db",
+		RLSPolicies: map[string]*RLSPolicy{"policy": {DBID: 10, CollectionID: 20, PolicyID: 30}},
+	}
+
+	collection.ApplyUpdates(
+		&message.AlterCollectionMessageHeader{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskDB}}},
+		&message.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{DbId: 11, DbName: "new_db"}},
+	)
+
+	assert.Equal(t, int64(11), collection.DBID)
+	assert.Equal(t, "new_db", collection.DBName)
+	assert.Equal(t, int64(11), collection.RLSPolicies["policy"].DBID)
 }
 
 func TestCollection_IgnoresDoPhysicalBackfill(t *testing.T) {

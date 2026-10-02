@@ -1,0 +1,1662 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package rls
+
+import (
+	"context"
+	"maps"
+	"reflect"
+	"slices"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+type snapshotTestCoord struct {
+	metadataKind   atomic.Int32
+	principalCalls atomic.Int32
+	tags           string
+}
+
+type metadataTestCoord struct {
+	metadataCalls  atomic.Int32
+	metadataKind   atomic.Int32
+	principalCalls atomic.Int32
+	policies       []*rootcoordpb.RLSPolicyInfo
+	principalTags  map[string]map[string]string
+	metadataErr    error
+	principalErr   error
+}
+
+type managerTestCoordClient struct {
+	getRLSMetadata func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)
+}
+
+type policySnapshot struct {
+	RefreshedAt time.Time
+	Policies    []*rlsutil.RowPolicy
+}
+
+var _ CoordClient = (*managerTestCoordClient)(nil)
+
+func (c *managerTestCoordClient) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, _ ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return c.getRLSMetadata(ctx, req)
+}
+
+func getOrCreateCollectionStateForTest(m *manager, collectionID UniqueID) *collectionState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, dropped := m.droppedCollections[collectionID]; dropped {
+		return nil
+	}
+	state := m.collections[collectionID]
+	if state == nil {
+		state = newCollectionState()
+		m.collections[collectionID] = state
+	}
+	return state
+}
+
+func setPolicySnapshotForTest(m *manager, collectionID UniqueID, snapshot policySnapshot) bool {
+	if m == nil || collectionID == 0 {
+		return false
+	}
+	for _, policy := range snapshot.Policies {
+		if policy == nil || policy.GetPolicyName() == "" {
+			return false
+		}
+	}
+	refreshedAt := snapshot.RefreshedAt
+	if refreshedAt.IsZero() {
+		refreshedAt = time.Now()
+	}
+	policies := make(map[string]*rlsutil.RowPolicy, len(snapshot.Policies))
+	for _, policy := range snapshot.Policies {
+		clone := *policy
+		clone.Actions = slices.Clone(policy.Actions)
+		policies[policy.GetPolicyName()] = &clone
+	}
+	state := getOrCreateCollectionStateForTest(m, collectionID)
+	if state == nil {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.setPreparedPolicySnapshotLocked(refreshedAt, policies)
+	return true
+}
+
+func setPrincipalTagsForTest(m *manager, key principalKey, entry *principalTagsEntry) bool {
+	state := m.getCollectionState(key.collectionID)
+	if state == nil {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	delete(state.principalRefreshTokens, key.principalName)
+	state.removePrincipalBackoffLocked(key.principalName)
+	state.putPrincipalTagsLocked(key.principalName, entry)
+	return true
+}
+
+func setManagerTestPrincipalTags(m *manager, collectionID UniqueID, principalName string, tags map[string]rlsutil.TagValue) bool {
+	getOrCreateCollectionStateForTest(m, collectionID)
+	return setPrincipalTagsForTest(m, principalKey{collectionID: collectionID, principalName: principalName}, &principalTagsEntry{
+		refreshedAt: time.Now(),
+		tags:        maps.Clone(tags),
+	})
+}
+
+type blockingPolicyCoord struct {
+	*metadataTestCoord
+	started     chan struct{}
+	release     chan struct{}
+	seenContext chan context.Context
+}
+
+type blockingPrincipalCoord struct {
+	*metadataTestCoord
+	started     chan struct{}
+	release     chan struct{}
+	seenContext chan context.Context
+}
+
+func validPolicyInfo(name string) *rootcoordpb.RLSPolicyInfo {
+	return &rootcoordpb.RLSPolicyInfo{
+		CollectionId: 100,
+		PolicyId:     1,
+		PolicyName:   name,
+		PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
+		Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query},
+		UsingExpr:    "true",
+	}
+}
+
+func (c *blockingPrincipalCoord) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, _ ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	if req.GetPrincipalName() == "" {
+		return c.metadataTestCoord.GetRLSMetadata(ctx, req)
+	}
+	c.principalCalls.Add(1)
+	if c.seenContext != nil {
+		c.seenContext <- ctx
+	}
+	close(c.started)
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return principalMetadataResponse(req.GetCollectionId(), req.GetPrincipalName(), map[string]string{"tenant": "stale"}), nil
+}
+
+func (c *snapshotTestCoord) GetRLSMetadata(_ context.Context, req *rootcoordpb.GetRLSMetadataRequest, _ ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	c.metadataKind.Store(int32(req.GetKind()))
+	if req.GetPrincipalName() != "" {
+		c.principalCalls.Add(1)
+		tags := c.tags
+		if tags == "" {
+			tags = `{"tenant":"acme","level":3,"score":0.75}`
+		}
+		return principalMetadataJSONResponse(req.GetCollectionId(), req.GetPrincipalName(), tags), nil
+	}
+	return &rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+		Policies: []*rootcoordpb.RLSPolicyInfo{
+			validPolicyInfo("tenant"),
+		},
+	}, nil
+}
+
+func (c *metadataTestCoord) GetRLSMetadata(_ context.Context, req *rootcoordpb.GetRLSMetadataRequest, _ ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	c.metadataCalls.Add(1)
+	c.metadataKind.Store(int32(req.GetKind()))
+	if c.metadataErr != nil {
+		return nil, c.metadataErr
+	}
+	if req.GetPrincipalName() != "" {
+		c.principalCalls.Add(1)
+		if c.principalErr != nil {
+			return nil, c.principalErr
+		}
+		tags, ok := c.principalTags[req.GetPrincipalName()]
+		if !ok {
+			return &rootcoordpb.GetRLSMetadataResponse{
+				Status:       merr.Success(),
+				CollectionId: req.GetCollectionId(),
+			}, nil
+		}
+		return principalMetadataResponse(req.GetCollectionId(), req.GetPrincipalName(), tags), nil
+	}
+	return &rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+		Policies:     c.policies,
+	}, nil
+}
+
+func principalMetadataResponse(collectionID int64, principalName string, tags map[string]string) *rootcoordpb.GetRLSMetadataResponse {
+	values := make(map[string]rlsutil.TagValue, len(tags))
+	for key, value := range tags {
+		values[key] = rlsutil.NewStringTagValue(value)
+	}
+	payload, err := rlsutil.TagsToJSON(values)
+	if err != nil {
+		panic(err)
+	}
+	return principalMetadataJSONResponse(collectionID, principalName, payload)
+}
+
+func principalMetadataJSONResponse(collectionID int64, principalName string, tags string) *rootcoordpb.GetRLSMetadataResponse {
+	return &rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: collectionID,
+		Principals: []*rootcoordpb.RLSPrincipalInfo{{
+			CollectionId:  collectionID,
+			PrincipalName: principalName,
+			Tags:          tags,
+		}},
+	}
+}
+
+func (c *blockingPolicyCoord) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, _ ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	c.metadataCalls.Add(1)
+	c.metadataKind.Store(int32(req.GetKind()))
+	if c.seenContext != nil {
+		c.seenContext <- ctx
+	}
+	close(c.started)
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+		Policies:     c.policies,
+	}, nil
+}
+
+func TestManagerInitDoesNotLoadMetadata(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.Zero(t, coord.metadataCalls.Load())
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerPrincipalTagsRejectInvalidState(t *testing.T) {
+	var nilManager *manager
+	_, err := nilManager.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	m := newManager()
+	_, err = m.ensurePrincipalTags(context.Background(), 0, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "")
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestMetadataRefreshErrorClassification(t *testing.T) {
+	for _, err := range []error{
+		context.Canceled,
+		context.DeadlineExceeded,
+		status.Error(codes.Canceled, "canceled"),
+		status.Error(codes.DeadlineExceeded, "deadline exceeded"),
+		status.Error(codes.Unavailable, "unavailable"),
+	} {
+		wrapped := rlsutil.WrapMetadataRefreshError(err, "refresh failed")
+		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(wrapped))
+	}
+
+	typed := merr.WrapErrDataIntegrity(context.DeadlineExceeded, "corrupted metadata")
+	wrapped := rlsutil.WrapMetadataRefreshError(typed, "refresh failed")
+	require.ErrorIs(t, wrapped, merr.ErrDataIntegrity)
+	require.False(t, merr.IsRetryableErr(wrapped))
+
+	for _, transient := range []error{
+		merr.WrapErrIoFailedMsg("etcd read failed"),
+		merr.WrapErrNodeNotFound(0, "mixcoord is unavailable"),
+		merr.WrapErrNodeNotMatch(1, 2, "mixcoord leader changed"),
+	} {
+		wrapped = rlsutil.WrapMetadataRefreshError(transient, "refresh failed")
+		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, wrapped, transient)
+		require.True(t, merr.IsRetryableErr(wrapped))
+	}
+
+	raw := errors.New("raw dependency failure")
+	wrapped = rlsutil.WrapMetadataRefreshError(raw, "refresh failed")
+	require.ErrorIs(t, wrapped, merr.ErrServiceInternal)
+	require.ErrorIs(t, wrapped, raw)
+	require.False(t, merr.IsRetryableErr(wrapped))
+}
+
+func TestManagerFailsClosedBeforeInitialization(t *testing.T) {
+	m := newManager()
+
+	require.ErrorIs(t, m.ensurePoliciesFresh(context.Background(), 100), merr.ErrServiceInternal)
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestManagerEnsureFreshMetadataLoadsMissingSnapshots(t *testing.T) {
+	m := newManager()
+	coord := &snapshotTestCoord{}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+	require.Equal(t, int32(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES), coord.metadataKind.Load())
+
+	state := m.collections[100]
+	require.NotNil(t, state)
+	require.Contains(t, state.policies, "tenant")
+	require.Empty(t, state.principalTags)
+	require.Zero(t, coord.principalCalls.Load())
+}
+
+func TestManagerPrincipalMetadataPreservesTypes(t *testing.T) {
+	m := newManager()
+	coord := &snapshotTestCoord{}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+
+	tags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, map[string]rlsutil.TagValue{
+		"tenant": rlsutil.NewStringTagValue("acme"),
+		"level":  rlsutil.NewInt64TagValue(3),
+		"score":  rlsutil.NewDoubleTagValue(0.75),
+	}, tags)
+}
+
+func TestManagerRejectsMalformedPrincipalMetadata(t *testing.T) {
+	m := newManager()
+	coord := &snapshotTestCoord{tags: `{"tenant":`}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+}
+
+func TestManagerEnsureFreshMetadataFailsClosed(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{
+		metadataErr: merr.WrapErrServiceUnavailableMsg("RLS metadata unavailable"),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+
+	err := m.ensurePoliciesFresh(context.Background(), 100)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(1), coord.metadataCalls.Load())
+	require.ErrorIs(t, m.ensurePoliciesFresh(context.Background(), 100), merr.ErrServiceUnavailable)
+	require.Equal(t, int32(1), coord.metadataCalls.Load(), "refreshes during backoff must not issue another RPC")
+	require.True(t, m.policyRefreshDue(100, time.Hour, time.Now()))
+
+	coord.metadataErr = nil
+	coord.policies = []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("recovered")}
+	m.invalidatePolicies(100, 0)
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+	require.Equal(t, int32(2), coord.metadataCalls.Load())
+	require.Contains(t, m.getCollectionState(100).policies, "recovered")
+}
+
+func TestManagerEnsureFreshMetadataSkipsFreshSnapshots(t *testing.T) {
+	m := newManager()
+	now := time.Now()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{RefreshedAt: now}))
+	coord := &metadataTestCoord{
+		metadataErr: merr.WrapErrServiceUnavailableMsg("refresh should not be called"),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+	require.Zero(t, coord.metadataCalls.Load())
+}
+
+func TestManagerEnsureFreshMetadataRefreshesExpiredSnapshots(t *testing.T) {
+	m := newManager()
+	oldRefresh := time.Now().Add(-2 * time.Hour)
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		RefreshedAt: oldRefresh,
+		Policies:    []*rlsutil.RowPolicy{{PolicyName: "old-policy"}},
+	}))
+	coord := &metadataTestCoord{
+		policies:      []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("new-policy")},
+		principalTags: map[string]map[string]string{"alice": {"tenant": "new"}},
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+
+	require.NoError(t, m.ensurePoliciesFresh(context.Background(), 100))
+	require.Equal(t, int32(1), coord.metadataCalls.Load())
+	require.Equal(t, int32(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES), coord.metadataKind.Load())
+
+	state := m.collections[100]
+	require.Contains(t, state.policies, "new-policy")
+	require.NotContains(t, state.policies, "old-policy")
+	require.True(t, state.policyRefreshedAt.After(oldRefresh))
+	require.Empty(t, state.principalTags)
+	require.Zero(t, coord.principalCalls.Load())
+}
+
+func TestManagerEnsureFreshMetadataCoalescesConcurrentRefreshes(t *testing.T) {
+	m := newManager()
+	coord := &blockingPolicyCoord{
+		metadataTestCoord: &metadataTestCoord{
+			policies: []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("policy")},
+		},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+
+	const concurrency = 8
+	errs := make(chan error, concurrency)
+	for range concurrency {
+		go func() {
+			errs <- m.ensurePoliciesFresh(context.Background(), 100)
+		}()
+	}
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("request-path RLS metadata refresh did not start")
+	}
+	require.Equal(t, int32(1), coord.metadataCalls.Load())
+	close(coord.release)
+	for range concurrency {
+		require.NoError(t, <-errs)
+	}
+	require.Equal(t, int32(1), coord.metadataCalls.Load())
+}
+
+func TestManagerPolicyInvalidationWinsOverInflightRefresh(t *testing.T) {
+	m := newManager()
+	firstStarted, firstRelease := make(chan struct{}), make(chan struct{})
+	secondStarted, secondRelease := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	coord := &managerTestCoordClient{getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		call := calls.Add(1)
+		started, release, policyName := firstStarted, firstRelease, "stale-policy"
+		if call == 2 {
+			started, release, policyName = secondStarted, secondRelease, "fresh-policy"
+		}
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Success(),
+			CollectionId: req.GetCollectionId(),
+			Policies:     []*rootcoordpb.RLSPolicyInfo{validPolicyInfo(policyName)},
+		}, nil
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- m.ensurePoliciesFresh(context.Background(), 100)
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first RLS snapshot refresh did not start")
+	}
+
+	invalidated := make(chan struct{})
+	go func() {
+		m.invalidatePolicies(100, 0)
+		close(invalidated)
+	}()
+	select {
+	case <-invalidated:
+	case <-time.After(time.Second):
+		t.Fatal("RLS policy invalidation waited for the in-flight refresh")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- m.ensurePoliciesFresh(context.Background(), 100)
+	}()
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second RLS snapshot refresh did not start")
+	}
+	close(secondRelease)
+	require.NoError(t, <-secondDone)
+
+	close(firstRelease)
+	require.ErrorIs(t, <-firstDone, merr.ErrServiceUnavailable)
+	state := m.getCollectionState(100)
+	require.NotNil(t, state)
+	require.Contains(t, state.policies, "fresh-policy")
+	require.NotContains(t, state.policies, "stale-policy")
+	require.Equal(t, int32(2), calls.Load())
+}
+
+func TestManagerPolicyRefreshUsesManagerContext(t *testing.T) {
+	lifecycleCtx, cancelLifecycle := context.WithCancel(context.Background())
+	defer cancelLifecycle()
+	m := newManager()
+	coord := &blockingPolicyCoord{
+		metadataTestCoord: &metadataTestCoord{
+			policies: []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("policy")},
+		},
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		seenContext: make(chan context.Context, 1),
+	}
+	require.NoError(t, m.init(lifecycleCtx, coord))
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- m.ensurePoliciesFresh(requestCtx, 100)
+	}()
+	var refreshCtx context.Context
+	select {
+	case refreshCtx = <-coord.seenContext:
+	case <-time.After(time.Second):
+		t.Fatal("policy refresh did not start")
+	}
+	cancelRequest()
+	require.NoError(t, refreshCtx.Err())
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("request cancellation did not stop waiting for policy refresh")
+	}
+	require.NoError(t, refreshCtx.Err())
+	close(coord.release)
+	require.Eventually(t, func() bool {
+		state := m.getCollectionState(100)
+		return state != nil && !m.policyRefreshDue(100, time.Hour, time.Now())
+	}, time.Second, time.Millisecond)
+}
+
+func TestManagerPolicyRefreshDoesNotLoadPrincipalTags(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{{PolicyName: "old-policy"}},
+	}))
+	coord := &metadataTestCoord{
+		policies:      []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("new-policy")},
+		principalTags: map[string]map[string]string{"alice": {"tenant": "new"}},
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	require.Equal(t, int32(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES), coord.metadataKind.Load())
+
+	state := m.collections[100]
+	require.Contains(t, state.policies, "new-policy")
+	require.Empty(t, state.principalTags)
+	require.Zero(t, coord.principalCalls.Load())
+}
+
+func TestManagerPolicyRefreshRejectsMalformedMetadata(t *testing.T) {
+	wrongCollection := validPolicyInfo("wrong-collection")
+	wrongCollection.CollectionId = 200
+	missingID := validPolicyInfo("missing-id")
+	missingID.PolicyId = 0
+	invalidType := validPolicyInfo("invalid-type")
+	invalidType.PolicyType = milvuspb.RowPolicyType_RowPolicyTypeUnknown
+	duplicateOne := validPolicyInfo("duplicate")
+	duplicateTwo := validPolicyInfo("duplicate")
+	duplicateTwo.PolicyId = 2
+
+	for name, policies := range map[string][]*rootcoordpb.RLSPolicyInfo{
+		"nil policy":          {nil},
+		"wrong collection":    {wrongCollection},
+		"missing policy id":   {missingID},
+		"invalid policy type": {invalidType},
+		"duplicate name":      {duplicateOne, duplicateTwo},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := newManager()
+			oldRefresh := time.Now().Add(-time.Hour)
+			require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+				RefreshedAt: oldRefresh,
+				Policies:    []*rlsutil.RowPolicy{{PolicyName: "old-policy"}},
+			}))
+
+			coord := &metadataTestCoord{policies: policies}
+			require.NoError(t, m.init(context.Background(), coord))
+			err := m.refreshPolicies(100)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+
+			state := m.getCollectionState(100)
+			require.Equal(t, oldRefresh, state.policyRefreshedAt)
+			require.Contains(t, state.policies, "old-policy")
+		})
+	}
+}
+
+func TestManagerPrincipalTagsAreLoadedAndCachedPerPrincipal(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{
+		principalTags: map[string]map[string]string{
+			"alice": {"tenant": "acme"},
+			"bob":   {"tenant": "globex"},
+		},
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), aliceTags["tenant"])
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	cachedAliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), cachedAliceTags["tenant"])
+	require.Equal(t, reflect.ValueOf(aliceTags).Pointer(), reflect.ValueOf(cachedAliceTags).Pointer())
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("globex"), bobTags["tenant"])
+	require.Equal(t, int32(2), coord.principalCalls.Load())
+	require.Len(t, m.collections[100].principalTags, 2)
+}
+
+func TestManagerPrincipalTagsAreNestedByCollection(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+	require.True(t, setPolicySnapshotForTest(m, 200, policySnapshot{}))
+	setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: "alice"}, &principalTagsEntry{
+		refreshedAt: time.Now(),
+		tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("one")},
+	})
+	setPrincipalTagsForTest(m, principalKey{collectionID: 200, principalName: "alice"}, &principalTagsEntry{
+		refreshedAt: time.Now(),
+		tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("two")},
+	})
+
+	require.Equal(t, rlsutil.NewStringTagValue("one"), m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}).tags["tenant"])
+	require.Equal(t, rlsutil.NewStringTagValue("two"), m.getPrincipalTagsEntry(principalKey{collectionID: 200, principalName: "alice"}).tags["tenant"])
+	m.markCollectionDropped(100)
+	require.Nil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
+	require.NotNil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 200, principalName: "alice"}))
+}
+
+func TestManagerPrincipalLookupUsesCollectionID(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{principalTags: map[string]map[string]string{"alice": {"tenant": "acme"}}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	tags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), tags["tenant"])
+	require.Equal(t, int32(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS), coord.metadataKind.Load())
+}
+
+func TestManagerPrincipalLookupRejectsCollectionMismatch(t *testing.T) {
+	m := newManager()
+	coord := &managerTestCoordClient{getRLSMetadata: func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Success(), CollectionId: 200}, nil
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestManagerPrincipalRefreshFailureBacksOff(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(1), coord.principalCalls.Load(), "refreshes during backoff must not issue another RPC")
+
+	coord.principalErr = nil
+	coord.principalTags = map[string]map[string]string{"alice": {"tenant": "acme"}}
+	m.invalidatePrincipalTags(100, "alice", 0)
+	tags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), tags["tenant"])
+	require.Equal(t, int32(2), coord.principalCalls.Load())
+}
+
+func TestManagerPrincipalRefreshFailureRetainsExponentialBackoffUntilIdleTTL(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMetaRefreshInterval.Key, "1"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMetaRefreshInterval.Key))
+	})
+	oldConfig := metadataRefreshBackoffConfig
+	metadataRefreshBackoffConfig = typeutil.BackoffTimerConfig{
+		Backoff: typeutil.BackoffConfig{
+			InitialInterval: time.Millisecond,
+			Multiplier:      2,
+			MaxInterval:     time.Second,
+		},
+	}
+	t.Cleanup(func() { metadataRefreshBackoffConfig = oldConfig })
+
+	m := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	firstBackoff := state.principalBackoffs["alice"].backoff
+	firstInstant := firstBackoff.NextInstant()
+	state.mu.RUnlock()
+	require.Eventually(t, func() bool {
+		_, _ = m.ensurePrincipalTags(context.Background(), 100, "alice")
+		return coord.principalCalls.Load() == 2
+	}, time.Second, time.Millisecond)
+
+	state.mu.RLock()
+	require.Same(t, firstBackoff, state.principalBackoffs["alice"].backoff)
+	secondInstant := state.principalBackoffs["alice"].backoff.NextInstant()
+	lastFailureAt := state.principalBackoffs["alice"].lastFailureAt
+	require.True(t, secondInstant.After(firstInstant))
+	state.mu.RUnlock()
+
+	m.expirePrincipalTags(secondInstant.Add(time.Millisecond))
+	state.mu.RLock()
+	require.Same(t, firstBackoff, state.principalBackoffs["alice"].backoff)
+	state.mu.RUnlock()
+
+	m.expirePrincipalTags(lastFailureAt.Add(time.Second))
+	state.mu.RLock()
+	require.NotContains(t, state.principalBackoffs, "alice")
+	state.mu.RUnlock()
+}
+
+func TestManagerPrincipalRefreshBackoffsAreBounded(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "5"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+	})
+
+	m := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	for _, principalName := range []string{"a", "b", "c"} {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, principalName)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	}
+	require.Equal(t, int32(3), coord.principalCalls.Load())
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalBackoffs, "a")
+	require.Contains(t, state.principalBackoffs, "b")
+	require.Contains(t, state.principalBackoffs, "c")
+	require.Equal(t, 2, state.principalBackoffOrder.Len())
+	require.Equal(t, int64(2), state.principalBackoffBytes)
+	state.mu.RUnlock()
+
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "c")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(3), coord.principalCalls.Load(), "retained failures must still back off")
+
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "longer")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(4), coord.principalCalls.Load())
+	state.mu.RLock()
+	require.Empty(t, state.principalBackoffs)
+	require.Zero(t, state.principalBackoffOrder.Len())
+	require.Zero(t, state.principalBackoffBytes)
+	state.mu.RUnlock()
+}
+
+func TestManagerPrincipalRefreshFailureKeepsNewestBackoffWhenCacheIsFull(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "1"))
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1024"))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+	})
+
+	m := newManager()
+	coord := &metadataTestCoord{principalTags: map[string]map[string]string{
+		"cached": {"tenant": "acme"},
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	_, err := m.ensurePrincipalTags(context.Background(), 100, "cached")
+	require.NoError(t, err)
+
+	coord.principalErr = merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "failed")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(2), coord.principalCalls.Load())
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalTags, "cached")
+	require.Contains(t, state.principalBackoffs, "failed")
+	state.mu.RUnlock()
+
+	_, err = m.ensurePrincipalTags(context.Background(), 100, "failed")
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, int32(2), coord.principalCalls.Load(), "retained backoff must suppress another refresh")
+}
+
+func TestManagerPrincipalRefreshCoalescesConcurrentLookups(t *testing.T) {
+	m := newManager()
+	coord := &blockingPrincipalCoord{
+		metadataTestCoord: &metadataTestCoord{},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	const concurrency = 8
+	results := make(chan error, concurrency)
+	for range concurrency {
+		go func() {
+			_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+			results <- err
+		}()
+	}
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("principal refresh did not start")
+	}
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+	close(coord.release)
+	for range concurrency {
+		require.NoError(t, <-results)
+	}
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+}
+
+func TestManagerPrincipalRefreshUsesManagerContext(t *testing.T) {
+	lifecycleCtx, cancelLifecycle := context.WithCancel(context.Background())
+	defer cancelLifecycle()
+	m := newManager()
+	coord := &blockingPrincipalCoord{
+		metadataTestCoord: &metadataTestCoord{},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+		seenContext:       make(chan context.Context, 1),
+	}
+	require.NoError(t, m.init(lifecycleCtx, coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(requestCtx, 100, "alice")
+		done <- err
+	}()
+	var refreshCtx context.Context
+	select {
+	case refreshCtx = <-coord.seenContext:
+	case <-time.After(time.Second):
+		t.Fatal("principal refresh did not start")
+	}
+	deadline, ok := refreshCtx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, time.Now().Add(metadataRefreshTimeout), deadline, time.Second)
+	cancelRequest()
+	require.NoError(t, refreshCtx.Err())
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("request cancellation did not stop waiting for principal refresh")
+	}
+	require.NoError(t, refreshCtx.Err())
+	close(coord.release)
+	require.Eventually(t, func() bool {
+		return m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}) != nil
+	}, time.Second, time.Millisecond)
+}
+
+func TestManagerPrincipalRefreshLimitQueues(t *testing.T) {
+	m := newManager()
+	m.principalRefreshSlots = make(chan struct{}, 1)
+	started := make(chan string, 2)
+	releaseAlice := make(chan struct{})
+	var calls atomic.Int32
+	coord := &managerTestCoordClient{getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		calls.Add(1)
+		started <- req.GetPrincipalName()
+		if req.GetPrincipalName() == "alice" {
+			select {
+			case <-releaseAlice:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return principalMetadataResponse(req.GetCollectionId(), req.GetPrincipalName(), map[string]string{"tenant": "fresh"}), nil
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		firstDone <- err
+	}()
+	select {
+	case principal := <-started:
+		require.Equal(t, "alice", principal)
+	case <-time.After(time.Second):
+		t.Fatal("principal refresh did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("queued principal refresh returned before capacity was available: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.Equal(t, int32(1), calls.Load())
+
+	close(releaseAlice)
+	require.NoError(t, <-firstDone)
+	select {
+	case principal := <-started:
+		require.Equal(t, "bob", principal)
+	case <-time.After(time.Second):
+		t.Fatal("queued principal refresh did not start")
+	}
+	require.NoError(t, <-secondDone)
+	require.Equal(t, int32(2), calls.Load())
+	require.Empty(t, m.principalRefreshSlots)
+}
+
+func TestManagerInvalidateAllClearsSnapshotsAndInflightRefreshes(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{PolicyName: "policy"}}}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("old")}))
+	m.markCollectionDropped(200)
+
+	state := m.getCollectionState(100)
+	state.mu.Lock()
+	oldGeneration := state.policyGeneration
+	state.principalRefreshSequence++
+	oldToken := state.principalRefreshSequence
+	state.principalRefreshTokens["bob"] = oldToken
+	state.mu.Unlock()
+
+	m.invalidateAll()
+
+	state.mu.RLock()
+	require.Nil(t, state.policies)
+	require.Empty(t, state.compiled)
+	require.Empty(t, state.principalTags)
+	require.Empty(t, state.principalRefreshTokens)
+	require.Zero(t, state.positivePrincipalCacheOrder.Len())
+	require.Zero(t, state.negativePrincipalCacheOrder.Len())
+	require.Greater(t, state.policyGeneration, oldGeneration)
+	state.mu.RUnlock()
+	require.True(t, m.isCollectionDropped(200))
+	require.False(t, m.finishPolicyRefresh(100, state, oldGeneration, map[string]*rlsutil.RowPolicy{"stale": {PolicyName: "stale"}}))
+	current, err := m.finishPrincipalRefresh(principalKey{collectionID: 100, principalName: "bob"}, state, oldToken, &principalTagsEntry{tags: map[string]rlsutil.TagValue{}}, true)
+	require.NoError(t, err)
+	require.False(t, current)
+}
+
+func TestManagerPrincipalInvalidationWinsOverInflightRefresh(t *testing.T) {
+	m := newManager()
+	firstStarted, firstRelease := make(chan struct{}), make(chan struct{})
+	secondStarted, secondRelease := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	coord := &managerTestCoordClient{getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		call := calls.Add(1)
+		started, release := firstStarted, firstRelease
+		if call == 2 {
+			started, release = secondStarted, secondRelease
+		}
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if call == 1 {
+			return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Success(), CollectionId: req.GetCollectionId()}, nil
+		}
+		return principalMetadataResponse(req.GetCollectionId(), req.GetPrincipalName(), map[string]string{"tenant": "fresh"}), nil
+	}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		firstDone <- err
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first principal refresh did not start")
+	}
+
+	invalidated := make(chan struct{})
+	go func() {
+		m.invalidatePrincipalTags(100, "alice", 0)
+		close(invalidated)
+	}()
+	select {
+	case <-invalidated:
+	case <-time.After(time.Second):
+		t.Fatal("principal invalidation waited for the in-flight refresh")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		secondDone <- err
+	}()
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second principal refresh did not start")
+	}
+	close(secondRelease)
+	require.NoError(t, <-secondDone)
+
+	close(firstRelease)
+	require.ErrorIs(t, <-firstDone, merr.ErrServiceUnavailable)
+	entry := m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"})
+	require.NotNil(t, entry)
+	require.Equal(t, rlsutil.NewStringTagValue("fresh"), entry.tags["tenant"])
+	require.Equal(t, int32(2), calls.Load())
+}
+
+func TestManagerPrincipalRefreshInvalidationIsPrincipalScoped(t *testing.T) {
+	m := newManager()
+	coord := &blockingPrincipalCoord{
+		metadataTestCoord: &metadataTestCoord{},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		done <- err
+	}()
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("principal refresh did not start")
+	}
+
+	m.invalidatePrincipalTags(100, "bob", 0)
+	close(coord.release)
+	require.NoError(t, <-done)
+	require.NotNil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
+}
+
+func TestManagerPrincipalTTLRefreshesExpiredEntriesOnLookup(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{
+		principalTags: map[string]map[string]string{
+			"alice": {"tenant": "new"},
+			"bob":   {"tenant": "unchanged"},
+		},
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+	setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: "alice"}, &principalTagsEntry{
+		refreshedAt: time.Now().Add(-2 * time.Hour),
+		tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("old")},
+	})
+	setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: "bob"}, &principalTagsEntry{
+		refreshedAt: time.Now(),
+		tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("unchanged")},
+	})
+
+	aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("new"), aliceTags["tenant"])
+	bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("unchanged"), bobTags["tenant"])
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	m.expirePrincipalTags(time.Now())
+	require.Contains(t, m.collections[100].principalTags, "alice")
+	require.Contains(t, m.collections[100].principalTags, "bob")
+}
+
+func TestManagerPrincipalCacheScannerDeletesExpiredEntries(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key, "1"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key))
+	})
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+	m.invalidatePrincipalTags(100, "alice", 10)
+	setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: "alice"}, &principalTagsEntry{
+		refreshedAt: time.Now().Add(-2 * time.Second),
+		tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("old")},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.runPrincipalCacheScanner(ctx, time.Millisecond)
+	}()
+	require.Eventually(t, func() bool {
+		state := m.getCollectionState(100)
+		state.mu.RLock()
+		defer state.mu.RUnlock()
+		return state.principalTags["alice"] == nil
+	}, time.Second, time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("principal cache scanner did not stop after cancellation")
+	}
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.Contains(t, state.invalidationRevisions, uint64(10))
+	require.Zero(t, state.principalCacheBytes)
+	require.Zero(t, state.positivePrincipalCacheOrder.Len())
+	require.Zero(t, state.negativePrincipalCacheOrder.Len())
+	state.mu.RUnlock()
+}
+
+func TestManagerPrincipalCacheScannerExpiresOrderedQueuePrefixes(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key, "3600"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.Key))
+	})
+	m := newManager()
+	getOrCreateCollectionStateForTest(m, 100)
+	now := time.Now()
+	entries := []struct {
+		principalName string
+		refreshedAt   time.Time
+		missing       bool
+	}{
+		{principalName: "expired-positive", refreshedAt: now.Add(-2 * time.Hour)},
+		{principalName: "fresh-positive", refreshedAt: now},
+		{principalName: "expired-negative", refreshedAt: now.Add(-2 * time.Hour), missing: true},
+		{principalName: "fresh-negative", refreshedAt: now, missing: true},
+	}
+	for _, entry := range entries {
+		require.True(t, setPrincipalTagsForTest(m, principalKey{collectionID: 100, principalName: entry.principalName}, &principalTagsEntry{
+			refreshedAt: entry.refreshedAt,
+			tags:        map[string]rlsutil.TagValue{},
+			missing:     entry.missing,
+		}))
+	}
+
+	m.expirePrincipalTags(now)
+
+	state := m.getCollectionState(100)
+	state.mu.RLock()
+	require.NotContains(t, state.principalTags, "expired-positive")
+	require.NotContains(t, state.principalTags, "expired-negative")
+	require.Contains(t, state.principalTags, "fresh-positive")
+	require.Contains(t, state.principalTags, "fresh-negative")
+	require.Equal(t, 1, state.positivePrincipalCacheOrder.Len())
+	require.Equal(t, 1, state.negativePrincipalCacheOrder.Len())
+	require.Equal(t, int64(len("fresh-positive")+len("fresh-negative")), state.principalCacheBytes)
+	state.mu.RUnlock()
+}
+
+func TestManagerMissingPrincipalIsCachedUntilInvalidated(t *testing.T) {
+	m := newManager()
+	coord := &metadataTestCoord{principalTags: map[string]map[string]string{}}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.NoError(t, m.refreshPolicies(100))
+
+	tags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.NotNil(t, tags)
+	require.Empty(t, tags)
+	require.Contains(t, m.collections[100].principalTags, "alice")
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	tags, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Empty(t, tags)
+	require.Equal(t, int32(1), coord.principalCalls.Load())
+
+	coord.principalTags["alice"] = map[string]string{"tenant": "acme"}
+	m.invalidatePrincipalTags(100, "alice", 1)
+	tags, err = m.ensurePrincipalTags(context.Background(), 100, "alice")
+	require.NoError(t, err)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), tags["tenant"])
+	require.Equal(t, int32(2), coord.principalCalls.Load())
+}
+
+func TestManagerPrincipalCacheLimits(t *testing.T) {
+	t.Run("entries", func(t *testing.T) {
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "3"))
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1024"))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		})
+
+		m := newManager()
+		coord := &metadataTestCoord{principalTags: map[string]map[string]string{}}
+		require.NoError(t, m.init(context.Background(), coord))
+		require.NoError(t, m.refreshPolicies(100))
+		for _, principalName := range []string{"a", "b", "c"} {
+			tags, err := m.ensurePrincipalTags(context.Background(), 100, principalName)
+			require.NoError(t, err)
+			require.Empty(t, tags)
+		}
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+		m.expirePrincipalTags(time.Now())
+
+		state := m.getCollectionState(100)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "a")
+		require.Contains(t, state.principalTags, "b")
+		require.Contains(t, state.principalTags, "c")
+		require.Equal(t, int64(2), state.principalCacheBytes)
+		require.Zero(t, state.positivePrincipalCacheOrder.Len())
+		require.Equal(t, 2, state.negativePrincipalCacheOrder.Len())
+		state.mu.RUnlock()
+
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "a")
+		require.NoError(t, err)
+		require.Equal(t, int32(4), coord.principalCalls.Load())
+	})
+
+	t.Run("bytes", func(t *testing.T) {
+		params := paramtable.Get()
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "10"))
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "10"))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		})
+
+		m := newManager()
+		coord := &metadataTestCoord{principalTags: map[string]map[string]string{
+			"alice": {"k": "1234"},
+			"bob":   {"k": "1"},
+			"empty": {},
+		}}
+		require.NoError(t, m.init(context.Background(), coord))
+		require.NoError(t, m.refreshPolicies(100))
+		aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		require.NoError(t, err)
+		require.Equal(t, rlsutil.NewStringTagValue("1234"), aliceTags["k"])
+		bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
+		require.NoError(t, err)
+		require.Equal(t, rlsutil.NewStringTagValue("1"), bobTags["k"])
+
+		state := m.getCollectionState(100)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "alice")
+		require.Contains(t, state.principalTags, "bob")
+		require.Equal(t, int64(len("bob")+len("k")+len("1")), state.principalCacheBytes)
+		state.mu.RUnlock()
+		emptyTags, err := m.ensurePrincipalTags(context.Background(), 100, "empty")
+		require.NoError(t, err)
+		require.Empty(t, emptyTags)
+
+		missingTags, err := m.ensurePrincipalTags(context.Background(), 100, "missed")
+		require.NoError(t, err)
+		require.Empty(t, missingTags)
+		state.mu.RLock()
+		require.NotContains(t, state.principalTags, "missed")
+		require.Contains(t, state.principalTags, "bob")
+		require.Contains(t, state.principalTags, "empty")
+		require.False(t, state.principalTags["empty"].missing)
+		require.Equal(t, 2, state.positivePrincipalCacheOrder.Len())
+		require.Zero(t, state.negativePrincipalCacheOrder.Len())
+		require.Equal(t, int64(len("bob")+len("k")+len("1")+len("empty")), state.principalCacheBytes)
+		state.mu.RUnlock()
+
+		m.invalidatePrincipalTags(100, "bob", 0)
+		m.invalidatePrincipalTags(100, "empty", 0)
+		state.mu.RLock()
+		require.Empty(t, state.principalTags)
+		require.Zero(t, state.principalCacheBytes)
+		require.Zero(t, state.positivePrincipalCacheOrder.Len())
+		require.Zero(t, state.negativePrincipalCacheOrder.Len())
+		state.mu.RUnlock()
+	})
+}
+
+func TestManagerPrincipalInvalidationIsPrincipalScoped(t *testing.T) {
+	m := newManager()
+	now := time.Now()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		RefreshedAt: now,
+		Policies:    []*rlsutil.RowPolicy{{PolicyName: "tenant"}},
+	}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", map[string]rlsutil.TagValue{
+		"tenant": rlsutil.NewStringTagValue("acme"),
+	}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "bob", map[string]rlsutil.TagValue{
+		"tenant": rlsutil.NewStringTagValue("globex"),
+	}))
+
+	m.invalidatePrincipalTags(100, "alice", 0)
+	require.NotContains(t, m.collections[100].principalTags, "alice")
+	require.Contains(t, m.collections[100].principalTags, "bob")
+	require.Contains(t, m.collections[100].policies, "tenant")
+
+	m.invalidatePolicies(100, 0)
+	require.Contains(t, m.collections, UniqueID(100))
+	require.Empty(t, m.collections[100].policies)
+	require.Contains(t, m.collections[100].principalTags, "bob")
+
+	m.markCollectionDropped(100)
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerInvalidationsAreIdempotent(t *testing.T) {
+	t.Run("policies", func(t *testing.T) {
+		m := newManager()
+		m.invalidatePolicies(100, 10)
+		require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+			Policies: []*rlsutil.RowPolicy{{PolicyName: "fresh"}},
+		}))
+
+		m.invalidatePolicies(100, 10)
+		state := m.getCollectionState(100)
+		require.Contains(t, state.policies, "fresh")
+		require.Equal(t, uint64(2), state.policyGeneration)
+
+		m.invalidatePolicies(100, 9)
+		require.Empty(t, state.policies)
+		require.Equal(t, uint64(3), state.policyGeneration)
+		require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+			Policies: []*rlsutil.RowPolicy{{PolicyName: "fresh"}},
+		}))
+		m.invalidatePolicies(100, 9)
+		require.Contains(t, state.policies, "fresh")
+
+		m.invalidatePolicies(100, 11)
+		require.Empty(t, state.policies)
+		require.Equal(t, uint64(5), state.policyGeneration)
+	})
+
+	t.Run("principal", func(t *testing.T) {
+		m := newManager()
+		key := principalKey{collectionID: 100, principalName: "alice"}
+		getOrCreateCollectionStateForTest(m, key.collectionID)
+		require.True(t, setPrincipalTagsForTest(m, key, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("old")},
+		}))
+		m.invalidatePrincipalTags(key.collectionID, key.principalName, 10)
+		require.True(t, setPrincipalTagsForTest(m, key, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("fresh")},
+		}))
+
+		m.invalidatePrincipalTags(key.collectionID, key.principalName, 10)
+		require.NotNil(t, m.getPrincipalTagsEntry(key))
+
+		m.invalidatePrincipalTags(key.collectionID, key.principalName, 9)
+		require.Nil(t, m.getPrincipalTagsEntry(key))
+		require.True(t, setPrincipalTagsForTest(m, key, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("fresh")},
+		}))
+		m.invalidatePrincipalTags(key.collectionID, key.principalName, 9)
+		require.NotNil(t, m.getPrincipalTagsEntry(key))
+
+		m.invalidatePrincipalTags(key.collectionID, key.principalName, 11)
+		require.Nil(t, m.getPrincipalTagsEntry(key))
+	})
+
+	t.Run("targets are independent", func(t *testing.T) {
+		m := newManager()
+		m.invalidatePolicies(100, 30)
+		alice := principalKey{collectionID: 100, principalName: "alice"}
+		require.True(t, setPrincipalTagsForTest(m, alice, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("fresh")},
+		}))
+		m.invalidatePrincipalTags(100, "alice", 20)
+		require.Nil(t, m.getPrincipalTagsEntry(alice))
+
+		bob := principalKey{collectionID: 100, principalName: "bob"}
+		require.True(t, setPrincipalTagsForTest(m, bob, &principalTagsEntry{
+			refreshedAt: time.Now(),
+			tags:        map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("fresh")},
+		}))
+		m.invalidatePrincipalTags(100, "bob", 10)
+		require.Nil(t, m.getPrincipalTagsEntry(bob))
+
+		require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+			Policies: []*rlsutil.RowPolicy{{PolicyName: "fresh"}},
+		}))
+		m.invalidatePolicies(100, 15)
+		require.Empty(t, m.getCollectionState(100).policies)
+	})
+
+	t.Run("bounded history retains delayed revision", func(t *testing.T) {
+		state := newCollectionState()
+		for i := 0; i < rememberedInvalidationLimit; i++ {
+			require.True(t, state.rememberInvalidationRevision(uint64(100+i)))
+		}
+		require.True(t, state.rememberInvalidationRevision(1))
+		require.False(t, state.rememberInvalidationRevision(1))
+		require.Len(t, state.invalidationRevisions, rememberedInvalidationLimit)
+		require.NotContains(t, state.invalidationRevisions, uint64(100))
+		require.Contains(t, state.invalidationRevisions, uint64(1))
+	})
+}
+
+func TestManagerPolicyRefreshKeyTracksInvalidation(t *testing.T) {
+	m := newManager()
+	state, generation := m.beginPolicyRefresh(100)
+	oldKey := policyRefreshKey(100, generation)
+
+	m.invalidatePolicies(100, 10)
+	newState, newGeneration := m.beginPolicyRefresh(100)
+	require.Same(t, state, newState)
+	require.NotEqual(t, oldKey, policyRefreshKey(100, newGeneration))
+	require.False(t, m.policyRefreshCurrent(100, state, generation))
+}
+
+func TestManagerPolicyAndPrincipalCachesAreIndependent(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{PolicyName: "old-policy"},
+		},
+	}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", map[string]rlsutil.TagValue{
+		"team": rlsutil.NewStringTagValue("old"),
+	}))
+
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{PolicyName: "new-policy"},
+		},
+	}))
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", map[string]rlsutil.TagValue{
+		"team": rlsutil.NewStringTagValue("new"),
+	}))
+
+	state := m.collections[100]
+	require.Contains(t, state.policies, "new-policy")
+	require.NotContains(t, state.policies, "old-policy")
+	entry := m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"})
+	require.NotNil(t, entry)
+	require.Equal(t, map[string]rlsutil.TagValue{"team": rlsutil.NewStringTagValue("new")}, entry.tags)
+}
+
+func TestManagerRemoveCollection(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{PolicyName: "tenant"},
+		},
+	}))
+	m.markCollectionDropped(100)
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerRefreshDoesNotRecreateAlreadyRemovedCollection(t *testing.T) {
+	m := newManager()
+	require.NoError(t, m.init(context.Background(), &metadataTestCoord{}))
+	m.markCollectionDropped(100)
+
+	err := m.refreshPolicies(100)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerRefreshDoesNotRecreateRemovedCollection(t *testing.T) {
+	m := newManager()
+	coord := &blockingPolicyCoord{
+		metadataTestCoord: &metadataTestCoord{
+			policies: []*rootcoordpb.RLSPolicyInfo{validPolicyInfo("stale-policy")},
+		},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	done := make(chan error, 1)
+	go func() {
+		done <- m.refreshPolicies(100)
+	}()
+
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("RLS snapshot refresh did not start")
+	}
+	removed := make(chan struct{})
+	go func() {
+		m.markCollectionDropped(100)
+		close(removed)
+	}()
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("RLS cache invalidation waited for the in-flight refresh")
+	}
+	close(coord.release)
+	require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerPrincipalRefreshDoesNotRecreateRemovedCollection(t *testing.T) {
+	m := newManager()
+	coord := &blockingPrincipalCoord{
+		metadataTestCoord: &metadataTestCoord{},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	require.NoError(t, m.init(context.Background(), coord))
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
+		done <- err
+	}()
+	select {
+	case <-coord.started:
+	case <-time.After(time.Second):
+		t.Fatal("RLS principal refresh did not start")
+	}
+	removed := make(chan struct{})
+	go func() {
+		m.markCollectionDropped(100)
+		close(removed)
+	}()
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("RLS cache invalidation waited for the in-flight principal refresh")
+	}
+	close(coord.release)
+	require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
+	require.NotContains(t, m.collections, UniqueID(100))
+}
+
+func TestManagerSnapshotsOwnImmutableData(t *testing.T) {
+	m := newManager()
+	policy := validPolicyInfo("tenant")
+	policies, err := rlsutil.RowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
+	require.NoError(t, err)
+	state := getOrCreateCollectionStateForTest(m, 100)
+	state.mu.Lock()
+	state.setPreparedPolicySnapshotLocked(time.Now(), policies)
+	state.mu.Unlock()
+	tags := map[string]rlsutil.TagValue{"tenant": rlsutil.NewStringTagValue("acme")}
+	require.True(t, setManagerTestPrincipalTags(m, 100, "alice", tags))
+
+	policy.PolicyName = "mutated"
+	policy.Actions[0] = milvuspb.RowPolicyAction_Delete
+	tags["tenant"] = rlsutil.NewStringTagValue("mutated")
+	state = m.getCollectionState(100)
+	require.NotNil(t, state)
+	state.mu.RLock()
+	require.Contains(t, state.policies, "tenant")
+	require.NotContains(t, state.policies, "mutated")
+	require.Equal(t, rlsutil.PolicyActionQuery, state.policies["tenant"].Actions[0])
+	state.mu.RUnlock()
+	entry := m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"})
+	require.NotNil(t, entry)
+	require.Equal(t, rlsutil.NewStringTagValue("acme"), entry.tags["tenant"])
+}
+
+func TestManagerCollectionStateLocksAreIndependent(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{}))
+	state := m.getCollectionState(100)
+	require.NotNil(t, state)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- setPolicySnapshotForTest(m, 200, policySnapshot{})
+	}()
+	select {
+	case updated := <-done:
+		require.True(t, updated)
+	case <-time.After(time.Second):
+		t.Fatal("updating one collection waited for another collection's state lock")
+	}
+}
+
+func TestManagerPolicyInvalidationDoesNotWaitForCompilation(t *testing.T) {
+	m := newManager()
+	require.True(t, setPolicySnapshotForTest(m, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{{PolicyName: "policy"}},
+	}))
+	state := m.getCollectionState(100)
+	require.NotNil(t, state)
+	state.policyCompileMu.Lock()
+	defer state.policyCompileMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		m.invalidatePolicies(100, 0)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RLS policy invalidation waited for policy compilation")
+	}
+}

@@ -3,6 +3,8 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -43,6 +47,12 @@ type Catalog struct {
 
 	pool *conc.Pool[any]
 }
+
+type prefixWalker interface {
+	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
+}
+
+const rlsPrincipalScanBatchSize = 128
 
 func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
@@ -684,6 +694,9 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
 	collectionKeys := []string{BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)}
+	if err := kc.Txn.RemoveWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionInfo.CollectionID)); err != nil {
+		return merr.Wrapf(err, "failed to remove RLS principals for collection %d", collectionInfo.CollectionID)
+	}
 
 	var delMetakeysSnap []string
 	for _, alias := range collectionInfo.Aliases {
@@ -707,6 +720,12 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	}
 	for _, function := range collectionInfo.Functions {
 		delMetakeysSnap = append(delMetakeysSnap, BuildFunctionKey(collectionInfo.CollectionID, function.ID))
+	}
+	for _, policy := range collectionInfo.RLSPolicies {
+		if policy == nil {
+			continue
+		}
+		delMetakeysSnap = append(delMetakeysSnap, BuildRLSPolicyKey(collectionInfo.CollectionID, policy.PolicyID))
 	}
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
@@ -2319,6 +2338,131 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 		privGroups = append(privGroups, privGroupInfo)
 	}
 	return privGroups, nil
+}
+
+func (kc *Catalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	if policy == nil {
+		return merr.WrapErrServiceInternalMsg("RLS policy is nil")
+	}
+	if policy.PolicyID == 0 {
+		return merr.WrapErrServiceInternalMsg("RLS policy ID is empty")
+	}
+	key := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
+	value, err := proto.Marshal(model.MarshalRLSPolicyModel(policy))
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal RLS policy info")
+	}
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error {
+	return kc.Txn.Remove(ctx, BuildRLSPolicyKey(collectionID, policyID))
+}
+
+func (kc *Catalog) ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, BuildRLSPolicyPrefix(collectionID))
+	if err != nil {
+		return nil, err
+	}
+	policies := make([]*model.RLSPolicy, 0, len(values))
+	for _, value := range values {
+		info := &rootcoordpb.RLSPolicyInfo{}
+		if err := proto.Unmarshal([]byte(value), info); err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS policy info")
+		}
+		policies = append(policies, model.UnmarshalRLSPolicyModel(info))
+	}
+	sort.Slice(policies, func(i, j int) bool {
+		if policies[i].PolicyName == policies[j].PolicyName {
+			return policies[i].PolicyID < policies[j].PolicyID
+		}
+		return policies[i].PolicyName < policies[j].PolicyName
+	})
+	return policies, nil
+}
+
+func buildRLSPrincipalKey(collectionID int64, principalName string) string {
+	return BuildRLSPrincipalPrefix(collectionID) + url.PathEscape(principalName)
+}
+
+func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
+	if principal == nil {
+		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
+	}
+	key := buildRLSPrincipalKey(principal.CollectionID, principal.PrincipalName)
+	info, err := model.MarshalRLSPrincipalModel(principal)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(info)
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
+	}
+	return kc.Txn.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error) {
+	key := buildRLSPrincipalKey(collectionID, principalName)
+	value, err := kc.Txn.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	info := &rootcoordpb.RLSPrincipalInfo{}
+	if err := proto.Unmarshal([]byte(value), info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
+	}
+	principal, err := model.UnmarshalRLSPrincipalModel(info)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+	}
+	return principal, nil
+}
+
+func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
+	return kc.Txn.Remove(ctx, buildRLSPrincipalKey(collectionID, principalName))
+}
+
+func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error) {
+	walker, ok := kc.Txn.(prefixWalker)
+	if !ok {
+		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support bounded RLS principal scans")
+	}
+	maxEntries := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheEntries.GetAsInt()
+	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	principals := make([]*model.RLSPrincipal, 0, min(maxEntries, rlsPrincipalScanBatchSize))
+	var totalBytes int64
+	// TODO: Add cursor pagination so callers can enumerate collections that
+	// exceed the non-paginated list limits.
+	err := walker.WalkWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID), rlsPrincipalScanBatchSize, func(_, value []byte) error {
+		if len(principals) >= maxEntries {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-entry limit", maxEntries)
+		}
+		info := &rootcoordpb.RLSPrincipalInfo{}
+		if err := proto.Unmarshal(value, info); err != nil {
+			return merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
+		}
+		principal, err := model.UnmarshalRLSPrincipalModel(info)
+		if err != nil {
+			return merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
+		}
+		entryBytes, err := rlsutil.PrincipalTagsSize(principal.PrincipalName, principal.Tags)
+		if err != nil {
+			return err
+		}
+		if entryBytes > maxBytes-totalBytes {
+			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-byte limit", maxBytes)
+		}
+		totalBytes += entryBytes
+		principals = append(principals, principal)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(principals, func(i, j int) bool {
+		return principals[i].PrincipalName < principals[j].PrincipalName
+	})
+	return principals, nil
 }
 
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
