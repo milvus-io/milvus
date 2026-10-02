@@ -68,7 +68,7 @@ func TestCancel(t *testing.T) {
 	e.MarkRunning(30 * time.Millisecond)
 
 	now := time.Now()
-	canceled, notFound := r.Cancel([]int64{7, 8}, "root", "too heavy", now)
+	canceled, notFound := r.Cancel([]int64{7, 8}, "", "root", "too heavy", now)
 	require.Len(t, canceled, 1)
 	assert.Equal(t, []int64{8}, notFound)
 	assert.Equal(t, int64(7), canceled[0].RequestID)
@@ -89,7 +89,7 @@ func TestCancel(t *testing.T) {
 	assert.Equal(t, now, at)
 
 	// a second cancel of the same request is not reported again
-	canceled, notFound = r.Cancel([]int64{7}, "root", "again", now)
+	canceled, notFound = r.Cancel([]int64{7}, "", "root", "again", now)
 	assert.Empty(t, canceled)
 	assert.Empty(t, notFound)
 
@@ -182,7 +182,7 @@ func TestConcurrentUse(t *testing.T) {
 			e.AddTask(id * 10)
 			e.MarkRunning(time.Millisecond)
 			if id%2 == 0 {
-				canceled, _ := r.Cancel([]int64{id}, "op", "", time.Now())
+				canceled, _ := r.Cancel([]int64{id}, "", "op", "", time.Now())
 				assert.Len(t, canceled, 1)
 				assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 			}
@@ -192,4 +192,19 @@ func TestConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 	assert.Equal(t, 0, r.Len())
+}
+
+func TestCancelHeldToOwner(t *testing.T) {
+	r := New()
+	aliceCtx, _ := r.Register(context.Background(), Info{RequestID: 1, Type: TypeSearch, User: "alice"})
+	bobCtx, _ := r.Register(context.Background(), Info{RequestID: 2, Type: TypeSearch, User: "bob"})
+
+	// alice names both ids: hers is canceled, bob's is reported exactly like
+	// an id that does not exist, and is left running.
+	canceled, notFound := r.Cancel([]int64{1, 2, 3}, "alice", "alice", "", time.Now())
+	require.Len(t, canceled, 1)
+	assert.Equal(t, int64(1), canceled[0].RequestID)
+	assert.Equal(t, []int64{2, 3}, notFound)
+	assert.ErrorIs(t, aliceCtx.Err(), context.Canceled)
+	assert.NoError(t, bobCtx.Err())
 }

@@ -141,7 +141,7 @@ func TestRegisterAndCancelRequestOnProxy(t *testing.T) {
 	assert.Equal(t, reqregistry.StateQueued, listed[0].State)
 	assert.Empty(t, node.listRunningRequests(reqregistry.Filter{DBName: "other"}))
 
-	canceled, notFound := node.cancelRequests(context.Background(), []int64{4242, 1}, "root", "test")
+	canceled, notFound := node.cancelRequests(context.Background(), []int64{4242, 1}, "", "root", "test")
 	require.Len(t, canceled, 1)
 	assert.Equal(t, []int64{1}, notFound)
 	assert.Equal(t, int64(4242), canceled[0].RequestID)
@@ -160,7 +160,7 @@ func TestRegisterRequestIsBestEffort(t *testing.T) {
 		ctx, entry := node.registerRequest(context.Background(), reqregistry.Info{})
 		assert.Nil(t, entry)
 		assert.Nil(t, reqregistry.FromContext(ctx))
-		canceled, notFound := node.cancelRequests(context.Background(), []int64{1}, "root", "")
+		canceled, notFound := node.cancelRequests(context.Background(), []int64{1}, "", "root", "")
 		assert.Empty(t, canceled)
 		assert.Equal(t, []int64{1}, notFound)
 		assert.Nil(t, node.listRunningRequests(reqregistry.Filter{}))
@@ -216,13 +216,13 @@ func TestCancelCountsOnlyWhatItActuallyCanceled(t *testing.T) {
 	defer node.unregisterRequest(e2)
 
 	// one call, two real cancellations and one id nobody holds
-	canceled, notFound := node.cancelRequests(context.Background(), []int64{11, 12, 99}, "root", "test")
+	canceled, notFound := node.cancelRequests(context.Background(), []int64{11, 12, 99}, "", "root", "test")
 	require.Len(t, canceled, 2)
 	assert.Equal(t, []int64{99}, notFound)
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
 
 	// canceling the same requests again reports and counts nothing
-	canceled, _ = node.cancelRequests(context.Background(), []int64{11, 12}, "root", "test")
+	canceled, _ = node.cancelRequests(context.Background(), []int64{11, 12}, "", "root", "test")
 	assert.Empty(t, canceled)
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
 }
@@ -361,4 +361,84 @@ func TestRunningRequestHandlersRejectUnhealthyProxy(t *testing.T) {
 	localCancelResp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(localCancelResp.GetStatus()))
+}
+
+// A caller without the privilege is held to their own requests: the entry
+// proxy names the caller as the user, and refuses to name anyone else.
+func TestRunningRequestCallsHeldToCaller(t *testing.T) {
+	newNode := func(t *testing.T) (*Proxy, *mocks.MockMixCoordClient) {
+		node := &Proxy{requests: reqregistry.New()}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		mixc := mocks.NewMockMixCoordClient(t)
+		node.mixCoord = mixc
+		return node, mixc
+	}
+	held := withOwnRequestsOnly(GetContext(context.Background(), "pat:pwd"))
+
+	t.Run("list names the caller", func(t *testing.T) {
+		node, mixc := newNode(t)
+		mixc.EXPECT().ListRunningRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRunningRequestsRequest) bool {
+			return req.GetUser() == "pat"
+		})).Return(&milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil).Twice()
+		for _, user := range []string{"", "pat"} {
+			resp, err := node.ListRunningRequests(held, &milvuspb.ListRunningRequestsRequest{User: user})
+			require.NoError(t, err)
+			assert.True(t, merr.Ok(resp.GetStatus()))
+		}
+	})
+
+	t.Run("list of another user is denied", func(t *testing.T) {
+		node, _ := newNode(t)
+		resp, err := node.ListRunningRequests(held, &milvuspb.ListRunningRequestsRequest{User: "bob"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("cancel names the caller", func(t *testing.T) {
+		node, mixc := newNode(t)
+		mixc.EXPECT().CancelRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.CancelRequestsRequest) bool {
+			return req.GetUser() == "pat"
+		})).Return(&milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil).Once()
+		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		require.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("cancel of another user is denied", func(t *testing.T) {
+		node, _ := newNode(t)
+		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}, User: "bob"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("a privileged caller is not held", func(t *testing.T) {
+		node, mixc := newNode(t)
+		mixc.EXPECT().ListRunningRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRunningRequestsRequest) bool {
+			return req.GetUser() == ""
+		})).Return(&milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil).Once()
+		mixc.EXPECT().CancelRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.CancelRequestsRequest) bool {
+			return req.GetUser() == "bob"
+		})).Return(&milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil).Once()
+		ctx := GetContext(context.Background(), "olive:pwd")
+		_, err := node.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
+		require.NoError(t, err)
+		_, err = node.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}, User: "bob"})
+		require.NoError(t, err)
+	})
+}
+
+// The owner named on a cancel is checked by the proxy holding the request.
+func TestCancelLocalRequestsHeldToOwner(t *testing.T) {
+	node := &Proxy{requests: reqregistry.New()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	aliceCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{RequestID: 1, User: "alice"})
+	bobCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{RequestID: 2, User: "bob"})
+
+	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2}, User: "alice"})
+	require.NoError(t, err)
+	require.Len(t, resp.GetCanceled(), 1)
+	assert.Equal(t, int64(1), resp.GetCanceled()[0].GetRequestId())
+	assert.Equal(t, []int64{2}, resp.GetNotFound())
+	assert.Error(t, aliceCtx.Err())
+	assert.NoError(t, bobCtx.Err())
 }
