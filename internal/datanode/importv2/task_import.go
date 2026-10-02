@@ -33,11 +33,14 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -162,6 +165,18 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
+	rlsPredicate := t.req.GetRlsCheckPredicate()
+	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
+		err := merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
+		log.Ctx(t.ctx).Warn("invalid import RLS predicate", WrapLogFields(t, zap.Error(err))...)
+		t.manager.Update(t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Failed),
+			UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			return nil, err
+		})}
+	}
+
 	bufferSize := t.GetBufferSize()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
@@ -183,7 +198,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = t.importFile(reader)
+		err = t.importFile(reader, rlsPredicate)
 		if err != nil {
 			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -213,7 +228,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, rlsPredicate *planpb.Expr) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -240,6 +255,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		err = FillDynamicData(t.GetSchema(), data, rowNum)
 		if err != nil {
 			return err
+		}
+		if rlsPredicate != nil {
+			if err = rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, rlsPredicate, "import", "check"); err != nil {
+				return err
+			}
 		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)

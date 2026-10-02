@@ -20,12 +20,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -75,6 +77,9 @@ type searchTask struct {
 	needRequery            bool
 	partitionKeyMode       bool
 	largeTopKEnabled       bool
+	rlsEnabled             bool
+	rlsDBName              string
+	rlsCollectionName      string
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
@@ -113,6 +118,37 @@ type searchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
+	rlsPredicate         *planpb.Expr
+	rlsResolved          bool
+	rlsPreset            bool
+}
+
+// ResolvedRLSSnapshot is the request-local RLS decision reused by later
+// attempts of the same Search or HybridSearch RPC.
+type ResolvedRLSSnapshot struct {
+	CollectionID   int64
+	DBName         string
+	CollectionName string
+	Predicate      *planpb.Expr
+}
+
+// SetResolvedRLSPredicate reuses a predicate resolved by an earlier attempt.
+func (t *searchTask) SetResolvedRLSPredicate(predicate *planpb.Expr) {
+	t.rlsPredicate = predicate
+	t.rlsResolved = true
+	t.rlsPreset = true
+}
+
+func (t *searchTask) ResolvedRLSSnapshot() *ResolvedRLSSnapshot {
+	if !t.rlsResolved {
+		return nil
+	}
+	return &ResolvedRLSSnapshot{
+		CollectionID:   t.GetCollectionID(),
+		DBName:         t.rlsDBName,
+		CollectionName: t.rlsCollectionName,
+		Predicate:      t.rlsPredicate,
+	}
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -148,6 +184,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 
 	t.IsAdvanced = len(t.request.GetSubReqs()) > 0
+	if !t.rlsPreset {
+		t.rlsPredicate = nil
+		t.rlsResolved = false
+	}
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -161,25 +201,38 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // todo
 	t.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
-	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
-	}
-
 	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
 	if err2 != nil {
 		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
 			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
 		return err2
 	}
+	t.schema = collectionInfo.schema
 	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
-
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("is partition key mode failed", zap.Error(err))
-		return err
+	t.rlsEnabled = collectionInfo.rlsEnabled
+	t.rlsDBName = collectionInfo.dbName
+	if t.rlsDBName == "" {
+		t.rlsDBName = t.request.GetDbName()
 	}
+	t.rlsCollectionName = collectionInfo.schema.GetName()
+	if !t.rlsPreset {
+		operation := "search"
+		if t.IsAdvanced {
+			operation = "hybrid search"
+		}
+		if t.rlsEnabled && t.request.GetSkipRls() {
+			t.rlsEnabled, err = resolveRLSEnforcement(ctx, t.rlsEnabled, collectionInfo.rlsForce, true,
+				t.rlsDBName, t.rlsCollectionName, operation)
+			if err != nil {
+				return err
+			}
+		}
+		if _, _, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation); err != nil {
+			return err
+		}
+	}
+
+	t.partitionKeyMode = t.schema.hasPartitionKeyField
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -927,6 +980,17 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
+	if !t.rlsResolved {
+		operation, isIterator := "search", searchInfo.isIterator
+		if t.IsAdvanced {
+			operation, isIterator = "hybrid search", false
+		}
+		t.rlsPredicate, err = t.resolveRLSUsingPredicate(operation, isIterator)
+		if err != nil {
+			return nil, nil, 0, false, err
+		}
+		t.rlsResolved = true
+	}
 	start := time.Now()
 	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
@@ -937,10 +1001,25 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+	if err := rls.MergeNormalizedPredicateToPlan(plan, t.rlsPredicate); err != nil {
+		return nil, nil, 0, false, err
+	}
 	log.Ctx(t.ctx).Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
 	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, nil
+}
+
+func (t *searchTask) resolveRLSUsingPredicate(operation string, isIterator bool) (*planpb.Expr, error) {
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation)
+	if err != nil {
+		return nil, err
+	}
+	if !enforceRLS {
+		return nil, nil
+	}
+	return rls.ResolveUsingPredicate(t.ctx, t.GetCollectionID(), principalName,
+		rls.SearchAction(t.IsAdvanced, isIterator), t.schema.schemaHelper)
 }
 
 func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
@@ -950,7 +1029,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
+	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, t.schema.CollectionSchema, partitionKeys)
 	if err != nil {
 		log.Ctx(t.ctx).Warn("failed to assign partition keys", zap.Error(err))
 		return nil, err

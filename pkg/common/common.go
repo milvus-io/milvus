@@ -388,6 +388,12 @@ const (
 	QueryModeLargeTopK = "large_topk"
 	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
 
+	// row level security
+	RLSEnabledKey       = "rls.enabled"
+	RLSForceKey         = "rls.force"
+	RLSPrincipalNameKey = "rls.principal_name"
+	RLSClearAllCacheKey = "rls.clear_all_cache"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -639,6 +645,119 @@ func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
 // IsQueryModeLargeTopK checks if query_mode is set to "large_topk".
 func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
 	return GetQueryMode(kvs...) == QueryModeLargeTopK
+}
+
+// ValidateRLSEnabledNotAltered rejects attempts to update or delete
+// rls.enabled after collection creation.
+func ValidateRLSEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), RLSEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(key, RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, RLSEnabledKey)
+		}
+	}
+	return nil
+}
+
+// IsRLSEnabled extracts rls.enabled from collection properties.
+// Returns false if not set.
+func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSEnabledKey)
+	if !ok {
+		return false, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSEnabledKey, value)
+	}
+	return enabled, nil
+}
+
+// IsRLSForce extracts rls.force from collection properties.
+// Returns false if not set.
+func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSForceKey)
+	if !ok {
+		return false, nil
+	}
+	force, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
+	}
+	return force, nil
+}
+
+func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+	var value string
+	found := false
+	for _, kv := range kvs {
+		if kv.GetKey() == key {
+			value = kv.GetValue()
+			found = true
+		}
+	}
+	return value, found
+}
+
+// ValidateRLSProperties validates collection-level RLS properties.
+// Returns nil if the values are valid or if RLS properties are not set. Also
+// rejects case-variant keys that would be silently ignored.
+func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
+	seen := make(map[string]struct{}, 2)
+	for _, kv := range kvs {
+		switch kv.GetKey() {
+		case RLSEnabledKey:
+			if _, ok := seen[RLSEnabledKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
+			}
+			seen[RLSEnabledKey] = struct{}{}
+			if _, err := IsRLSEnabled(kv); err != nil {
+				return err
+			}
+		case RLSForceKey:
+			if _, ok := seen[RLSForceKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
+			}
+			seen[RLSForceKey] = struct{}{}
+			if _, err := IsRLSForce(kv); err != nil {
+				return err
+			}
+		default:
+			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+				if strings.EqualFold(kv.GetKey(), key) {
+					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateRLSForceRequiresEnabled rejects an effective collection property set
+// that enables rls.force without enabling RLS itself.
+func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
+	force, err := IsRLSForce(kvs...)
+	if err != nil || !force {
+		return err
+	}
+	enabled, err := IsRLSEnabled(kvs...)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
+	}
+	return nil
 }
 
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {

@@ -17,10 +17,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -70,13 +72,15 @@ type queryTask struct {
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
-	plan             *planpb.PlanNode
-	partitionKeyMode bool
-	shardclientMgr   shardclient.ShardClientMgr
-	lb               shardclient.LBPolicy
-	channelsMvcc     map[string]Timestamp
-	preferredNodes   map[string]int64
-	fastSkip         bool
+	plan              *planpb.PlanNode
+	partitionKeyMode  bool
+	shardclientMgr    shardclient.ShardClientMgr
+	lb                shardclient.LBPolicy
+	channelsMvcc      map[string]Timestamp
+	preferredNodes    map[string]int64
+	fastSkip          bool
+	skipRuntimeRLS    bool
+	preserveRawFields bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -85,6 +89,16 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 
 	storageCost segcore.StorageCost
+}
+
+// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
+func (t *queryTask) SetSkipRuntimeRLS(skip bool) {
+	t.skipRuntimeRLS = skip
+}
+
+// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
+func (t *queryTask) SetPreserveRawFields(preserve bool) {
+	t.preserveRawFields = preserve
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -412,11 +426,29 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return err
+	canonicalDBName := colInfo.dbName
+	if canonicalDBName == "" {
+		canonicalDBName = t.request.GetDbName()
 	}
+	var principalName string
+	var enforceRLS bool
+	if !t.skipRuntimeRLS {
+		rlsEnabled := colInfo.rlsEnabled
+		if rlsEnabled && t.request.GetSkipRls() {
+			rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
+				canonicalDBName, colInfo.schema.GetName(), "query")
+			if err != nil {
+				return err
+			}
+		}
+		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		if err != nil {
+			return err
+		}
+	}
+
+	t.schema = colInfo.schema
+	t.partitionKeyMode = t.schema.hasPartitionKeyField
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -453,16 +485,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.queryParams = queryParams
 	t.Limit = queryParams.limit + queryParams.offset
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
-	}
-	t.schema = schema
-
 	if t.ids != nil {
 		pkField := ""
-		for _, field := range schema.Fields {
+		for _, field := range t.schema.Fields {
 			if field.IsPrimaryKey {
 				pkField = field.Name
 			}
@@ -482,9 +507,20 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
 		return err
 	}
+	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
+	if enforceRLS {
+		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName,
+			rls.QueryAction(t.queryParams.isIterator), t.schema.schemaHelper)
+		if err != nil {
+			return err
+		}
+		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
+			return err
+		}
+	}
 	t.plan.GetQuery().Limit = t.Limit
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited {
+	if userPlanAlwaysTrue && t.Limit == typeutil.Unlimited {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -497,7 +533,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -526,20 +562,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err2 != nil {
-		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),
-			zap.Error(err2))
-		return err2
-	}
-
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
-		consistencyLevel = collectionInfo.consistencyLevel
+		consistencyLevel = colInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -558,8 +586,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if collectionInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = collectionInfo.updateTimestamp
+	if colInfo.updateTimestamp > guaranteeTs {
+		guaranteeTs = colInfo.updateTimestamp
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
@@ -570,13 +598,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if collectionInfo.collectionTTL != 0 {
+	if colInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(colInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), colInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -686,7 +714,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
-	if !t.reQuery {
+	if !t.reQuery && !t.preserveRawFields {
 		if len(t.queryParams.extractTimeFields) > 0 {
 			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
 			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)

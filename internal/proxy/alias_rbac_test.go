@@ -447,7 +447,9 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 	cache := &MetaCache{
 		mixCoord: mockCoord,
 		collInfo: map[string]map[string]*collectionInfo{
-			"mydb": {},
+			"mydb": {
+				"coll1": {collID: 101},
+			},
 		},
 		aliasInfo: map[string]map[string]*aliasEntry{
 			"mydb": {
@@ -459,7 +461,8 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 		},
 	}
 
-	cache.RemoveDatabase(ctx, "mydb")
+	collectionIDs := cache.RemoveDatabase(ctx, "mydb")
+	assert.ElementsMatch(t, []int64{101}, collectionIDs)
 
 	// Alias cache for the database should be gone
 	_, ok := cache.getAlias("mydb", "alias1")

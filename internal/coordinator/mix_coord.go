@@ -452,6 +452,10 @@ func (s *mixCoordImpl) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.S
 	return s.rootcoordServer.ShowCollectionIDs(ctx, req)
 }
 
+func (s *mixCoordImpl) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.rootcoordServer.GetRLSMetadata(ctx, req)
+}
+
 func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.AlterCollection(ctx, req)
 }
@@ -662,6 +666,38 @@ func (s *mixCoordImpl) ListPrivilegeGroups(ctx context.Context, req *milvuspb.Li
 
 func (s *mixCoordImpl) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.OperatePrivilegeGroup(ctx, req)
+}
+
+func (s *mixCoordImpl) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CreateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.UpdateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DropRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.rootcoordServer.ListRowPolicies(ctx, req)
+}
+
+func (s *mixCoordImpl) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.rootcoordServer.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.rootcoordServer.ListRLSPrincipals(ctx, req)
+}
+
+func (s *mixCoordImpl) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DeleteRLSPrincipalTags(ctx, req)
 }
 
 // GetComponentStates get states of components

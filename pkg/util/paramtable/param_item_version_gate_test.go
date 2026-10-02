@@ -104,6 +104,14 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 		assert.True(t, item.GetAsBool())
 	})
 
+	t.Run("clearing temporary override restores gated default", func(t *testing.T) {
+		item := &params.ProxyCfg.RLSImportEnforcementEnabled
+		old := item.SwapTempValue("true")
+		assert.True(t, item.GetAsBool())
+		item.SwapTempValue(old)
+		assert.False(t, item.GetAsBool())
+	})
+
 	t.Run("different switchers keep their own pre-switch values", func(t *testing.T) {
 		a := &ParamItem{
 			Key:          "test.a",

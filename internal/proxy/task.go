@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -453,6 +454,13 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate query mode
 	if err := common.ValidateQueryMode(t.GetProperties()...); err != nil {
+		return err
+	}
+
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
+		return err
+	}
+	if err := common.ValidateRLSForceRequiresEnabled(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -1419,17 +1427,58 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
-
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
+	for _, key := range t.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
 	}
-
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.GetDbName(), t.CollectionName, collectionID)
+	if err != nil {
+		return err
+	}
+	if collInfo == nil || collInfo.schema == nil || collInfo.schema.GetName() == "" {
+		return merr.WrapErrServiceInternalMsg("failed to resolve collection metadata for alter collection target %d", collectionID)
+	}
 	t.CollectionID = collectionID
+
+	requiresManageRLS := false
+	for _, property := range t.GetProperties() {
+		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
+			requiresManageRLS = true
+			break
+		}
+	}
+	if !requiresManageRLS {
+		for _, key := range t.GetDeleteKeys() {
+			if key == common.RLSEnabledKey || key == common.RLSForceKey {
+				requiresManageRLS = true
+				break
+			}
+		}
+	}
+	if requiresManageRLS {
+		dbName := collInfo.dbName
+		if dbName == "" {
+			dbName = t.GetDbName()
+		}
+		if err := checkManageRLSPrivilege(ctx, t.AlterCollectionRequest, dbName, collInfo.schema.GetName()); err != nil {
+			return err
+		}
+	}
+	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
+		return err
+	}
+	collSchema := collInfo.schema
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
@@ -1521,10 +1570,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, t.CollectionID)
-	if err != nil {
-		return err
-	}
+	collBasicInfo := collInfo
 	newIsoValue, isoChanged, err := detectBoolPropChange(
 		collBasicInfo.partitionKeyIsolation, common.PartitionKeyIsolationKey,
 		t.Properties, t.GetDeleteKeys(),
