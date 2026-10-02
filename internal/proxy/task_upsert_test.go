@@ -7372,7 +7372,7 @@ func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
 
 // Rejected request preparation must not reach the new Strong read or publish DML.
 func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
-	for _, stage := range []string{"collection_info", "text_storage", "field_ops", "namespace", "partition_mode", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "functions", "insert", "delete", "implicit_partial_namespace"} {
+	for _, stage := range []string{"collection_info", "text_storage", "field_ops", "namespace", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "functions", "insert", "delete", "implicit_partial_namespace"} {
 		t.Run(stage, func(t *testing.T) {
 			task := createTestUpdateTask()
 			task.req.PartialUpdate = true
@@ -7398,7 +7398,6 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			}
 			patch(resolveFieldPartialUpdateOps, map[string]*fieldPartialUpdatePlan(nil), implicit, failure("field_ops"))
 			patch(resolveNamespacePartitionName, "namespace_partition", implicit, failure("namespace"))
-			patch(isPartitionKeyMode, false, failure("partition_mode"))
 			if stage == "partition_info" {
 				task.req.PartitionName = ""
 			}
@@ -7413,8 +7412,11 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			streaming.SetWALForTest(fakeWAL)
 			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
 			queryCalls := 0
-			query := mockey.Mock((*upsertTask).queryPreExecute).To(func(task *upsertTask, _ context.Context) ([]int, error) {
+			query := mockey.Mock((*upsertTask).queryPreExecute).To(func(task *upsertTask, ctx context.Context) ([]int, error) {
 				queryCalls++
+				if err := genFunctionFields(ctx, task.upsertMsg.InsertMsg, task.schema, task.req.GetPartialUpdate()); err != nil {
+					return nil, err
+				}
 				task.insertFieldData = task.req.FieldsData
 				return nil, nil
 			}).Build()
@@ -7429,7 +7431,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
-			if implicit || stage == "insert" || stage == "delete" {
+			if implicit || stage == "functions" || stage == "insert" || stage == "delete" {
 				require.Equal(t, 1, queryCalls)
 			} else {
 				require.Zero(t, queryCalls)
