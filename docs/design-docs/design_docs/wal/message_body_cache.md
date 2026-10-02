@@ -1,6 +1,6 @@
 # Immutable Message Body Cache
 
-Status: implemented in this workspace. Updated on 2026-09-30.
+Status: implemented in this workspace. Updated on 2026-10-02.
 
 ## Purpose and current implementation
 
@@ -53,6 +53,30 @@ Schema-dependent function-output caching is not part of this design. In
 particular, the first consumer must not overwrite the shared raw Body with
 output derived using its pack or runtime schema. Body caching alone does not
 deduplicate compatibility-path function execution.
+
+## Decryption failures and retry
+
+Payload decoding retries recoverable failures from both `GetDecryptor` and
+`Decrypt` in one loop, reacquiring the decryptor on every attempt. The initial
+delay is 100 ms, doubles to a 3-second cap, and has no attempt limit. A caller's
+context cancellation or deadline ends the retry and returns its context error.
+The plugin interfaces do not accept a context, so cancellation cannot interrupt
+an in-flight plugin call; it is checked between calls and during backoff.
+`MustBody` and `Payload` retain their Background context and can wait indefinitely
+for an unavailable dependency. This does not introduce a per-message goroutine.
+
+Recoverable errors include the existing KMS-key-invalid/restoration signal,
+explicitly retryable Milvus errors, gRPC Unavailable/DeadlineExceeded/
+ResourceExhausted, dependency timeouts, and connection reset/refused/broken-pipe
+errors. Explicit Milvus error classification takes precedence over a wrapped
+transport error. Unknown plugin errors remain terminal; apart from the existing
+KMS signal, error strings are not used to guess retryability.
+
+Malformed cipher headers, permanent cipher failures and protobuf decoding
+errors do not retry. No partial plaintext is published or cached after failure.
+Retry happens before consumer application, so it cannot reapply a partially
+executed Insert/Delete. Immutable callers still share the construction attempt;
+valid waiters retry under their own context if its constructor is cancelled.
 
 ## Ownership and registration
 
@@ -109,9 +133,12 @@ and leaves the slot retryable, without retaining partial bodies or permanently
 caching cancellation/decryption failures.
 
 Each waiter observes its own context cancellation without cancelling another
-caller's work. If the constructing caller is cancelled, that attempt may fail;
-other valid callers can retry. Check context cancellation consistently on both
-cache hits and misses. Do not use an irreversible `sync.Once` for a computation
+caller's work. If an attempt fails with its constructing caller's context
+cancellation or deadline error, still-valid waiters automatically compete for
+a new construction using their own context, preserving singleflight. Other
+decode failures propagate to the current waiters without automatic retries,
+even if the constructing caller's context was also cancelled. Check context
+cancellation consistently on both cache hits and misses. Do not use an irreversible `sync.Once` for a computation
 that can fail and later retry. There is no per-message construction goroutine.
 
 Access-time updates, publication, registration and eviction need one coherent

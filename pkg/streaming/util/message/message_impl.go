@@ -62,18 +62,7 @@ func (m *messageImpl) decodePayload(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	if ch != nil {
-		decryptor, err := getDecryptorWithRetryContext(ctx, ch.EzId, ch.CollectionId, ch.SafeKey)
-		if err != nil {
-			return nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		payload, err := decryptor.Decrypt(m.payload)
-		if err != nil {
-			return nil, err
-		}
-		return payload, nil
+		return decryptPayloadWithRetry(ctx, ch.EzId, ch.CollectionId, ch.SafeKey, m.payload)
 	}
 	return m.payload, nil
 }
