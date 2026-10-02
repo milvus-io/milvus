@@ -362,6 +362,128 @@ func (s bm25Stats) RetainFields(fieldIDs map[int64]struct{}) {
 	}
 }
 
+// idfSyncParallelism bounds the goroutines that read sealed segment stats and merge them into current in SyncDistribution.
+const idfSyncParallelism = 8
+
+// statsTable is the shard-wide BM25 stats of each BM25 field. Merge and Minus are safe for
+// concurrent use, so loads holding only the oracle read lock can merge in parallel.
+// Changing the field set (SyncFunctions) needs the oracle write lock.
+type statsTable struct {
+	mu     sync.RWMutex // guards fields
+	fields map[int64]*storage.ConcurrentBM25Stats
+}
+
+func newStatsTable(functions []*schemapb.FunctionSchema) *statsTable {
+	t := &statsTable{fields: make(map[int64]*storage.ConcurrentBM25Stats)}
+	for _, function := range functions {
+		if function.GetType() == schemapb.FunctionType_BM25 {
+			t.fields[function.GetOutputFieldIds()[0]] = storage.NewConcurrentBM25Stats()
+		}
+	}
+	return t
+}
+
+func (t *statsTable) field(fieldID int64) *storage.ConcurrentBM25Stats {
+	t.mu.RLock()
+	stats, ok := t.fields[fieldID]
+	t.mu.RUnlock()
+	if ok {
+		return stats
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if stats, ok = t.fields[fieldID]; !ok {
+		stats = storage.NewConcurrentBM25Stats()
+		t.fields[fieldID] = stats
+	}
+	return stats
+}
+
+func (t *statsTable) Merge(stats bm25Stats) {
+	for fieldID, s := range stats {
+		if s != nil {
+			t.field(fieldID).Merge(s)
+		}
+	}
+}
+
+func (t *statsTable) Minus(stats bm25Stats) {
+	for fieldID, s := range stats {
+		if s != nil {
+			t.field(fieldID).Minus(s)
+		}
+	}
+}
+
+func (t *statsTable) GetStats(fieldID int64) (*storage.ConcurrentBM25Stats, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	stats, ok := t.fields[fieldID]
+	if !ok {
+		return nil, merr.WrapErrFieldNotFound(fieldID, "not in idf oracle BM25 stats")
+	}
+	return stats, nil
+}
+
+func (t *statsTable) NumRow() int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, stats := range t.fields {
+		return stats.NumRow()
+	}
+	return 0
+}
+
+func (t *statsTable) MemSize() int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	size := int64(0)
+	for _, stats := range t.fields {
+		size += stats.MemSize()
+	}
+	return size
+}
+
+// SyncFunctions keeps the fields of the given BM25 functions, dropping the others and adding missing ones.
+func (t *statsTable) SyncFunctions(functions []*schemapb.FunctionSchema) map[int64]struct{} {
+	fieldIDs := bm25FunctionFieldIDs(functions)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for fieldID := range t.fields {
+		if _, ok := fieldIDs[fieldID]; !ok {
+			delete(t.fields, fieldID)
+		}
+	}
+	for fieldID := range fieldIDs {
+		if _, ok := t.fields[fieldID]; !ok {
+			t.fields[fieldID] = storage.NewConcurrentBM25Stats()
+		}
+	}
+	return fieldIDs
+}
+
+// applyParallel merges (or subtracts) every stats into current on up to idfSyncParallelism goroutines.
+func (t *statsTable) applyParallel(all []bm25Stats, minus bool) {
+	workers := min(idfSyncParallelism, len(all))
+	next := atomic.NewInt64(-1)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := int(next.Inc()); i < len(all); i = int(next.Inc()) {
+				if minus {
+					t.Minus(all[i])
+				} else {
+					t.Merge(all[i])
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 type idfTarget struct {
 	sync.RWMutex
 	snapshot *snapshot
@@ -382,9 +504,11 @@ func (t *idfTarget) GetSnapshot() (*snapshot, time.Time) {
 }
 
 type idfOracle struct {
-	sync.RWMutex // protect current and growing segment stats
-	current      bm25Stats
-	growing      map[int64]*growingBm25Stats
+	// protect growing segment stats and the target state. current is safe for concurrent use:
+	// preloads update it under the read lock, everything else that updates it holds the write lock.
+	sync.RWMutex
+	current *statsTable
+	growing map[int64]*growingBm25Stats
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
@@ -418,8 +542,11 @@ func (o *idfOracle) DirPath() string {
 }
 
 func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memoryStats bm25Stats) {
-	o.Lock()
-	defer o.Unlock()
+	// Read lock only, so loads of different segments merge into current in parallel.
+	// SyncDistribution sets the target version under the write lock, so the check below
+	// and the merge are atomic with respect to it.
+	o.RLock()
+	defer o.RUnlock()
 
 	// skip preload if first target was loaded.
 	if o.targetVersion.Load() != 0 {
@@ -841,10 +968,7 @@ func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64)
 // memSize estimates total in-memory size of current + all growing stats.
 // Caller must hold RLock or Lock.
 func (o *idfOracle) memSize() int64 {
-	size := int64(0)
-	for _, stats := range o.current {
-		size += stats.MemSize()
-	}
+	size := o.current.MemSize()
 	for _, g := range o.growing {
 		for _, stats := range g.bm25Stats {
 			size += stats.MemSize()
@@ -1026,38 +1150,35 @@ func (o *idfOracle) SyncDistribution() error {
 		}
 	}
 
-	activateStats := make(map[int64]bm25Stats)
-	deactivateStats := make(map[int64]bm25Stats)
-
-	var rangeErr error
+	activateSegs := make([]*sealedBm25Stats, 0)
+	deactivateSegs := make([]*sealedBm25Stats, 0)
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
 		intarget := targetMap.Contain(segmentID)
 
 		activate := stats.activate.Load()
 		// activate segment if segment in target
 		if intarget && !activate {
-			stats, err := stats.FetchStats()
-			if err != nil {
-				rangeErr = merr.Wrap(err, "fetch stats failed")
-				return false
-			}
-			activateStats[segmentID] = stats
+			activateSegs = append(activateSegs, stats)
 		} else
 		// deactivate segment if segment not in target.
 		if !intarget && activate {
-			stats, err := stats.FetchStats()
-			if err != nil {
-				rangeErr = merr.Wrap(err, "fetch stats failed")
-				return false
-			}
-			deactivateStats[segmentID] = stats
+			deactivateSegs = append(deactivateSegs, stats)
 		}
 		return true
 	})
 
-	if rangeErr != nil {
-		return rangeErr
+	activateStats, err := fetchSealedStats(activateSegs)
+	if err != nil {
+		return err
 	}
+	deactivateStats, err := fetchSealedStats(deactivateSegs)
+	if err != nil {
+		return err
+	}
+
+	// stats to fold into current once the per-segment state is settled below
+	toMerge := make([]bm25Stats, 0, len(activateStats))
+	toMinus := make([]bm25Stats, 0, len(deactivateStats))
 
 	o.Lock()
 
@@ -1081,14 +1202,15 @@ func (o *idfOracle) SyncDistribution() error {
 		// save activate if segment in target.
 		if intarget && !activate {
 			if segmentStats, ok := activateStats[segmentID]; ok {
-				o.activateSealedStatsLocked(stats, segmentStats)
+				toMerge = append(toMerge, segmentStats)
+				stats.activate.Store(true)
 			}
 		}
 
 		// deactivate if segment not in target.
 		if !intarget && activate {
 			if segmentStats, ok := deactivateStats[segmentID]; ok {
-				o.current.Minus(segmentStats)
+				toMinus = append(toMinus, segmentStats)
 				stats.activate.Store(false)
 			}
 		}
@@ -1108,6 +1230,9 @@ func (o *idfOracle) SyncDistribution() error {
 		}
 		return true
 	})
+	// still under the write lock, so no reader sees current between the flag changes and these merges
+	o.current.applyParallel(toMerge, false)
+	o.current.applyParallel(toMinus, true)
 
 	o.targetVersion.Store(snapshot.targetVersion)
 	numRow := o.current.NumRow()
@@ -1118,6 +1243,48 @@ func (o *idfOracle) SyncDistribution() error {
 	o.syncResource()
 	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
 	return nil
+}
+
+// fetchSealedStats reads the stats of all segments from local disk on up to idfSyncParallelism goroutines,
+// keyed by segment ID.
+func fetchSealedStats(segs []*sealedBm25Stats) (map[int64]bm25Stats, error) {
+	results := make([]bm25Stats, len(segs))
+	workers := min(idfSyncParallelism, len(segs))
+	errs := make([]error, workers)
+	next := atomic.NewInt64(-1)
+	failed := atomic.NewBool(false)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for !failed.Load() {
+				i := int(next.Inc())
+				if i >= len(segs) {
+					return
+				}
+				stats, err := segs[i].FetchStats()
+				if err != nil {
+					errs[w] = merr.Wrap(err, "fetch stats failed")
+					failed.Store(true)
+					return
+				}
+				results[i] = stats
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	byID := make(map[int64]bm25Stats, len(segs))
+	for i, seg := range segs {
+		byID[seg.segmentID] = results[i]
+	}
+	return byID, nil
 }
 
 func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
@@ -1141,7 +1308,7 @@ func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracl
 	return &idfOracle{
 		channel:        channel,
 		targetVersion:  atomic.NewInt64(0),
-		current:        newBm25Stats(functions),
+		current:        newStatsTable(functions),
 		growing:        make(map[int64]*growingBm25Stats),
 		sealed:         typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
 		sealedDiskSize: atomic.NewInt64(0),

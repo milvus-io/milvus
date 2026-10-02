@@ -480,10 +480,14 @@ func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
 	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
 		value := typeutil.SparseFloatRowValueAt(tf, idx)
-		nq := m.rowsWithToken[key]
-		typeutil.SparseFloatRowSetAt(idf, idx, key, value*float32(math.Log(1+(float64(m.numRow)-float64(nq)+0.5)/(float64(nq)+0.5))))
+		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, m.numRow, m.rowsWithToken[key]))
 	}
 	return idf
+}
+
+// bm25TermIDF weights a query term by its IDF given the total row count and the rows containing the term.
+func bm25TermIDF(value float32, numRow int64, nq int32) float32 {
+	return value * float32(math.Log(1+(float64(numRow)-float64(nq)+0.5)/(float64(nq)+0.5)))
 }
 
 func (m *BM25Stats) GetAvgdl() float64 {
