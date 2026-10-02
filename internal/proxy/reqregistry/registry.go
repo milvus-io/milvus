@@ -123,6 +123,13 @@ type Entry struct {
 	canceledAt time.Time
 }
 
+// User returns the name of the user who issued the request.
+func (e *Entry) User() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.info.User
+}
+
 // Snapshot returns a copy of the request description with ElapsedMS computed
 // against now.
 func (e *Entry) Snapshot(now time.Time) Info {
@@ -283,10 +290,14 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 // returns their snapshots taken at cancellation, plus the ids it does not
 // hold. An id whose request was already canceled counts as canceled again
 // but is not reported a second time.
-func (r *Registry) Cancel(requestIDs []int64, operator, reason string, now time.Time) (canceled []Info, notFound []int64) {
+//
+// A non-empty owner restricts the cancel to requests issued by that user: the
+// id of another user's request is reported as not held, so a caller limited
+// to their own requests learns nothing about anyone else's.
+func (r *Registry) Cancel(requestIDs []int64, owner, operator, reason string, now time.Time) (canceled []Info, notFound []int64) {
 	for _, id := range requestIDs {
 		e, ok := r.entries.Get(id)
-		if !ok {
+		if !ok || (owner != "" && e.User() != owner) {
 			notFound = append(notFound, id)
 			continue
 		}

@@ -227,6 +227,13 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 			}
 		}
 
+		if isRunningRequestCall(req) {
+			// Any user may list and cancel the requests they issued; the
+			// privilege is what reaches other users' requests. Without it the
+			// call goes through, held to the caller's own requests.
+			return withOwnRequestsOnly(ctx), nil
+		}
+
 		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
 
 		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
@@ -250,6 +257,16 @@ func isCurUserObject(objectType string, curUser string, object string) bool {
 		return false
 	}
 	return curUser == object
+}
+
+// isRunningRequestCall reports whether req lists or cancels running requests,
+// which a caller without the privilege may still do for their own requests.
+func isRunningRequestCall(req interface{}) bool {
+	switch req.(type) {
+	case *milvuspb.ListRunningRequestsRequest, *milvuspb.CancelRequestsRequest:
+		return true
+	}
+	return false
 }
 
 func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {

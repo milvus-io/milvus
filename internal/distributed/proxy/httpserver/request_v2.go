@@ -1325,6 +1325,7 @@ func (req *ListRunningRequestsReq) GetDbName() string { return req.DbName }
 type CancelRequestsReq struct {
 	RequestIDs []int64 `json:"requestIds" binding:"required"`
 	Reason     string  `json:"reason"`
+	User       string  `json:"user"`
 }
 
 type GetQuotaMetricsReq struct{}
