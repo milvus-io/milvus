@@ -40,7 +40,7 @@ func (m *Manager) notifyTransformMessageLocked(msg message.ImmutableMessage) {
 	if len(m.transformNotifiers) == 0 {
 		return
 	}
-	if msg.VChannel() == "" {
+	if msg.VChannel() == "" || msg.IsPChannelLevel() {
 		if messageutil.IsPChannelTransformBarrier(msg.MessageType()) || msg.MessageType() == message.MessageTypeRecoveryBarrier {
 			m.notifyAllTransformsLocked()
 		}

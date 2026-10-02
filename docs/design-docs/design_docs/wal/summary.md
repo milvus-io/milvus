@@ -592,8 +592,11 @@ insert-only assembled transaction), CommitImport, Flush/ManualFlush, relevant
 DDL and schema changes notify their VChannel. Plain Inserts, property-only
 AlterCollection and ordinary TimeTick confirmations do not. PChannel-wide
 FlushAll/AlterWAL and RecoveryBarrier notify every active scope. GC wakes scopes
-whose history is retired; a terminal failure wakes every scope. These signals
-do not implement the deferred DDL visibility effects.
+whose history is retired; a terminal failure wakes every scope. Cluster broadcast
+copies are recognized by `IsPChannelLevel()` even when their VChannel property
+contains the physical/control channel name; empty-VChannel barriers remain
+supported. This scope test agrees with QueryMVCC and VChannel dispatch.
+These signals do not implement the deferred DDL visibility effects.
 
 Each active VChannel owns one reference-counted notifier shared by subscriptions.
 The last subscription release removes it. Tokens are allocated only on reads and
