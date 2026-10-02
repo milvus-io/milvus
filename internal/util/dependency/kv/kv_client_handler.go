@@ -1,6 +1,8 @@
 package kvfactory
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -33,8 +35,10 @@ func CloseEtcdClient() {
 	clientCreator.mu.Lock()
 	defer clientCreator.mu.Unlock()
 	if clientCreator.client != nil {
+		// Close reports context.Canceled when the client was already closed,
+		// which is harmless during shutdown.
 		err := clientCreator.client.Close()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}
