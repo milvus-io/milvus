@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -30,7 +31,7 @@ func (r *Runtime) WaitMVCCVisible(ctx context.Context, growingTimetick uint64, t
 	defer r.mu.Unlock()
 	for !r.mvccVisibleLocked(growingTimetick, transformTimetick) {
 		if r.closed {
-			return merr.WrapErrServiceUnavailable("growing runtime is closed")
+			return viewerror.NewViewInvalidated("growing runtime is closed")
 		}
 		if err := ctx.Err(); err != nil {
 			return err

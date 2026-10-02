@@ -15,11 +15,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -32,6 +34,46 @@ func TestSearchTaskRunnerUsesDirectExecutionPath(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "not implemented")
 	assert.Contains(t, err.Error(), "nil collection")
+}
+
+func TestSearchTaskRunnerAppliesGrowingBoostScorers(t *testing.T) {
+	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
+	require.NoError(t, initcore.InitLocalChunkManager(t.TempDir()))
+	require.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	schema := mock_segcore.GenTestCollectionSchema("sn_boost", schemapb.DataType_Int64, false)
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 1, Schema: schema, IndexMeta: mock_segcore.GenTestIndexMeta(1, schema)})
+	require.NoError(t, err)
+	defer collection.Release()
+	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{Collection: collection, SegmentID: 1, SegmentType: segcore.SegmentTypeGrowing})
+	require.NoError(t, err)
+	defer segment.Release()
+	insert, err := mock_segcore.GenInsertMsg(collection, 1, 1, 10)
+	require.NoError(t, err)
+	_, err = segment.Insert(context.Background(), &segcore.InsertRequest{RowIDs: insert.RowIDs, Timestamps: insert.Timestamps, Record: &segcorepb.InsertRecord{FieldsData: insert.FieldsData, NumRows: int64(len(insert.RowIDs))}})
+	require.NoError(t, err)
+	req, err := mock_segcore.GenQueryRequest(collection, []int64{1}, 1, 5, 1)
+	require.NoError(t, err)
+	base, err := searchTaskRunner{}.Search(context.Background(), collection, []segcore.CSegment{segment}, req, 1)
+	require.NoError(t, err)
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(req.Req.SerializedExprPlan, plan))
+	plan.Scorers = []*planpb.ScoreFunction{{Type: planpb.FunctionType_FunctionTypeWeight, Weight: 2.5}}
+	plan.ScoreOption = &planpb.ScoreOption{BoostMode: planpb.BoostMode_BoostModeSum}
+	req.Req.SerializedExprPlan, err = proto.Marshal(plan)
+	require.NoError(t, err)
+	boosted, err := searchTaskRunner{}.Search(context.Background(), collection, []segcore.CSegment{segment}, req, 1)
+	require.NoError(t, err)
+	baseData, boostedData := &schemapb.SearchResultData{}, &schemapb.SearchResultData{}
+	require.NoError(t, proto.Unmarshal(base.GetSlicedBlob(), baseData))
+	require.NoError(t, proto.Unmarshal(boosted.GetSlicedBlob(), boostedData))
+	require.NotEmpty(t, baseData.Scores)
+	require.True(t, proto.Equal(baseData.GetIds(), boostedData.GetIds()))
+	require.Len(t, boostedData.Scores, len(baseData.Scores))
+	for i, score := range baseData.Scores {
+		require.InDelta(t, score+2.5, boostedData.Scores[i], 0.001)
+	}
 }
 
 func TestQueryTaskRunnerUsesDirectExecutionPath(t *testing.T) {

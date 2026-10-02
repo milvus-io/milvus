@@ -74,6 +74,12 @@ change invalidates the continuity guarantee; callers retry through existing
 view/WAL errors. Recovery rebuilds persisted views as UpRecovering without a
 new lease; Coord re-delivers its desired state.
 
+A missing query runtime or one closed during MVCC waiting/handle acquisition
+returns `VIEW_INVALIDATED`; a WAL that rejects MVCC acquisition during shutdown
+returns `ON_SHUTDOWN`. These lifecycle errors retain Phase 1 retry semantics
+through the View RPC boundary. Request cancellation/deadline errors keep their
+original meaning, and unrelated execution errors are not relabeled as retries.
+
 Explicit Dropped (including Unrecoverable cleanup), shutdown, and WAL handoff
 cancel pending timers and bypass timed retention. They preserve existing
 resource/handle cleanup semantics. The lease does not make a failed node or an

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 func requireNotification(t *testing.T, ch <-chan struct{}, closed bool) {
@@ -86,6 +87,29 @@ func TestTransformBarrierNotifications(t *testing.T) {
 		m.ObserveMessage(context.Background(), notificationMessage(typ, "", uint64(i+20)))
 		requireNotification(t, a.TransformChanged, true)
 		requireNotification(t, b.TransformChanged, true)
+	}
+}
+
+func TestClusterBroadcastNotifiesEveryTransformScope(t *testing.T) {
+	channels := message.ClusterChannels{Channels: []string{"p1", "p2"}, ControlChannel: funcutil.GetControlChannel("p1")}
+	for _, broadcast := range []message.BroadcastMutableMessage{
+		message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+		message.NewAlterWALMessageBuilderV2().WithHeader(&message.AlterWALMessageHeader{}).WithBody(&message.AlterWALMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+	} {
+		for _, msg := range broadcast.WithBroadcastID(1).SplitIntoMutableMessage() {
+			t.Run(msg.MessageType().String()+"/"+msg.VChannel(), func(t *testing.T) {
+				m := NewManager(ManagerConfig{})
+				defer m.WatchTransform("a")()
+				defer m.WatchTransform("b")()
+				a, b := readNotification(t, m, "a"), readNotification(t, m, "b")
+				require.NotEmpty(t, msg.VChannel())
+				require.True(t, msg.IsPChannelLevel())
+				m.ObserveMessage(context.Background(), msg.WithTimeTick(20).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(2)))
+				requireNotification(t, a.TransformChanged, true)
+				requireNotification(t, b.TransformChanged, true)
+				require.Equal(t, uint64(20), readNotification(t, m, "a").CoveredThrough)
+			})
+		}
 	}
 }
 

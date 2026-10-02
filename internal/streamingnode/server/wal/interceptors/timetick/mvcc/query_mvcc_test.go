@@ -5,9 +5,37 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
+
+func TestQueryMVCCClusterBroadcastAdvancesEveryVChannel(t *testing.T) {
+	channels := message.ClusterChannels{Channels: []string{"p1", "p2"}, ControlChannel: funcutil.GetControlChannel("p1")}
+	for _, broadcast := range []message.BroadcastMutableMessage{
+		message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+		message.NewAlterWALMessageBuilderV2().WithHeader(&message.AlterWALMessageHeader{}).WithBody(&message.AlterWALMessageBody{}).WithClusterLevelBroadcast(channels).MustBuildBroadcast(),
+	} {
+		for _, msg := range broadcast.WithBroadcastID(1).SplitIntoMutableMessage() {
+			t.Run(msg.MessageType().String()+"/"+msg.VChannel(), func(t *testing.T) {
+				cm := NewQueryMVCCManager(0)
+				cm.ApplyRecoveryBarrier("a", 10)
+				cm.ApplyRecoveryBarrier("b", 10)
+				require.NotEmpty(t, msg.VChannel())
+				require.True(t, msg.IsPChannelLevel())
+				cm.UpdateMVCC(msg.WithTimeTick(20))
+				for _, vc := range []string{"a", "b"} {
+					require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 10, TransformingTimetick: 20}, cm.GetQueryMVCCOfVChannel(vc))
+				}
+				cm.UpdateMVCC(createQueryTestMessage(t, 20, "", message.MessageTypeTimeTick, false, true))
+				require.True(t, cm.GetQueryMVCCOfVChannel("a").Confirmed)
+				require.True(t, cm.GetQueryMVCCOfVChannel("b").Confirmed)
+				require.Len(t, cm.vchannelMVCCs, 2, "must not register the physical/control channel as a query shard")
+			})
+		}
+	}
+}
 
 func TestQueryNewQueryMVCCManager(t *testing.T) {
 	cm := NewQueryMVCCManager(100)

@@ -76,7 +76,10 @@ preparation is synchronous. There is no independent background advancement task
 or per-version prepared-resource map.
 
 Initialization and refresh use the exact-version resource RPC and validate its
-response. Equal or older targets reuse the aggregate without a fetch. Coordinator
+response. The RPC expands compressed BM25 LogIDs into object paths on owned
+copies of the log descriptors; shared DataCoord metadata remains unchanged.
+StorageV3 continues resolving statistics from the selected manifest version.
+Equal or older targets reuse the aggregate without a fetch. Coordinator
 progress alone does not select a different version; seal notifications supply
 handoff metadata only. Failures classified as locally retryable remain Preparing
 and retry through NodeScheduler; failures requiring Coordinator intervention

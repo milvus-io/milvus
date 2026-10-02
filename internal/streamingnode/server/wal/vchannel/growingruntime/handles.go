@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -22,7 +23,7 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion 
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return nil, merr.WrapErrServiceInternalMsg("growing runtime closed")
+		return nil, viewerror.NewViewInvalidated("growing runtime is closed")
 	}
 	for _, id := range partitionIDs {
 		if !r.partitionLoaded(id) {

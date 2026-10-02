@@ -10,10 +10,20 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}}
+	w.lifetime.SetState(typeutil.LifetimeStateStopped)
+	_, err := w.GetLatestQueryPlanMVCC(context.Background(), "p_1v0")
+	require.True(t, viewerror.AsViewError(err).IsOnShutdown())
+	wire := viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
+	require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetMVCCTimestamp", wire)).IsRetryable())
+}
 
 func TestQueryPlanPrunesSNUsingSelectedViewDataVersion(t *testing.T) {
 	sealedAt := qviews.DataVersion{StreamingVersion: 10, CompactVersion: 2}

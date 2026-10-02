@@ -252,22 +252,31 @@ func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qv
 	}
 	h.mu.Lock()
 	shard := h.shards[shardID]
-	if shard == nil && shardID.ReplicaID == qviews.UnknownReplicaID {
-		// The client resolves shards by vchannel only and carries an unknown
-		// replica ID before Phase 1; resolve by matching vchannel.
-		// A vchannel may be served by several replicas (one shard per replica);
-		// the lookup picks one of them — unambiguous under the single-replica
-		// semantics the query client targets.
-		for id, candidate := range h.shards {
-			if id.VChannel == shardID.VChannel {
-				shard = candidate
-				break
-			}
+	if shard != nil {
+		h.mu.Unlock()
+		return shard.acquireLatestUpView(ctx)
+	}
+	if shardID.ReplicaID != qviews.UnknownReplicaID {
+		h.mu.Unlock()
+		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
+	}
+	var candidates []*snShardView
+	for id, candidate := range h.shards {
+		if id.VChannel == shardID.VChannel {
+			candidates = append(candidates, candidate)
 		}
 	}
 	h.mu.Unlock()
-	if shard == nil {
-		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
+	// A matching replica may be preparing or tearing down. Acquire an Up lease
+	// before choosing it. Never nest shard locks under h.mu: onEmpty takes h.mu.
+	for _, candidate := range candidates {
+		lease, err := candidate.acquireLatestUpView(ctx)
+		if err == nil {
+			return lease, nil
+		}
+		if !viewerror.AsViewError(err).IsViewNotFound() {
+			return nil, err
+		}
 	}
-	return shard.acquireLatestUpView(ctx)
+	return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
 }

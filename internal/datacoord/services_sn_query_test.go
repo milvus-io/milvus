@@ -9,7 +9,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/dataview"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -40,4 +42,31 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: &viewpb.DataVersion{StreamingVersion: 100}})
 	require.NoError(t, err)
 	require.Error(t, merr.Error(resp.GetStatus()))
+}
+
+func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	version := &viewpb.DataVersion{StreamingVersion: 1}
+	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3}}}}}}
+	patch := mockey.Mock((*catalogkv.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{view}, nil).Build()
+	defer patch.UnPatch()
+	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
+	require.NoError(t, err)
+	logs := []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 42}, {LogID: 43, LogPath: "existing/path/43"}}}}
+	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo()}}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
+	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Len(t, resp.Bm25Resources, 1)
+	paths, err := packed.NewStatsResolver("", packed.CreateStorageConfig()).WithBM25Logs(resp.Bm25Resources[0].Bm25Binlogs).BM25StatsPaths()
+	require.NoError(t, err)
+	expected, err := binlog.BuildLogPath(storage.BM25Binlog, 1, 2, 3, 100, 42)
+	require.NoError(t, err)
+	require.Equal(t, []string{expected, "existing/path/43"}, paths[100])
+	require.Empty(t, logs[0].Binlogs[0].LogPath, "RPC must not mutate shared metadata")
+	resp.Bm25Resources[0].Bm25Binlogs[0].Binlogs[1].LogPath = "caller-owned"
+	require.Equal(t, "existing/path/43", logs[0].Binlogs[1].LogPath)
 }

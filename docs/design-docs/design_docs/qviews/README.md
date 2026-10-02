@@ -59,6 +59,9 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
   `fetchFieldsAsRecord` pins/unpins LocalSegments locally and borrows SN
   CSegments protected by the outer query task handles. These handles remain held
   through execution and Arrow-to-proto conversion; the adapter does not release them.
+  Boost scorers follow the same ownership rule: SN adapters borrow the pinned
+  CSegments through asynchronous scoring, while LocalSegments keep their local
+  pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
   complete SN/QN end-to-end flow above remain integration work.
 

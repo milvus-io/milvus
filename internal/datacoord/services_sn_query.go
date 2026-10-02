@@ -6,8 +6,11 @@ import (
 	"slices"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -100,10 +103,17 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 			}
 			manifestPath = packed.MarshalManifestPath(base, version)
 		}
+		bm25Logs := lo.Map(segment.GetBm25Statslogs(), func(log *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+			return proto.Clone(log).(*datapb.FieldBinlog)
+		})
+		if err := binlog.DecompressBinLog(storage.BM25Binlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), bm25Logs); err != nil {
+			resp.Status = merr.Status(merr.Wrap(err, "decode query view BM25 log paths"))
+			return resp, nil
+		}
 		byID[segment.GetID()] = &datapb.StreamingNodeBM25Resource{
 			SegmentId:      segment.GetID(),
 			PartitionId:    segment.GetPartitionID(),
-			Bm25Binlogs:    segment.GetBm25Statslogs(),
+			Bm25Binlogs:    bm25Logs,
 			StorageVersion: segment.GetStorageVersion(),
 			ManifestPath:   manifestPath,
 		}

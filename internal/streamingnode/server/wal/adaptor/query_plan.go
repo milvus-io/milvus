@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -20,7 +19,7 @@ import (
 
 func (w *walAdaptorImpl) GetLatestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, status.NewOnShutdownError("wal is on shutdown")
+		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
 	currentMVCC := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
