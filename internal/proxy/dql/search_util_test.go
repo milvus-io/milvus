@@ -119,6 +119,7 @@ func TestSubSearchRequestFunctionChainsWireRoundTrip(t *testing.T) {
 	require.Len(t, roundTrip.GetFunctionChains(), 1)
 	assert.True(t, proto.Equal(chain, roundTrip.GetFunctionChains()[0]))
 }
+
 func TestConvertHybridSearchToSearchUsesTopLevelRLS(t *testing.T) {
 	searchReq := ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
 		RlsPrincipal: "top-level-principal",

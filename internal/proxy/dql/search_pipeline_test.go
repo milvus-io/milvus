@@ -3155,6 +3155,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperatorReusesRLSPredicate() {
 	s.NoError(err)
 	s.Same(predicate, op.(*requeryOperator).rlsPredicate)
 }
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},
