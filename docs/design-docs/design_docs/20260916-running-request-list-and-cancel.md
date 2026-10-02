@@ -160,6 +160,7 @@ message CancelRequestsRequest {
   common.MsgBase base = 1;
   repeated int64 request_ids = 2;
   string reason = 3;
+  string user = 4;             // only that user's requests; see Privileges
 }
 
 message CancelRequestsResponse {
@@ -238,9 +239,13 @@ answer normally. The rule is the same for both:
   request may still be running on the proxy that was not reached; the caller
   retries the cancel or lists again once that proxy is back. Reporting such an
   id as `not_found` would tell the caller a still-running request is gone.
-  This is the same shape as DynamoDB's `UnprocessedKeys` or the `unreachable`
-  field of Google AIP-217 (API Improvement Proposals): what could not be
-  settled is listed separately rather than folded into a definite answer.
+  Both halves have precedents. `node_results` is what Google AIP-217 (API
+  Improvement Proposals) calls `unreachable`: the resources that could not be
+  reached are named, so a partial answer is not taken for a complete one.
+  `undetermined` is closer to DynamoDB `BatchGetItem`'s `UnprocessedKeys`:
+  the items this call did not settle, listed for the caller to retry
+  (DynamoDB leaves items unprocessed because of throughput or size limits;
+  here it is because the proxy that may hold them did not answer).
 
 Returning an error instead, and letting the caller discard the rows, would be
 backwards. The reason to list running requests is usually that something is
@@ -296,6 +301,26 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
   match.
 - The request messages carry the `privilege_ext_obj` annotation in the same
   form as `FlushAllRequest`; `rbac_annotation_coverage_test.go` enforces it.
+- The privileges reach other users' requests only. Any user may list and
+  cancel the requests they issued, as in PostgreSQL (`pg_cancel_backend` on a
+  backend of the caller's own role), MySQL (`KILL` of one's own threads
+  without `CONNECTION_ADMIN`), CockroachDB (`CANCEL QUERY` of one's own
+  queries without `CANCELQUERY`), Trino ("users always have permission to view
+  or kill their own queries"), MongoDB (`killOp` of one's own operations on
+  `mongod` without `killop`) and ClickHouse (`KILL QUERY` of one's own
+  queries without the `KILL QUERY` grant).
+- Mechanism: when the privilege check fails for one of these two calls, the
+  interceptor (`privilege_interceptor.go`) lets it through with the ctx marked
+  as held to the caller's own requests, next to the existing `isCurUserObject`
+  and `isSelectMyRoleGrants` exceptions. The entry proxy then sets `user` to
+  the caller when it is empty and refuses any other name with
+  `ErrPrivilegeNotPermitted`. List already filters by `user`. Cancel carries
+  `user` down to the proxy that holds each request, which checks the owner as
+  it cancels; the id of another user's request is reported in `not_found`,
+  exactly like an id that does not exist, so its existence is not revealed.
+  The owner of a request never changes, so the check needs no coordination.
+- With authorization disabled, or for root when `rootShouldBindRole` is off,
+  the interceptor returns before the check and nothing is restricted.
 
 ## Design Details
 
@@ -496,7 +521,9 @@ Remaining limits:
 - Unit tests: concurrent registration and removal in the registry;
   `lb_policy` neither blacklists nor excludes a node when the ctx is canceled;
   `Enqueue` returns immediately on a canceled ctx; the gRPC methods return
-  3002; privilege grant and denial.
+  3002; privilege grant and denial; a caller without the privileges lists and
+  cancels only their own requests, is refused when naming another user, and
+  gets another user's id back as not found.
 - Integration tests: brute-force search on a large growing segment, cancel,
   and observe QueryNode CPU dropping and the cgo cancel counters increasing;
   cancel from a proxy that is not executing the request in a multi-proxy
