@@ -220,7 +220,8 @@ func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentIn
 	// For StorageV3, set up a manifest path
 	if storageVersion == storage.StorageV3 {
 		k := fmt.Sprintf("%d/%d/%d", s.collectionID, s.partitionID, s.segmentID)
-		basePath := fmt.Sprintf("insert_log/%s", k)
+		// Complete key under the suite's local storage root ("/tmp").
+		basePath := fmt.Sprintf("/tmp/insert_log/%s", k)
 		// Use JSON format for manifest path: {"ver": 0, "base_path": "..."}
 		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}

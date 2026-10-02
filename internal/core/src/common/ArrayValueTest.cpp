@@ -84,6 +84,7 @@ NestedArrayFieldMeta(FieldId field_id,
                      DataType::ARRAY,
                      DataType::ARRAY,
                      nullable,
+                     false,
                      std::nullopt,
                      std::string{},
                      LOCAL_FORMAT_RAW,
@@ -290,7 +291,9 @@ AssertStorageV3NestedArrayResult(const proto::segcore::RetrieveResults& result,
 }
 
 void
-RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
+RunStorageV3SealedRetrieve(bool enable_mmap,
+                           bool use_take,
+                           bool lazy_manifest = false) {
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
     const auto segment_path =
@@ -307,6 +310,12 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     const auto row_count = static_cast<int64_t>(rows.size());
 
     auto& segcore_config = segcore::SegcoreConfig::default_config();
+    const auto original_lazy_manifest =
+        segcore_config.get_lazy_column_group_enabled();
+    Defer restore_lazy_column_group([&]() {
+        segcore_config.set_lazy_column_group_enabled(original_lazy_manifest);
+    });
+    segcore_config.set_lazy_column_group_enabled(lazy_manifest);
     const auto original_chunk_rows = segcore_config.get_chunk_rows();
     DeferLambda([&]() { segcore_config.set_chunk_rows(original_chunk_rows); });
     segcore_config.set_chunk_rows(2);
@@ -391,6 +400,54 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     auto* chunked =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(sealed.get());
     ASSERT_NE(chunked, nullptr);
+    if (lazy_manifest) {
+        auto column =
+            chunked->TestGetPublishedStateSnapshot()->runtime->fields.at(
+                nested_field);
+        ASSERT_NE(column, nullptr);
+        auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+        ASSERT_NE(proxy, nullptr);
+        ASSERT_TRUE(proxy->IsLazy());
+        ASSERT_FALSE(proxy->IsMaterialized());
+        if (enable_mmap) {
+            EXPECT_EQ(static_cast<segcore::SegmentInterface*>(sealed.get())
+                          ->get_field_avg_size(nested_field),
+                      0);
+            EXPECT_FALSE(proxy->IsMaterialized());
+        }
+        const std::vector<int64_t> lazy_offsets = {3, 0, 1, 2, 0};
+        EXPECT_FALSE(
+            column->CellsLoaded(lazy_offsets.data(), lazy_offsets.size()));
+
+        // The first call must materialize through BulkArrayValueAt itself,
+        // without a layout/size getter preparing the column beforehand.
+        milvus::OpContext op_ctx;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            SCOPED_TRACE(attempt);
+            std::vector<ScalarFieldProto> actual(lazy_offsets.size());
+            size_t callback_count = 0;
+            ASSERT_NO_THROW(column->BulkArrayValueAt(
+                &op_ctx,
+                [&](ScalarFieldProto&& value, size_t i) {
+                    ASSERT_LT(i, actual.size());
+                    actual[i] = std::move(value);
+                    ++callback_count;
+                },
+                lazy_offsets.data(),
+                lazy_offsets.size()));
+            EXPECT_EQ(callback_count, lazy_offsets.size());
+            for (size_t i = 0; i < lazy_offsets.size(); ++i) {
+                AssertProtoEqual(rows[lazy_offsets[i]], actual[i]);
+            }
+            EXPECT_TRUE(
+                column->CellsLoaded(lazy_offsets.data(), lazy_offsets.size()));
+        }
+        if (enable_mmap) {
+            EXPECT_EQ(static_cast<segcore::SegmentInterface*>(sealed.get())
+                          ->get_field_avg_size(nested_field),
+                      0);
+        }
+    }
     ASSERT_GT(sealed->num_chunk(nested_field), 1);
     chunked->SetUseTakeForOutputForTesting(use_take);
 
@@ -418,8 +475,8 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         auto row = BoolArrayRow({true, false, true});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Bool));
-        ASSERT_TRUE(array.View().get_data<bool>(0));
-        ASSERT_FALSE(array.View().get_data<bool>(1));
+        ASSERT_TRUE(array.View().get_data_unchecked<bool>(0));
+        ASSERT_FALSE(array.View().get_data_unchecked<bool>(1));
         AssertProtoEqual(row, array.output_data());
     }
     {
@@ -430,31 +487,31 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         ASSERT_EQ(array.child().RowNums(), 2);
         ASSERT_EQ(array.child().Data(), array.data());
         ASSERT_EQ(array.byte_size(), 2 * sizeof(int32_t) + MMAP_ARRAY_PADDING);
-        ASSERT_EQ(array.View().get_data<int16_t>(0), -3);
-        ASSERT_EQ(array.View().get_data<int16_t>(1), 7);
-        ASSERT_EQ(array.View().get_data<int64_t>(0), -3);
-        ASSERT_EQ(array.View().get_data<int64_t>(1), 7);
+        ASSERT_EQ(array.View().get_data_unchecked<int16_t>(0), -3);
+        ASSERT_EQ(array.View().get_data_unchecked<int16_t>(1), 7);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(0), -3);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(1), 7);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = LongArrayRow({-9, 11});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Int64));
-        ASSERT_EQ(array.View().get_data<int64_t>(1), 11);
+        ASSERT_EQ(array.View().get_data_unchecked<int64_t>(1), 11);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = FloatArrayRow({1.5F, -2.0F});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Float));
-        ASSERT_FLOAT_EQ(array.View().get_data<float>(0), 1.5F);
+        ASSERT_FLOAT_EQ(array.View().get_data_unchecked<float>(0), 1.5F);
         AssertProtoEqual(row, array.output_data());
     }
     {
         auto row = DoubleArrayRow({1.25, -4.5});
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::Double));
-        ASSERT_DOUBLE_EQ(array.View().get_data<double>(1), -4.5);
+        ASSERT_DOUBLE_EQ(array.View().get_data_unchecked<double>(1), -4.5);
         AssertProtoEqual(row, array.output_data());
     }
     {
@@ -462,7 +519,7 @@ TEST(ArrayValue, ScalarLeavesRoundTrip) {
         auto array = ArrayValue::FromProto(
             row, LeafArrayType(proto::schema::DataType::VarChar));
         ASSERT_NE(dynamic_cast<const StringChunk*>(&array.child()), nullptr);
-        ASSERT_EQ(array.View().get_data<std::string_view>(1), "bb");
+        ASSERT_EQ(array.View().get_data_unchecked<std::string_view>(1), "bb");
         AssertProtoEqual(row, array.output_data());
     }
 }
@@ -508,9 +565,9 @@ TEST(ArrayValue, NestedStringArrayUsesRecursiveNodes) {
 
     ASSERT_EQ(root.size(), 3);
     ASSERT_TRUE(root.is_nested_array());
-    ASSERT_EQ(root.array_at(0).get_data<std::string_view>(1), "bb");
+    ASSERT_EQ(root.array_at(0).get_data_unchecked<std::string_view>(1), "bb");
     ASSERT_TRUE(root.array_at(1).empty());
-    ASSERT_EQ(root.array_at(2).get_data<std::string_view>(0), "c");
+    ASSERT_EQ(root.array_at(2).get_data_unchecked<std::string_view>(0), "c");
 
     const auto* inner = dynamic_cast<const ColumnarArrayChunk*>(&array.child());
     ASSERT_NE(inner, nullptr);
@@ -558,7 +615,7 @@ TEST(ArrayValue, NullAndEmptyArraysRemainDistinctAtEveryLevel) {
     ASSERT_TRUE(root.array_at(0).array_at(1).is_null());
     ASSERT_FALSE(root.array_at(0).array_at(2).is_null());
     ASSERT_TRUE(root.array_at(0).array_at(2).empty());
-    ASSERT_EQ(root.array_at(2).array_at(0).get_data<int32_t>(0), 4);
+    ASSERT_EQ(root.array_at(2).array_at(0).get_data_unchecked<int32_t>(0), 4);
 
     const auto* level_one =
         dynamic_cast<const ColumnarArrayChunk*>(&array.child());
@@ -597,7 +654,7 @@ TEST(ArrayValue, TripleNestedIntAccess) {
     auto array = ArrayValue::FromProto(row, type);
     auto root = array.View();
 
-    ASSERT_EQ(root.array_at(2).array_at(0).get_data<int32_t>(0), 4);
+    ASSERT_EQ(root.array_at(2).array_at(0).get_data_unchecked<int32_t>(0), 4);
 
     const auto* level_one =
         dynamic_cast<const ColumnarArrayChunk*>(&array.child());
@@ -624,7 +681,9 @@ TEST(ArrayValue, QuadrupleNestedIntAccess) {
     auto array = ArrayValue::FromProto(row, type);
     auto root = array.View();
 
-    ASSERT_EQ(root.array_at(0).array_at(0).array_at(1).get_data<int32_t>(0), 3);
+    ASSERT_EQ(
+        root.array_at(0).array_at(0).array_at(1).get_data_unchecked<int32_t>(0),
+        3);
     const auto output = array.output_data();
     ASSERT_EQ(output.array_data().element_type(),
               proto::schema::DataType::Array);
@@ -881,6 +940,8 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     schema->AddField(NestedArrayFieldMeta(array_field, type));
 
     auto config = segcore::SegcoreConfig::default_config();
+    const auto original_chunk_rows = config.get_chunk_rows();
+    DeferLambda([&]() { config.set_chunk_rows(original_chunk_rows); });
     config.set_chunk_rows(2);
     auto segment =
         segcore::CreateGrowingSegment(schema, empty_index_meta, 1, config);
@@ -993,6 +1054,7 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     writer.write_to_target(arrays, target);
     auto* data = target->release();
     auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+    target->TransferOwnership();
     ColumnarArrayChunk array_chunk(
         row_count,
         data,
@@ -1005,15 +1067,17 @@ TEST(ColumnarArrayChunk, WriterAndChunkShareOneContiguousBuffer) {
     ASSERT_FALSE(array_chunk.is_valid(1));
     ASSERT_TRUE(array_chunk.is_valid(2));
     AssertOffsets(array_chunk.offsets(), {0, 4, 4, 5});
-    ASSERT_EQ(array_chunk.View(0).array_at(0).get_data<std::string_view>(1),
-              "bb");
+    ASSERT_EQ(
+        array_chunk.View(0).array_at(0).get_data_unchecked<std::string_view>(1),
+        "bb");
     ASSERT_TRUE(array_chunk.View(0).array_at(1).is_null());
     ASSERT_FALSE(array_chunk.View(0).array_at(2).is_null());
     ASSERT_TRUE(array_chunk.View(0).array_at(2).empty());
     ASSERT_TRUE(array_chunk.View(1).is_null());
     ASSERT_TRUE(array_chunk.View(1).empty());
-    ASSERT_EQ(array_chunk.View(2).array_at(0).get_data<std::string_view>(0),
-              "d");
+    ASSERT_EQ(
+        array_chunk.View(2).array_at(0).get_data_unchecked<std::string_view>(0),
+        "d");
 
     const auto* inner =
         dynamic_cast<const ColumnarArrayChunk*>(&array_chunk.child());
@@ -1178,6 +1242,14 @@ TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMemoryChunk) {
 
 TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMmapChunk) {
     RunStorageV3SealedRetrieve(true, false);
+}
+
+TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMemoryChunk) {
+    RunStorageV3SealedRetrieve(false, false, true);
+}
+
+TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMmapChunk) {
+    RunStorageV3SealedRetrieve(true, false, true);
 }
 
 TEST(ArrayValue, SealedStorageV3TakeNestedArray) {

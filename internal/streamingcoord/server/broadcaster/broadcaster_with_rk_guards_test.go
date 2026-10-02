@@ -37,24 +37,27 @@ func TestBroadcastLeavesGuardsWithTheTaskWhenTheAckWaitFails(t *testing.T) {
 	t.Cleanup(releaseAppends)
 
 	operator := mock_streaming.NewMockWALAccesser(t)
-	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
-			<-release
-			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
-			for idx := range msgs {
-				resps.Responses[idx] = types.AppendResponse{
-					AppendResult: &types.AppendResult{
-						MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
-						TimeTick:  uint64(time.Now().UnixMilli()),
-					},
-				}
+	operator.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+	appendFn := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+		<-release
+		resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+		for idx := range msgs {
+			resps.Responses[idx] = types.AppendResponse{
+				AppendResult: &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+					TimeTick:  uint64(time.Now().UnixMilli()),
+				},
 			}
-			return resps
-		}).Maybe()
+		}
+		return resps
+	}
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
+	// A new broadcast also goes to the control channel: one more message per append.
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
 	guards := bm.resourceKeyLocker.Lock(collKey)
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 1, guards: guards}
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 1, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: guards}
 
 	// Registration happens before the scheduler is ever asked to wait, so an
 	// already-canceled context reproduces the real failure -- a request that times
@@ -86,4 +89,27 @@ func TestBroadcastLeavesGuardsWithTheTaskWhenTheAckWaitFails(t *testing.T) {
 		g.Unlock()
 		return true
 	}, 10*time.Second, 10*time.Millisecond)
+}
+
+// TestUnreplicableBroadcastRejectsReplicableMessage pins that a broadcast api from
+// WithUnreplicableResourceKeys only accepts unreplicable messages, and that the
+// rejection leaves the guards with the caller so Close() releases them.
+func TestUnreplicableBroadcastRejectsReplicableMessage(t *testing.T) {
+	locker := newResourceKeyLocker()
+	key := message.NewExclusiveClusterResourceKey()
+	b := &broadcasterWithRK{
+		broadcaster:    &broadcastTaskManager{},
+		broadcastID:    1,
+		controlChannel: "by-dev-rootcoord-dml_0_vcchan",
+		unreplicable:   true,
+		guards:         locker.Lock(key),
+	}
+
+	_, err := b.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}))
+	require.Error(t, err)
+	b.Close()
+
+	guards, err := locker.FastLock(key)
+	require.NoError(t, err, "the caller's Close() must release the resource key")
+	guards.Unlock()
 }

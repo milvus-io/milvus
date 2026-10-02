@@ -59,22 +59,27 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		}
 
 		if mlog.LevelEnabled(mlog.DebugLevel) && req.GetReq().GetIsCount() {
-			allRetrieveCount := result.AllRetrieveCount
-			countRet := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
-			if allRetrieveCount != countRet {
-				mlog.Debug(ctx, "count segment done with delete",
-					mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
-					mlog.String("channel", s.LoadInfo().GetInsertChannel()),
-					mlog.FieldSegmentID(s.ID()),
-					mlog.Int64("allRetrieveCount", allRetrieveCount),
-					mlog.Int64("countRet", countRet))
-			} else {
-				mlog.Debug(ctx, "count segment done",
-					mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
-					mlog.String("channel", s.LoadInfo().GetInsertChannel()),
-					mlog.FieldSegmentID(s.ID()),
-					mlog.Int64("allRetrieveCount", allRetrieveCount),
-					mlog.Int64("countRet", countRet))
+			// A segment may legitimately return an empty count result (no
+			// field data or a 0-row scalar array), e.g. a segment with no
+			// rows matching the filter during rollout. Skip the comparison
+			// log in that case.
+			if countRet, ok := getCountRet(result); ok {
+				allRetrieveCount := result.AllRetrieveCount
+				if allRetrieveCount != countRet {
+					mlog.Debug(ctx, "count segment done with delete",
+						mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
+						mlog.String("channel", s.LoadInfo().GetInsertChannel()),
+						mlog.FieldSegmentID(s.ID()),
+						mlog.Int64("allRetrieveCount", allRetrieveCount),
+						mlog.Int64("countRet", countRet))
+				} else {
+					mlog.Debug(ctx, "count segment done",
+						mlog.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
+						mlog.String("channel", s.LoadInfo().GetInsertChannel()),
+						mlog.FieldSegmentID(s.ID()),
+						mlog.Int64("allRetrieveCount", allRetrieveCount),
+						mlog.Int64("countRet", countRet))
+				}
 			}
 		}
 		resultCh <- RetrieveSegmentResult{
@@ -97,6 +102,21 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+// getCountRet extracts the count(*) value from a per-segment retrieve result.
+// A segment may return an empty result (no field data, or a 0-row scalar
+// array) for a count(*) request, in which case ok is false and the caller must
+// not index into the raw data slices.
+func getCountRet(result *segcorepb.RetrieveResults) (int64, bool) {
+	if len(result.GetFieldsData()) == 0 {
+		return 0, false
+	}
+	longData := result.GetFieldsData()[0].GetScalars().GetLongData()
+	if longData == nil || len(longData.GetData()) == 0 {
+		return 0, false
+	}
+	return longData.GetData()[0], true
 }
 
 // shouldEnableIgnoreNonPk determines whether to use two-phase retrieval

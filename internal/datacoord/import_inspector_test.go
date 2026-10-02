@@ -54,6 +54,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.collectionID = 1
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
+	s.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

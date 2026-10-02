@@ -43,12 +43,12 @@ import (
 const twoPCRowCount = 100
 
 type TwoPCImportSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 func (s *TwoPCImportSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.MiniClusterSuite.SetupSuite()
+	s.importSuite.SetupSuite()
 }
 
 // WaitForImportState polls GetImportProgress until the job reaches the target state.
@@ -86,7 +86,7 @@ func WaitForImportState(ctx context.Context, c *cluster.MiniClusterV3, jobID str
 			mlog.String("current", currentState.String()),
 			mlog.String("target", targetState.String()),
 			mlog.Int64("progress", resp.GetProgress()))
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -414,6 +414,16 @@ func (s *TwoPCImportSuite) TestQueryBeforeCommit() {
 	// Wait for Completed
 	err = WaitForImportState(ctx, s.Cluster, jobID, internalpb.ImportJobState_Completed)
 	s.NoError(err)
+
+	// Completed means the commit fences have been processed, but the collection
+	// was loaded before these segments became visible. Refresh its load target
+	// and wait for the committed segments before querying.
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
+		Refresh:        true,
+	})
+	s.Require().NoError(merr.CheckRPCCall(loadStatus, err))
+	s.WaitForLoadRefresh(ctx, "", collectionName)
 
 	// Query AFTER commit - data should be visible
 	countAfter := s.queryRowCount(ctx, collectionName)

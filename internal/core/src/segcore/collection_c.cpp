@@ -15,6 +15,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "monitor/scope_metric.h"
@@ -32,9 +33,8 @@ NewCollection(const void* schema_proto_blob,
             schema_proto_blob, length);
         *newCollection = collection.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -49,9 +49,8 @@ UpdateSchema(CCollection collection,
 
         col->parse_schema(proto_blob, length, version);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -64,9 +63,8 @@ UpdateLoadFields(CCollection collection,
         col->get_schema()->UpdateLoadFields(
             std::vector<int64_t>(field_ids, field_ids + length));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -79,9 +77,8 @@ SetIndexMeta(CCollection collection,
         auto col = static_cast<milvus::segcore::Collection*>(collection);
         col->parseIndexMeta(proto_blob, length);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void

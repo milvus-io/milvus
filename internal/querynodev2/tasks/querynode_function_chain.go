@@ -31,14 +31,14 @@ type preparedQueryNodeFunctionChains struct {
 }
 
 type preparedL0Rerank struct {
-	chain         *chain.ChainRepr
-	inputFieldIDs []int64
-	boostScore    *preparedBoostScore
+	chain      *chain.ChainRepr
+	inputPlan  *chain.DataFrameInputPlan
+	boostScore *preparedBoostScore
 }
 
 type preparedL1FunctionChain struct {
-	chain         *chain.ChainRepr
-	inputFieldIDs []int64
+	chain     *chain.ChainRepr
+	inputPlan *chain.DataFrameInputPlan
 }
 
 func prepareQueryNodeFunctionChains(serializedPlan []byte, schema *schemapb.CollectionSchema) (*preparedQueryNodeFunctionChains, error) {
@@ -102,31 +102,54 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 			if err := validateL0FunctionChainSystemOutputs(repr); err != nil {
 				return nil, merr.Wrapf(err, "querynode function chain[%d]", i)
 			}
-			inputFieldIDs, err := planQueryNodeFunctionChainInputs(repr, schemaHelper, stage)
+			inputPlan, err := chain.CompileDataFrameInputPlanWithSchemaHelper(repr, schemaHelper)
 			if err != nil {
 				return nil, merr.Wrapf(err, "querynode function chain[%d]", i)
 			}
 			prepared.l0 = &preparedL0Rerank{
-				chain:         repr,
-				inputFieldIDs: inputFieldIDs,
+				chain:     repr,
+				inputPlan: inputPlan,
 			}
 		case schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
 			if err := validateL1FunctionChain(repr); err != nil {
 				return nil, merr.Wrapf(err, "querynode function chain[%d]", i)
 			}
-			inputFieldIDs, err := planQueryNodeFunctionChainInputs(repr, schemaHelper, stage)
+			inputPlan, err := chain.CompileDataFrameInputPlanWithSchemaHelper(repr, schemaHelper)
 			if err != nil {
 				return nil, merr.Wrapf(err, "querynode function chain[%d]", i)
 			}
 			prepared.l1 = &preparedL1FunctionChain{
-				chain:         repr,
-				inputFieldIDs: inputFieldIDs,
+				chain:     repr,
+				inputPlan: inputPlan,
 			}
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("querynode function chain[%d] stage %s is not supported", i, stage.String())
 		}
 	}
 	return prepared, nil
+}
+
+// validateQueryNodeMapOp checks request semantics without executing the function
+// or materializing input fields. Both L0 and L1 must run these checks before ANN.
+func validateQueryNodeMapOp(op *chain.OperatorRepr, stage string) error {
+	fn, err := chain.FunctionFromReprWithContext(op.Function, chaintypes.FunctionBuildContext{})
+	if err != nil {
+		return err
+	}
+	if len(op.Inputs) == 0 {
+		return merr.WrapErrParameterInvalidMsg("map operator requires inputs")
+	}
+	if len(op.Outputs) == 0 {
+		return merr.WrapErrParameterInvalidMsg("map operator requires outputs")
+	}
+	outputTypes := fn.OutputDataTypes()
+	if outputTypes != nil && len(op.Outputs) != len(outputTypes) {
+		return merr.WrapErrParameterInvalidMsg("map output columns count %d does not match function output count %d", len(op.Outputs), len(outputTypes))
+	}
+	if !fn.IsRunnable(stage) {
+		return merr.WrapErrParameterInvalidMsg("function %q does not support stage %q", fn.Name(), stage)
+	}
+	return nil
 }
 
 func validateQueryNodeFunctionChainSystemOutputs(repr *chain.ChainRepr, level string) error {
@@ -144,54 +167,4 @@ func validateQueryNodeFunctionChainSystemOutputs(repr *chain.ChainRepr, level st
 		}
 	}
 	return nil
-}
-
-func planQueryNodeFunctionChainInputs(
-	repr *chain.ChainRepr,
-	schemaHelper *typeutil.SchemaHelper,
-	stage schemapb.FunctionChainStage,
-) ([]int64, error) {
-	if repr == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("function chain repr is nil")
-	}
-
-	level := "L0"
-	if stage == schemapb.FunctionChainStage_FunctionChainStageL1Rerank {
-		level = "L1"
-	}
-
-	inputFieldIDs := make([]int64, 0)
-	seenInputFields := make(map[string]struct{})
-	for _, input := range repr.Info.RequiredInputs {
-		if chain.IsFunctionChainSystemName(input) {
-			if !isReadableQueryNodeSystemInput(input) {
-				return nil, merr.WrapErrParameterInvalidMsg("system input %q is not readable by %s rerank function chain", input, level)
-			}
-			continue
-		}
-		if _, ok := seenInputFields[input]; ok {
-			continue
-		}
-
-		field, err := schemaHelper.GetFieldFromName(input)
-		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", input)
-		}
-		if _, err := chain.ToArrowType(field.GetDataType()); err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("function chain input %q has unsupported field type %s", input, field.GetDataType().String())
-		}
-
-		seenInputFields[input] = struct{}{}
-		inputFieldIDs = append(inputFieldIDs, field.GetFieldID())
-	}
-	return inputFieldIDs, nil
-}
-
-func isReadableQueryNodeSystemInput(input string) bool {
-	switch input {
-	case chaintypes.IDFieldName, chaintypes.ScoreFieldName:
-		return true
-	default:
-		return false
-	}
 }

@@ -18,6 +18,7 @@
 
 #include <string.h>
 #include <cstdint>
+#include <memory>
 
 #include "common/BitUtil.h"
 #include "common/Vector.h"
@@ -87,10 +88,11 @@ RowContainer::initializeRow(char* row) {
 
 char*
 RowContainer::newRow() {
-    char* row = new char[fixedRowSize_];
-    rows_.emplace_back(row);
+    std::unique_ptr<char[]> row(new char[fixedRowSize_]);
+    initializeRow(row.get());
+    rows_.emplace_back(row.get());
     ++numRows_;
-    return initializeRow(row);
+    return row.release();
 }
 
 void

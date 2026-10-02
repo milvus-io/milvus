@@ -29,6 +29,8 @@
 #include "expr/ITypeExpr.h"
 #include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
@@ -36,6 +38,7 @@
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/skip_metrics_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -86,57 +89,6 @@ class NoOpPrefetchSegmentExpr final : public InspectableSegmentExpr {
  private:
     int prefetch_calls_{0};
 };
-
-std::unique_ptr<SegmentSealed>
-CreateTwoChunkSealed(const SchemaPtr& schema,
-                     const GeneratedData& first,
-                     const GeneratedData& second) {
-    std::unordered_map<int64_t, std::vector<FieldDataPtr>> field_chunks;
-
-    auto append_dataset = [&](const GeneratedData& dataset) {
-        const auto row_count = dataset.row_ids_.size();
-
-        auto row_ids =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
-        row_ids->FillFieldData(dataset.row_ids_.data(), row_count);
-        field_chunks[RowFieldID.get()].push_back(std::move(row_ids));
-
-        auto timestamps =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
-        timestamps->FillFieldData(dataset.timestamps_.data(), row_count);
-        field_chunks[TimestampFieldID.get()].push_back(std::move(timestamps));
-
-        const auto fields = schema->get_fields();
-        for (const auto& data : dataset.raw_->fields_data()) {
-            const auto field_id = data.field_id();
-            field_chunks[field_id].push_back(CreateFieldDataFromDataArray(
-                row_count, &data, fields.at(FieldId(field_id))));
-        }
-    };
-
-    append_dataset(first);
-    append_dataset(second);
-
-    LoadFieldDataInfo combined_load_info;
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    for (auto& [field_id, chunks] : field_chunks) {
-        auto field_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                              kPartitionID,
-                                                              kSegmentID,
-                                                              field_id,
-                                                              std::move(chunks),
-                                                              cm);
-        combined_load_info.field_infos.merge(field_load_info.field_infos);
-    }
-
-    auto segment = CreateSealedSegment(schema, empty_index_meta);
-    const auto status = LoadFieldData(segment.get(), &combined_load_info);
-    AssertInfo(status.error_code == Success,
-               "Failed to load two-chunk sealed data: {}",
-               status.error_msg);
-    return segment;
-}
 
 void
 SetInt64FieldData(GeneratedData& dataset,
@@ -209,8 +161,8 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
         bitmap_input[i] = true;
     }
 
-    auto skip_chunk = [skipped_chunk_id](
-                          const SkipIndex&, FieldId, int chunk_id) {
+    auto skip_chunk = [skipped_chunk_id](const milvus::FieldSkipMetricsView&,
+                                         int64_t chunk_id) {
         return chunk_id == skipped_chunk_id;
     };
 
@@ -265,8 +217,8 @@ VerifyElementFullScanSkipCursor(SegmentExpr& segment_expr,
         bitmap_input[i] = true;
     }
 
-    auto skip_chunk = [skipped_chunk_id](
-                          const SkipIndex&, FieldId, int chunk_id) {
+    auto skip_chunk = [skipped_chunk_id](const milvus::FieldSkipMetricsView&,
+                                         int64_t chunk_id) {
         return chunk_id == skipped_chunk_id;
     };
 
@@ -361,8 +313,8 @@ VerifyNullableElementFullScanLogicalCount(
                              row_count,
                              query_context->get_consistency_level());
 
-    auto skip_chunk = [skipped_chunk_id](
-                          const SkipIndex&, FieldId, int chunk_id) {
+    auto skip_chunk = [skipped_chunk_id](const milvus::FieldSkipMetricsView&,
+                                         int64_t chunk_id) {
         return chunk_id == skipped_chunk_id;
     };
     int64_t processed_cursor = 0;
@@ -500,9 +452,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchDrivesCallbackPerCandidate) {
     }
     const int expected_skipped = 4;  // offsets 0,1,2,3 live in chunk 0
 
-    auto skip_chunk0 = [](const milvus::SkipIndex&,
-                          FieldId,
-                          int chunk_id) -> bool { return chunk_id == 0; };
+    auto skip_chunk0 = [](const milvus::FieldSkipMetricsView&,
+                          int64_t chunk_id) -> bool { return chunk_id == 0; };
 
     int64_t rows_seen = 0;
     int64_t null_rows = 0;
@@ -560,9 +511,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchKeepsBitmapCursorAligned) {
         bitmap_input[i] = true;
     }
 
-    auto skip_chunk0 = [](const milvus::SkipIndex&,
-                          FieldId,
-                          int chunk_id) -> bool { return chunk_id == 0; };
+    auto skip_chunk0 = [](const milvus::FieldSkipMetricsView&,
+                          int64_t chunk_id) -> bool { return chunk_id == 0; };
 
     // Mirror of the production pattern (e.g. UnaryExpr): a closure-local
     // processed_cursor advanced by every invocation, including null batches.
@@ -637,9 +587,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
     candidate_mask.set(1);
     candidate_mask.set(2);
 
-    auto skip_chunk0 = [](const milvus::SkipIndex&,
-                          FieldId,
-                          int chunk_id) -> bool { return chunk_id == 0; };
+    auto skip_chunk0 = [](const milvus::FieldSkipMetricsView&,
+                          int64_t chunk_id) -> bool { return chunk_id == 0; };
     int64_t processed_cursor = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t*,
@@ -689,9 +638,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
         bitmap_input[i] = true;
     }
 
-    auto skip_chunk0 = [](const milvus::SkipIndex&,
-                          FieldId,
-                          int chunk_id) -> bool { return chunk_id == 0; };
+    auto skip_chunk0 = [](const milvus::FieldSkipMetricsView&,
+                          int64_t chunk_id) -> bool { return chunk_id == 0; };
 
     int64_t processed_cursor = 0;
     int64_t null_batches = 0;
@@ -733,50 +681,75 @@ TEST_F(OffsetsEvalCorrectnessTest,
     }
 }
 
-TEST_F(OffsetsEvalCorrectnessTest,
-       SealedOffsetTakeAppliesLoadedPayloadSkipAfterPin) {
-    ASSERT_EQ(sealed_->GetSkipIndex()->GetMetricsSource(i64_fid_),
-              SkipIndex::MetricsSource::LoadedPayload);
-    auto query_context = std::make_shared<QueryContext>(
-        DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
-    auto seg_expr = MakeDirectSegmentExpr(
-        sealed_.get(), i64_fid_, DataType::INT64, *query_context);
-    OffsetVector offsets{0, 16, 1, 17};
-
-    int skip_checks = 0;
-    auto reject_every_cell = [&](const milvus::SkipIndex&, FieldId, int) {
-        ++skip_checks;
-        return true;
-    };
-
-    int64_t null_rows = 0;
-    int64_t data_rows = 0;
-    auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
-        const int64_t* data,
-        ValidityView,
-        const int32_t*,
-        int size,
-        TargetBitmapView,
-        TargetBitmapView) {
-        if (data == nullptr) {
-            null_rows += size;
-        } else {
-            data_rows += size;
+TEST_F(OffsetsEvalCorrectnessTest, SealedOffsetTakeAppliesColumnOwnedSkip) {
+    struct CopyCounter {
+        int* copies;
+        explicit CopyCounter(int& count) : copies(&count) {
+        }
+        CopyCounter(const CopyCounter& other) : copies(other.copies) {
+            ++*copies;
         }
     };
+    for (bool with_metrics : {false, true}) {
+        SCOPED_TRACE(with_metrics);
+        if (with_metrics) {
+            InstallTestSkipMetrics(sealed_.get(), i64_fid_);
+        }
+        auto query_context = std::make_shared<QueryContext>(
+            DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
+        auto seg_expr = MakeDirectSegmentExpr(
+            sealed_.get(), i64_fid_, DataType::INT64, *query_context);
+        OffsetVector offsets{0, 16, 1, 17};
 
-    TargetBitmap result(offsets.size(), false);
-    TargetBitmap valid(offsets.size(), true);
-    EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(evaluate_batch,
-                                                      reject_every_cell,
-                                                      &offsets,
-                                                      TargetBitmapView(result),
-                                                      TargetBitmapView(valid)),
-              static_cast<int64_t>(offsets.size()));
-    EXPECT_EQ(skip_checks, 2);
-    EXPECT_EQ(null_rows, static_cast<int64_t>(offsets.size()));
-    EXPECT_EQ(data_rows, 0);
-    EXPECT_EQ(result.count(), 0);
+        int skip_checks = 0;
+        int predicate_copies = 0;
+        SkipChunkFn reject_every_cell =
+            [&, counter = CopyCounter(predicate_copies)](
+                const milvus::FieldSkipMetricsView&, int64_t) {
+                ++skip_checks;
+                return true;
+            };
+
+        int64_t null_rows = 0;
+        int64_t data_rows = 0;
+        auto evaluate_batch = [&]<FilterType filter_type =
+                                      FilterType::sequential>(
+            const int64_t* data,
+            ValidityView,
+            const int32_t*,
+            int size,
+            TargetBitmapView,
+            TargetBitmapView) {
+            if (data == nullptr) {
+                null_rows += size;
+            } else {
+                data_rows += size;
+            }
+        };
+
+        TargetBitmap result(offsets.size(), false);
+        TargetBitmap valid(offsets.size(), true);
+        for (int batch = 0; batch < 3; ++batch) {
+            predicate_copies = 0;
+            skip_checks = 0;
+            null_rows = 0;
+            data_rows = 0;
+            EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(
+                          evaluate_batch,
+                          reject_every_cell,
+                          &offsets,
+                          TargetBitmapView(result),
+                          TargetBitmapView(valid)),
+                      static_cast<int64_t>(offsets.size()));
+            // Only the first call with metrics may copy the callback into the
+            // retained filter. Passing later batches through Take must borrow it.
+            EXPECT_EQ(predicate_copies, with_metrics && batch == 0 ? 1 : 0);
+            EXPECT_EQ(skip_checks, with_metrics ? 2 : 0);
+            EXPECT_EQ(null_rows, with_metrics ? offsets.size() : 0);
+            EXPECT_EQ(data_rows, with_metrics ? 0 : offsets.size());
+            EXPECT_EQ(result.count(), 0);
+        }
+    }
 }
 
 TEST_F(OffsetsEvalCorrectnessTest,
@@ -799,8 +772,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     SetScalarFieldValidity(second, nullable_fid, second_valid);
 
     auto segment = CreateTwoChunkSealed(schema, first, second);
-    ASSERT_EQ(segment->GetSkipIndex()->GetMetricsSource(nullable_fid),
-              SkipIndex::MetricsSource::LoadedPayload);
+    InstallTestSkipMetrics(segment.get(), nullable_fid);
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment.get(), N, MAX_TIMESTAMP);
     auto seg_expr = MakeDirectSegmentExpr(
@@ -808,7 +780,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     OffsetVector offsets{0, 16, 1, 17};
 
     int skip_checks = 0;
-    auto reject_every_cell = [&](const milvus::SkipIndex&, FieldId, int) {
+    auto reject_every_cell = [&](const milvus::FieldSkipMetricsView&, int64_t) {
         ++skip_checks;
         return true;
     };
@@ -861,7 +833,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanAdvancesGlobalPosition) {
                                                             int,
                                                             TargetBitmapView,
                                                             TargetBitmapView){};
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     TargetBitmap first_res(4, false);
     TargetBitmap first_valid(4, true);
@@ -915,7 +887,7 @@ TEST_F(OffsetsEvalCorrectnessTest, DirectScanDelegatesPrefetchToColumn) {
                                                             int,
                                                             TargetBitmapView,
                                                             TargetBitmapView){};
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
     TargetBitmap res(4, false);
     TargetBitmap valid(4, true);
     EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
@@ -957,7 +929,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ASSERT_NE(data, nullptr);
         callback_sizes.push_back(size);
     };
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     TargetBitmap res(20, false);
     TargetBitmap valid(20, true);
@@ -971,10 +943,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 20);
 }
 
-TEST_F(OffsetsEvalCorrectnessTest,
-       SequentialScanAppliesLoadedPayloadSkipAfterReadingTheCell) {
-    ASSERT_EQ(sealed_->GetSkipIndex()->GetMetricsSource(i64_fid_),
-              SkipIndex::MetricsSource::LoadedPayload);
+TEST_F(OffsetsEvalCorrectnessTest, SequentialScanAppliesColumnOwnedSkip) {
+    InstallTestSkipMetrics(sealed_.get(), i64_fid_);
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     InspectableSegmentExpr seg_expr(std::vector<ExprPtr>{},
@@ -999,9 +969,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
             TargetBitmapView) {
         callbacks.emplace_back(data == nullptr, size);
     };
-    auto skip_first_cell = [](const milvus::SkipIndex&, FieldId, int chunk_id) {
-        return chunk_id == 0;
-    };
+    auto skip_first_cell = [](const milvus::FieldSkipMetricsView&,
+                              int64_t chunk_id) { return chunk_id == 0; };
 
     TargetBitmap res(20, false);
     TargetBitmap valid(20, true);
@@ -1032,8 +1001,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     first_valid[1] = false;
     SetScalarFieldValidity(first, nullable_fid, first_valid);
     auto segment = CreateTwoChunkSealed(schema, first, second);
-    ASSERT_EQ(segment->GetSkipIndex()->GetMetricsSource(nullable_fid),
-              SkipIndex::MetricsSource::LoadedPayload);
+    InstallTestSkipMetrics(segment.get(), nullable_fid);
 
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment.get(), N, MAX_TIMESTAMP);
@@ -1047,9 +1015,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                     N,
                                     /*batch_size=*/20,
                                     query_context->get_consistency_level());
-    auto skip_first_cell = [](const SkipIndex&, FieldId, int chunk_id) {
-        return chunk_id == 0;
-    };
+    auto skip_first_cell = [](const milvus::FieldSkipMetricsView&,
+                              int64_t chunk_id) { return chunk_id == 0; };
     TargetBitmap candidate_mask(20, false);
     candidate_mask.set(1);
     int64_t processed_cursor = 0;
@@ -1148,7 +1115,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ASSERT_NE(data, nullptr);
         values_seen.insert(values_seen.end(), data, data + size);
     };
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
     TargetBitmap res(12, false);
     TargetBitmap valid(12, true);
     EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
@@ -1183,7 +1150,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                                             int,
                                                             TargetBitmapView,
                                                             TargetBitmapView){};
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     auto process_batch = [&]() {
         TargetBitmap res(4, false);
@@ -1237,7 +1204,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
             ASSERT_NE(data, nullptr);
             rows_seen += size;
         };
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+        std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)>
+            no_skip;
 
         TargetBitmap first_res(4, false);
         TargetBitmap first_valid(4, true);
@@ -1307,15 +1275,17 @@ TEST(OffsetsEvalProductionRegressionTest,
     SetFloatFieldData(second, prune_fid, {70.0F, 80.0F, 90.0F, 100.0F});
 
     auto segment = CreateTwoChunkSealed(schema, first, second);
-    auto skip_index = segment->GetSkipIndex();
-    ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
-        gate_fid, 0, proto::plan::OpType::Equal, 999));
-    ASSERT_FALSE(skip_index->CanSkipUnaryRange<int64_t>(
-        gate_fid, 1, proto::plan::OpType::Equal, 999));
-    ASSERT_TRUE(skip_index->CanSkipUnaryRange<float>(
-        prune_fid, 0, proto::plan::OpType::GreaterThan, 60.0F));
-    ASSERT_FALSE(skip_index->CanSkipUnaryRange<float>(
-        prune_fid, 1, proto::plan::OpType::GreaterThan, 60.0F));
+    InstallTestSkipMetrics(
+        segment.get(),
+        prune_fid,
+        {std::make_shared<index::FloatFieldChunkMetrics<float>>(10.0F, 40.0F),
+         std::make_shared<index::FloatFieldChunkMetrics<float>>(70.0F,
+                                                                100.0F)});
+    auto view = segment->GetFieldSkipMetrics(prune_fid);
+    ASSERT_TRUE(view.CanSkipUnaryRange<float>(
+        0, proto::plan::OpType::GreaterThan, 60.0F));
+    ASSERT_FALSE(view.CanSkipUnaryRange<float>(
+        1, proto::plan::OpType::GreaterThan, 60.0F));
 
     proto::plan::GenericValue gate_value;
     gate_value.set_int64_val(999);
@@ -1383,10 +1353,11 @@ TEST(OffsetsEvalProductionRegressionTest,
     }
 }
 
+// VARCHAR/JSON/ARRAY use get_views_by_offsets rather than chunk_data. Pin the
+// view branch separately because its validity storage and ownership differ.
 TEST_F(OffsetsEvalCorrectnessTest,
-       SealedViewTakeAppliesLoadedPayloadSkipWithoutBuildingViews) {
-    ASSERT_EQ(sealed_->GetSkipIndex()->GetMetricsSource(varchar_fid_),
-              SkipIndex::MetricsSource::LoadedPayload);
+       SealedViewTakeAppliesColumnOwnedSkipWithoutBuildingViews) {
+    InstallTestSkipMetrics(sealed_.get(), varchar_fid_);
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, sealed_.get(), N, MAX_TIMESTAMP);
     auto seg_expr = MakeDirectSegmentExpr(
@@ -1394,7 +1365,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     OffsetVector offsets{0, 16, 1, 17};
 
     int skip_checks = 0;
-    auto reject_every_cell = [&](const milvus::SkipIndex&, FieldId, int) {
+    auto reject_every_cell = [&](const milvus::FieldSkipMetricsView&, int64_t) {
         ++skip_checks;
         return true;
     };
@@ -1471,7 +1442,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
         int,
         TargetBitmapView,
         TargetBitmapView){};
-    std::function<bool(const milvus::SkipIndex&, FieldId, int)> no_skip;
+    std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     auto process_batch = [&]() {
         TargetBitmap res(4, false);
@@ -1524,9 +1495,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
         bitmap_input[i] = true;
     }
 
-    auto skip_chunk0 = [](const SkipIndex&, FieldId, int chunk_id) {
-        return chunk_id == 0;
-    };
+    auto skip_chunk0 = [](const milvus::FieldSkipMetricsView&,
+                          int64_t chunk_id) { return chunk_id == 0; };
     int64_t processed_cursor = 0;
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
@@ -1763,7 +1733,9 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         }
         processed_cursor += size;
     };
-    auto skip_everything = [](const SkipIndex&, FieldId, int) { return true; };
+    auto skip_everything = [](const milvus::FieldSkipMetricsView&, int64_t) {
+        return true;
+    };
 
     TargetBitmap res(input.size(), false);
     TargetBitmap valid(input.size(), true);
@@ -1863,6 +1835,121 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     segment->ClearData();
     EXPECT_THROW({ auto snapshot = segment->CaptureReadSnapshot(); },
                  milvus::SegcoreError);
+}
+
+// The production visit() path pins the sealed snapshot once and runs the whole
+// expression tree against it (Expr.cpp binds SetSnapshot to every compiled
+// expression). The ExecuteQueryExpr test helper used to skip that step, so the
+// pinned path never executed under CI. Run the same expression both ways and
+// require the bitsets to be bit-identical.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedOnSealed) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 300, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 301, 0, 1, 1);
+    // Deterministic values spanning both chunks so the filter crosses the
+    // chunk boundary through every hot accessor on the snapshot.
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+    ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    ASSERT_EQ(unpinned.count(), 2);
+    EXPECT_TRUE(unpinned[2]);
+    EXPECT_TRUE(unpinned[6]);
+}
+
+// The ready-bit divergence (comment 1 in the PR review) surfaced only on the
+// pinned path. Repeat it end-to-end: with index-only raw data (ready bit
+// cleared), a pinned ExecuteQueryExpr run must not read chunk data for the
+// dropped field and must match the unpinned run exactly.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedWithIndexOnlyField) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 400, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 401, 0, 1, 1);
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    std::vector<int64_t> index_values(kRowCount);
+    std::iota(index_values.begin(), index_values.end(), int64_t{0});
+    auto index_valid = std::make_unique<bool[]>(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        index_valid[i] = true;
+    }
+    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = value_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
+    segment->LoadIndex(load_index_info);
+    segment->DropFieldData(value_fid);
+    ASSERT_FALSE(segment->HasFieldData(value_fid));
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
 }
 
 TEST(OffsetsEvalIndexOnlyCorrectnessTest,

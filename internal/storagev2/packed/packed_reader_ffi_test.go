@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -53,7 +54,7 @@ func TestPackedFFIReader(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := "files/packed_reader_test/1"
+	basePath := path.Join(dir, "packed_reader_test/1")
 	version := int64(0)
 
 	// Build record batch
@@ -204,7 +205,7 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := "files/packed_reader_partial_test/1"
+	basePath := path.Join(dir, "packed_reader_partial_test/1")
 	version := int64(0)
 
 	// Build record batch
@@ -342,7 +343,7 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := "files/packed_reader_multi_batch_test/1"
+	basePath := path.Join(dir, "packed_reader_multi_batch_test/1")
 	version := int64(0)
 
 	columnGroups := []storagecommon.ColumnGroup{

@@ -118,6 +118,13 @@ class MinStringAggregate final : public Aggregate {
     }
 
     void
+    destroy(char* group) noexcept override {
+        auto& ptr = *value<std::string*>(group);
+        delete ptr;
+        ptr = nullptr;
+    }
+
+    void
     extractValues(char** groups,
                   int32_t numGroups,
                   VectorPtr* result) override {

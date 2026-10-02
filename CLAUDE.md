@@ -34,6 +34,7 @@ NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — t
 
 - [**Observability**](docs/agent_guides/observability/README.md): Logging, metrics, tracing, and observability debug workflows.
 - [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
+- [**Storage Paths**](docs/agent_guides/storage/path_contract.md): Read before changing storage paths, manifests, local migration, or GC.
 
 ## Testing
 

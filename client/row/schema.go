@@ -21,11 +21,11 @@ import (
 	"go/ast"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 )
 
 // ParseSchema parses schema from interface{}.
@@ -166,32 +166,5 @@ func ParseSchema(r interface{}) (*entity.Schema, error) {
 
 // ParseTagSetting parses struct tag into map settings
 func ParseTagSetting(str string, sep string) map[string]string {
-	settings := map[string]string{}
-	names := strings.Split(str, sep)
-
-	for i := 0; i < len(names); i++ {
-		j := i
-		if len(names[j]) > 0 {
-			for {
-				if names[j][len(names[j])-1] == '\\' {
-					i++
-					names[j] = names[j][0:len(names[j])-1] + sep + names[i]
-					names[i] = ""
-				} else {
-					break
-				}
-			}
-		}
-
-		values := strings.Split(names[j], ":")
-		k := strings.TrimSpace(strings.ToUpper(values[0]))
-
-		if len(values) >= 2 {
-			settings[k] = strings.Join(values[1:], ":")
-		} else if k != "" {
-			settings[k] = k
-		}
-	}
-
-	return settings
+	return rowutil.ParseTagSetting(str, sep)
 }

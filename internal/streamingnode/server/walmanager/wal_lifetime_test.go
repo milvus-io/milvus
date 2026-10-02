@@ -3,7 +3,9 @@ package walmanager
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -44,7 +46,7 @@ func TestWALLifetime(t *testing.T) {
 			return l, nil
 		})
 
-	wlt := newWALLifetime(opener, channel, mlog.With())
+	wlt := newWALLifetime(context.Background(), opener, channel, mlog.With())
 	assert.Nil(t, wlt.GetWAL())
 
 	// Test open.
@@ -127,4 +129,62 @@ func TestWALLifetime(t *testing.T) {
 	assert.Equal(t, int64(12), wlt.GetWAL().Channel().Term)
 
 	wlt.Close()
+}
+
+func TestWALLifetimeOpeningCtxCancelsOpen(t *testing.T) {
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	openStarted := make(chan struct{})
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			close(openStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+
+	openingCtx, cancelOpening := context.WithCancel(context.Background())
+	wlt := newWALLifetime(openingCtx, opener, "test", mlog.With())
+	defer wlt.Close()
+	openErr := make(chan error, 1)
+	go func() {
+		openErr <- wlt.Open(context.Background(), types.PChannelInfo{Name: "test", Term: 1})
+	}()
+	<-openStarted
+
+	cancelOpening()
+	select {
+	case err := <-openErr:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("open is not canceled by the opening context")
+	}
+}
+
+func TestWALLifetimeRemoveAfterOpenCanceled(t *testing.T) {
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).Return(nil, errors.Wrap(context.DeadlineExceeded, "create pulsar producer"))
+
+	wlt := newWALLifetime(context.Background(), opener, "test", mlog.With())
+	defer wlt.Close()
+
+	err := wlt.Open(context.Background(), types.PChannelInfo{Name: "test", Term: 1})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+	err = wlt.Remove(context.Background(), 1)
+	assert.NoError(t, err)
 }

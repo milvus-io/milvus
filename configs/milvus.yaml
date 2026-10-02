@@ -87,6 +87,8 @@ tikv:
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+  # Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+  # Migration of data written using a relative path in older versions is not supported.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
   path: /var/lib/milvus/data/
@@ -164,6 +166,7 @@ minio:
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
+  multipartCopyThreshold: 1073741824 # Object size threshold in bytes for switching from a single CopyObject request to multipart copy. Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). Must be a positive integer; invalid values fall back to the default. Single CopyObject requests remain capped at 5 GiB regardless of this threshold. Changes apply to subsequent copies, not copies already in progress. Does not apply to GCP or Azure.
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
 # You can change the MQ by setting the mq.type field.
@@ -206,6 +209,16 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+      # How long this client waits for one logstore node to answer one compaction request.
+      # It travels to the node as the gRPC deadline; the node applies its own ceiling
+      # (woodpecker.logstore.segmentCompactionPolicy.timeout) on top and the shorter of the two applies.
+      # Raise it together with that ceiling: on its own it has no effect while it stays above the node's.
+      compactionAttemptTimeout: 330s
+      # How long one auditor cycle keeps starting compactions. It is a start deadline, not a cap on the
+      # cycle: once spent no further segment is begun, but one already running finishes, so a cycle can
+      # overrun this by one segment. Raise it to trade the timeliness of the auditor's other passes
+      # (truncate state, snapshot publication, orphan sweep) for compaction throughput.
+      compactionPassBudget: 60s
     directRead:
       enabled: true # Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
@@ -261,6 +274,27 @@ woodpecker:
       maxSize: 2M # The maximum size of the merged files.
       maxParallelUploads: 4 # The maximum number of parallel upload threads for compaction.
       maxParallelReads: 8 # The maximum number of parallel read threads for compaction.
+      # Ceiling on how long one compaction may run on a logstore node. This is the node's guardrail, not a
+      # per-tenant policy: one node serves many logs from this single value, and it exists so no one
+      # request can hold a node's compaction resources indefinitely.
+      timeout: 300s
+      # Memory a logstore node will reserve for the compactions it runs at once, across every log it
+      # serves. Absolute rather than a share of the pod: useful compaction concurrency saturates on
+      # object-storage bandwidth long before memory, so a larger node does not need a larger allowance.
+      # Raise it alongside maxSize or maxParallelUploads, which raise what one compaction costs.
+      # Compactions beyond it are refused, not queued, and retried on a later auditor cycle.
+      maxInflightMemory: 1000000000
+      # Stop taking on new compactions once a logstore node's memory usage passes this fraction of its
+      # limit, whatever is using it -- maxInflightMemory above only accounts for compaction. Applies only
+      # where a container memory limit can be read; on bare metal, with no limit set, or if detection
+      # fails, it is skipped rather than measured against host memory.
+      memoryHighWatermark: 0.7
+    syncScheduler:
+      # Workers in a logstore node's shared flush pool, as a plain count. Each one blocks in fdatasync
+      # while a flush is in flight, so this bounds concurrent syncs, not CPU usage. Tune it from the
+      # volume's IOPS budget: workers ~= target IOPS x fsync latency. Past the point where the device
+      # saturates, more workers buy queueing rather than throughput.
+      maxWorkers: 32
     segmentReadPolicy:
       maxBatchSize: 16M # Maximum size of a batch in bytes.
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
@@ -283,6 +317,9 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
+  # Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+  # Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.
+  webaddress: 
   webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
@@ -307,6 +344,15 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # shared: multiple producers can write to the topic at the same time.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  producerAccessMode: exclusive
+  # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+  # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+  # When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.
+  producerCreateTimeout: 1m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -432,7 +478,6 @@ proxy:
   maxSearchAggregationResultEntries: 10000
   rls:
     maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
-    maxPrincipalsPerCollection: 1000 # Maximum number of RLS principals allowed on one collection.
     maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
     maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
     maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
@@ -442,6 +487,9 @@ proxy:
     maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
     maxTagValueLength: 1024 # Maximum RLS principal tag value length in bytes.
     maxArrayLiteralElements: 1024 # Maximum literal elements for RLS in and array_contains* predicates.
+    maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
+    maxPrincipalCacheBytes: 67108864 # Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.
+    metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -475,6 +523,11 @@ proxy:
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
+    # Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+    # Disabling requires a restart and leaves the HTTP listeners, /v2/vectordb/*, probes, and metrics available.
+    # The non-underscore /api/v1/* REST API has been removed regardless of this setting.
+    # WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.
+    enableV1: true
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
@@ -593,6 +646,11 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  autoscale:
+    precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.
+    enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.
+    maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
+    maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -605,8 +663,9 @@ queryCoord:
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
   groupBy:
-    strictGroupAcceptanceThreshold: 0.1 # Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.
-    strictGroupProbeCandidates: 100 # Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.
+    strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
+    strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.
+    strictGroupSkipRefine: false # Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.
   stats:
     publishInterval: 1000 # The interval that query node publishes the node statistics information, including segment status, cpu usage, memory usage, health status, etc. Unit: ms.
   segcore:
@@ -673,6 +732,7 @@ queryNode:
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
+      lazyColumnGroupEnabled: false # When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
     dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
@@ -738,12 +798,15 @@ queryNode:
   delegatorPostLoadConcurrencyFactor: 1 # delegator post-load concurrency factor after worker LoadSegments returns. Concurrency is hardware.GetCPUNum * factor
   exprCache:
     enabled: false # enable expression result cache
-    mode: disk # cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)
+    mode: disk # cache mode: 'disk' (sealed only) or 'memory' (sealed and optionally growing)
     minEvalDurationUs: 1000 # global latency filter: skip expressions that eval faster than this (0=disabled)
-    admissionThreshold: 2 # frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)
+    admissionThreshold: 2 # per-cache-key frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)
+    materialization:
+      maxBytes: 268435456 # max transient heap memory for full expression-cache bitmap materializations in memory and disk modes (default 256MB)
     memory:
       maxBytes: 268435456 # max memory for expression cache in memory mode (default 256MB)
       compressionEnabled: true # enable Roaring/Raw adaptive compression in memory mode
+      enableGrowing: false # cache growing-segment snapshots in expression cache memory mode
     disk:
       maxBytes: 10737418240 # max total disk usage for expression cache in disk mode (default 10GB)
       maxFileSizeBytes: 268435456 # max file size per sealed segment in disk mode (default 256MB)
@@ -809,14 +872,9 @@ dataCoord:
     # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
-    smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
-    # (smallProportion * segment max # of rows).
-    # A compaction will happen on small segments if the segment after compaction will have
-    compactableProportion: 0.85
-    # over (compactableProportion * segment max # of rows) rows.
-    # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
-    expansionRate: 1.25
+    smallProportion: 0.5 # Deprecated: unused since two-tier compaction. Replaced by middleSize (idealSize/4) × fillRate.
+    compactableProportion: 0.85 # Deprecated: fill rate is now a hardcoded constant (0.85) in the two-tier compaction algorithm.
+    expansionRate: 1.25 # Deprecated: no longer used by the mix compaction planner. Still read by v2 trigger and import paths.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
@@ -884,6 +942,7 @@ dataCoord:
         maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
       expiredlog:
         maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
+    maxFragmentsPerGroup: 8 # maximum number of fragment segments allowed per channel-partition group before fragment-tier compaction triggers
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
@@ -906,6 +965,13 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
+    # Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
+    # The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+    # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
+    writeSegmentIndexToManifest: false
+    # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
+    # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
+    segmentIndexManifestLoadConcurrency: 64
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
@@ -975,7 +1041,7 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingMaxColumns: 1024 # the max number of columns to shred
   jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
-  jsonShreddingWriteBatchSize: 81920 # the batch size to write
+  jsonShreddingWriteBatchSize: 81920 # the batch size to write; values must be positive, otherwise the default is used
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -1055,6 +1121,10 @@ dataNode:
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]
     deltalog: json # deltalog format, options: [json, parquet]
+  jsonStats:
+    parallelBuild:
+      maxWorkers: 8 # Maximum number of process-wide JSON Stats Build workers. The effective value is capped by the cgroup-aware CPU count. Values less than or equal to 0 use the safe automatic limit min(CPU, 8).
+      maxInflightBytes: 536870912 # Process-wide transient memory budget in bytes for materialized JSON Stats Build chunks. The budget is shared by concurrent builds. Lower values reduce peak memory at the cost of parallelism. A chunk larger than the budget is allowed to run exclusively to guarantee progress. Set to 0 to disable the limit.
   ip:  # TCP/IP address of dataNode. If not specified, use the first unicastable address
   port: 21124 # TCP port of dataNode
   grpc:
@@ -1133,6 +1203,32 @@ grpc:
   gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
+    # The compression tier for gRPC messages: fastest, default, better, best.
+    # snappy and s2 have three tiers rather than four, so fastest and default behave identically for them.
+    compressionLevel: default
+    # The gRPC compression algorithm: zstd, snappy, or s2.
+    # Only zstd is understood by every Milvus version. A node that has not been upgraded yet has no snappy or s2 decompressor
+    # and rejects those encodings, failing every RPC sent to it, and there is no automatic fallback.
+    # Change this only after every node in the cluster has been upgraded.
+    compressionAlgorithm: zstd
+    # Whether the zstd encoder embeds a per-frame checksum. Off by default: it costs throughput on every message,
+    # while TCP already checksums the link and zstd's entropy decoding rejects a damaged frame rather than
+    # returning garbage. Turn it on where a verified end-to-end integrity check on the payload is worth the cost.
+    # Frames a peer wrote with a checksum are still verified either way.
+    compressionCRC: false
+    # Size of the zstd encoder state pool, as a multiple of GOMAXPROCS (default 2). It also sizes the free
+    # lists every codec parks its per-message writers and readers in, so it is the one ceiling on how much
+    # memory compression holds.
+    # Compression always runs inline on the gRPC goroutine handling the RPC; this is not a thread count.
+    # For the zstd encoder it is the ceiling on how many RPCs may compress at the same time: once every state is
+    # borrowed, further callers block until one is returned, so too small a pool costs throughput under load.
+    # Decoding does not draw on it -- an inbound message takes a pooled streaming decoder instead.
+    # The encoder pool is allocated on the first message this process compresses -- nothing at startup, then all of
+    # it at once -- and costs this value x GOMAXPROCS x the per-state size: roughly 2.6MB at fastest, 3.6MB at
+    # default, 6.5MB at better and 36MB at best. Most of a state is its history buffer, which is only allocated
+    # once that state sees a message above 128KB, so RSS reaches that figure in two steps.
+    # Raising this at a high compressionLevel is therefore expensive.
+    compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
@@ -1178,7 +1274,7 @@ common:
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
-    enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
+    enabled: true # whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. Storage v2 segments only; manifest-based (v3) segments do not build this index yet.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
@@ -1235,6 +1331,21 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Whether the metrics port (default 9091) requires root HTTP Basic authentication
+    # for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+    # Probes and scrapes remain open; the retired /api/v1/health endpoint is no longer served.
+    # Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+    # Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+    # Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+    # up to 10 minutes after its last fetch, including a password rotated during an outage.
+    # A Proxy receiving a root credential notification revokes that cached hash and any
+    # in-flight verification results; it returns 503 if the current hash cannot be fetched.
+    # Other nodes and Proxies that have not received the notification retain the TTL policy.
+    # Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+    # stream becomes loopback-only. This port remains plaintext: use a trusted network
+    # or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+    # Not settable through /management/config/alter. Watch milvus_admin_auth_total.
+    adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
@@ -1561,6 +1672,11 @@ streaming:
     # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
     operationTimeout: 30m
+    # The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    # It gives the old streaming node time to exit before another streaming node writes to the same wal.
+    # It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.
+    nodeLostGracePeriod: 5s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.
@@ -1636,10 +1752,13 @@ streaming:
     # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
     # but not wait for the persist interval.
     maxDirtyMessage: 100
-    # The graceful close timeout for wal recovery, 3s by default.
-    # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-    # If that persist operation exceeds this timeout, the wal recovery module will close right now.
+    # Deprecated. RecoveryStorage no longer persists recovery metadata during close.
+    # This no-op setting is retained so existing configurations remain loadable.
     gracefulCloseTimeout: 3s
+    tail:
+      lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
+      softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
+      highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
     pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.

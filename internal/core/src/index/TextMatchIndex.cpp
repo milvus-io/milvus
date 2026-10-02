@@ -131,18 +131,21 @@ TextMatchIndex::Upload(const Config& config) {
             LOG_WARN("{} is a directory", path_str);
         } else {
             LOG_INFO("trying to add text log: {}", path_str);
-            AssertInfo(disk_file_manager_->AddTextLog(path_str),
-                       "failed to add text log: {}",
-                       path_str);
+            if (!(disk_file_manager_->AddTextLog(path_str))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add text log: {}",
+                          path_str);
+            }
             LOG_INFO("text log: {} added", path_str);
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
     this->file_manager_->AddTextLog(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
     // Strip the remote basePath prefix to return relative file paths.
@@ -183,7 +186,7 @@ TextMatchIndex::UploadUnified(const Config& config) {
 }
 
 void
-TextMatchIndex::Load(const Config& config) {
+TextMatchIndex::Load(const Config& config, milvus::OpContext* op_ctx) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -197,7 +200,7 @@ TextMatchIndex::Load(const Config& config) {
         if (filename.size() > 3 &&
             filename.substr(filename.size() - 3) == ".v3") {
             LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
-            InvertedIndexTantivy<std::string>::LoadUnified(config);
+            InvertedIndexTantivy<std::string>::LoadUnified(config, op_ctx);
             return;
         }
     }
@@ -226,8 +229,9 @@ TextMatchIndex::Load(const Config& config) {
     LoadIndexMetas(files_value, config);
     RetainTantivyIndexFiles(files_value);
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
-    AssertInfo(
-        tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
+    if (!(tantivy_index_exist(prefix.c_str()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index not exist: {}", prefix);
+    }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);

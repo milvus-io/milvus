@@ -526,6 +526,7 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		resp, err := s.node.QuerySlot(ctx, nil)
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
+		s.True(resp.GetCopySegmentSharedIndexes())
 		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }

@@ -19,13 +19,23 @@
 #include <atomic>
 #include <cstddef>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 
 #include "folly/Executor.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/coro/Task.h"
+#include "pb/common.pb.h"
 
 namespace milvus::storage {
+
+// Runs one blocking local-file phase and drains it even if the caller cancels.
+// Acquires an executor only for this phase; callers check cancellation before
+// submitting new work. The disabled pool uses the selected async executor.
+folly::coro::Task<void>
+RunLocalFileIOAsync(std::function<void()> operation,
+                    proto::common::LoadPriority priority);
 
 // Owns the dedicated executor used for blocking local-file finalization.
 // A CPUThreadPoolExecutor is used intentionally because these tasks perform

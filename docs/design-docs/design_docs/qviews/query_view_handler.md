@@ -161,9 +161,11 @@ SN persists only the Up state. On crash recovery:
 3. Construct each recovered shard, install its identity-checked empty callback,
    and publish it in the handler map.
 4. Call the injected `resMgr.Acquire(OnReady, OnUnrecoverable)` for each view.
-5. `OnReady` drives UpRecovering → Up → report Up. `OnUnrecoverable` drives
-   UpRecovering → Unrecoverable locally without reporting to Coord and retains
-   persisted recovery metadata until Coord later pushes Dropped.
+5. `OnRecoveringDone` drives UpRecovering → Up → report Up (the ResourceManager's
+   `OnReady` callback is forwarded to `OnRecoveringDone` on the recovery path).
+   `OnUnrecoverable` drives UpRecovering → Unrecoverable locally without
+   reporting to Coord and retains persisted recovery metadata until Coord later
+   pushes Dropped.
 
 The resource interface and state-machine failure wiring are part of this change;
 the concrete resource preparation implementation remains outside this scope.

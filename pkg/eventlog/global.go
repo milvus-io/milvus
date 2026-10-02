@@ -88,3 +88,17 @@ func (l *globalLogger) Flush() error {
 func (l *globalLogger) Register(key string, logger Logger) {
 	l.loggers.GetOrInsert(key, logger)
 }
+
+// Replace swaps the logger registered under key, which Register cannot do
+// because it keeps whatever is already there. A logger that can change mode at
+// runtime needs this: the incumbent has been stopped, and leaving it registered
+// would keep dispatching events into a dead one.
+func (l *globalLogger) Replace(key string, logger Logger) {
+	l.loggers.Insert(key, logger)
+}
+
+// Unregister drops the logger under key, for a mode switch that failed and left
+// nothing serving.
+func (l *globalLogger) Unregister(key string) {
+	l.loggers.GetAndRemove(key)
+}

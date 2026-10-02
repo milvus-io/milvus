@@ -352,7 +352,7 @@ func resolveFFIReaderFragments(
 	resolvedFragments := make([]Fragment, len(fragments))
 	copy(resolvedFragments, fragments)
 	for i := range resolvedFragments {
-		resolvedPath, err := resolveExternalSourceRelativePath(resolvedFragments[i].FilePath, cProperties, extfs)
+		resolvedPath, err := resolveExternalResolvedPath(resolvedFragments[i].FilePath, cProperties, extfs)
 		if err != nil {
 			return nil, err
 		}

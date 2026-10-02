@@ -19,8 +19,8 @@ passes it to Milvus. Policies may reference the principal and its tags.
 
 RLS fails closed when required metadata, a required tag, or an applicable
 permissive policy is unavailable. Sub-search principal overrides, atomic tag
-upsert-and-delete in one request, bulk import enforcement, and external
-collection refresh enforcement are outside the initial scope.
+upsert-and-delete in one request, and external collection refresh enforcement
+are outside the initial scope.
 
 ## Collection Switch
 
@@ -33,10 +33,11 @@ collection and invalidates Proxy RLS state. These synchronization steps are
 performed by Milvus as part of the property transition; users do not manage
 Proxy caches directly.
 
-Every row-bearing request on an enabled collection must provide a non-blank
-top-level `rls_principal` or request `skip_rls=true`. Sub-searches inherit the
-top-level decision. A skip is allowed only when authorization is disabled or
-the authenticated Milvus user has `SkipRLS` on the collection.
+Every row-bearing request on an enabled collection must provide request-level
+RLS context. Most APIs use top-level `rls_principal` and `skip_rls`; bulk import
+carries the same values in its existing `options` map. Sub-searches inherit the
+top-level decision. A skip is allowed only when authorization is disabled or the
+authenticated Milvus user has `SkipRLS` on the collection.
 
 `rls.force=true` rejects `skip_rls=true` and is meaningful only while RLS is
 enabled.
@@ -78,7 +79,9 @@ Principal names and string tag values are bound as template values rather than
 interpolated into expression text, so they do not require an ASCII-only
 whitelist. Tag keys cannot contain a single quote because the
 `$current_principal_tags['key']` syntax does not define key escaping. Names and
-keys must otherwise be non-blank and satisfy their configured byte limits.
+keys must otherwise be non-blank. Configured byte limits apply to tag-binding
+writes; existing identifiers remain addressable for reads and deletes after
+those limits are lowered.
 
 If a policy references a missing tag, that policy predicate evaluates to
 false.
@@ -153,7 +156,9 @@ request plan with logical AND. For insert and the written side of upsert, Proxy
 compiles the restricted `check_expr` into the same plan expression nodes and
 evaluates those nodes directly against each input row's `FieldData`; this is a
 small RLS evaluator, not a second general SQL engine. Existing rows selected by
-upsert must also pass `using_expr`.
+upsert must also pass `using_expr`. Bulk import uses the insert semantics: its
+job persists the applicable `check_expr`, and DataNode validates every imported
+batch before routing or writing it.
 
 Local checks use SQL three-valued logic consistent with Segcore filtering.
 Comparisons involving NULL produce UNKNOWN, and only a final TRUE admits a row.
@@ -167,7 +172,8 @@ RLS accepts a deliberately restricted expression subset:
   template value;
 - `in` with literal value lists;
 - `array_contains`, `array_contains_all`, and `array_contains_any` on primitive
-  array fields;
+  array fields. `using_expr` excludes element-nullable arrays, and integer-array
+  `array_contains_all` and `array_contains_any` accept only integer literals;
 - `$current_principal` as a string template value;
 - `$current_principal_tags['key']` as a string, int64, or double template value.
 
@@ -188,27 +194,28 @@ functions such as `now()`.
 RootCoord owns policies and principal tag bindings. Records use globally unique
 collection IDs as identity; database and collection names are descriptive.
 RootCoord keeps complete policies in a name-keyed collection map, including
-their internal IDs.
+their internal IDs. Principal tag bindings remain in the catalog and are read
+by `(collectionID, principalName)` instead of being loaded during recovery.
 
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same
 `SharedDBName + ExclusiveCollectionName` resources as collection DDL. The
 message carries a complete post-image or stable drop identity. Its ACK callback
-persists metadata, updates RootCoord state, and invalidates the relevant Proxy
-cache; callback failures are retried. This orders mutations with collection
-drop and schema changes.
+persists metadata, updates the RootCoord policy map when applicable, and
+invalidates the relevant Proxy cache; callback failures are retried. This
+orders mutations with collection drop and schema changes.
 
 CChannel load is determined by policy and tag update rate, not by the number of
 principals used in data requests. Applications should not use tag APIs as a
-per-request data path. Supporting high-frequency tag churn and scaling
-RootCoord storage or recovery for very large numbers of tag bindings remain
-separate work.
+per-request data path. Bulk principal APIs materialize their result on demand;
+pagination and high-frequency tag churn remain follow-up work.
 
 Proxy caches policies per collection and tags per
 `(collectionID, principalName)`. It does not preload Proxy RLS state. An
 RLS-enforced request loads missing state through `GetRLSMetadata`; refresh
-failure denies the request. Policy freshness is checked on use. Principal tag
-entries expire through a periodic scanner and reload on their next use.
+failure denies the request. Policy and principal-tag freshness are checked on
+use, and expired principal entries reload immediately. A periodic scanner
+reclaims expired entries that are not accessed again.
 
 RLS messages are eligible for generic CDC replication and replay the same
 idempotent ACK callbacks on a secondary. Dedicated RLS CDC compatibility and
@@ -219,7 +226,6 @@ recovery validation remains follow-up work.
 | Config | Meaning |
 | --- | --- |
 | `proxy.rls.maxPoliciesPerCollection` | Maximum policies on one collection. |
-| `proxy.rls.maxPrincipalsPerCollection` | Maximum principal identifiers with stored tags on one collection. |
 | `proxy.rls.maxTagsPerPrincipal` | Maximum stored tags for one collection-scoped principal identifier. |
 | `proxy.rls.maxExpressionLength` | Maximum bytes in one policy expression. |
 | `proxy.rls.maxCombinedExpressionLength` | Maximum bytes in one combined expression. |
@@ -229,6 +235,8 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxTagKeyLength` | Maximum tag-key length in bytes. |
 | `proxy.rls.maxTagValueLength` | Maximum string tag-value length in bytes. |
 | `proxy.rls.maxArrayLiteralElements` | Maximum literal elements in supported array expressions. |
+| `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
+| `proxy.rls.maxPrincipalCacheBytes` | Maximum logical bytes of principal names, tag keys, and tag values cached per collection or materialized by one non-paginated principal list. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
 
 ## Compatibility And Rollout
@@ -236,6 +244,8 @@ recovery validation remains follow-up work.
 There is no previously released RLS metadata to migrate. RLS may be enabled
 only after all serving Proxy and RootCoord instances understand its API, WAL
 messages, dynamic property transition, and cache invalidation contract. A
+cluster-wide version gate rejects bulk imports into RLS-enabled collections
+until DataCoord and DataNode also support the persisted import predicate. A
 cluster with enabled collections must not roll back to a version that cannot
 enforce RLS.
 
@@ -257,4 +267,4 @@ lazy principal-tag loading rather than collection-wide Proxy snapshots, and
 the existing broadcast/ACK path rather than direct catalog mutation.
 
 Follow-ups include an atomic tag patch API, high-frequency tag mutation,
-RootCoord tag-storage and lookup scaling, and dedicated CDC validation.
+pagination for bulk principal APIs, and dedicated CDC validation.

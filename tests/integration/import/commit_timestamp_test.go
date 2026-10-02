@@ -34,14 +34,12 @@ import (
 )
 
 type CommitTimestampSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 // TestImport_CommitTimestampSetAfterCompletion verifies that all segments produced
 // by a bulk-insert import have CommitTimestamp > 0 once the job completes.
 func (s *CommitTimestampSuite) TestImport_CommitTimestampSetAfterCompletion() {
-	s.T().Skip("CommitTimestamp assignment is implemented by the companion 2PC commit flow PR.")
-
 	const rowCount = 100
 
 	c := s.Cluster

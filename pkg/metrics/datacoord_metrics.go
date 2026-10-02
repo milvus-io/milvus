@@ -264,6 +264,14 @@ var (
 			Help:      "garbage collection running count",
 		}, []string{nodeIDLabelName})
 
+	GarbageCollectorInvalidManifestCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "gc_invalid_manifest_count",
+			Help:      "number of times garbage collection is blocked by an invalid segment manifest index entry",
+		}, []string{nodeIDLabelName})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -493,6 +501,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(CopySegmentJobLatency)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
+	registry.MustRegister(GarbageCollectorInvalidManifestCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
 	registry.MustRegister(IndexStatsTaskNum)
 	registry.MustRegister(TaskVersion)

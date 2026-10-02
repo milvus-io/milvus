@@ -522,6 +522,116 @@ func TestUpdateDefaultValueFieldBehavior(t *testing.T) {
 	require.Equal(t, "original_3", unchangedResults[0])
 }
 
+func TestPartialUpdateMixedRowsDefaultValue(t *testing.T) {
+	const totalRows, existingRows = 180, 25
+	const defaultRegion = "default_region"
+	for _, autoID := range []bool{false, true} {
+		for _, input := range []string{"without_valid_data", "all_valid", "with_default"} {
+			t.Run(fmt.Sprintf("autoID=%t/%s", autoID, input), func(t *testing.T) {
+				ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+				mc := hp.CreateDefaultMilvusClient(ctx, t)
+				collName := common.GenRandomString("partial_default_mixed", 6)
+				schema := entity.NewSchema().WithName(collName).WithAutoID(autoID).
+					WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(autoID)).
+					WithField(entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)).
+					WithField(entity.NewField().WithName("region").WithDataType(entity.FieldTypeVarChar).WithMaxLength(100).WithDefaultValueString(defaultRegion))
+				require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithShardNum(2)))
+				t.Cleanup(func() {
+					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+					defer cancel()
+					require.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collName)))
+				})
+
+				seedPKs := make([]int64, existingRows)
+				seedRegions := make([]string, existingRows)
+				for i := range seedPKs {
+					seedPKs[i] = int64(i + 1)
+					seedRegions[i] = "old_region"
+				}
+				seedColumns := []column.Column{
+					hp.GenColumnData(existingRows, entity.FieldTypeFloatVector, *hp.TNewDataOption()),
+					column.NewColumnVarChar("region", seedRegions),
+				}
+				if !autoID {
+					seedColumns = append(seedColumns, column.NewColumnInt64("id", seedPKs))
+				}
+				seed, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(seedColumns...))
+				require.NoError(t, err)
+				require.EqualValues(t, existingRows, seed.InsertCount)
+				seedPKs = seed.IDs.(*column.ColumnInt64).Data()
+				prepare := &hp.CollectionPrepare{}
+				prepare.FlushData(ctx, t, mc, collName)
+				prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+				prepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
+
+				requestPKs := make([]int64, totalRows)
+				for i := range requestPKs {
+					requestPKs[i] = -int64(i + 1)
+				}
+				// Interleave existing rows so verification does not depend on merge order.
+				for i, pk := range seedPKs {
+					requestPKs[i*7+1] = pk
+				}
+				regions := make([]string, 0, totalRows)
+				validData := make([]bool, totalRows)
+				wantRegions := make([]string, totalRows)
+				for i := range validData {
+					validData[i] = input != "with_default" || i%10 != 1
+					wantRegions[i] = defaultRegion
+					if validData[i] {
+						wantRegions[i] = fmt.Sprintf("region_%d", i)
+						regions = append(regions, wantRegions[i])
+					}
+				}
+				var regionColumn column.Column = column.NewColumnVarChar("region", regions)
+				if input != "without_valid_data" {
+					regionColumn, err = column.NewNullableColumnVarChar("region", regions, validData)
+					require.NoError(t, err)
+				}
+				result, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+					WithColumns(column.NewColumnInt64("id", requestPKs),
+						hp.GenColumnData(totalRows, entity.FieldTypeFloatVector, *hp.TNewDataOption()), regionColumn).
+					WithPartialUpdate(true))
+				require.NoError(t, err)
+				require.EqualValues(t, totalRows, result.UpsertCount)
+				returnedPKs := result.IDs.(*column.ColumnInt64).Data()
+				require.Len(t, returnedPKs, totalRows)
+				writePKs := requestPKs
+				if autoID {
+					writePKs = returnedPKs
+					for i, pk := range requestPKs {
+						if pk > 0 {
+							require.Equal(t, pk, writePKs[i], "existing PK at row %d", i)
+						} else {
+							require.Positive(t, writePKs[i], "allocated PK at row %d", i)
+						}
+					}
+				} else {
+					require.ElementsMatch(t, requestPKs, returnedPKs)
+				}
+				want := make(map[int64]string, totalRows)
+				for i, pk := range writePKs {
+					want[pk] = wantRegions[i]
+				}
+				require.Len(t, want, totalRows, "destination PKs must be unique")
+
+				rows, err := mc.Query(ctx, client.NewQueryOption(collName).
+					WithFilter("id != 0").WithLimit(totalRows+1).WithOutputFields("id", "region").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				actualPKs := rows.GetColumn("id").(*column.ColumnInt64).Data()
+				actualRegions := rows.GetColumn("region").(*column.ColumnVarChar).Data()
+				require.Len(t, actualPKs, totalRows)
+				require.Len(t, actualRegions, totalRows)
+				got := make(map[int64]string, totalRows)
+				for i, pk := range actualPKs {
+					got[pk] = actualRegions[i]
+				}
+				require.Equal(t, want, got)
+			})
+		}
+	}
+}
+
 func TestPartialUpdateEmptyStringDefaultValue(t *testing.T) {
 	t.Parallel()
 

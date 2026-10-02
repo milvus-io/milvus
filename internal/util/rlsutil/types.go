@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TagValueKind int32
@@ -54,38 +55,104 @@ func NewDoubleTagValue(value float64) TagValue {
 	return TagValue{Kind: TagValueKindDouble, DoubleValue: value}
 }
 
+// PrincipalTagsSize returns the logical bytes occupied by one principal and
+// its tags. Numeric values use their fixed-width in-memory representation.
+func PrincipalTagsSize(principalName string, tags map[string]TagValue) (int64, error) {
+	size := int64(len(principalName))
+	for key, value := range tags {
+		size += int64(len(key))
+		switch value.Kind {
+		case TagValueKindString:
+			size += int64(len(value.StringValue))
+		case TagValueKindInt64, TagValueKindDouble:
+			size += 8
+		default:
+			return 0, merr.WrapErrServiceInternalMsg("RLS principal tag %q has unsupported internal value type", key)
+		}
+	}
+	return size, nil
+}
+
 func TagsFromJSON(payload string) (map[string]TagValue, error) {
+	return tagsFromJSON(payload, 0)
+}
+
+// TagsFromJSONWithLimit bounds the raw payload before decoding, then decodes
+// at most maxTags JSON object members so untrusted requests cannot materialize
+// unbounded tokens or oversized tag maps before validation.
+func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
+	if maxTags > 0 {
+		if err := validatePrincipalTagsJSONTransportSize(payload, maxTags); err != nil {
+			return nil, err
+		}
+	}
+	return tagsFromJSON(payload, maxTags)
+}
+
+func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
-	var raw map[string]any
-	if err := decoder.Decode(&raw); err != nil {
+	token, err := decoder.Token()
+	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
 	}
-	if raw == nil {
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '{' {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a JSON object")
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return nil, err
-	}
-	tags := make(map[string]TagValue, len(raw))
-	for key, value := range raw {
+
+	tags := make(map[string]TagValue)
+	entryCount := 0
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
+		}
+		entryCount++
+		if maxTags > 0 && entryCount > maxTags {
+			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
+		}
+		if maxTags > 0 {
+			maxTagKeyLength := paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
+			if len(key) > maxTagKeyLength {
+				return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxTagKeyLength)
+			}
+		}
+
+		value, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
 		switch typed := value.(type) {
 		case string:
+			if maxTags > 0 {
+				maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+				if len(typed) > maxTagValueLength {
+					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+				}
+			}
 			tags[key] = NewStringTagValue(typed)
 		case json.Number:
-			if strings.ContainsAny(typed.String(), ".eE") {
-				value, err := strconv.ParseFloat(typed.String(), 64)
+			number := typed.String()
+			if strings.ContainsAny(number, ".eE") {
+				value, err := strconv.ParseFloat(number, 64)
 				if err != nil {
 					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid double value", key)
 				}
 				tags[key] = NewDoubleTagValue(value)
 			} else {
-				value, err := strconv.ParseInt(typed.String(), 10, 64)
+				value, err := strconv.ParseInt(number, 10, 64)
 				if err == nil {
 					tags[key] = NewInt64TagValue(value)
 					continue
 				}
-				doubleValue, doubleErr := strconv.ParseFloat(typed.String(), 64)
+				// encoding/json may serialize an integral double without a decimal
+				// point. Preserve values outside int64 as doubles on round trip.
+				doubleValue, doubleErr := strconv.ParseFloat(number, 64)
 				if doubleErr != nil {
 					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
 				}
@@ -94,6 +161,17 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, or double", key)
 		}
+	}
+	closingToken, err := decoder.Token()
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+	}
+	closingDelim, ok := closingToken.(json.Delim)
+	if !ok || closingDelim != '}' {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, err
 	}
 	return tags, nil
 }
@@ -118,7 +196,11 @@ func TagsToJSON(tags map[string]TagValue) (string, error) {
 		case TagValueKindInt64:
 			values[key] = value.Int64Value
 		case TagValueKindDouble:
-			values[key] = value.DoubleValue
+			encoded := strconv.FormatFloat(value.DoubleValue, 'g', -1, 64)
+			if !strings.ContainsAny(encoded, ".eE") {
+				encoded += ".0"
+			}
+			values[key] = json.Number(encoded)
 		default:
 			return "", merr.WrapErrServiceInternalMsg("RLS principal tag %q has unsupported internal value type", key)
 		}
@@ -128,17 +210,6 @@ func TagsToJSON(tags map[string]TagValue) (string, error) {
 		return "", merr.WrapErrDataIntegrity(err, "encode RLS principal tags")
 	}
 	return string(payload), nil
-}
-
-func CloneTags(tags map[string]TagValue) map[string]TagValue {
-	if tags == nil {
-		return nil
-	}
-	cloned := make(map[string]TagValue, len(tags))
-	for key, value := range tags {
-		cloned[key] = value
-	}
-	return cloned
 }
 
 type PolicyType int32
@@ -176,23 +247,46 @@ const (
 func (action PolicyAction) String() string {
 	switch action {
 	case PolicyActionQuery:
-		return "RowPolicyActionQuery"
-	case PolicyActionQueryIterator:
-		return "RowPolicyActionQueryIterator"
+		return "Query"
 	case PolicyActionSearch:
-		return "RowPolicyActionSearch"
-	case PolicyActionSearchIterator:
-		return "RowPolicyActionSearchIterator"
-	case PolicyActionHybridSearch:
-		return "RowPolicyActionHybridSearch"
-	case PolicyActionDelete:
-		return "RowPolicyActionDelete"
+		return "Search"
 	case PolicyActionInsert:
-		return "RowPolicyActionInsert"
+		return "Insert"
+	case PolicyActionDelete:
+		return "Delete"
 	case PolicyActionUpsert:
-		return "RowPolicyActionUpsert"
+		return "Upsert"
+	case PolicyActionQueryIterator:
+		return "QueryIterator"
+	case PolicyActionSearchIterator:
+		return "SearchIterator"
+	case PolicyActionHybridSearch:
+		return "HybridSearch"
 	default:
-		return "RowPolicyActionUnknown"
+		return "Unknown"
+	}
+}
+
+func PolicyActionOperation(action PolicyAction) string {
+	switch action {
+	case PolicyActionQuery:
+		return "query"
+	case PolicyActionQueryIterator:
+		return "query iterator"
+	case PolicyActionSearch:
+		return "search"
+	case PolicyActionSearchIterator:
+		return "search iterator"
+	case PolicyActionHybridSearch:
+		return "hybrid search"
+	case PolicyActionDelete:
+		return "delete"
+	case PolicyActionInsert:
+		return "insert"
+	case PolicyActionUpsert:
+		return "upsert"
+	default:
+		return "unknown"
 	}
 }
 

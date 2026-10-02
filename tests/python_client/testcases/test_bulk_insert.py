@@ -218,7 +218,7 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         for pk in non_null_ids:
             vector = rows_by_id[pk][self.nullable_vector_field]
             assert vector is not None
-            assert len(vector) == dim
+            np.testing.assert_array_equal(vector, self._float_vector(pk, dim))
 
         search_res, _ = self.collection_wrap.search(
             [self._float_vector(100, dim)],
@@ -311,6 +311,19 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         )
         assert len(results) == entities
         rows_by_id = {row[df.pk_field]: row for row in results}
+        assert set(rows_by_id) == {row[df.pk_field] for row in rows}
+        for expected in rows:
+            actual = rows_by_id[expected[df.pk_field]]
+            assert actual[df.int_field] == expected[df.int_field]
+            assert actual[df.string_field] == expected[df.string_field]
+            for field_name in (self.nullable_vector_field, df.sparse_vec_field):
+                value = expected.get(field_name)
+                if value is None:
+                    assert actual[field_name] is None
+                elif field_name == df.sparse_vec_field:
+                    assert actual[field_name] == pytest.approx(value)
+                else:
+                    np.testing.assert_array_equal(actual[field_name], value)
         for pk in int_null_ids:
             assert rows_by_id[pk][df.int_field] is None
         for pk in string_null_ids:
@@ -395,6 +408,11 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
             output_fields=[df.pk_field, df.int_field, df.string_field],
         )
         rows_by_id = {row[df.pk_field]: row for row in results}
+        assert set(rows_by_id) == {row[df.pk_field] for row in rows}
+        for expected in rows:
+            actual = rows_by_id[expected[df.pk_field]]
+            assert actual[df.int_field] == expected[df.int_field]
+            assert actual[df.string_field] == expected[df.string_field]
         for pk in int_null_ids:
             assert rows_by_id[pk][df.int_field] is None
         for pk in string_null_ids:
@@ -550,7 +568,22 @@ class TestBulkInsertNullableVector(TestcaseBaseBulkInsert):
         for pk in null_ids:
             assert rows_by_id[pk][vector_field] is None
         for pk in non_null_ids:
-            assert rows_by_id[pk][vector_field] is not None
+            actual = rows_by_id[pk][vector_field]
+            expected = rows[pk][vector_field]
+            assert actual is not None
+            if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+                assert actual == pytest.approx(expected)
+            elif vector_type == DataType.BINARY_VECTOR:
+                assert actual[0] == bytes(expected)
+            elif vector_type in (DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR):
+                dtype = {
+                    DataType.FLOAT16_VECTOR: np.float16,
+                    DataType.BFLOAT16_VECTOR: cf.bfloat16,
+                    DataType.INT8_VECTOR: np.int8,
+                }[vector_type]
+                np.testing.assert_array_equal(np.frombuffer(actual[0], dtype=dtype), np.asarray(expected, dtype=dtype))
+            else:
+                np.testing.assert_array_equal(actual, expected)
 
         search_res, _ = self.collection_wrap.search(
             self._search_vector_value(vector_type, 100, dim),
@@ -1381,6 +1414,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     if enable_dynamic_field:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
+        # The shared generator uses all-null columns except for its mixed text field.
+        if nullable:
+            null_fields = [field.name for field in fields if field.nullable and field.name != df.text_field]
+            null_rows, _ = self.collection_wrap.query(
+                expr=f"{df.pk_field} >= 0", output_fields=[df.pk_field, *null_fields]
+            )
+            assert len(null_rows) == entities
+            for row in null_rows:
+                for field_name in null_fields:
+                    assert row[field_name] is None, {"pk": row[df.pk_field], "field": field_name, "row": row}
         # query data
         if not nullable:
             expr_field = df.string_field
@@ -1448,8 +1491,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         if enable_dynamic_field is False and include_meta is True:
             pytest.skip("include_meta only works with enable_dynamic_field")
-        if nullable is True:
-            pytest.skip("not support bulk insert numpy files in field which set nullable == true")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim + random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim + random.randint(-16, 32)
@@ -1472,6 +1513,12 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         c_name = cf.gen_unique_str("bulk_insert")
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
 
+        # Numpy stores non-null values even when the destination field is nullable.
+        data_schema = cf.gen_collection_schema(
+            fields=[FieldSchema.construct_from_dict({**field.to_dict(), "nullable": False}) for field in fields],
+            auto_id=auto_id,
+            enable_dynamic_field=enable_dynamic_field,
+        )
         files = prepare_bulk_insert_numpy_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1480,7 +1527,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
-            schema=schema,
+            schema=data_schema,
+            include_meta=include_meta,
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
@@ -1561,7 +1609,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
@@ -1582,7 +1630,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
@@ -1599,10 +1647,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         res, _ = self.collection_wrap.query(
             expr=f"TEXT_MATCH({df.text_field}, 'milvus')", output_fields=[df.text_field]
         )
-        if nullable is False:
-            assert len(res) == entities
-        else:
-            assert 0 < len(res) < entities
+        assert len(res) == entities
+        if nullable:
+            for field_name in (df.int_field, df.text_field):
+                null_rows, _ = self.collection_wrap.query(expr=f"{field_name} is null", output_fields=[df.pk_field])
+                assert null_rows == []
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
         res, _ = self.collection_wrap.query(expr=f"{df.json_field}['number'] >= 0", output_fields=[df.json_field])
@@ -1778,6 +1827,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     if enable_dynamic_field:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
+        # The shared generator uses all-null columns except for its mixed text field.
+        if nullable:
+            null_fields = [field.name for field in fields if field.nullable and field.name != df.text_field]
+            null_rows, _ = self.collection_wrap.query(
+                expr=f"{df.pk_field} >= 0", output_fields=[df.pk_field, *null_fields]
+            )
+            assert len(null_rows) == entities
+            for row in null_rows:
+                for field_name in null_fields:
+                    assert row[field_name] is None, {"pk": row[df.pk_field], "field": field_name, "row": row}
         # query data
         if not nullable:
             expr_field = df.string_field
@@ -2560,7 +2619,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 access_key="minioadmin",
                 secret_key="minioadmin",
             ),
-            file_type=BulkFileType.JSON,
+            file_type=BulkFileType.PARQUET,
         ) as remote_writer:
             json_value = [
                 # 1,
@@ -2601,6 +2660,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
+        assert files and all(path.endswith(".parquet") for batch in files for path in batch)
         # import data
         for f in files:
             t0 = time.time()
@@ -3064,13 +3124,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self._connect()
         c_name = cf.gen_unique_str("bulk_ins_parkey")
         fields = [
-            cf.gen_int64_field(name=df.pk_field, is_primary=True),
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field, is_partition_key=True),
             cf.gen_float_field(name=df.float_field),
             cf.gen_double_field(name=df.double_field),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
-        schema = cf.gen_collection_schema(fields=fields)
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         # build index
         index_params = ct.default_index

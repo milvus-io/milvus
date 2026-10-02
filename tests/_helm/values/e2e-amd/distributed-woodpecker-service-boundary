@@ -19,7 +19,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: v0.1.40
+    tag: v0.1.45
     pullPolicy: Always
 streaming:
   enabled: true
@@ -79,6 +79,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       bloomFilterApplyBatchSize: 511
       storage:

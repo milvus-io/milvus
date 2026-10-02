@@ -27,6 +27,11 @@ PGO_PATH := $(PWD)/configs/pgo
 OS := $(shell uname -s)
 mode = Release
 
+# Optional persistent root for Cargo build artifacts. Individual Rust
+# workspaces select their own subdirectories below this root.
+MILVUS_CARGO_TARGET_ROOT ?=
+export MILVUS_CARGO_TARGET_ROOT
+
 # Set disk_index default based on OS
 # macOS (Darwin) does not support aio, so disable disk_index
 ifeq ($(OS),Darwin)
@@ -83,7 +88,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.11.2
+GCI_VERSION := 0.13.4
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
@@ -217,8 +222,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gofumpt -l -w tests/go_client/
 	@$(INSTALL_PATH)/gofumpt -l -w tests/integration/
 	@echo "Running gci fix"
-# Skip boring_enabled.go: gci misclassifies crypto/boring (a std lib package) as third-party, conflicting with gofumpt
-	@find cmd/ -name '*.go' ! -name 'boring_enabled.go' | xargs $(INSTALL_PATH)/gci write --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write internal/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write pkg/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write client/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
@@ -239,6 +243,8 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
+	@echo "Start check segcore error boundaries"
+	@$(PWD)/scripts/check_segcore_error_boundaries.sh
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
@@ -317,6 +323,18 @@ generated-proto-without-cpp: download-milvus-proto get-proto-deps
 generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
+
+generate-segcore-codes:
+	@echo "Generating segcore error code list from milvus-common ..."
+	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
+
+# CI gate: regenerate the segcore code list and fail on drift, so a
+# milvus-common pin bump that adds an ErrorCode cannot ship without the
+# generated snapshot (and therefore the classForCode switch) catching up.
+# Mirrors check-proto-product.
+check-segcore-codes-product: generate-segcore-codes
+	@git diff --exit-code -- pkg/util/merr/segcore_codes_gen.go || \
+		(echo "segcore_codes_gen.go is out of date with milvus-common's EasyAssert.h; run 'make generate-segcore-codes' and classify any new code in classForCode" && exit 1)
 
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."

@@ -163,6 +163,14 @@ type RLSPrincipal struct {
 	Tags          map[string]rlsutil.TagValue
 }
 
+// RLSMetadata is a collection's RLS metadata view. Policies are detached from
+// MetaTable state, and principals are caller-owned records decoded by Catalog.
+type RLSMetadata struct {
+	CollectionID int64
+	Policies     []*RLSPolicy
+	Principals   []*RLSPrincipal
+}
+
 func MarshalRLSPrincipalModel(principal *RLSPrincipal) (*rootcoordpb.RLSPrincipalInfo, error) {
 	if principal == nil {
 		return nil, nil
@@ -205,17 +213,6 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		PrincipalName: principal.PrincipalName,
 		Tags:          cloneRLSTags(principal.Tags),
 	}
-}
-
-func CloneRLSPrincipals(principals []*RLSPrincipal) []*RLSPrincipal {
-	if principals == nil {
-		return nil
-	}
-	cloned := make([]*RLSPrincipal, len(principals))
-	for i, principal := range principals {
-		cloned[i] = CloneRLSPrincipal(principal)
-	}
-	return cloned
 }
 
 func cloneRowPolicyActions(actions []rlsutil.PolicyAction) []rlsutil.PolicyAction {

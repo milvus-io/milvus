@@ -3,6 +3,7 @@
 #include <exception>
 #include <memory>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "tantivy/phrase_match.h"
 
@@ -14,7 +15,6 @@ compute_phrase_match_slop_c(const char* params,
     try {
         *slop = milvus::tantivy::compute_phrase_match_slop(params, query, data);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

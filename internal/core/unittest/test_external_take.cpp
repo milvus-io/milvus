@@ -1240,6 +1240,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
+                               false,
                                std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
@@ -3051,6 +3052,89 @@ TEST(InjectExtfsAllowlist, AllowlistedKeyIsApplied) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")), "true");
 }
 
+TEST(InjectExtfsAllowlist, EndpointURLSelectsExplicitEndpointMode) {
+    struct Case {
+        std::string endpoint_url;
+        std::string expected_address;
+        std::string expected_use_ssl;
+    };
+    std::vector<Case> cases = {
+        {"http://rook-ceph-rgw.storage.svc:80",
+         "http://rook-ceph-rgw.storage.svc:80",
+         "false"},
+        {"HTTPS://s3.example.com/", "https://s3.example.com", "true"},
+    };
+
+    for (const auto& c : cases) {
+        milvus_storage::api::Properties props;
+        const int64_t coll_id = 42;
+        std::string spec =
+            R"({"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws","region":"us-west-2","endpoint_url":")" +
+            c.endpoint_url + R"("}})";
+
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://my-bucket/object", spec);
+
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
+                  c.expected_address);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
+                  "my-bucket");
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.use_ssl")),
+                  c.expected_use_ssl);
+        // endpoint_url is a public alias for address, not a milvus-storage
+        // property. It must never be forwarded under the extfs namespace.
+        EXPECT_EQ(props.count("extfs.42.endpoint_url"), 0u);
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLRejectsFragments) {
+    const std::vector<std::string> endpoint_urls = {
+        "http://host#", "http://host/#", "http://host#fragment"};
+
+    for (const auto& endpoint_url : endpoint_urls) {
+        SCOPED_TRACE(endpoint_url);
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"parquet","extfs":{"endpoint_url":")" +
+                           endpoint_url + R"("}})";
+
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://my-bucket/object", spec),
+                     milvus::SegcoreError);
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLErrorsRedactRawValue) {
+    const std::string marker = "endpoint-credential-marker";
+    const std::vector<std::string> endpoint_urls = {
+        marker, "ftp://" + marker, "http://user:" + marker + "@host"};
+
+    for (const auto& endpoint_url : endpoint_urls) {
+        SCOPED_TRACE(endpoint_url);
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"parquet","extfs":{"endpoint_url":")" +
+                           endpoint_url + R"("}})";
+
+        try {
+            ::InjectExternalSpecProperties(
+                props, 42, "s3://my-bucket/object", spec);
+            FAIL() << "expected invalid endpoint URL to be rejected";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(std::string(error.what()).find(marker),
+                      std::string::npos);
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, EndpointURLRejectsEndpointFormSource) {
+    milvus_storage::api::Properties props;
+    std::string spec =
+        R"({"format":"parquet","extfs":{"endpoint_url":"http://rook-ceph-rgw:80"}})";
+
+    EXPECT_THROW(::InjectExternalSpecProperties(
+                     props, 42, "s3://localhost:9000/my-bucket/object", spec),
+                 milvus::SegcoreError);
+}
+
 TEST(InjectExtfsAllowlist, UnknownKeyIsDropped) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
@@ -3671,6 +3755,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          dim,
                          std::nullopt,
                          nullable,
+                         false,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -3698,6 +3783,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
+                         false,
                          std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }

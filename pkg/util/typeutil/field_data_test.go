@@ -33,6 +33,18 @@ func TestFieldDataValidData(t *testing.T) {
 		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
 	})
 
+	t.Run("nested scalar field", func(t *testing.T) {
+		field := &schemapb.ScalarField{ValidData: scalarValid}
+		assert.Equal(t, scalarValid, GetArrayElementValidData(field))
+		assert.Nil(t, GetArrayElementValidData((*schemapb.ScalarField)(nil)))
+	})
+
+	t.Run("nested vector field", func(t *testing.T) {
+		field := &schemapb.VectorField{ValidData: vectorValid}
+		assert.Equal(t, vectorValid, GetVectorArrayElementValidData(field))
+		assert.Nil(t, GetVectorArrayElementValidData((*schemapb.VectorField)(nil)))
+	})
+
 	t.Run("legacy fallback", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			ValidData: legacy,

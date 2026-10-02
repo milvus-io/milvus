@@ -1,8 +1,10 @@
 package message_test
 
 import (
+	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -32,7 +34,7 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, insertMsg)
 	assert.Equal(t, int64(1), insertMsg.Header().CollectionId)
-	body, err := insertMsg.Body()
+	body, err := insertMsg.Body(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), body.CollectionID)
 
@@ -63,7 +65,7 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.NotNil(t, insertMsg2)
 	assert.Equal(t, int64(1), insertMsg2.Header().CollectionId)
 	assert.Equal(t, insertMsg2.Header().Partitions[0].SegmentAssignment.SegmentId, int64(1))
-	body, err = insertMsg2.Body()
+	body, err = insertMsg2.Body(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), body.CollectionID)
 
@@ -81,4 +83,36 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.Panics(t, func() {
 		message.MustAsMutableCreateCollectionMessageV1(m)
 	})
+}
+
+func TestSpecializedMessageBody(t *testing.T) {
+	m := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.InsertRequest{CollectionID: 1, NumRows: 7}).
+		MustBuildMutable()
+
+	mutable := message.MustAsMutableInsertMessageV1(m)
+	body, err := mutable.Body(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(7), body.GetNumRows())
+
+	immutable := message.MustAsImmutableInsertMessageV1(m.WithTimeTick(1).WithLastConfirmedUseMessageID().IntoImmutableMessage(mock_message.NewMockMessageID(t)))
+	body, err = immutable.Body(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(7), body.GetNumRows())
+
+	// a canceled context is returned as is, not as a malformed body.
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = mutable.Body(canceled)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, errors.Is(err, message.ErrMalformedBody))
+
+	// a payload that is not a valid body is marked as malformed.
+	corrupted := message.MustAsMutableInsertMessageV1(
+		message.NewMutableMessageBeforeAppend([]byte{0xff}, m.Properties().ToRawMap()))
+	_, err = corrupted.Body(context.Background())
+	assert.ErrorIs(t, err, message.ErrMalformedBody)
+	assert.True(t, errors.Is(err, message.ErrMalformedBody))
 }

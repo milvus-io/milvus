@@ -14,6 +14,8 @@
 
 #include <stdint.h>
 
+#include "common/type_c.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,7 +26,10 @@ InitPermutations(int32_t num_hashes,
                  uint64_t* perm_a,
                  uint64_t* perm_b);
 
-void
+// Returns a CStatus so a failure (tokenizer error, allocation failure) is
+// reported to the Go caller instead of leaving `signatures` half-written:
+// silently returning garbage signatures would corrupt minhash results.
+CStatus
 ComputeMinHashFromTexts(const char** texts,
                         const int32_t* text_lengths,
                         int32_t num_texts,

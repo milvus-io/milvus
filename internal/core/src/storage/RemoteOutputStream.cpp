@@ -12,6 +12,7 @@
 #include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
 
@@ -26,14 +27,22 @@ RemoteOutputStream::~RemoteOutputStream() {
 size_t
 RemoteOutputStream::Tell() const {
     auto status = output_stream_->Tell();
-    AssertInfo(status.ok(), "Failed to tell output stream");
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status.status()),
+                  "Failed to tell output stream: {}",
+                  status.status().ToString());
+    }
     return status.ValueOrDie();
 }
 
 size_t
 RemoteOutputStream::Write(const void* data, size_t size) {
     auto status = output_stream_->Write(data, size);
-    AssertInfo(status.ok(), "Failed to write to output stream");
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to write to output stream: {}",
+                  status.ToString());
+    }
     return size;
 }
 
@@ -47,10 +56,15 @@ RemoteOutputStream::Write(int fd, size_t size) {
     while (rest_size > 0) {
         size_t read_size = std::min(rest_size, read_batch_size);
         auto read_status = ::read(fd, data.data(), read_size);
-        AssertInfo(read_status == static_cast<ssize_t>(read_size),
-                   "Failed to read from file");
+        if (!(read_status == static_cast<ssize_t>(read_size))) {
+            ThrowInfo(ErrorCode::FileReadFailed, "Failed to read from file");
+        }
         auto write_status = output_stream_->Write(data.data(), read_size);
-        AssertInfo(write_status.ok(), "Failed to write to output stream");
+        if (!write_status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(write_status),
+                      "Failed to write to output stream: {}",
+                      write_status.ToString());
+        }
         rest_size -= read_size;
     }
 
@@ -60,6 +74,10 @@ RemoteOutputStream::Write(int fd, size_t size) {
 void
 RemoteOutputStream::Close() {
     auto status = output_stream_->Close();
-    AssertInfo(status.ok(), "Failed to close output stream");
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to close output stream: {}",
+                  status.ToString());
+    }
 }
 }  // namespace milvus::storage

@@ -40,13 +40,31 @@ func NewOwnedImmutableMessage(
 	msg ImmutableMessage,
 	finalizer func(),
 ) OwnedImmutableMessage {
+	return NewOwnedImmutableMessageWithFinalizer(msg, func(bool) {
+		if finalizer != nil {
+			finalizer()
+		}
+	})
+}
+
+// NewOwnedImmutableMessageWithFinalizer reports the message's final poison
+// status when all references are released. Releasing memory alone does not
+// imply successful processing when poisoned is true.
+func NewOwnedImmutableMessageWithFinalizer(
+	msg ImmutableMessage,
+	finalizer func(poisoned bool),
+) OwnedImmutableMessage {
 	if msg == nil {
 		panic("ref-counted immutable message is nil")
 	}
 	core := &refCountedImmutableMessageCore{
-		message:   msg,
-		refCount:  1,
-		finalizer: finalizer,
+		message:  msg,
+		refCount: 1,
+	}
+	core.finalizer = func() {
+		if finalizer != nil {
+			finalizer(core.isPoisoned())
+		}
 	}
 	return &ownedImmutableMessage{core: core}
 }
@@ -168,6 +186,13 @@ func (c *refCountedImmutableMessageCore) finishFinalization(finalizer func(), fi
 
 type ownedImmutableMessage struct {
 	core *refCountedImmutableMessageCore
+}
+
+func (m *ownedImmutableMessage) IsPoisoned() bool {
+	if m.core == nil {
+		panic("ref-counted immutable message owner accessed after release")
+	}
+	return m.core.isPoisoned()
 }
 
 func (m *ownedImmutableMessage) Message() ImmutableMessage {

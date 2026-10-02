@@ -242,6 +242,7 @@ struct GeneratedData {
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
                             break;
                         }
+                        case DataType::STRING:
                         case DataType::VARCHAR: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
@@ -941,6 +942,7 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
@@ -1472,26 +1474,54 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::VECTOR_FLOAT: {
                 auto raw_data = data->vectors().float_vector().data().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_FLOAT, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_FLOAT,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_FLOAT, dim);
+                }
                 break;
             }
             case DataType::VECTOR_BINARY: {
                 auto raw_data = data->vectors().binary_vector().data();
                 dim = field_meta.get_dim();
                 AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
-                createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_BINARY,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                }
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
                 auto raw_data = data->vectors().float16_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_FLOAT16, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_FLOAT16,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_FLOAT16, dim);
+                }
                 break;
             }
             case DataType::VECTOR_BFLOAT16: {
                 auto raw_data = data->vectors().bfloat16_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_BFLOAT16,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
+                }
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
@@ -1503,7 +1533,14 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::VECTOR_INT8: {
                 auto raw_data = data->vectors().int8_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_INT8, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_INT8,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_INT8, dim);
+                }
                 break;
             }
             case DataType::VECTOR_ARRAY: {
@@ -1511,7 +1548,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto dim = field_meta.get_dim();
                 std::vector<VectorArray> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
-                    data_raw[i] = VectorArray(src_data.at(i));
+                    data_raw[i] = VectorArray(src_data.at(i),
+                                              field_meta.is_element_nullable());
                 }
                 createFieldData(data_raw.data(), DataType::VECTOR_ARRAY, dim);
                 break;
@@ -1615,6 +1653,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR: {
                 auto begin = data->scalars().string_data().data().begin();
                 auto end = data->scalars().string_data().data().end();
@@ -1623,10 +1662,11 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(data_raw.data(),
                                             raw_valid_data,
-                                            DataType::VARCHAR,
+                                            field_meta.get_data_type(),
                                             dim);
                 } else {
-                    createFieldData(data_raw.data(), DataType::VARCHAR, dim);
+                    createFieldData(
+                        data_raw.data(), field_meta.get_data_type(), dim);
                 }
                 break;
             }

@@ -704,6 +704,46 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorSkipsBlacklist() {
 	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
 }
 
+// TestExecuteWithRetryUnsupportedSkipsBlacklist verifies that a segcore
+// "unsupported" verdict -- deterministic across replicas because every node
+// runs the same binary -- aborts without retrying and without blacklisting the
+// serving node, which did nothing wrong.
+func (s *LBPolicySuite) TestExecuteWithRetryUnsupportedSkipsBlacklist() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(merr.ErrSegcoreUnsupported, "unsupported on QueryNode %d", nodeID)
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrSegcoreUnsupported)
+	// not retried across replicas despite retryOnReplica=3
+	s.Equal(1, execCount)
+	// the serving node is not blacklisted: every replica would answer the same
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
 func (s *LBPolicySuite) TestExecuteOneChannel() {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")

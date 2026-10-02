@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -53,6 +54,36 @@ import (
 
 func TestClusteringCompactionTaskStorageV3Suite(t *testing.T) {
 	suite.Run(t, new(ClusteringCompactionTaskStorageV3Suite))
+}
+
+func TestClusteringInitLOBCompactionContextDecodesAcrossPartitionBases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	params := compaction.GenParams()
+	task := &clusteringCompactionTask{
+		collectionID: 10,
+		partitionID:  20,
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_ClusteringCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			}},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+				SegmentID: 1,
+				Manifest: packed.MarshalManifestPath(
+					params.StorageConfig.GetRootPath()+"/files/insert_log/10/20/1", 1),
+			}},
+		},
+		compactionParams: params,
+	}
+
+	require.NoError(t, task.initLOBCompactionContext(context.Background()))
+	require.NotNil(t, task.lobContext)
+	require.True(t, task.lobContext.ShouldRewriteAnyField())
+	require.True(t, task.lobContext.DecodeTextFromSource)
+	sourceConfigs, err := task.lobContext.GetSourceTextColumnConfigs(task.plan.GetSegmentBinlogs()[0].GetManifest())
+	require.NoError(t, err)
+	require.Len(t, sourceConfigs, 1)
+	require.Contains(t, sourceConfigs[0].LobBasePath, "/files/insert_log/10/20/lobs/101")
 }
 
 type ClusteringCompactionTaskStorageV3Suite struct {
@@ -190,7 +221,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -395,7 +426,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -443,7 +474,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{

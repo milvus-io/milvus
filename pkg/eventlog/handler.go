@@ -32,9 +32,15 @@ const (
 	ContentTypeJSON = "application/json"
 )
 
-// eventLogHandler is the event log http handler
+// eventLogHandler is the event log http handler.
 type eventLogHandler struct{}
 
+// Handler returns the discovery handler.
+//
+// It carries no listener-mode policy of its own. Whether the gRPC stream binds
+// to loopback is owned entirely by EnsureListenerMode, which the embedder calls
+// before serving and again on every config change. A second, per-request source
+// of truth for the same decision would be one that could disagree.
 func Handler() http.Handler {
 	return &eventLogHandler{}
 }

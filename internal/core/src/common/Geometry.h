@@ -265,7 +265,7 @@ class Geometry {
     // WKB parse into this instance that returns false ONLY for bad data
     // (unparseable WKB), leaving this invalid (IsValid() == false), instead of
     // the throwing WKB constructor's AssertInfo. Mirrors the geometry cache's
-    // GetByOffsetUnsafe() == nullptr contract so exact refinement can
+    // GetByOffset() == nullptr contract so exact refinement can
     // `continue` past a corrupt/placeholder row in every configuration
     // (geometry cache on or off) rather than throwing and failing the whole
     // query.
@@ -282,9 +282,12 @@ class Geometry {
     // indistinguishable from unparseable WKB at this boundary (telling them
     // apart would require installing a GEOS error handler and parsing message
     // strings). Such a row is therefore classified as bad data with no retry:
-    // the cache stores an invalid entry, the filter paths evaluate it to
-    // false, and the index stamps a placeholder MBR. Accepted tradeoff:
-    // parse-time OOM is rare and the blast radius is a single row.
+    // the geometry cache leaves it without a geometry, the filter paths
+    // evaluate it to false, and the index stamps a placeholder MBR. Accepted
+    // tradeoff: parse-time OOM is rare and the blast radius is a single row.
+    // (The cache does not freeze that outcome: if the same offset is written
+    // again -- e.g. its batch is retried -- the row is re-parsed, see
+    // SimpleGeometryCache::AppendDataAt.)
     bool
     TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
         if (ctx == nullptr) {
@@ -365,12 +368,12 @@ class Geometry {
     // Explicit deep clone into the CALLER's context. All GEOS work runs
     // through `ctx`, never through this instance's context, and the returned
     // Geometry is bound to `ctx` -- this is the only safe way to duplicate a
-    // cache-owned Geometry from a query thread (hold the cache read lock and
-    // pass GetThreadLocalGEOSContext()), and the clone stays valid after the
+    // cache-owned Geometry from a query thread (pass
+    // GetThreadLocalGEOSContext()), and the clone stays valid after the
     // cache is gone.
     //
     // NOTE: no production caller today -- the filter paths borrow cached
-    // geometries under the read lock and never copy them, which is cheaper.
+    // geometries by pointer and never copy them, which is cheaper.
     // This is not leftover dead code: it exists so that the next caller that
     // does need a copy has a correct path, instead of reaching for the copy
     // constructor above and silently cloning through the cache's shared
@@ -421,8 +424,8 @@ class Geometry {
     // Each predicate has an overload that takes an explicit GEOS context. GEOS
     // context handles are NOT thread-safe, and cache-owned Geometry instances
     // share one context across concurrent queries, so callers on a shared
-    // (read-locked) cached geometry MUST pass their own per-thread context
-    // (see GetThreadLocalGEOSContext) instead of relying on the stored ctx_.
+    // cached geometry MUST pass their own per-thread context (see
+    // GetThreadLocalGEOSContext) instead of relying on the stored ctx_.
     // The no-context overloads keep using the instance's own context and are
     // only safe when this instance is not shared across threads.
     bool

@@ -35,6 +35,9 @@
 #include "storage/IndexEntryReader.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/Util.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 
 namespace milvus::index {
 template <typename T>
@@ -191,8 +194,10 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
     // Create the IndexEntryWriter
     auto writer =
         file_manager_->CreateIndexEntryWriterUnified(filename, is_index_file_);
-    AssertInfo(writer != nullptr,
-               "failed to create IndexEntryWriter for V3 format");
+    if (!(writer != nullptr)) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "failed to create IndexEntryWriter for V3 format");
+    }
 
     // Call subclass implementation to write all entries.
     // Subclasses use writer->PutMeta() to add their metadata.
@@ -240,30 +245,46 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
 
     LOG_INFO("LoadUnified: loading packed index file: {}", packed_file);
 
-    // Open the file using the file manager
-    auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
-    AssertInfo(input != nullptr,
-               "failed to open input stream for packed index file: {}",
-               packed_file);
-
-    size_t file_size = input->Size();
-
-    auto collection_id =
-        GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
-
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     auto cancellation_token =
         op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
+    const bool use_async_load = file_manager_->GetAsyncLoadEnabled().value_or(
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    if (use_async_load) {
+        folly::coro::blockingWait(
+            LoadUnifiedAsync(
+                packed_file, config, load_priority, cancellation_token)
+                .scheduleOn(
+                    storage::ResolveAsyncLoadExecutor({}, load_priority)));
+        return;
+    }
+
+    // Open the file using the file manager
+    auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
+    if (!(input != nullptr)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "failed to open input stream for packed index file: {}",
+                  packed_file);
+    }
+
+    size_t file_size = input->Size();
+
+    auto collection_id =
+        GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
+
     auto reader =
         storage::IndexEntryReader::Open(input,
                                         file_size,
                                         collection_id,
                                         milvus::PriorityForLoad(load_priority),
                                         cancellation_token);
-    AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
+    if (!(reader != nullptr)) {
+        ThrowInfo(ErrorCode::FileOpenFailed,
+                  "failed to create IndexEntryReader");
+    }
 
     LoadEntries(*reader, config);
 

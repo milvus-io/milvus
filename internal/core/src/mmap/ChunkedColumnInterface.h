@@ -30,11 +30,16 @@
 #include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
 #include "mmap/ChunkedColumnScanCommon.h"
+#include "index/FieldChunkMetricsProvider.h"
 namespace milvus {
+
+namespace index {
+class FieldChunkMetrics;
+}  // namespace index
 
 using namespace milvus::cachinglayer;
 
-class ChunkedColumnInterface {
+class ChunkedColumnInterface : public FieldChunkMetricsProvider {
  public:
     using TargetType = milvus::TargetType;
     using ValueView = milvus::ValueView;
@@ -53,7 +58,24 @@ class ChunkedColumnInterface {
     using TakeResult = milvus::TakeResult;
     using TakeResultPtr = milvus::TakeResultPtr;
 
-    virtual ~ChunkedColumnInterface() = default;
+    ~ChunkedColumnInterface() override = default;
+
+    // Optional per-cell skip metrics owned by this column's generation.
+    // Storage V2 proxy columns override both accessors; an ordinary V1 column
+    // has no metrics and must fail open (never skip).
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t) const override {
+        return nullptr;
+    }
+
+    // Declare list support with no list: a FieldSkipMetricsView resolved on a
+    // V1 column then never prunes and never calls GetSkipMetrics per cell.
+    // Without this override the base class answers "no list support" and the
+    // view would fall back to one virtual call per cell just to learn nullptr.
+    std::optional<const SkipMetricsList*>
+    GetSkipMetricsList() const override {
+        return static_cast<const SkipMetricsList*>(nullptr);
+    }
 
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
@@ -272,9 +294,9 @@ class ChunkedColumnInterface {
         if (valid_row_ids_built_.load(std::memory_order_relaxed)) {
             return;
         }
+        auto chunk_pws = GetAllChunks(op_ctx);
         const auto total_chunks = num_chunks();
         const auto total_rows = NumRows();
-        auto chunk_pws = GetAllChunks(op_ctx);
 
         valid_data_.resize(total_rows);
         valid_count_per_chunk_.assign(total_chunks, 0);

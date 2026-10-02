@@ -82,6 +82,54 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestDataViewCollectionRecoveryValidator(t *testing.T) {
+	mockey.PatchConvey("validate CollectionMeta state for DataView recovery", t, func() {
+		lookupErr := errors.New("lookup failed")
+		meta := &MetaTable{}
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(
+			_ *MetaTable,
+			_ context.Context,
+			_ string,
+			collectionID UniqueID,
+			_ Timestamp,
+			_ bool,
+		) (*model.Collection, error) {
+			switch collectionID {
+			case 1:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreated}, nil
+			case 2:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreating}, nil
+			case 3:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropping}, nil
+			case 4:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropped}, nil
+			case 5:
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
+			case 6:
+				return nil, lookupErr
+			default:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState(100)}, nil
+			}
+		}).Build()
+
+		core := &Core{meta: meta}
+		recover, err := core.ValidateDataViewCollectionForRecovery(context.Background(), 1)
+		require.NoError(t, err)
+		require.True(t, recover)
+		for _, collectionID := range []int64{2, 3, 4, 5} {
+			recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), collectionID)
+			require.NoError(t, err)
+			require.False(t, recover)
+		}
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 6)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, recover)
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 7)
+		require.Error(t, err)
+		require.False(t, recover)
+	})
+}
+
 // testBoundIndexRecorder captures FieldIndexes applied through the fake
 // CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
 var testBoundIndexRecorder = struct {
@@ -156,7 +204,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-		msg = msg.WithBroadcastID(1)
+		// Stamp the header the way the real broadcaster does, control channel included.
+		msg = msg.OverwriteBroadcastHeader(1)
+		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
@@ -1788,14 +1838,21 @@ func TestCore_RLSAPIs(t *testing.T) {
 		if msg.IsUnreplicable() {
 			return false
 		}
-		return msg.MessageType() == message.MessageTypeAlterRLSMetadata ||
-			msg.MessageType() == message.MessageTypeDropRLSMetadata
+		switch msg.MessageType() {
+		case message.MessageTypeAlterRLSMetadata:
+			rlsMsg, err := message.AsBroadcastAlterRLSMetadataMessageV2(msg)
+			return err == nil && len(rlsMsg.Header().GetCacheExpirations().GetCacheExpirations()) == 1
+		case message.MessageTypeDropRLSMetadata:
+			rlsMsg, err := message.AsBroadcastDropRLSMetadataMessageV2(msg)
+			return err == nil && len(rlsMsg.Header().GetCacheExpirations().GetCacheExpirations()) == 1
+		default:
+			return false
+		}
 	})).Return(nil, nil).Times(5)
 	policyLock.EXPECT().Close().Times(6)
 	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(policyLock, nil).Build()
 	defer lockMocker.UnPatch()
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Times(5)
 	streaming.SetWALForTest(wal)
 	defer streaming.SetWALForTest(nil)
 	idAllocator := newMockIDAllocator()
@@ -1823,14 +1880,14 @@ func TestCore_RLSAPIs(t *testing.T) {
 		Actions:      createReq.GetActions(),
 		UsingExpr:    createReq.GetUsingExpr(),
 	}, nil).Once()
-	status, err := c.CreateRowPolicy(ctx, createReq)
+	status, err := c.createRowPolicy(ctx, createReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
 	assert.Equal(t, 1, allocations)
 
 	meta.EXPECT().PrepareCreateRLSPolicy(mock.Anything, createReq, unallocatedRLSPolicyID).
 		Return(nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", createReq.GetPolicyName())).Once()
-	status, err = c.CreateRowPolicy(ctx, createReq)
+	status, err = c.createRowPolicy(ctx, createReq)
 	require.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
 	assert.Contains(t, status.GetReason(), "already exists")
@@ -1853,7 +1910,7 @@ func TestCore_RLSAPIs(t *testing.T) {
 		Actions:      updateReq.GetActions(),
 		UsingExpr:    updateReq.GetUsingExpr(),
 	}, nil).Once()
-	status, err = c.UpdateRowPolicy(ctx, updateReq)
+	status, err = c.updateRowPolicy(ctx, updateReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
 
@@ -1863,13 +1920,13 @@ func TestCore_RLSAPIs(t *testing.T) {
 		CollectionID: 20,
 		PolicyName:   dropReq.GetPolicyName(),
 	}, nil).Once()
-	status, err = c.DropRowPolicy(ctx, dropReq)
+	status, err = c.dropRowPolicy(ctx, dropReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
 
 	listReq := &rlsutil.ListRowPoliciesRequest{DbName: "db1", CollectionName: "coll1"}
 	meta.EXPECT().ListRLSPolicies(mock.Anything, listReq).Return([]*rlsutil.RowPolicy{{PolicyName: "policy1"}}, nil).Once()
-	listResp, err := c.ListRowPolicies(ctx, listReq)
+	listResp, err := c.listRowPolicies(ctx, listReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(listResp.Status))
 	require.Len(t, listResp.Policies, 1)
@@ -1889,7 +1946,7 @@ func TestCore_RLSAPIs(t *testing.T) {
 		PrincipalName: setTagsReq.GetPrincipalName(),
 		Tags:          setTagsReq.GetTags(),
 	}, nil).Once()
-	status, err = c.SetRLSPrincipalTags(ctx, setTagsReq)
+	status, err = c.setRLSPrincipalTags(ctx, setTagsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
 
@@ -1897,7 +1954,7 @@ func TestCore_RLSAPIs(t *testing.T) {
 	meta.EXPECT().GetRLSPrincipalTags(mock.Anything, getTagsReq).Return(map[string]rlsutil.TagValue{
 		"dept": rlsutil.NewStringTagValue("sales"),
 	}, nil).Once()
-	getTagsResp, err := c.GetRLSPrincipalTags(ctx, getTagsReq)
+	getTagsResp, err := c.getRLSPrincipalTags(ctx, getTagsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(getTagsResp.Status))
 	assert.Equal(t, map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}, getTagsResp.Tags)
@@ -1905,10 +1962,37 @@ func TestCore_RLSAPIs(t *testing.T) {
 
 	listPrincipalsReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
 	meta.EXPECT().ListRLSPrincipals(mock.Anything, listPrincipalsReq).Return([]string{"alice", "bob"}, nil).Once()
-	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, listPrincipalsReq)
+	listPrincipalsResp, err := c.listRLSPrincipals(ctx, listPrincipalsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(listPrincipalsResp.Status))
 	assert.Equal(t, []string{"alice", "bob"}, listPrincipalsResp.PrincipalNames)
+
+	meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, "").Return(&model.RLSMetadata{
+		CollectionID: 20,
+		Policies:     []*model.RLSPolicy{{PolicyName: "policy1"}},
+		Principals: []*model.RLSPrincipal{
+			{
+				DBID:          10,
+				CollectionID:  20,
+				PrincipalName: "alice",
+				Tags: map[string]rlsutil.TagValue{
+					"dept":  rlsutil.NewStringTagValue("sales"),
+					"level": rlsutil.NewInt64TagValue(3),
+					"score": rlsutil.NewDoubleTagValue(0.75),
+				},
+			},
+		},
+	}, nil).Once()
+	metadataResp, err := c.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+		CollectionId: 20,
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+	})
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(metadataResp.GetStatus()))
+	assert.Equal(t, int64(20), metadataResp.GetCollectionId())
+	require.Len(t, metadataResp.GetPolicies(), 1)
+	require.Len(t, metadataResp.GetPrincipals(), 1)
+	assert.JSONEq(t, `{"dept":"sales","level":3,"score":0.75}`, metadataResp.GetPrincipals()[0].GetTags())
 
 	deleteTagsReq := &rlsutil.DeleteRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice", TagKeys: []string{"dept"}}
 	meta.EXPECT().PrepareDeleteRLSPrincipalTags(mock.Anything, deleteTagsReq).Return(&model.RLSPrincipal{
@@ -1916,9 +2000,55 @@ func TestCore_RLSAPIs(t *testing.T) {
 		CollectionID:  20,
 		PrincipalName: deleteTagsReq.GetPrincipalName(),
 	}, true, nil).Once()
-	status, err = c.DeleteRLSPrincipalTags(ctx, deleteTagsReq)
+	status, err = c.deleteRLSPrincipalTags(ctx, deleteTagsReq)
 	require.NoError(t, err)
 	assert.True(t, merr.Ok(status))
+}
+
+func TestCore_GetRLSMetadataRejectsInvalidPrincipalState(t *testing.T) {
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, "").Return(&model.RLSMetadata{
+		CollectionID: 20,
+		Principals: []*model.RLSPrincipal{{
+			CollectionID:  20,
+			PrincipalName: "alice",
+			Tags: map[string]rlsutil.TagValue{
+				"invalid": {Kind: rlsutil.TagValueKindUnknown},
+			},
+		}},
+	}, nil).Once()
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+
+	resp, err := c.GetRLSMetadata(context.Background(), &rootcoordpb.GetRLSMetadataRequest{
+		CollectionId: 20,
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+	})
+	require.NoError(t, err)
+	require.Error(t, merr.Error(resp.GetStatus()))
+	require.Empty(t, resp.GetPrincipals())
+}
+
+func TestCore_RLSListQuotaStatus(t *testing.T) {
+	ctx := context.Background()
+	meta := mockrootcoord.NewIMetaTable(t)
+	c := newTestCore(withHealthyCode(), withMeta(meta))
+	quotaErr := merr.WrapErrServiceQuotaExceededMsg("list too large")
+
+	listReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listReq).Return(nil, quotaErr).Once()
+	listResp, err := c.listRLSPrincipals(ctx, listReq)
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(listResp.Status), merr.ErrServiceQuotaExceeded)
+
+	for _, kind := range []rootcoordpb.RLSMetadataKind{
+		rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL,
+		rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
+	} {
+		meta.EXPECT().GetRLSMetadata(mock.Anything, int64(20), kind, "").Return(nil, quotaErr).Once()
+		resp, err := c.GetRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{CollectionId: 20, Kind: kind})
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceQuotaExceeded)
+	}
 }
 
 func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
@@ -1931,35 +2061,39 @@ func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
 		require.True(t, errors.Is(merr.Error(status), merr.ErrParameterInvalid), status.GetReason())
 	}
 
-	status, err := c.CreateRowPolicy(ctx, nil)
+	status, err := c.createRowPolicy(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, status)
 
-	status, err = c.UpdateRowPolicy(ctx, nil)
+	status, err = c.updateRowPolicy(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, status)
 
-	status, err = c.DropRowPolicy(ctx, nil)
+	status, err = c.dropRowPolicy(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, status)
 
-	listResp, err := c.ListRowPolicies(ctx, nil)
+	listResp, err := c.listRowPolicies(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, listResp.Status)
 
-	status, err = c.SetRLSPrincipalTags(ctx, nil)
+	status, err = c.setRLSPrincipalTags(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, status)
 
-	getTagsResp, err := c.GetRLSPrincipalTags(ctx, nil)
+	getTagsResp, err := c.getRLSPrincipalTags(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, getTagsResp.Status)
 
-	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, nil)
+	listPrincipalsResp, err := c.listRLSPrincipals(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, listPrincipalsResp.Status)
 
-	status, err = c.DeleteRLSPrincipalTags(ctx, nil)
+	metadataResp, err := c.GetRLSMetadata(ctx, nil)
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(metadataResp.GetStatus()), merr.ErrServiceInternal)
+
+	status, err = c.deleteRLSPrincipalTags(ctx, nil)
 	require.NoError(t, err)
 	assertParameterInvalidStatus(t, status)
 }
@@ -1975,7 +2109,7 @@ func TestCore_RLSPolicyMutationReturnsCollectionLockFailure(t *testing.T) {
 		return 123, nil
 	}
 	c := newTestCore(withHealthyCode(), withMeta(meta), withIDAllocator(idAllocator))
-	status, err := c.CreateRowPolicy(context.Background(), &rlsutil.CreateRowPolicyRequest{
+	status, err := c.createRowPolicy(context.Background(), &rlsutil.CreateRowPolicyRequest{
 		DbName:         "db1",
 		CollectionName: "coll1",
 		PolicyName:     "policy1",
@@ -1992,6 +2126,19 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
 	assert.NoError(t, err)
 	assert.Equal(t, priv, util.AnyWord)
+
+	skipRLSPrivilege := util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	priv, err = c.getMetastorePrivilegeName(context.Background(), skipRLSPrivilege)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), priv)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, skipRLSPrivilege).Return(false, nil)
+	err = c.isValidPrivilege(context.Background(), skipRLSPrivilege, commonpb.ObjectType_Collection.String())
+	assert.NoError(t, err)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, skipRLSPrivilege).Return(false, nil)
+	err = c.isValidPrivilegeV2(context.Background(), skipRLSPrivilege)
+	assert.NoError(t, err)
 
 	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
 	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
@@ -2470,6 +2617,9 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 }
 
 func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
+	clearRequest := mock.MatchedBy(func(req *proxypb.InvalidateCollMetaCacheRequest) bool {
+		return req.GetBase().GetProperties()[common.RLSClearAllCacheKey] == "true"
+	})
 	t.Run("add proxy", func(t *testing.T) {
 		proxyManager := proxyutil.NewMockProxyClientManager(t)
 		observer := NewMockFileResourceObserver(t)
@@ -2478,6 +2628,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
 			clientAdded = true
 		})
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientAdded)
@@ -2497,6 +2648,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest).Return(nil)
 		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
@@ -2512,6 +2664,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager := proxyutil.NewMockProxyClientManager(t)
 		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
 		proxyManager.EXPECT().AddProxyClient(session)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 
 		c := newTestCore()
 		c.proxyClientManager = proxyManager
@@ -2523,6 +2676,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		observer := NewMockFileResourceObserver(t)
 		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
 		proxyManager.EXPECT().AddProxyClient(session)
+		proxyManager.EXPECT().InvalidateCollectionMetaCache(mock.Anything, clearRequest, mock.Anything).Return(nil)
 		observer.EXPECT().IsEmpty().Return(true)
 
 		c := newTestCore()

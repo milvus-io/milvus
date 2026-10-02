@@ -63,6 +63,9 @@ ColumnPlanner::Locate(int64_t segment_offset) const {
                segment_offset,
                NumRows());
     const auto& boundaries = *num_rows_until_cell_;
+    if (boundaries.size() == 2) {
+        return CellLocation{0, segment_offset};
+    }
     const auto it =
         std::upper_bound(boundaries.begin(), boundaries.end(), segment_offset);
     const auto cell_id =

@@ -32,6 +32,7 @@
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -120,6 +121,9 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    // Cache translators pin the mode used by their resource estimate. Other
+    // callers leave it unset and select the global mode when loading starts.
+    std::optional<bool> use_async_load;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -142,11 +146,19 @@ struct FileManagerContext {
 class FileManagerImpl : public milvus::FileManager {
  public:
     explicit FileManagerImpl(const FieldDataMeta& field_mata,
-                             IndexMeta index_meta)
-        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+                             IndexMeta index_meta,
+                             std::optional<bool> use_async_load = std::nullopt)
+        : field_meta_(field_mata),
+          index_meta_(std::move(index_meta)),
+          use_async_load_(use_async_load) {
     }
 
- public:
+    // Unset means the caller has no cache-owned resource reservation.
+    std::optional<bool>
+    GetAsyncLoadEnabled() const {
+        return use_async_load_;
+    }
+
     /**
      * @brief Load a file to the local disk, so we can use stl lib to operate it.
      *
@@ -198,6 +210,27 @@ class FileManagerImpl : public milvus::FileManager {
         return OpenInputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
+    folly::SemiFuture<std::shared_ptr<InputStream>>
+    OpenInputStreamAsync(
+        const std::string& local_full_file_path) override final {
+        return OpenInputStreamAsync(local_full_file_path,
+                                    /*is_index_file=*/true);
+    }
+
+    // Resolve the same object as OpenInputStream, then open it and obtain its
+    // size asynchronously. The future owns the resolved path and filesystem.
+    folly::SemiFuture<std::shared_ptr<InputStream>>
+    OpenInputStreamAsync(const std::string& local_full_file_path,
+                         bool is_index_file) {
+        return folly::makeSemiFutureWith([&] {
+            AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
+            auto path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                      : GetRemoteTextLogPrefix();
+            path += "/" + GetFileName(local_full_file_path);
+            return RemoteInputStream::OpenAsync(fs_, std::move(path)).semi();
+        });
+    }
+
     /**
      * @brief Open an output stream for uploading a built local index file to
      * remote storage.
@@ -220,9 +253,11 @@ class FileManagerImpl : public milvus::FileManager {
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         auto remote_file = fs_->OpenInputFile(remote_file_path);
-        AssertInfo(remote_file.ok(),
-                   "failed to open remote file, reason: {}",
-                   remote_file.status().ToString());
+        if (!remote_file.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(remote_file.status()),
+                      "failed to open remote file, reason: {}",
+                      remote_file.status().ToString());
+        }
         return std::static_pointer_cast<milvus::InputStream>(
             std::make_shared<milvus::storage::RemoteInputStream>(
                 std::move(remote_file.ValueOrDie())));
@@ -244,16 +279,20 @@ class FileManagerImpl : public milvus::FileManager {
                 remote_file_path.substr(0, remote_file_path.find_last_of('/'));
             if (!dir_path.empty()) {
                 auto status = fs_->CreateDir(dir_path, /*recursive=*/true);
-                AssertInfo(status.ok(),
-                           "failed to create directory {}, reason: {}",
-                           dir_path,
-                           status.ToString());
+                if (!status.ok()) {
+                    ThrowInfo(ArrowStatusToErrorCode(status),
+                              "failed to create directory {}, reason: {}",
+                              dir_path,
+                              status.ToString());
+                }
             }
         }
         auto remote_stream = fs_->OpenOutputStream(remote_file_path);
-        AssertInfo(remote_stream.ok(),
-                   "failed to open remote stream, reason: {}",
-                   remote_stream.status().ToString());
+        if (!remote_stream.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(remote_stream.status()),
+                      "failed to open remote stream, reason: {}",
+                      remote_stream.status().ToString());
+        }
         return std::make_shared<milvus::storage::RemoteOutputStream>(
             std::move(remote_stream.ValueOrDie()));
     }
@@ -281,7 +320,6 @@ class FileManagerImpl : public milvus::FileManager {
             OpenOutputStream(filename, is_index_file));
     }
 
- public:
     virtual std::string
     GetName() const = 0;
 
@@ -302,9 +340,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         if (index_meta_.index_store_path_version >=
             ::milvus::proto::index::IndexStorePathVersion::
                 INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
@@ -329,9 +365,7 @@ class FileManagerImpl : public milvus::FileManager {
         if (!stats_base_path_.empty()) {
             return stats_base_path_;
         }
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -375,6 +409,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::optional<bool> use_async_load_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;

@@ -1414,6 +1414,18 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 	}
 
 	for _, action := range task.Actions() {
+		// Orphan cleanup becomes stale when an RG change assigns the node back
+		// to a replica. The segment may have been released and reloaded between
+		// distribution reports, so waiting for its absence can block other cleanup.
+		if segmentAction, ok := action.(*SegmentAction); ok && task.ReplicaID() == -1 &&
+			action.Type() == ActionTypeReduce && segmentAction.GetScope() == querypb.DataScope_Historical {
+			// ReleaseCollection retains replica metadata until all copies are gone.
+			if scheduler.meta.Exist(scheduler.ctx, task.CollectionID()) &&
+				scheduler.meta.GetByCollectionAndNode(scheduler.ctx, task.CollectionID(), action.Node()) != nil {
+				return merr.WrapErrServiceInternal("orphan segment cleanup node reassigned to a replica")
+			}
+		}
+
 		// Determine the target node for stale checking.
 		// For LeaderAction, we need to check the leader node (delegator) instead of the worker node.
 		// This is because LeaderAction.Node() returns the worker node where the segment resides,

@@ -2450,6 +2450,27 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("load default partition for AutoID upsert", func(t *testing.T) {
+		collectionID, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+		defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
+		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{defaultPartitionName},
+			ReplicaNumber:  1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		for attempt := 0; !checkPartitionInMemory(t, ctx, proxy, dbName, collectionName, defaultPartitionName, collectionID); attempt++ {
+			if attempt >= 100 {
+				t.Fatal("default partition was not loaded for AutoID upsert")
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+
 	t.Run("upsert when autoID == true", func(t *testing.T) {
 		// autoID==true but not pass pk in upsert, failed
 		req := constructCollectionUpsertRequestNoPK(dbName, collectionName, floatVecField, binaryVecField, structField, schema, rowNum, dim)
@@ -2545,6 +2566,16 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, mixedUpsertResp.GetStatus().GetErrorCode(),
 			"reason: %s", mixedUpsertResp.GetStatus().GetReason())
 		assert.Equal(t, int64(halfRows), mixedUpsertResp.UpsertCnt)
+	})
+
+	t.Run("release default partition after AutoID upsert", func(t *testing.T) {
+		resp, err := proxy.ReleasePartitions(ctx, &milvuspb.ReleasePartitionsRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{Params.CommonCfg.DefaultPartitionName.GetValue()},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
 	t.Run("release partition", func(t *testing.T) {
@@ -2689,6 +2720,10 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
+		// Completion must not wait for Summary's 600-second backlog flush.
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
 		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
@@ -3694,6 +3729,7 @@ func TestProxy(t *testing.T) {
 	testProxyPrivilegeTimeout(shortCtx, t, proxy)
 
 	schema = constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
+	schema.Fields[0].AutoID = false
 	createCollectionReq = constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
 
 	t.Run("create collection upsert valid", func(t *testing.T) {
@@ -4408,6 +4444,38 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
+	t.Run("test get all compaction tasks by collection", func(t *testing.T) {
+		metaCache := NewMockCache(t)
+		metaCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil)
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(100), request.GetCollectionId())
+			assert.Equal(t, "collection", request.GetCollectionName())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+	t.Run("test ignore client supplied collection id", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(10), request.GetCompactionID())
+			assert.Zero(t, request.GetCollectionId())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: 10,
+			CollectionId: 999,
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
 		mixCoord := &MixCoordMock{}
 		proxy := &Proxy{mixCoord: mixCoord}
@@ -4502,7 +4570,12 @@ func TestProxy_Import(t *testing.T) {
 		mc := NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+			CollectionSchema: &schemapb.CollectionSchema{Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
+		}, nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
@@ -4905,4 +4978,10 @@ func TestProxy_IsDQLQueueFull(t *testing.T) {
 		name:          "query",
 	}))
 	assert.True(t, node.IsDQLQueueFull())
+}
+
+func getMixCoordClient() *mocks.MockMixCoordClient {
+	mixc := &mocks.MockMixCoordClient{}
+	mixc.EXPECT().Close().Return(nil)
+	return mixc
 }

@@ -193,8 +193,8 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestBatchAnalyze() {
 func (s *MultiAnalyzerBM25FunctionSuite) newTrackingAnalyzer(active *atomic.Int32, maxActive *atomic.Int32) *interfaces.MockAnalyzer {
 	tokenizer := interfaces.NewMockAnalyzer(s.T())
 	tokenizer.EXPECT().Clone().Return(tokenizer, nil)
-	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
-		return newTrackingTokenStream(text, active, maxActive)
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) (interfaces.TokenStream, error) {
+		return newTrackingTokenStream(text, active, maxActive), nil
 	})
 	tokenizer.EXPECT().Destroy().Return()
 	return tokenizer

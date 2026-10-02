@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -165,6 +166,16 @@ func (t *SearchTask) Execute() error {
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	searchReq.Plan().SetTakeForOutputAllowed(takeAllowed)
 
+	// Validate before ANN so invalid chains fail even when there are no local
+	// segments. Filter-only requests only collect statistics for two-stage search.
+	var preparedChains *preparedQueryNodeFunctionChains
+	if !searchReq.FilterOnly() {
+		preparedChains, err = prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
+		if err != nil {
+			return err
+		}
+	}
+
 	var (
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
@@ -282,17 +293,12 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 
-	preparedChains, err := prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
-	if err != nil {
-		return err
-	}
-
-	// Export per-segment results as Arrow DataFrames
-	var l0InputFieldIDs []int64
+	// Export per-segment results as Arrow DataFrames.
+	var l0InputPlan *chain.DataFrameInputPlan
 	if preparedChains.l0 != nil {
-		l0InputFieldIDs = preparedChains.l0.inputFieldIDs
+		l0InputPlan = preparedChains.l0.inputPlan
 	}
-	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), l0InputFieldIDs)
+	segDFs, err := t.exportSearchResultsAsArrow(results, searchReq.Plan(), l0InputPlan)
 	if err != nil {
 		return err
 	}

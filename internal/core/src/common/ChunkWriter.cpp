@@ -36,6 +36,7 @@
 #include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus {
 namespace {
@@ -794,9 +795,12 @@ create_chunk_buffer(const FieldMeta& field_meta,
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
                           ~(ChunkTarget::ALIGNED_SIZE - 1);
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MemChunkTarget> mem_target;
     std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
-        target = std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
+        mem_target =
+            std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
+        target = mem_target;
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
         mmap_target = std::make_shared<MmapChunkTarget>(
@@ -815,6 +819,7 @@ create_chunk_buffer(const FieldMeta& field_meta,
         mmap_target->TransferOwnership();
     } else {
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+        mem_target->TransferOwnership();
     }
     ChunkBuffer buffer;
     buffer.data = data;
@@ -890,10 +895,12 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
         }
     }
     std::shared_ptr<ChunkTarget> target;
+    std::shared_ptr<MemChunkTarget> mem_target;
     std::shared_ptr<MmapChunkTarget> mmap_target;
     if (file_path.empty()) {
-        target =
+        mem_target =
             std::make_shared<MemChunkTarget>(total_aligned_size, mmap_populate);
+        target = mem_target;
     } else {
         mmap_target = std::make_shared<MmapChunkTarget>(
             file_path,
@@ -942,6 +949,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     } else {
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, total_aligned_size, "");
+        mem_target->TransferOwnership();
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
@@ -974,8 +982,15 @@ arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
     for (const auto& batch : *reader) {
-        auto batch_data = batch.ValueOrDie();
-        array_vec.push_back(batch_data->column(0));
+        // A failed read (corrupt file, IO error) surfaces here as an error
+        // Result; ValueOrDie would abort the process instead of throwing a
+        // classified error.
+        if (!batch.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(batch.status()),
+                      "failed to read record batch: {}",
+                      batch.status().ToString());
+        }
+        array_vec.push_back(batch.ValueUnsafe()->column(0));
     }
     return array_vec;
 }

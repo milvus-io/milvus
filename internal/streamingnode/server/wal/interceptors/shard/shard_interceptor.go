@@ -41,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
+		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
@@ -283,6 +284,16 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	header.SegmentIds = segmentIDs
 	maunalFlushMsg.OverwriteHeader(header)
 
+	return appendOp(ctx, msg)
+}
+
+// handleCreateSnapshotMessage seals the old segments so later inserts cannot
+// change the snapshot's L1 data. The consuming-side Ack waits for their output.
+func (impl *shardInterceptor) handleCreateSnapshotMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateSnapshotMessageV2(msg).Header()
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
 	return appendOp(ctx, msg)
 }
 

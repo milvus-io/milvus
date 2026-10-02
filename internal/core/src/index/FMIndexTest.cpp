@@ -9,10 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "folly/coro/BlockingWait.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
 #include <array>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -559,6 +562,68 @@ TEST(FMIndex, LibraryDocLocateBoundsOutOfRangePositions) {
     }
 }
 
+// GuardFMIndexLibrary is the single Ring-2 boundary every call into the
+// vendored fm-index-lite library goes through. What it must not do is let an
+// exception past untyped: FailureCStatus() reports anything that is not a
+// SegcoreError as UnexpectedError(2001), which merr classifies as a permanent
+// system error.
+//
+// The bad_alloc case is the one with teeth. FMIndex::parseView self-classifies
+// every other std::exception into a false return value (which the caller turns
+// into DataFormatBroken via !valid()) and deliberately RETHROWS bad_alloc, so
+// an out-of-memory during index load is the exception that actually escapes the
+// library. MemAllocateFailed(2034) is retriable in merr's classForCode while
+// 2001 is not, so folding it into the phase fallback would make a transient OOM
+// look permanent and stop the load from being retried.
+TEST(FMIndex, LibraryGuardClassifiesEscapingExceptions) {
+    constexpr int64_t kFieldId = 101;
+    auto guard = [](auto&& fn, ErrorCode fallback) {
+        return index::detail::GuardFMIndexLibrary(
+            std::forward<decltype(fn)>(fn), fallback, "load", kFieldId);
+    };
+    auto code_of = [&](auto&& fn, ErrorCode fallback) {
+        try {
+            guard(std::forward<decltype(fn)>(fn), fallback);
+        } catch (const SegcoreError& e) {
+            return e.get_error_code();
+        }
+        return ErrorCode::Success;
+    };
+
+    // OOM stays retriable and is never folded into the phase fallback.
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::DataFormatBroken),
+        ErrorCode::MemAllocateFailed);
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::IndexBuildError),
+        ErrorCode::MemAllocateFailed);
+
+    // Any other std:: exception takes the phase's fallback, which differs
+    // between build and load: a library failure while building is a build
+    // error, while one during load means the persisted blob is unusable.
+    EXPECT_EQ(code_of([] { throw std::runtime_error("truncated"); },
+                      ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+    EXPECT_EQ(code_of([] { throw std::length_error("corpus too large"); },
+                      ErrorCode::IndexBuildError),
+              ErrorCode::IndexBuildError);
+
+    // A non-std exception must not escape the boundary untyped either.
+    EXPECT_EQ(code_of([] { throw 42; }, ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+
+    // An already-classified error keeps its own code instead of being
+    // relabelled by the boundary.
+    EXPECT_EQ(
+        code_of(
+            [] { ThrowInfo(ErrorCode::FileReadFailed, "staged file gone"); },
+            ErrorCode::DataFormatBroken),
+        ErrorCode::FileReadFailed);
+
+    // The success path returns normally and throws nothing.
+    EXPECT_EQ(code_of([] {}, ErrorCode::DataFormatBroken), ErrorCode::Success);
+}
+
 TEST(FMIndex, UnsupportedSchemaUsesDataTypeInvalidCode) {
     storage::FileManagerContext ctx;
     ctx.fieldDataMeta.field_id = 101;
@@ -1005,7 +1070,7 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1034,8 +1099,8 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1194,7 +1259,7 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1235,8 +1300,8 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1357,9 +1422,8 @@ struct SealedFMMatch {
     FieldId varchar_id;
     FieldId int_id;
     std::unique_ptr<segcore::SegmentSealed> segment;
-    // Owns the insert-log write and keeps TestLocalPath alive until the
-    // loaded segment is destroyed. ChunkManagerWrapper::dtor wipes the
-    // chunk-manager root.
+    // Owns the insert-log write and cleans the remote test root with this
+    // fixture. ChunkManagerWrapper::dtor wipes the chunk-manager root.
     std::unique_ptr<ChunkManagerWrapper> cm_w;
 };
 
@@ -1426,11 +1490,11 @@ LoadSealedFMMatch(int64_t collection_id,
                                                       /*max_length=*/65535);
     auto index_meta = gen_index_meta(
         segment_id, out.varchar_id.get(), index_build_id, index_build_id);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
-    // Same FS handle as ExecutorPathMatchRechecksVarchar. UploadUnified writes
-    // through StorageV2FSCache; AppendIndexV2 reads through the process Arrow
-    // FS. Both are rooted at TestLocalPath, so the packed file is visible.
+    // AppendIndexV2 loads through RemoteChunkManagerSingleton, so build the
+    // index under that singleton's TestRemotePath root as well. TestLocalPath
+    // remains the mmap/local-temp root.
     auto fs = storage::InitArrowFileSystem(storage_config);
     out.cm_w = std::make_unique<ChunkManagerWrapper>(cm);
 
@@ -1482,8 +1546,8 @@ LoadSealedFMMatch(int64_t collection_id,
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1837,3 +1901,196 @@ TEST(FMIndex, MatchGuardAcceptsRareFragmentOnShortRows) {
     EXPECT_EQ(RecheckedMatch(idx.get(), data, "%RARE%"),
               (std::vector<int64_t>{0}));
 }
+
+namespace {
+
+class ExposedFMIndex : public index::FMIndex {
+ public:
+    using FMIndex::FMIndex;
+
+    void
+    LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
+        folly::coro::blockingWait(
+            reader.ReadEntriesAsync(plan.entries, priority));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
+    }
+};
+
+struct FMIndexAsyncLoadFixture {
+    explicit FMIndexAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::VarChar);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~FMIndexAsyncLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+}  // namespace
+TEST(FMIndexV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_memory");
+    std::vector<std::string> data{"alpha", "alphabet", "beta", "gamma"};
+    index::FMIndexParams params{.sa_sample_rate = 8};
+
+    ExposedFMIndex build_index(fixture.ctx, params);
+    build_index.BuildWithRawDataForUT(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedFMIndex load_index(fixture.ctx, params);
+    Config config;
+    config[index::ENABLE_MMAP] = false;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(Prefix(&load_index, "alph"), (std::vector<int64_t>{0, 1}));
+}
+
+TEST(FMIndexV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_mmap");
+    std::vector<std::string> data{"zero", "one", "two", "three"};
+    index::FMIndexParams params{.sa_sample_rate = 8};
+
+    ExposedFMIndex build_index(fixture.ctx, params);
+    build_index.BuildWithRawDataForUT(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedFMIndex load_index(fixture.ctx, params);
+    Config config;
+    config[index::ENABLE_MMAP] = true;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::LOW);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(Inner(&load_index, "hr"), (std::vector<int64_t>{3}));
+}
+
+TEST(FMIndexV3AsyncLoadTest, PackedNullBitmapPreservesRowsAndRejectsTailBits) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_null_bitmap");
+    fixture.field_schema.set_nullable(true);
+    fixture.field_meta.field_schema = fixture.field_schema;
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+    for (size_t rows : {8, 9, 63, 64, 65}) {
+        std::vector<std::string> data(rows, "value");
+        std::vector<uint8_t> valid((rows + 7) / 8, 0);
+        for (size_t i = 0; i < rows; ++i) {
+            if (i % 3 != 0) {
+                valid[i / 8] |= 1u << (i % 8);
+            }
+        }
+        auto field_data =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+        field_data->FillFieldData(data.data(), valid.data(), rows, 0);
+        index::FMIndex build_index(fixture.ctx, {});
+        build_index.BuildWithFieldData({field_data});
+        auto stats = build_index.UploadUnified({});
+        auto packed = milvus::test::ReadPackedIndexBytes(
+            fixture.ctx, stats->GetIndexFiles());
+        for (bool mmap : {false, true}) {
+            for (bool corrupt_tail : {false, true}) {
+                if (corrupt_tail && rows % 8 == 0) {
+                    continue;
+                }
+                SCOPED_TRACE(testing::Message()
+                             << "rows=" << rows << ", mmap=" << mmap
+                             << ", corrupt_tail=" << corrupt_tail);
+                milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+                auto reader = milvus::test::OpenDirectIndexEntryReader(
+                    packed, &remote_file);
+                index::FMIndex load_index(fixture.ctx, {});
+                Config config;
+                config[index::ENABLE_MMAP] = mmap;
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
+                auto entry = std::find_if(
+                    plan.entries.begin(),
+                    plan.entries.end(),
+                    [](const auto& entry) {
+                        return entry.name ==
+                               index::FMINDEX_NULL_BITMAP_FILE_NAME;
+                    });
+                ASSERT_NE(entry, plan.entries.end());
+                const auto target =
+                    std::get<storage::MemoryEntryTarget>(entry->target);
+                ASSERT_EQ(target.bytes, (rows + 7) / 8);
+                folly::coro::blockingWait(reader->ReadEntriesAsync(
+                    plan.entries, proto::common::LoadPriority::HIGH));
+                if (corrupt_tail) {
+                    // Inject after CRC to exercise the FM format check itself.
+                    target.data[target.bytes - 1] |= 0x80;
+                    try {
+                        folly::coro::blockingWait(
+                            load_index.FinishLoadAsync(plan, config));
+                        FAIL() << "Expected corrupt null bitmap to be rejected";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(),
+                                  ErrorCode::DataFormatBroken);
+                    }
+                } else {
+                    folly::coro::blockingWait(
+                        load_index.FinishLoadAsync(plan, config));
+                    plan.Commit();
+                    auto nulls = load_index.IsNull();
+                    const auto* bytes =
+                        reinterpret_cast<const uint8_t*>(nulls.data());
+                    for (size_t i = 0; i < nulls.size_in_bytes() * 8; ++i) {
+                        EXPECT_EQ((bytes[i / 8] >> (i % 8)) & 1u,
+                                  i < rows && i % 3 == 0);
+                    }
+                    EXPECT_EQ(load_index.IsNotNull().count(),
+                              build_index.IsNotNull().count());
+                }
+            }
+        }
+    }
+}
+
+// ---- query routing over raw data (no storage) ----

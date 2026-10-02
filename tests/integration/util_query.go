@@ -81,7 +81,7 @@ func (s *MiniClusterSuite) WaitForSortedSegmentLoaded(ctx context.Context, dbNam
 			s.FailNow("failed to wait for get segments sorted")
 			return
 		default:
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -104,7 +104,7 @@ func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, coll
 			s.FailNow("failed to wait for load")
 			return
 		default:
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -127,7 +127,7 @@ func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, colle
 			s.FailNow("failed to wait for load (refresh)")
 			return
 		default:
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }

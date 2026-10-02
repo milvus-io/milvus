@@ -30,10 +30,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -66,7 +66,7 @@ type StartBroadcasterFunc func(ctx context.Context, collectionID int64, snapshot
 //
 // The lock set is:
 //   - Shared lock on target database
-//   - Exclusive lock on target collection name (reserves the name before creation)
+//   - Exclusive lock on target collection name during admission validation
 //   - Exclusive lock on (sourceCollectionID, snapshotName) — serializes against
 //     DropSnapshot of the same source snapshot
 //
@@ -117,11 +117,12 @@ type SnapshotManager interface {
 	//   - collectionID: ID of the collection to snapshot
 	//   - name: Unique name for the snapshot (globally unique)
 	//   - description: Optional description of the snapshot
+	//   - positions: Acknowledged CreateSnapshot boundaries for the business VChannels
 	//
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, positions []*msgpb.MsgPosition) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -376,10 +377,10 @@ type snapshotManager struct {
 	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
 	createSnapshotMu sync.Mutex
 
-	// Serialize external restores by target name without holding RootCoord's DDL lock.
-	externalRestoreTargetLockOnce sync.Once
-	externalRestoreTargetLock     *lock.KeyLock[restoreTarget]
-	exportManager                 *snapshotExportManager
+	// Serialize all restores by target name without holding RootCoord's DDL lock.
+	restoreTargetLockOnce sync.Once
+	restoreTargetLock     *lock.KeyLock[restoreTarget]
+	exportManager         *snapshotExportManager
 }
 
 type restoreTarget struct {
@@ -437,6 +438,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	collectionID int64,
 	name, description string,
 	compactionProtectionSeconds int64,
+	positions []*msgpb.MsgPosition,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
@@ -468,7 +470,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	}
 
 	// Generate snapshot data
-	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID)
+	snapshotData, err := sm.handler.GenSnapshot(ctx, collectionID, positions)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to generate snapshot", mlog.Err(err))
 		return 0, err
@@ -671,6 +673,11 @@ func (sm *snapshotManager) RestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	// Keep admission, target creation, job submission, and synchronous cleanup
+	// serialized across internal and external restores to the same target.
+	unlockTarget := sm.lockRestoreTarget(targetDbName, targetCollectionName)
+	defer unlockTarget()
+
 	// ========================================================================
 	// Phase 0: Acquire serialization lock + claim restore reference
 	//
@@ -683,6 +690,10 @@ func (sm *snapshotManager) RestoreSnapshot(
 	phase0Lock, err := startRestoreLock(ctx, sourceCollectionID, snapshotName, targetDbName, targetCollectionName)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to acquire restore lock")
+	}
+	if err := sm.validateRestoreTargetAbsent(ctx, targetDbName, targetCollectionName); err != nil {
+		phase0Lock.Close()
+		return 0, err
 	}
 
 	// Pin the source snapshot while holding the phase-0 lock. The pin is the
@@ -803,7 +814,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 	if snapshotS3Location == "" {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot_s3_location is required")
 	}
-	unlockTarget := sm.lockExternalRestoreTarget(targetDbName, targetCollectionName)
+	unlockTarget := sm.lockRestoreTarget(targetDbName, targetCollectionName)
 	defer unlockTarget()
 
 	resolved, err := snapshotstorage.ResolveForeignStorage(
@@ -859,7 +870,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 
 	// RootCoord CreateCollection acquires the same broadcaster resource key, so
 	// release the phase-0 lock before entering the common restore flow. The
-	// per-target DataCoord lock above continues to serialize external restores.
+	// per-target DataCoord lock above continues to serialize all restores.
 	phase0Lock.Close()
 	phase0Lock = nil
 
@@ -972,8 +983,8 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	msg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 
 	if _, bcErr := restoreBroadcaster.Broadcast(ctx, msg); bcErr != nil {
@@ -1001,16 +1012,20 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	return jobID, nil
 }
 
-func (sm *snapshotManager) lockExternalRestoreTarget(dbName, collectionName string) func() {
-	sm.externalRestoreTargetLockOnce.Do(func() {
-		if sm.externalRestoreTargetLock == nil {
-			sm.externalRestoreTargetLock = lock.NewKeyLock[restoreTarget]()
+func (sm *snapshotManager) lockRestoreTarget(dbName, collectionName string) func() {
+	sm.restoreTargetLockOnce.Do(func() {
+		if sm.restoreTargetLock == nil {
+			sm.restoreTargetLock = lock.NewKeyLock[restoreTarget]()
 		}
 	})
+	// Match the database normalization used by DDL resource keys.
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	target := restoreTarget{dbName: dbName, collectionName: collectionName}
-	sm.externalRestoreTargetLock.Lock(target)
+	sm.restoreTargetLock.Lock(target)
 	return func() {
-		sm.externalRestoreTargetLock.Unlock(target)
+		sm.restoreTargetLock.Unlock(target)
 	}
 }
 
@@ -1220,7 +1235,7 @@ func (sm *snapshotManager) RestoreIndexes(
 			WithBody(&message.CreateIndexMessageBody{
 				FieldIndex: model.MarshalIndexModel(index),
 			}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast(),
 		)
 		b.Close()

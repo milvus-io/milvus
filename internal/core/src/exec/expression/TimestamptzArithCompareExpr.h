@@ -23,7 +23,7 @@ namespace milvus::exec {
 class PhyTimestamptzArithCompareExpr : public SegmentExpr {
  public:
     PhyTimestamptzArithCompareExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr>&
             expr,
         const std::string& name,
@@ -51,6 +51,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
 
     std::string
     ToString() const override;

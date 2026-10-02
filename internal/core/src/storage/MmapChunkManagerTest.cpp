@@ -13,8 +13,10 @@
 #include <cstdint>
 
 #include <gtest/gtest.h>
+#include <future>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "storage/MmapChunkManager.h"
@@ -46,4 +48,35 @@ TEST(MmapChunkManager, AllocateKeepsTypedBuffersAligned) {
         0);
 
     ASSERT_NO_THROW(mcm->UnRegister(segment_descriptor));
+}
+
+TEST(MmapChunkManager, ConcurrentRegistrationsRemainIndependent) {
+    auto mcm =
+        milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
+    using Descriptor = milvus::storage::MmapChunkDescriptorPtr;
+    std::vector<std::future<std::vector<Descriptor>>> futures;
+    for (int worker = 0; worker < 8; ++worker) {
+        futures.push_back(std::async(std::launch::async, [mcm] {
+            std::vector<Descriptor> descriptors;
+            for (int i = 0; i < 16; ++i) {
+                descriptors.push_back(mcm->Register());
+            }
+            return descriptors;
+        }));
+    }
+    std::vector<Descriptor> descriptors;
+    for (auto& future : futures) {
+        auto registered = future.get();
+        descriptors.insert(
+            descriptors.end(), registered.begin(), registered.end());
+    }
+
+    for (size_t i = 0; i < descriptors.size(); ++i) {
+        ASSERT_TRUE(mcm->HasRegister(descriptors[i]));
+        mcm->UnRegister(descriptors[i]);
+        ASSERT_FALSE(mcm->HasRegister(descriptors[i]));
+        for (size_t j = i + 1; j < descriptors.size(); ++j) {
+            ASSERT_TRUE(mcm->HasRegister(descriptors[j]));
+        }
+    }
 }

@@ -21,30 +21,46 @@
 #include <arrow/filesystem/filesystem.h>
 #include <arrow/record_batch.h>
 #include <arrow/type_fwd.h>
+#include <boost/filesystem/operations.hpp>
+#include <folly/CancellationToken.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <parquet/properties.h>
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <string>
+#include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
+#include "cachinglayer/Manager.h"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/TieredStorageConfig.h"
+#include "common/Common.h"
 #include "common/Consts.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
+#include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Span.h"
+#include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/Task.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
@@ -53,10 +69,12 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/JsonFlatIndex.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/packed/writer.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
@@ -66,15 +84,21 @@
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
@@ -82,6 +106,111 @@ using namespace milvus::segcore;
 using namespace milvus::segcore::storagev1translator;
 
 namespace {
+std::string
+UniqueManifestTestPath(const std::string& prefix) {
+    return (boost::filesystem::path(TestLocalPath) /
+            boost::filesystem::unique_path(prefix + "_%%%%-%%%%-%%%%-%%%%"))
+        .string();
+}
+
+bool
+IsLazyColumnForTest(const std::shared_ptr<ChunkedColumnInterface>& column) {
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+    EXPECT_NE(proxy, nullptr);
+    return proxy != nullptr && proxy->IsLazy();
+}
+
+class LazyColumnGroupGuard {
+ public:
+    explicit LazyColumnGroupGuard(bool enabled)
+        : previous_(
+              SegcoreConfig::default_config().get_lazy_column_group_enabled()) {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(enabled);
+    }
+
+    ~LazyColumnGroupGuard() {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(
+            previous_);
+    }
+
+ private:
+    bool previous_;
+};
+
+class CacheWarmupPolicyGuard {
+ public:
+    explicit CacheWarmupPolicyGuard(
+        milvus::cachinglayer::CacheWarmupPolicies warmup_policies)
+        : previous_(milvus::cachinglayer::TieredStorageConfig::GetInstance()
+                        .GetSnapshot()) {
+        milvus::cachinglayer::Manager::UpdateConfig(
+            previous_.loading_timeout,
+            previous_.warmup_loading_timeout,
+            previous_.storage_usage_tracking_enabled,
+            warmup_policies);
+    }
+
+    ~CacheWarmupPolicyGuard() {
+        milvus::cachinglayer::Manager::UpdateConfig(
+            previous_.loading_timeout,
+            previous_.warmup_loading_timeout,
+            previous_.storage_usage_tracking_enabled,
+            previous_.warmup_policies);
+    }
+
+ private:
+    milvus::cachinglayer::TieredStorageConfig::Snapshot previous_;
+};
+
+SchemaPtr
+CreateTextMatchManifestSchema(bool pk_is_string) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("int64", DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField(
+        "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
+    std::map<std::string, std::string> analyzer_params;
+    schema->AddDebugVarcharField(FieldName("string1"),
+                                 DataType::VARCHAR,
+                                 65535,
+                                 true,
+                                 true,
+                                 true,
+                                 analyzer_params,
+                                 std::nullopt);
+    schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+    return schema;
+}
+
+// Keep system fields and PK in separate physical groups so ordinary user-field
+// Tasks can exercise lazy materialization independently of those blockers.
+std::string
+LazyManifestTestGroupPattern(const SchemaPtr& schema) {
+    std::string user_fields;
+    std::string other_groups;
+    auto primary_field_id = schema->get_primary_field_id();
+    for (const auto& field_id : schema->get_field_ids()) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            (primary_field_id.has_value() &&
+             primary_field_id.value() == field_id) ||
+            IsVectorDataType((*schema)[field_id].get_data_type())) {
+            other_groups += "," + std::to_string(field_id.get());
+        } else {
+            if (!user_fields.empty()) {
+                user_fields += "|";
+            }
+            user_fields += std::to_string(field_id.get());
+        }
+    }
+    return user_fields.empty() ? other_groups.substr(1)
+                               : user_fields + other_groups;
+}
+
 class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
  public:
     RawLookupOnlyIndex() : index::ScalarIndex<int64_t>("raw_lookup_only") {
@@ -241,7 +370,8 @@ TEST(ChunkedSegmentSealedStorageV2,
     auto schema = Schema::ParseFrom(schema_proto);
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    const std::string dir = "test_data/storage_v2_direct_warmup";
+    const std::string dir =
+        TestLocalPath + "test_data/storage_v2_direct_warmup";
     StorageV2TempDirGuard dir_guard(fs, dir);
     const std::string path = dir + "/vec.parquet";
     ASSERT_TRUE(fs->CreateDir(dir).ok());
@@ -318,11 +448,13 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
     segcore::SegmentSealedUPtr
     CreateSegmentByLoadInfo(proto::segcore::SegmentLoadInfo proto,
-                            bool is_sorted_by_pk) {
+                            const SchemaPtr& schema,
+                            bool is_sorted_by_pk,
+                            Timestamp commit_ts = 0) {
         auto seg = segcore::CreateSealedSegment(
-            schema_,
+            schema,
             nullptr,
-            -1,
+            proto.segmentid(),
             segcore::SegcoreConfig::default_config(),
             is_sorted_by_pk);
         auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
@@ -331,10 +463,47 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             return seg;
         }
         sealed->SetLoadInfo(std::move(proto));
+        if (commit_ts != 0) {
+            sealed->SetCommitTimestamp(commit_ts);
+        }
         milvus::OpContext op_ctx;
         milvus::tracer::TraceContext trace_ctx;
         sealed->Load(trace_ctx, &op_ctx);
         return seg;
+    }
+
+    segcore::SegmentSealedUPtr
+    CreateSegmentByLoadInfo(proto::segcore::SegmentLoadInfo proto,
+                            bool is_sorted_by_pk,
+                            Timestamp commit_ts = 0) {
+        return CreateSegmentByLoadInfo(
+            std::move(proto), schema_, is_sorted_by_pk, commit_ts);
+    }
+
+    proto::segcore::SegmentLoadInfo
+    MakeV3ManifestLoadInfo(const milvus::test::V3SegmentTestData& test_data,
+                           int64_t segment_id) {
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(segment_id);
+        load_info.set_partitionid(1);
+        load_info.set_collectionid(1);
+        load_info.set_num_of_rows(test_data.TotalRows());
+        load_info.set_storageversion(STORAGE_V3);
+        load_info.set_manifest_path(test_data.ManifestPathJson());
+        load_info.set_priority(proto::common::LoadPriority::LOW);
+        return load_info;
+    }
+
+    segcore::SegmentSealedUPtr
+    CreateV3ManifestSegment(const milvus::test::V3SegmentTestData& test_data,
+                            int64_t segment_id,
+                            Timestamp commit_ts = 0,
+                            const SchemaPtr& schema = nullptr) {
+        return CreateSegmentByLoadInfo(
+            MakeV3ManifestLoadInfo(test_data, segment_id),
+            schema != nullptr ? schema : schema_,
+            false,
+            commit_ts);
     }
 
     void
@@ -360,9 +529,10 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"test_data/0/10000.parquet",
-                                          "test_data/102/10001.parquet",
-                                          "test_data/103/10002.parquet"};
+        std::vector<std::string> paths = {
+            TestLocalPath + "test_data/0/10000.parquet",
+            TestLocalPath + "test_data/102/10001.parquet",
+            TestLocalPath + "test_data/103/10002.parquet"};
 
         // Create directories for the parquet files
         for (const auto& path : paths) {
@@ -491,7 +661,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
         // Clean up test data directory
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-        auto status = fs->DeleteDir("test_data");
+        auto status = fs->DeleteDir(TestLocalPath + "test_data");
         ASSERT_TRUE(status.ok());
     }
 
@@ -572,7 +742,18 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         for (int64_t i = 0; i < RowCount(); ++i) {
             data.push_back("test" + std::to_string(i));
         }
-        index->BuildWithRawDataForUT(data.size(), data.data());
+        if (index_type == index::MARISA_TRIE) {
+            // MARISA inherits the protobuf-based string UT builder; the
+            // inverted index overload accepts std::string objects directly.
+            proto::schema::StringArray values;
+            for (const auto& value : data) {
+                values.add_data(value);
+            }
+            const auto serialized = values.SerializeAsString();
+            index->BuildWithRawDataForUT(serialized.size(), serialized.data());
+        } else {
+            index->BuildWithRawDataForUT(data.size(), data.data());
+        }
 
         segcore::LoadIndexInfo load_index_info;
         load_index_info.index_params = GenIndexParams(index.get());
@@ -596,6 +777,1367 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
                          TestChunkSegmentStorageV2,
                          testing::Bool());
+
+class TestLazyManifest : public TestChunkSegmentStorageV2 {
+ protected:
+    void
+    SetUp() override {
+        // Manifest tests create their own V3 data; no V2 segment is needed.
+        schema_ = segcore::GenChunkedSegmentTestSchema(GetParam());
+        fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
+                  {"pk", schema_->get_field_id(FieldName("pk"))},
+                  {"ts", TimestampFieldID},
+                  {"string1", schema_->get_field_id(FieldName("string1"))},
+                  {"string2", schema_->get_field_id(FieldName("string2"))}};
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
+
+TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto schema = GenChunkedSegmentTestSchema(GetParam());
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto schema_proto = schema->ToProto();
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            field.set_name("Timestamp");
+        }
+    }
+    // Admit a lazy raw-vector Task independently of interim index warmup.
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "disable");
+    schema = Schema::ParseFrom(schema_proto);
+
+    FieldIndexMeta field_index_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+         {"metric_type", knowhere::metric::L2},
+         {"nlist", "64"}},
+        {{"dim", "4"}});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100000, std::map<FieldId, FieldIndexMeta>{{vec, field_index_meta}});
+    auto& config = SegcoreConfig::default_config();
+    const auto previous_interim = config.get_enable_interim_segment_index();
+    const auto previous_chunk_rows = config.get_chunk_rows();
+    const auto previous_index_type =
+        config.get_dense_vector_intermin_index_type();
+    const auto previous_nlist = config.get_nlist();
+    const auto previous_nprobe = config.get_nprobe();
+    auto restore_config = folly::makeGuard([&]() {
+        config.set_enable_interim_segment_index(previous_interim);
+        config.set_chunk_rows(previous_chunk_rows);
+        config.set_dense_vector_intermin_index_type(previous_index_type);
+        config.set_nlist(previous_nlist);
+        config.set_nprobe(previous_nprobe);
+    });
+    config.set_enable_interim_segment_index(true);
+    config.set_chunk_rows(1024);
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    config.set_nlist(16);
+    config.set_nprobe(16);
+
+    for (int64_t num_rows : {1, 1000}) {
+        const auto base_path = UniqueManifestTestPath(
+            std::string("lazy_manifest_interim_") +
+            (GetParam() ? "varchar_" : "int64_") + std::to_string(num_rows));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, base_path);
+        milvus::test::V3SegmentTestData test_data(
+            schema, 1, num_rows, 4, TestLocalPath, base_path);
+
+        for (auto warmup : {CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Async}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "rows=" << num_rows
+                         << ", warmup=" << static_cast<int>(warmup));
+            auto policies = cachinglayer::TieredStorageConfig::GetInstance()
+                                .warmup_policies();
+            policies.vectorIndexCacheWarmupPolicy = warmup;
+            CacheWarmupPolicyGuard warmup_guard(policies);
+
+            auto seg = CreateSealedSegment(schema, index_meta, 3190, config);
+            auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+            ASSERT_NE(sealed, nullptr);
+            sealed->SetLoadInfo(MakeV3ManifestLoadInfo(test_data, 3190));
+            milvus::OpContext op_ctx;
+            milvus::tracer::TraceContext trace_ctx;
+            sealed->Load(trace_ctx, &op_ctx);
+
+            auto snapshot = sealed->TestGetPublishedStateSnapshot();
+            auto column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+                snapshot->runtime->fields.at(vec));
+            ASSERT_NE(column, nullptr);
+            ASSERT_TRUE(column->IsLazy());
+            if (num_rows == 1) {
+                EXPECT_FALSE(column->IsMaterialized());
+                EXPECT_EQ(snapshot->runtime->vector_indexings.count(vec), 0);
+                EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
+                                                           START_USER_FIELDID]);
+                continue;
+            }
+
+            ASSERT_TRUE(snapshot->runtime->vector_indexings.count(vec));
+            EXPECT_TRUE(
+                snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
+            auto slot = snapshot->runtime->vector_indexings.at(vec)->indexing_;
+            ASSERT_NE(slot, nullptr);
+            if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+                EXPECT_FALSE(column->IsMaterialized());
+                EXPECT_FALSE(slot->IsCached(0));
+            } else if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
+                EXPECT_TRUE(column->IsMaterialized());
+                EXPECT_TRUE(slot->IsCached(0));
+            }
+
+            auto first =
+                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            EXPECT_TRUE(column->IsMaterialized());
+            EXPECT_EQ(first->get_cell_of(0)->Count(), num_rows);
+            auto second =
+                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            EXPECT_EQ(first->get_cell_of(0), second->get_cell_of(0));
+        }
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.vectorFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    constexpr int64_t kNumRows = 64;
+    constexpr int64_t kDim = 4;
+    constexpr Timestamp kCommitTs = 1000;
+    auto schema = GenChunkedSegmentTestSchema(GetParam());
+    auto vec = schema->AddDebugField("nullable_vec",
+                                     DataType::VECTOR_FLOAT,
+                                     kDim,
+                                     knowhere::metric::L2,
+                                     true);
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_nullable_vector_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema,
+        1,
+        kNumRows,
+        kDim,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema));
+
+    auto manifest_segment = CreateV3ManifestSegment(
+        test_data, 3191 + (GetParam() ? 100 : 0), kCommitTs, schema);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto vector_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(vec);
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(vector_column);
+    ASSERT_NE(proxy, nullptr);
+    ASSERT_TRUE(proxy->IsLazy());
+    ASSERT_FALSE(proxy->IsMaterialized());
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(
+        std::make_shared<expr::AlwaysTrueExpr>());
+    plan->field_ids_ = {vec};
+
+    auto results = manifest_segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_TRUE(proxy->IsMaterialized());
+    ASSERT_EQ(results->fields_data_size(), 1);
+    ASSERT_EQ(results->offset_size(), kNumRows);
+
+    auto expected_data = DataGen(schema, kNumRows, 42);
+    auto expected_field = expected_data.get_col(vec);
+    const auto& actual_field = results->fields_data(0);
+    const auto& actual_values = actual_field.vectors().float_vector().data();
+    const auto& expected_values =
+        expected_field->vectors().float_vector().data();
+    ASSERT_EQ(actual_values.size(), expected_values.size());
+    for (int i = 0; i < actual_values.size(); ++i) {
+        EXPECT_FLOAT_EQ(actual_values.Get(i), expected_values.Get(i));
+    }
+
+    const auto& actual_valid = GetFieldDataRowValidData(actual_field);
+    const auto& expected_valid = GetFieldDataRowValidData(*expected_field);
+    ASSERT_EQ(actual_valid.size(), kNumRows);
+    ASSERT_EQ(actual_valid.size(), expected_valid.size());
+    for (int64_t i = 0; i < kNumRows; ++i) {
+        EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_initial_task_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3150 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto int64_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    auto string_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("string1"));
+    ASSERT_NE(int64_column, nullptr);
+    ASSERT_NE(string_column, nullptr);
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+
+    const std::vector<
+        std::pair<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
+        lazy_columns = {
+            {fields.at("int64"), int64_column},
+            {fields.at("string1"), string_column},
+        };
+    for (const auto& [field_id, column] : lazy_columns) {
+        (void)field_id;
+        EXPECT_TRUE(column->IsInMultiFieldColumnGroup());
+        int64_t offset = 0;
+        EXPECT_FALSE(column->CellsLoaded(&offset, 1));
+        EXPECT_TRUE(column->CellsLoaded(nullptr, 0));
+        EXPECT_TRUE(IsLazyColumnForTest(column));
+    }
+
+    auto memory_before_materialize = segment_impl->GetMemoryUsageInBytes();
+    constexpr int kThreadCount = 16;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> workers;
+    workers.reserve(kThreadCount);
+    for (int i = 0; i < kThreadCount; ++i) {
+        auto column = i % 2 == 0 ? int64_column : string_column;
+        workers.emplace_back([column, &ready, &start, &failed]() {
+            ready.fetch_add(1, std::memory_order_acq_rel);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            try {
+                auto data = column->DataOfChunk(nullptr, 0);
+                if (data.get() == nullptr) {
+                    failed.store(true, std::memory_order_release);
+                }
+            } catch (...) {
+                failed.store(true, std::memory_order_release);
+            }
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != kThreadCount) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_FALSE(failed.load(std::memory_order_acquire));
+    EXPECT_GT(int64_column->DataByteSize(), 0);
+    EXPECT_GT(string_column->DataByteSize(), 0);
+    // The untouched user-field sibling shares the same Task.
+    int64_t first_offset = 0;
+    auto sibling_column = snapshot->runtime->fields.at(fields.at("string2"));
+    EXPECT_TRUE(sibling_column->CellsLoaded(&first_offset, 1));
+    EXPECT_EQ(segment_impl->GetMemoryUsageInBytes(), memory_before_materialize);
+
+    segment_impl->DropFieldData(fields.at("int64"));
+    EXPECT_EQ(segment_impl->GetMemoryUsageInBytes(), memory_before_materialize);
+    auto dropped_column_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(
+        dropped_column_snapshot->runtime->fields.count(fields.at("int64")), 0);
+}
+
+TEST_P(TestLazyManifest, LazyManifestDefersTextMatchAfterIndexCreation) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto text_schema = CreateTextMatchManifestSchema(GetParam());
+    auto text_field = text_schema->get_field_id(FieldName("string1"));
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path_a = UniqueManifestTestPath(
+        std::string("lazy_manifest_text_match_a_") + suffix);
+    const auto base_path_b = UniqueManifestTestPath(
+        std::string("lazy_manifest_text_match_b_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard_a(fs, base_path_a);
+    StorageV2TempDirGuard dir_guard_b(fs, base_path_b);
+    milvus::test::V3SegmentTestData test_data_a(
+        text_schema,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_a,
+        LazyManifestTestGroupPattern(text_schema));
+    milvus::test::V3SegmentTestData test_data_b(
+        text_schema,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_b,
+        LazyManifestTestGroupPattern(text_schema));
+
+    constexpr int64_t segment_id = 3178;
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data_a, segment_id, 0, text_schema);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto initial_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto initial_column = initial_snapshot->runtime->fields.at(text_field);
+    ASSERT_NE(initial_column, nullptr);
+    EXPECT_FALSE(IsLazyColumnForTest(initial_column));
+    ASSERT_NE(initial_snapshot->load_info, nullptr);
+    EXPECT_TRUE(initial_snapshot->load_info->HasTextIndexCreated(text_field));
+
+    milvus::OpContext op_ctx;
+    segment_impl->Reopen(&op_ctx,
+                         MakeV3ManifestLoadInfo(test_data_b, segment_id));
+
+    auto reopened_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto reopened_column = reopened_snapshot->runtime->fields.at(text_field);
+    ASSERT_NE(reopened_column, nullptr);
+    EXPECT_TRUE(IsLazyColumnForTest(reopened_column));
+    int64_t offset = 0;
+    EXPECT_FALSE(reopened_column->CellsLoaded(&offset, 1));
+
+    auto data = reopened_column->DataOfChunk(nullptr, 0);
+    EXPECT_NE(data.get(), nullptr);
+    EXPECT_TRUE(reopened_column->CellsLoaded(&offset, 1));
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestFieldPreCancellationAllowsFreshContextRetry) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_field_cancel_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3171 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot->runtime, nullptr);
+    auto column = snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(column, nullptr);
+    EXPECT_TRUE(IsLazyColumnForTest(column));
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    milvus::OpContext cancelled_ctx(source.getToken());
+    try {
+        (void)column->DataOfChunk(&cancelled_ctx, 0);
+        FAIL() << "expected cancelled field materialization";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    milvus::OpContext fresh_ctx;
+    auto data = column->DataOfChunk(&fresh_ctx, 0);
+    ASSERT_NE(data.get(), nullptr);
+    EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
+    EXPECT_GT(column->DataByteSize(), 0);
+}
+
+TEST_P(TestLazyManifest, LazyManifestFirstNonCancellationFailureIsRetryable) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_failure_retry_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3174 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot->runtime, nullptr);
+    ASSERT_NE(snapshot->runtime->reader, nullptr);
+
+    auto column_groups = snapshot->runtime->reader->get_column_groups();
+    ASSERT_NE(column_groups, nullptr);
+    auto field_id = fields.at("int64");
+    auto storage_name = schema_->get_storage_column_name(field_id);
+    auto group_it = std::find_if(
+        column_groups->begin(), column_groups->end(), [&](const auto& group) {
+            return group != nullptr &&
+                   std::find(group->columns.begin(),
+                             group->columns.end(),
+                             storage_name) != group->columns.end();
+        });
+    ASSERT_NE(group_it, column_groups->end());
+    auto target_group = *group_it;
+    ASSERT_FALSE(target_group->files.empty());
+    const auto original_path = target_group->files.front().path;
+    const auto unavailable_path = original_path + ".lazy-retry-unavailable";
+    ASSERT_TRUE(fs->Move(original_path, unavailable_path).ok());
+    auto restore_file = folly::makeGuard([&]() {
+        static_cast<void>(fs->Move(unavailable_path, original_path));
+    });
+
+    auto column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            field_id);
+    ASSERT_NE(column, nullptr);
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    std::optional<ErrorCode> first_error;
+    try {
+        (void)column->DataOfChunk(nullptr, 0);
+    } catch (const SegcoreError& err) {
+        first_error = err.get_error_code();
+    }
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(17);
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::INT64),
+        std::vector<proto::plan::GenericValue>{value});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>("filter_1", term_expr);
+    auto query_context =
+        std::make_shared<exec::QueryContext>("lazy_manifest_failure_retry",
+                                             manifest_segment.get(),
+                                             kNumRows,
+                                             MAX_TIMESTAMP);
+    auto task = exec::Task::Create("lazy_manifest_failure_retry_task",
+                                   plan::PlanFragment(filter_node),
+                                   0,
+                                   query_context);
+    std::optional<ErrorCode> operator_error;
+    std::exception_ptr unexpected_error;
+    try {
+        while (task->Next()) {
+        }
+    } catch (const SegcoreError& err) {
+        operator_error = err.get_error_code();
+    } catch (...) {
+        unexpected_error = std::current_exception();
+    }
+
+    if (unexpected_error != nullptr) {
+        std::rethrow_exception(unexpected_error);
+    }
+
+    ASSERT_TRUE(first_error.has_value());
+    EXPECT_NE(*first_error, ErrorCode::FollyCancel);
+    ASSERT_TRUE(operator_error.has_value());
+    EXPECT_EQ(*operator_error, *first_error);
+    EXPECT_NE(*operator_error, ErrorCode::UnexpectedError);
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    ASSERT_TRUE(fs->Move(unavailable_path, original_path).ok());
+    restore_file.dismiss();
+    auto data = column->DataOfChunk(nullptr, 0);
+    ASSERT_NE(data.get(), nullptr);
+    EXPECT_GT(column->DataByteSize(), 0);
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestKeepsWarmupDisabledAfterGlobalConfigChanges) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(1);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard disable_warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_fixed_warmup_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kRowsPerBatch = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        2,
+        kRowsPerBatch,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3154 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    ASSERT_NE(column, nullptr);
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    auto sync_policies = warmup_policies;
+    sync_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    CacheWarmupPolicyGuard sync_warmup_guard(sync_policies);
+
+    ASSERT_GT(column->num_chunks(), 0);
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    int64_t value = 0;
+    column->BulkPrimitiveValueAt(nullptr, &value, &first_offset, 1);
+    EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
+}
+
+TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_retrieve_size_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    constexpr Timestamp kCommitTs = 1000;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    int64_t eager_avg_size = 0;
+    {
+        LazyColumnGroupGuard eager_group_guard(false);
+        auto eager_segment = CreateSegmentByLoadInfo(
+            MakeV3ManifestLoadInfo(test_data, 3156 + (GetParam() ? 100 : 0)),
+            true,
+            kCommitTs);
+        eager_avg_size = static_cast<SegmentInterface*>(eager_segment.get())
+                             ->get_field_avg_size(fields.at("string1"));
+    }
+    ASSERT_GT(eager_avg_size, 0);
+
+    auto manifest_segment = CreateSegmentByLoadInfo(
+        MakeV3ManifestLoadInfo(test_data, 3155 + (GetParam() ? 100 : 0)),
+        true,
+        kCommitTs);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto string_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("string1"));
+    ASSERT_NE(string_column, nullptr);
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(string_column);
+    ASSERT_NE(proxy, nullptr);
+    ASSERT_TRUE(proxy->IsLazy());
+    ASSERT_FALSE(proxy->IsMaterialized());
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(manifest_segment.get());
+
+    proto::plan::GenericValue missing_pk;
+    if (GetParam()) {
+        missing_pk.set_string_val("__missing__");
+    } else {
+        missing_pk.set_int64_val(-1);
+    }
+    auto zero_hit_plan = std::make_unique<query::RetrievePlan>(schema_);
+    zero_hit_plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    zero_hit_plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(
+            std::make_shared<expr::TermFilterExpr>(
+                expr::ColumnInfo(
+                    fields.at("pk"),
+                    GetParam() ? DataType::VARCHAR : DataType::INT64),
+                std::vector<proto::plan::GenericValue>{missing_pk}));
+    zero_hit_plan->field_ids_ = {fields.at("string1")};
+
+    auto zero_hit_results = manifest_segment->Retrieve(
+        nullptr, zero_hit_plan.get(), MAX_TIMESTAMP, 1, false);
+    EXPECT_EQ(zero_hit_results->offset_size(), 0);
+    EXPECT_FALSE(proxy->IsMaterialized());
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema_);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(
+        std::make_shared<expr::AlwaysTrueExpr>());
+    plan->field_ids_ = {fields.at("string1")};
+
+    segment_interface->set_field_avg_size(
+        fields.at("string1"), kNumRows, kNumRows);
+    try {
+        auto unexpected = manifest_segment->Retrieve(
+            nullptr, plan.get(), MAX_TIMESTAMP, 1, false);
+        (void)unexpected;
+        FAIL() << "expected Retrieve size guard to reject the result";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
+        EXPECT_NE(std::string(err.what()).find("query results exceed"),
+                  std::string::npos);
+    }
+    EXPECT_GT(string_column->DataByteSize(), 0);
+    EXPECT_EQ(segment_interface->get_field_avg_size(fields.at("string1")),
+              eager_avg_size);
+
+    auto results = manifest_segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_EQ(manifest_segment->get_max_timestamp(), kCommitTs);
+    ASSERT_EQ(results->fields_data_size(), 1);
+    const auto& values = results->fields_data(0).scalars().string_data();
+    ASSERT_EQ(values.data_size(), kNumRows);
+    auto expected_data = DataGen(schema_, kNumRows, 42);
+    const auto expected =
+        expected_data.get_col<std::string>(fields.at("string1"));
+    const auto expected_valid =
+        expected_data.get_col_valid(fields.at("string1"));
+    const auto& actual_valid =
+        GetFieldDataRowValidData(results->fields_data(0));
+    ASSERT_EQ(actual_valid.size(), kNumRows);
+    for (int64_t i = 0; i < kNumRows; ++i) {
+        EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;
+        if (expected_valid[i]) {
+            EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
+        }
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    auto pk = schema->AddDebugField(
+        "pk", GetParam() ? DataType::VARCHAR : DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    for (bool separate_timestamp : {false, true}) {
+        SCOPED_TRACE(separate_timestamp);
+        const auto base_path = UniqueManifestTestPath(
+            std::string("lazy_manifest_system_fields_") +
+            (GetParam() ? "varchar" : "int64") +
+            (separate_timestamp ? "_split_ts" : "_shared_ts"));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, base_path);
+        constexpr int64_t kNumRows = 64;
+        milvus::test::V3SegmentTestData test_data(
+            schema,
+            1,
+            kNumRows,
+            1,
+            TestLocalPath,
+            base_path,
+            separate_timestamp ? fmt::format("{}|{},{}",
+                                             RowFieldID.get(),
+                                             pk.get(),
+                                             TimestampFieldID.get())
+                               : "");
+        ASSERT_EQ(test_data.NumColumnGroups(), separate_timestamp ? 2 : 1);
+
+        auto manifest_segment = CreateV3ManifestSegment(
+            test_data,
+            3161 + (GetParam() ? 100 : 0) + (separate_timestamp ? 1000 : 0),
+            0,
+            schema);
+        auto* segment_impl =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+        ASSERT_NE(segment_impl, nullptr);
+        auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+        ASSERT_NE(snapshot->runtime, nullptr);
+        ASSERT_TRUE(snapshot->system_field_ready);
+        ASSERT_NE(snapshot->runtime->pk_index_slot, nullptr);
+        ASSERT_NE(snapshot->runtime->timestamp_index_slot, nullptr);
+        EXPECT_NE(snapshot->runtime->timestamps, nullptr);
+        EXPECT_NE(snapshot->runtime->timestamp_index, nullptr);
+        EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
+        EXPECT_TRUE(snapshot->runtime->timestamp_index_slot->IsCached(0));
+
+        auto row_id_column = snapshot->runtime->fields.at(RowFieldID);
+        auto pk_column = snapshot->runtime->fields.at(pk);
+        auto timestamp_column = snapshot->runtime->fields.at(TimestampFieldID);
+        for (const auto& [field_id, column] : std::vector<
+                 std::pair<FieldId, std::shared_ptr<ChunkedColumnInterface>>>{
+                 {RowFieldID, row_id_column},
+                 {pk, pk_column},
+                 {TimestampFieldID, timestamp_column}}) {
+            ASSERT_NE(column, nullptr);
+            EXPECT_EQ(column->IsInMultiFieldColumnGroup(),
+                      !separate_timestamp || field_id != TimestampFieldID);
+            EXPECT_FALSE(IsLazyColumnForTest(column));
+        }
+
+        int64_t offsets[] = {0, kNumRows - 1};
+        auto timestamps = manifest_segment->bulk_subscript(
+            nullptr, TimestampFieldID, offsets, 2);
+        ASSERT_EQ(timestamps->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(timestamps->scalars().long_data().data(0), 0);
+        EXPECT_EQ(timestamps->scalars().long_data().data(1), kNumRows - 1);
+
+        BitsetType timestamp_mask(kNumRows);
+        BitsetTypeView timestamp_mask_view(timestamp_mask);
+        static_cast<SegmentInternalInterface*>(manifest_segment.get())
+            ->mask_with_timestamps(timestamp_mask_view, 31, 0);
+        for (int64_t i = 0; i < kNumRows; ++i) {
+            EXPECT_EQ(timestamp_mask[i], i >= kNumRows / 2);
+        }
+
+        // PK shares the regular-load Task; delete application must still work.
+        PkType missing_pk = GetParam() ? PkType(std::string("__missing__"))
+                                       : PkType(int64_t{-1});
+        EXPECT_FALSE(segment_impl->Contain(missing_pk));
+        EXPECT_TRUE(snapshot->runtime->pk_index_slot->IsCached(0));
+        auto pk_values =
+            manifest_segment->bulk_subscript(nullptr, pk, offsets, 1);
+        IdArray delete_ids;
+        if (GetParam()) {
+            delete_ids.mutable_str_id()->add_data(
+                pk_values->scalars().string_data().data(0));
+        } else {
+            delete_ids.mutable_int_id()->add_data(
+                pk_values->scalars().long_data().data(0));
+        }
+        Timestamp delete_ts = MAX_TIMESTAMP;
+        ASSERT_TRUE(manifest_segment->Delete(1, &delete_ids, &delete_ts).ok());
+        auto* segment_internal =
+            dynamic_cast<SegmentInternalInterface*>(manifest_segment.get());
+        ASSERT_NE(segment_internal, nullptr);
+        BitsetType delete_mask(kNumRows);
+        BitsetTypeView delete_mask_view(delete_mask);
+        segment_internal->mask_with_delete(
+            delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        EXPECT_EQ(delete_mask.count(), 1);
+        EXPECT_TRUE(delete_mask[0]);
+        EXPECT_GT(pk_column->DataByteSize(), 0);
+        EXPECT_GT(timestamp_column->DataByteSize(), 0);
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    warmup_policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField(
+        "pk", GetParam() ? DataType::VARCHAR : DataType::INT64, false);
+    auto value = schema->AddDebugField("value", DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kNumRows = 64;
+
+    for (bool share_pk_task : {false, true}) {
+        SCOPED_TRACE(share_pk_task);
+        const auto base_path =
+            UniqueManifestTestPath(std::string("lazy_manifest_pk_regular_") +
+                                   (GetParam() ? "varchar" : "int64") +
+                                   (share_pk_task ? "_shared" : "_single"));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard_a(fs, base_path + "_a");
+        StorageV2TempDirGuard dir_guard_b(fs, base_path + "_b");
+        auto pattern =
+            share_pk_task
+                ? fmt::format(
+                      "{}|{},{}", pk.get(), value.get(), TimestampFieldID.get())
+                : fmt::format("{},{},{}",
+                              pk.get(),
+                              value.get(),
+                              TimestampFieldID.get());
+        milvus::test::V3SegmentTestData test_data_a(
+            schema, 1, kNumRows, 1, TestLocalPath, base_path + "_a", pattern);
+        milvus::test::V3SegmentTestData test_data_b(
+            schema, 1, kNumRows, 1, TestLocalPath, base_path + "_b", pattern);
+        ASSERT_EQ(test_data_a.NumColumnGroups(), share_pk_task ? 2 : 3);
+        const auto segment_id =
+            3180 + (GetParam() ? 100 : 0) + (share_pk_task ? 1000 : 0);
+        auto segment =
+            CreateV3ManifestSegment(test_data_a, segment_id, 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto old_pk_column =
+            impl->TestGetPublishedStateSnapshot()->runtime->fields.at(pk);
+
+        for (bool reopen : {false, true}) {
+            SCOPED_TRACE(reopen);
+            if (reopen) {
+                milvus::OpContext ctx;
+                impl->Reopen(&ctx,
+                             MakeV3ManifestLoadInfo(test_data_b, segment_id));
+            }
+            auto snapshot = impl->TestGetPublishedStateSnapshot();
+            auto pk_column = snapshot->runtime->fields.at(pk);
+            auto value_column = snapshot->runtime->fields.at(value);
+            EXPECT_FALSE(IsLazyColumnForTest(pk_column));
+            EXPECT_EQ(IsLazyColumnForTest(value_column), !share_pk_task);
+            EXPECT_EQ(pk_column->IsInMultiFieldColumnGroup(), share_pk_task);
+            ASSERT_NE(snapshot->runtime->pk_index_slot, nullptr);
+            // Excluding PK from Lazy Manifest does not force its index to build.
+            EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
+            if (reopen) {
+                EXPECT_NE(pk_column, old_pk_column);
+            }
+        }
+
+        int64_t offset = 0;
+        auto pk_values = segment->bulk_subscript(nullptr, pk, &offset, 1);
+        IdArray delete_ids;
+        if (GetParam()) {
+            delete_ids.mutable_str_id()->add_data(
+                pk_values->scalars().string_data().data(0));
+        } else {
+            delete_ids.mutable_int_id()->add_data(
+                pk_values->scalars().long_data().data(0));
+        }
+        Timestamp delete_ts = MAX_TIMESTAMP;
+        ASSERT_TRUE(segment->Delete(1, &delete_ids, &delete_ts).ok());
+        auto* internal = dynamic_cast<SegmentInternalInterface*>(segment.get());
+        ASSERT_NE(internal, nullptr);
+        BitsetType delete_mask(kNumRows);
+        BitsetTypeView delete_mask_view(delete_mask);
+        internal->mask_with_delete(delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        EXPECT_EQ(delete_mask.count(), 1);
+        EXPECT_TRUE(delete_mask[0]);
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path_a =
+        UniqueManifestTestPath(std::string("lazy_manifest_reopen_a_") + suffix);
+    const auto base_path_b =
+        UniqueManifestTestPath(std::string("lazy_manifest_reopen_b_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard_a(fs, base_path_a);
+    StorageV2TempDirGuard dir_guard_b(fs, base_path_b);
+    milvus::test::V3SegmentTestData test_data_a(
+        schema_,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_a,
+        LazyManifestTestGroupPattern(schema_));
+    milvus::test::V3SegmentTestData test_data_b(
+        schema_,
+        2,
+        32,
+        128,
+        TestLocalPath,
+        base_path_b,
+        LazyManifestTestGroupPattern(schema_));
+
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data_a, 3164 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto old_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto old_column = old_snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(old_column, nullptr);
+    ASSERT_NE(old_snapshot->runtime->pk_index_slot, nullptr);
+    ASSERT_NE(old_snapshot->runtime->timestamp_index_slot, nullptr);
+
+    const auto string_field = fields.at("string1");
+    static_cast<SegmentInterface*>(manifest_segment.get())
+        ->set_field_avg_size(string_field, 64, 64 * 123);
+    ASSERT_GT(segment_impl->TestGetPublishedStateSnapshot()
+                  ->runtime->variable_fields_avg_size.count(string_field),
+              0);
+    auto mmap_proto = schema_->ToProto();
+    for (auto& field : *mmap_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            field.set_name("Timestamp");
+        }
+        if (field.fieldid() == string_field.get()) {
+            auto* mmap = field.add_type_params();
+            mmap->set_key(MMAP_ENABLED_KEY);
+            mmap->set_value("true");
+        }
+    }
+    auto mmap_schema = Schema::ParseFrom(mmap_proto);
+    milvus::OpContext op_ctx;
+    segment_impl->Reopen(
+        &op_ctx,
+        MakeV3ManifestLoadInfo(test_data_b, 3164 + (GetParam() ? 100 : 0)),
+        mmap_schema);
+    auto new_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_snapshot, old_snapshot);
+    auto new_column = new_snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(new_column, nullptr);
+    EXPECT_NE(new_column, old_column);
+    EXPECT_EQ(new_snapshot->runtime->mmap_field_ids.count(string_field), 1);
+    EXPECT_EQ(
+        new_snapshot->runtime->variable_fields_avg_size.count(string_field), 0);
+    auto mmap_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        new_snapshot->runtime->fields.at(string_field));
+    ASSERT_NE(mmap_column, nullptr);
+    ASSERT_TRUE(mmap_column->IsLazy());
+    ASSERT_FALSE(mmap_column->IsMaterialized());
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(manifest_segment.get());
+    EXPECT_EQ(segment_interface->get_field_avg_size(string_field), 0);
+    EXPECT_FALSE(mmap_column->IsMaterialized());
+    ASSERT_NE(new_snapshot->runtime->pk_index_slot, nullptr);
+    ASSERT_NE(new_snapshot->runtime->timestamp_index_slot, nullptr);
+    EXPECT_NE(new_snapshot->runtime->pk_index_slot,
+              old_snapshot->runtime->pk_index_slot);
+    EXPECT_NE(new_snapshot->runtime->timestamp_index_slot,
+              old_snapshot->runtime->timestamp_index_slot);
+
+    auto read_value = [](const std::shared_ptr<ChunkedColumnInterface>& column,
+                         int64_t offset) {
+        int64_t value = -1;
+        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
+        return value;
+    };
+    EXPECT_EQ(read_value(old_column, 40), 40);
+
+    EXPECT_EQ(read_value(new_column, 40), 8);
+    EXPECT_TRUE(mmap_column->IsMaterialized());
+    EXPECT_EQ(segment_interface->get_field_avg_size(string_field), 0);
+    segment_impl->DropFieldData(fields.at("string1"));
+    auto dropped_column_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(
+        dropped_column_snapshot->runtime->fields.count(fields.at("string1")),
+        0);
+
+    EXPECT_EQ(read_value(new_column, 40), 8);
+    EXPECT_EQ(read_value(old_column, 40), 40);
+    EXPECT_EQ(old_snapshot->runtime->fields.at(fields.at("int64")), old_column);
+}
+
+TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto old_schema = std::make_shared<Schema>(*schema_);
+    old_schema->set_schema_version(1);
+
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_schema_drop_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+
+    constexpr int64_t kNumRows = 64;
+    constexpr int64_t kOffset = 40;
+    const auto segment_id = 3167 + (GetParam() ? 100 : 0);
+    milvus::test::V3SegmentTestData test_data(
+        old_schema,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(old_schema));
+
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, segment_id, 0, old_schema);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    const auto survivor_field = fields.at("int64");
+    const auto dropped_field = fields.at("string1");
+    const auto peer_field = fields.at("string2");
+
+    auto old_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_snapshot, nullptr);
+    ASSERT_NE(old_snapshot->runtime, nullptr);
+    auto old_survivor = old_snapshot->runtime->fields.at(survivor_field);
+    auto old_dropped = old_snapshot->runtime->fields.at(dropped_field);
+    auto old_peer = old_snapshot->runtime->fields.at(peer_field);
+    ASSERT_NE(old_survivor, nullptr);
+    ASSERT_NE(old_dropped, nullptr);
+    ASSERT_NE(old_peer, nullptr);
+    EXPECT_TRUE(old_survivor->IsInMultiFieldColumnGroup());
+
+    auto schema_proto = old_schema->ToProto();
+    bool removed = false;
+    for (int i = 0; i < schema_proto.fields_size(); ++i) {
+        if (schema_proto.fields(i).fieldid() == dropped_field.get()) {
+            schema_proto.mutable_fields()->DeleteSubrange(i, 1);
+            removed = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(removed);
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            // GenChunkedSegmentTestSchema uses the debug-only name "ts";
+            // Schema::ParseFrom validates production system-field names.
+            field.set_name("Timestamp");
+        }
+    }
+    auto new_schema = Schema::ParseFrom(schema_proto);
+    new_schema->set_schema_version(2);
+
+    segment_impl->Reopen(new_schema);
+
+    auto new_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_snapshot, old_snapshot);
+    ASSERT_NE(new_snapshot->runtime, nullptr);
+    EXPECT_TRUE(old_snapshot->schema->has_field(dropped_field));
+    EXPECT_FALSE(new_snapshot->schema->has_field(dropped_field));
+    EXPECT_EQ(new_snapshot->runtime->fields.count(dropped_field), 0);
+
+    auto new_survivor = new_snapshot->runtime->fields.at(survivor_field);
+    auto new_peer = new_snapshot->runtime->fields.at(peer_field);
+    ASSERT_NE(new_survivor, nullptr);
+    ASSERT_NE(new_peer, nullptr);
+    EXPECT_EQ(new_survivor, old_survivor);
+    EXPECT_EQ(new_peer, old_peer);
+    EXPECT_TRUE(new_survivor->IsInMultiFieldColumnGroup());
+
+    // A schema-only drop removes the dropped facade from the new runtime but
+    // keeps the unchanged physical Task for surviving fields.
+    auto read_int64 = [](const std::shared_ptr<ChunkedColumnInterface>& column,
+                         int64_t offset) {
+        int64_t value = -1;
+        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
+        return value;
+    };
+
+    EXPECT_EQ(read_int64(new_survivor, kOffset), kOffset);
+    auto old_dropped_data = old_dropped->DataOfChunk(nullptr, 0);
+    EXPECT_NE(old_dropped_data.get(), nullptr);
+
+    auto current_dropped_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(current_dropped_snapshot->runtime->fields.count(dropped_field),
+              0);
+}
+
+TEST_P(TestLazyManifest, LazyManifestDisabledKeepsEagerColumnGroup) {
+    LazyColumnGroupGuard lazy_group_guard(false);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_disabled_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        32,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3170 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto int64_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    auto pk_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("pk"));
+    ASSERT_NE(int64_column, nullptr);
+    ASSERT_NE(pk_column, nullptr);
+    EXPECT_TRUE(int64_column->IsInMultiFieldColumnGroup());
+    // The test layout keeps PK in its own physical group.
+    EXPECT_FALSE(pk_column->IsInMultiFieldColumnGroup());
+    EXPECT_FALSE(IsLazyColumnForTest(int64_column));
+    EXPECT_FALSE(IsLazyColumnForTest(pk_column));
+
+    auto& config = SegcoreConfig::default_config();
+    config.set_lazy_column_group_enabled(true);
+    auto lazy_segment =
+        CreateV3ManifestSegment(test_data, 3180 + (GetParam() ? 100 : 0));
+    auto* lazy_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(lazy_segment.get());
+    ASSERT_NE(lazy_impl, nullptr);
+    auto lazy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        lazy_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64")));
+    ASSERT_NE(lazy_column, nullptr);
+    EXPECT_TRUE(lazy_column->IsLazy());
+    EXPECT_FALSE(lazy_column->IsMaterialized());
+    EXPECT_FALSE(IsLazyColumnForTest(int64_column));
+
+    config.set_lazy_column_group_enabled(false);
+    auto next_segment =
+        CreateV3ManifestSegment(test_data, 3181 + (GetParam() ? 100 : 0));
+    auto* next_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(next_segment.get());
+    ASSERT_NE(next_impl, nullptr);
+    EXPECT_FALSE(IsLazyColumnForTest(
+        next_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"))));
+    EXPECT_FALSE(lazy_column->IsMaterialized());
+    EXPECT_TRUE(lazy_column->IsLazy());
+}
+
+TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        const auto previous_async =
+            storagev2translator::StorageV2AsyncLoadEnabled();
+        auto restore_async = folly::makeGuard([previous_async] {
+            storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+        });
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        LazyColumnGroupGuard lazy_group_guard(true);
+        auto policies =
+            cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+        policies.scalarFieldCacheWarmupPolicy =
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+        CacheWarmupPolicyGuard warmup_guard(policies);
+
+        const FieldId number(100), text(101), pk(102);
+        auto source_schema = std::make_shared<Schema>();
+        source_schema->AddField(FieldMeta(FieldName("number"),
+                                          number,
+                                          DataType::INT64,
+                                          true,
+                                          std::nullopt,
+                                          "source_number"));
+        source_schema->AddField(FieldMeta(FieldName("text"),
+                                          text,
+                                          DataType::VARCHAR,
+                                          65535,
+                                          true,
+                                          std::nullopt,
+                                          "source_text"));
+        source_schema->set_external_source("s3://test-bucket/data");
+        source_schema->set_external_spec(R"({"format":"parquet"})");
+        const auto path = UniqueManifestTestPath("lazy_manifest_external");
+        auto fs = GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, path);
+        constexpr int64_t rows = 8;
+        milvus::test::V3SegmentTestData data(source_schema,
+                                             1,
+                                             rows,
+                                             1,
+                                             TestLocalPath,
+                                             path,
+                                             "source_number|source_text");
+        ASSERT_EQ(data.NumColumnGroups(), 1);
+
+        auto schema = std::make_shared<Schema>(*source_schema);
+        schema->AddField(FieldMeta(
+            FieldName("virtual_pk"), pk, DataType::INT64, false, std::nullopt));
+        schema->AddField(FieldName("RowID"),
+                         RowFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("Timestamp"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->set_primary_field_id(pk);
+
+        // A cold external load must not need even the Parquet footer.
+        const auto parquet_path =
+            data.GetColumnGroups()->at(0)->files.front().path;
+        const auto hidden_path = parquet_path + ".hidden";
+        ASSERT_TRUE(fs->Move(parquet_path, hidden_path).ok());
+        auto restore_file = folly::makeGuard(
+            [&] { static_cast<void>(fs->Move(hidden_path, parquet_path)); });
+        constexpr int64_t segment_id = 3190;
+        auto segment = CreateSealedSegment(schema, nullptr, segment_id);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(segment_id);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(rows);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(data.ManifestPathJson());
+        segment->SetLoadInfo(info);
+        milvus::tracer::TraceContext trace_ctx;
+        ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto state = sealed->TestGetPublishedStateSnapshot();
+        auto number_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+            state->runtime->fields.at(number));
+        auto text_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+            state->runtime->fields.at(text));
+        ASSERT_NE(number_column, nullptr);
+        ASSERT_NE(text_column, nullptr);
+        ASSERT_TRUE(number_column->IsLazy());
+        ASSERT_TRUE(text_column->IsLazy());
+        EXPECT_FALSE(number_column->IsMaterialized());
+        EXPECT_FALSE(text_column->IsMaterialized());
+        EXPECT_NE(state->runtime->virtual_pk2offset, nullptr);
+        EXPECT_EQ(state->runtime->pk_index_slot, nullptr);
+        EXPECT_EQ(state->runtime->timestamp_index_slot, nullptr);
+
+        int64_t offsets[] = {6, 0, 2, 6};
+        auto pks = segment->bulk_subscript(nullptr, pk, offsets, 4);
+        ASSERT_EQ(pks->scalars().long_data().data_size(), 4);
+        Timestamp timestamps[4];
+        static_cast<SegmentInternalInterface*>(segment.get())
+            ->bulk_subscript(
+                nullptr, SystemFieldType::Timestamp, offsets, 4, timestamps);
+        for (int i = 0; i < 4; ++i) {
+            EXPECT_EQ(pks->scalars().long_data().data(i),
+                      (segment_id << 32) | offsets[i]);
+            EXPECT_EQ(timestamps[i], 0);
+        }
+        EXPECT_FALSE(number_column->IsMaterialized());
+        EXPECT_FALSE(text_column->IsMaterialized());
+
+        ASSERT_TRUE(fs->Move(hidden_path, parquet_path).ok());
+        restore_file.dismiss();
+        int64_t values[4];
+        number_column->BulkPrimitiveValueAt(
+            nullptr, values, offsets, 4, /*small_int_raw_type=*/false);
+        for (int i = 0; i < 4; ++i) {
+            EXPECT_EQ(values[i], offsets[i]);
+        }
+        EXPECT_TRUE(number_column->IsMaterialized());
+        // Separate Tasks from the same physical CG materialize independently.
+        EXPECT_FALSE(text_column->IsMaterialized());
+        auto expected =
+            DataGen(source_schema, rows, 42).get_col<std::string>(text);
+        size_t seen = 0;
+        text_column->BulkRawStringAt(
+            nullptr,
+            [&](std::string_view value, size_t i, bool valid) {
+                ASSERT_LT(i, 4);
+                EXPECT_TRUE(valid);
+                EXPECT_EQ(value, expected[offsets[i]]);
+                ++seen;
+            },
+            offsets,
+            4);
+        EXPECT_EQ(seen, 4);
+        EXPECT_TRUE(text_column->IsMaterialized());
+    }
+}
 
 TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
     constexpr int64_t nq = 4;
@@ -893,7 +2435,8 @@ TEST(TestChunkSegmentStorageV2Regression,
     schema->set_primary_field_id(right_fid);
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    const std::string root = "test_compare_expr_misaligned_storage_v2";
+    const std::string root =
+        TestLocalPath + "test_compare_expr_misaligned_storage_v2";
     auto cleanup_status = fs->DeleteDir(root);
     (void)cleanup_status;
     ASSERT_TRUE(fs->CreateDir(root + "/0").ok());
@@ -1042,6 +2585,103 @@ TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
             ASSERT_EQ(offset + i, values[i]);
         }
         offset += expected_batch_size;
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestStringExpressionsWithSmallScanWindowsAndOffsets) {
+    // Both fields contain identical strings in separate physical column groups.
+    // Exercise the real ColumnExpr and CompareExpr consumers, including raw
+    // fallback from an index that cannot reverse-lookup its string values.
+    for (const bool indexed : {false, true}) {
+        if (indexed) {
+            LoadString1ScalarIndex(index::INVERTED_INDEX_TYPE);
+            ASSERT_FALSE(segment->HasRawData(fields.at("string1").get()));
+        }
+        auto config = std::make_shared<exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{
+                {exec::QueryConfig::kExprEvalBatchSize, "17"}});
+        exec::QueryContext query_context("string_reader_scan_take",
+                                         segment.get(),
+                                         RowCount(),
+                                         MAX_TIMESTAMP,
+                                         0,
+                                         0,
+                                         query::PlanOptions(),
+                                         config);
+        exec::ExecContext exec_context(&query_context);
+        std::vector<expr::TypedExprPtr> exprs{
+            std::make_shared<expr::ColumnExpr>(
+                expr::ColumnInfo(fields.at("string1"), DataType::VARCHAR)),
+            std::make_shared<expr::CompareExpr>(fields.at("string1"),
+                                                fields.at("string2"),
+                                                DataType::VARCHAR,
+                                                DataType::VARCHAR,
+                                                proto::plan::OpType::Equal)};
+        exec::ExprSet expr_set(exprs, &exec_context);
+        exec::EvalCtx eval_context(&exec_context);
+        int64_t offset = 0;
+        while (offset < RowCount()) {
+            std::vector<VectorPtr> results;
+            expr_set.Eval(eval_context, results);
+            ASSERT_EQ(results.size(), 2);
+            auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+            ASSERT_NE(values, nullptr);
+            ASSERT_NE(matches, nullptr);
+            const auto count = std::min<int64_t>(17, RowCount() - offset);
+            ASSERT_EQ(values->size(), count);
+            TargetBitmapView bits(matches->GetRawData(), count);
+            for (int64_t i = 0; i < count; ++i) {
+                ASSERT_TRUE(values->ValidAt(i));
+                EXPECT_EQ(values->RawAsValues<std::string>()[i],
+                          string_data[offset + i]);
+                EXPECT_TRUE(bits[i]);
+            }
+            offset += count;
+        }
+        exec::OffsetVector offsets;
+        for (int32_t row :
+             {static_cast<int32_t>(RowCount() - 1), 0, 10000, 16, 10000, 0}) {
+            offsets.push_back(row);
+        }
+        exec::ExprSet offset_expr_set(exprs, &exec_context);
+        exec::EvalCtx offset_context(&exec_context, &offsets);
+        std::vector<VectorPtr> results;
+        offset_expr_set.Eval(offset_context, results);
+        ASSERT_EQ(results.size(), 2);
+        auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+        ASSERT_NE(values, nullptr);
+        ASSERT_NE(matches, nullptr);
+        TargetBitmapView bits(matches->GetRawData(), offsets.size());
+        ASSERT_EQ(values->size(), offsets.size());
+        for (int64_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(values->RawAsValues<std::string>()[i],
+                      string_data[offsets[i]]);
+            EXPECT_TRUE(bits[i]);
+        }
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestStringTakeAccessorRetainsIndexReverseLookup) {
+    LoadString1ScalarIndex(index::MARISA_TRIE);
+    ASSERT_TRUE(segment->HasRawData(fields.at("string1").get()));
+    auto pins = segment->PinIndex(nullptr, fields.at("string1"));
+    ASSERT_EQ(pins.size(), 1);
+    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
+    const std::vector<int32_t> offsets{10007, 7, 10007, 0};
+    auto accessor = reader.GetStringDataAccessorByOffsets(
+        fields.at("string1"),
+        OffsetView::From(offsets.data(), offsets.size()),
+        {pins.data(), pins.size()});
+    for (int64_t i = 0; i < offsets.size(); ++i) {
+        auto value = accessor(i);
+        ASSERT_TRUE(value.has_value());
+        // Index values deliberately differ from raw values in this fixture.
+        EXPECT_EQ(segcore::get_from_variant<std::string>(value),
+                  "test" + std::to_string(offsets[i]));
     }
 }
 
@@ -1449,4 +3089,980 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
         ASSERT_EQ(pk_result->scalars().long_data().data(0), 0);
         ASSERT_EQ(pk_result->scalars().long_data().data(1), 42);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PR #51441 skip-index regression tests (storage v2). Two dimensions:
+//  1. Correctness: real queries return the exact count -- a mis-aligned cell,
+//     a use-after-free VARCHAR bound, or a wrong metric would drop rows.
+//  2. Skip effect: with the flag ON the footer skip index actually prunes
+//     lower cells; with it OFF storage-v2 scalar columns get none.
+// ─────────────────────────────────────────────────────────────────────────
+namespace {
+constexpr int64_t kSkipMeasureNullEvery = 10;
+
+std::string
+SkipMeasurePayloadAt(int64_t row) {
+    auto digits = std::to_string(row);
+    auto prefix = digits.size() >= 8
+                      ? digits
+                      : std::string(8 - digits.size(), '0') + digits;
+    return prefix + std::string(2040, 'x');
+}
+
+// val(INT64 monotonic 0..N-1) + payload(bloated VARCHAR -> many row groups)
+// + ts share one column group; pk sits alone. Writes two parquet files under
+// `root`; returns the row count. `writer_mem` tunes row groups per file.
+int64_t
+WriteSkipMeasureV2Parquet(
+    const std::shared_ptr<Schema>& schema,
+    FieldId pk_fid,
+    const std::string& root,
+    int64_t writer_mem,
+    std::shared_ptr<::parquet::WriterProperties> writer_properties =
+        ::parquet::default_writer_properties(),
+    bool all_null_val = false) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+    EXPECT_TRUE(fs->CreateDir(root + "/0").ok());
+    EXPECT_TRUE(fs->CreateDir(root + "/" + std::to_string(pk_fid.get())).ok());
+    std::vector<std::string> paths = {
+        root + "/0/10000.parquet",
+        root + "/" + std::to_string(pk_fid.get()) + "/10001.parquet"};
+    std::vector<std::vector<int>> column_groups = {{0, 2, 3}, {1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        schema->ConvertToArrowSchema(),
+        storage_config,
+        column_groups,
+        writer_mem,
+        writer_properties);
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+
+    constexpr int64_t rows_per_batch = 10000;
+    constexpr int64_t batch_count = 4;
+    const int64_t N = rows_per_batch * batch_count;  // val 0..39999
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    for (int64_t batch = 0; batch < batch_count; ++batch) {
+        const int64_t start = batch * rows_per_batch;
+        std::vector<std::shared_ptr<arrow::Array>> arrays;
+        for (int i = 0; i < arrow_schema->fields().size(); ++i) {
+            if (arrow_schema->fields()[i]->type()->id() == arrow::Type::INT64 &&
+                arrow_schema->fields()[i]->nullable()) {
+                arrow::Int64Builder builder;
+                for (int64_t row = 0; row < rows_per_batch; ++row) {
+                    const int64_t value = start + row;
+                    if (all_null_val || value % kSkipMeasureNullEvery == 0) {
+                        EXPECT_TRUE(builder.AppendNull().ok());
+                    } else {
+                        EXPECT_TRUE(builder.Append(value).ok());
+                    }
+                }
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else if (arrow_schema->fields()[i]->type()->id() ==
+                       arrow::Type::INT64) {
+                std::vector<int64_t> values(rows_per_batch);
+                std::iota(values.begin(), values.end(), start);  // monotonic
+                arrow::Int64Builder builder;
+                EXPECT_TRUE(
+                    builder.AppendValues(values.data(), rows_per_batch).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else if (arrow_schema->fields()[i]->type()->id() ==
+                       arrow::Type::INT32) {
+                std::vector<int32_t> values(rows_per_batch);
+                std::iota(values.begin(),
+                          values.end(),
+                          static_cast<int32_t>(start));  // monotonic
+                arrow::Int32Builder builder;
+                EXPECT_TRUE(
+                    builder.AppendValues(values.data(), rows_per_batch).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            } else {
+                arrow::StringBuilder builder;
+                std::vector<std::string> values;
+                values.reserve(rows_per_batch);
+                for (int64_t row = 0; row < rows_per_batch; ++row) {
+                    values.push_back(SkipMeasurePayloadAt(start + row));
+                }
+                EXPECT_TRUE(builder.AppendValues(values).ok());
+                std::shared_ptr<arrow::Array> array;
+                EXPECT_TRUE(builder.Finish(&array).ok());
+                arrays.push_back(array);
+            }
+        }
+        auto rb =
+            arrow::RecordBatch::Make(arrow_schema, rows_per_batch, arrays);
+        EXPECT_TRUE(writer->Write(rb).ok());
+    }
+    EXPECT_TRUE(writer->Close().ok());
+    return N;
+}
+
+int64_t
+WriteOneSidedVarcharStatsV2Parquet(const std::shared_ptr<Schema>& schema,
+                                   FieldId pk_fid,
+                                   const std::string& root) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+    EXPECT_TRUE(fs->CreateDir(root + "/0").ok());
+    EXPECT_TRUE(fs->CreateDir(root + "/" + std::to_string(pk_fid.get())).ok());
+    std::vector<std::string> paths = {
+        root + "/0/10000.parquet",
+        root + "/" + std::to_string(pk_fid.get()) + "/10001.parquet"};
+    std::vector<std::vector<int>> column_groups = {{0, 2, 3}, {1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+
+    constexpr int64_t N = 2;
+    const std::vector<int64_t> integer_values = {0, 1};
+    const std::vector<std::string> varchar_values = {"a",
+                                                     std::string(4097, 'z')};
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (const auto& field : arrow_schema->fields()) {
+        std::shared_ptr<arrow::Array> array;
+        if (field->type()->id() == arrow::Type::STRING) {
+            arrow::StringBuilder builder;
+            EXPECT_TRUE(builder.AppendValues(varchar_values).ok());
+            EXPECT_TRUE(builder.Finish(&array).ok());
+        } else {
+            arrow::Int64Builder builder;
+            EXPECT_TRUE(builder.AppendValues(integer_values).ok());
+            EXPECT_TRUE(builder.Finish(&array).ok());
+        }
+        arrays.push_back(std::move(array));
+    }
+    auto batch = arrow::RecordBatch::Make(arrow_schema, N, std::move(arrays));
+    EXPECT_TRUE(writer->Write(batch).ok());
+    EXPECT_TRUE(writer->Close().ok());
+    return N;
+}
+
+std::shared_ptr<Schema>
+MakeSkipMeasureSchema(FieldId& val_fid,
+                      FieldId& pk_fid,
+                      FieldId* payload_fid = nullptr,
+                      bool nullable_val = false,
+                      DataType val_type = DataType::INT64) {
+    auto schema = std::make_shared<Schema>();
+    val_fid = schema->AddDebugField("val", val_type, nullable_val);
+    pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto payload = schema->AddDebugField("payload", DataType::VARCHAR, false);
+    if (payload_fid != nullptr) {
+        *payload_fid = payload;
+    }
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+    return schema;
+}
+
+SegmentSealedUPtr
+LoadSkipMeasureV2Segment(const std::shared_ptr<Schema>& schema,
+                         FieldId pk_fid,
+                         int64_t N,
+                         const std::string& root) {
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    load_info.field_infos.emplace(
+        int64_t(0),
+        FieldBinlogInfo{int64_t(0),
+                        N,
+                        std::vector<int64_t>(N),
+                        std::vector<int64_t>(N * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({root + "/0/10000.parquet"})});
+    load_info.field_infos.emplace(
+        pk_fid.get(),
+        FieldBinlogInfo{pk_fid.get(),
+                        N,
+                        std::vector<int64_t>(N),
+                        std::vector<int64_t>(N * 4),
+                        false,
+                        "",
+                        std::vector<std::string>({root + "/" +
+                                                  std::to_string(pk_fid.get()) +
+                                                  "/10001.parquet"})});
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->AddFieldDataInfoForSealed(load_info);
+    for (auto& [id, info] : load_info.field_infos) {
+        LoadFieldDataInfo one;
+        one.storage_version = 2;
+        one.field_infos.emplace(id, info);
+        segment->LoadFieldData(one);
+    }
+    return segment;
+}
+
+class DriverPrefetchGuard {
+ public:
+    explicit DriverPrefetchGuard(bool enabled)
+        : old_(milvus::ENABLE_DRIVER_PREFETCH.load()) {
+        milvus::SetDefaultDriverPrefetchEnable(enabled);
+    }
+
+    ~DriverPrefetchGuard() {
+        milvus::SetDefaultDriverPrefetchEnable(old_);
+    }
+
+ private:
+    bool old_;
+};
+
+class ParquetStatsSkipIndexGuard {
+ public:
+    explicit ParquetStatsSkipIndexGuard(bool enabled)
+        : old_(milvus::ENABLE_PARQUET_STATS_SKIP_INDEX.load()) {
+        Set(enabled);
+    }
+
+    ~ParquetStatsSkipIndexGuard() {
+        milvus::SetDefaultEnableParquetStatsSkipIndex(old_);
+    }
+
+    void
+    Set(bool enabled) {
+        milvus::SetDefaultEnableParquetStatsSkipIndex(enabled);
+    }
+
+ private:
+    bool old_;
+};
+
+class StorageUsageTrackingGuard {
+ public:
+    StorageUsageTrackingGuard()
+        : old_(milvus::cachinglayer::TieredStorageConfig::GetInstance()
+                   .storage_usage_tracking_enabled()) {
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .SetStorageUsageTrackingEnabled(true);
+    }
+
+    ~StorageUsageTrackingGuard() {
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .SetStorageUsageTrackingEnabled(old_);
+    }
+
+ private:
+    bool old_;
+};
+
+struct ScanTraffic {
+    int64_t count;
+    int64_t total_bytes;
+};
+
+ScanTraffic
+RunWithStorageUsage(const std::shared_ptr<milvus::plan::PlanNode>& plan,
+                    const milvus::segcore::SegmentInternalInterface* segment,
+                    int64_t active_count) {
+    auto fragment = milvus::plan::PlanFragment(plan);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    milvus::OpContext op_context;
+    query_context->set_op_context(&op_context);
+
+    auto row = milvus::query::ExecPlanNodeVisitor::ExecuteTask(fragment,
+                                                               query_context);
+    auto column = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
+    BitsetType selected{BitsetTypeView(column->GetRawData(), column->size())};
+    selected.flip();
+    return {static_cast<int64_t>(selected.count()),
+            op_context.storage_usage.scanned_total_bytes.load()};
+}
+
+std::shared_ptr<milvus::plan::PlanNode>
+UnaryRangePlan(FieldId field_id, proto::plan::OpType op, int64_t threshold) {
+    proto::plan::GenericValue value;
+    value.set_int64_val(threshold);
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::INT64), op, value);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
+std::shared_ptr<milvus::plan::PlanNode>
+BinaryRangePlan(FieldId field_id,
+                DataType data_type,
+                int64_t lower,
+                int64_t upper) {
+    proto::plan::GenericValue lower_value;
+    lower_value.set_int64_val(lower);
+    proto::plan::GenericValue upper_value;
+    upper_value.set_int64_val(upper);
+    auto expr = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, data_type),
+        lower_value,
+        upper_value,
+        /*lower_inclusive=*/true,
+        /*upper_inclusive=*/true);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
+std::shared_ptr<milvus::plan::PlanNode>
+BinaryArithPlan(FieldId field_id,
+                proto::plan::OpType op,
+                proto::plan::ArithOpType arithmetic,
+                int64_t value,
+                int64_t right_operand) {
+    proto::plan::GenericValue value_arg;
+    value_arg.set_int64_val(value);
+    proto::plan::GenericValue right_arg;
+    right_arg.set_int64_val(right_operand);
+    auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(field_id, DataType::INT64),
+        op,
+        arithmetic,
+        value_arg,
+        right_arg);
+    return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+}
+
+ScanTraffic
+RunByOffsetsWithStorageUsage(
+    const std::shared_ptr<milvus::plan::PlanNode>& plan,
+    const milvus::segcore::SegmentInternalInterface* segment,
+    int64_t active_count,
+    milvus::exec::OffsetVector& offsets) {
+    auto filter = std::dynamic_pointer_cast<milvus::plan::FilterBitsNode>(plan);
+    AssertInfo(filter != nullptr, "expected FilterBitsNode");
+    std::vector<milvus::expr::TypedExprPtr> filters{filter->filter()};
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP);
+    milvus::OpContext op_context;
+    query_context->set_op_context(&op_context);
+    auto exec_context =
+        std::make_unique<milvus::exec::ExecContext>(query_context.get());
+    auto expressions =
+        std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
+
+    std::vector<VectorPtr> results;
+    milvus::exec::EvalCtx eval_context(exec_context.get(), &offsets);
+    expressions->Eval(0, 1, true, eval_context, results);
+    auto column = milvus::query::GetColumnVectorForTest(results[0]);
+    BitsetTypeView selected(column->GetRawData(), column->size());
+    return {static_cast<int64_t>(selected.count()),
+            op_context.storage_usage.scanned_total_bytes.load()};
+}
+}  // namespace
+
+// Correctness: run real UnaryRange filters end-to-end and compare against the
+// exact expected counts. A materialization that dropped rows (mis-alignment,
+// VARCHAR use-after-free, wrong metric) would make a count too low.
+TEST(SkipIndexPr51441, StorageV2SkipQueryResultsCorrect) {
+    // Large target: without the force many row groups pack into few cells;
+    // with the flag ON the force makes 1 rg/cell and many cells.
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_query_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 4 * 1024 * 1024);
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    const int64_t num_cells = segment->num_chunk_data(val_fid);
+
+    auto run_count = [&](proto::plan::OpType op, int64_t threshold) -> int64_t {
+        proto::plan::GenericValue value;
+        value.set_int64_val(threshold);
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(val_fid, milvus::DataType::INT64), op, value);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final =
+            query::ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+        return static_cast<int64_t>(final.count());
+    };
+    // val holds 0..N-1: #>T = N-1-T, #<T = T, #==T = 1.
+    for (int64_t T :
+         {int64_t(5000), int64_t(20000), int64_t(30000), int64_t(37777)}) {
+        EXPECT_EQ(run_count(proto::plan::OpType::GreaterThan, T), N - 1 - T)
+            << "val > " << T << " (cells=" << num_cells << ")";
+        EXPECT_EQ(run_count(proto::plan::OpType::LessThan, T), T)
+            << "val < " << T;
+        EXPECT_EQ(run_count(proto::plan::OpType::Equal, T), int64_t(1))
+            << "val == " << T;
+    }
+    EXPECT_GT(num_cells, 1) << "force 1 rg/cell should yield many cells";
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// Skip effect: flag ON prunes lower cells (but never a cell holding a match);
+// flag OFF prunes nothing (storage-v2 scalar columns get no index).
+TEST(SkipIndexPr51441, StorageV2CellPruneByFlag) {
+    ParquetStatsSkipIndexGuard skip_index_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_prune_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+    const int64_t threshold = N - 10000;  // 30000; only the top batch matches
+
+    auto build_and_count = [&](bool flag) -> std::pair<int64_t, int64_t> {
+        skip_index_guard.Set(flag);
+        auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+        const int64_t cells = segment->num_chunk_data(val_fid);
+        auto skip = segment->GetFieldSkipMetrics(val_fid);
+        int64_t skipped = 0;
+        for (int64_t c = 0; c < cells; ++c) {
+            if (skip.CanSkipUnaryRange<int64_t>(
+                    c, OpType::GreaterThan, threshold)) {
+                ++skipped;
+            }
+        }
+        return {skipped, cells};
+    };
+    auto [skipped_on, cells_on] = build_and_count(true);
+    auto [skipped_off, cells_off] = build_and_count(false);
+
+    ASSERT_GT(cells_on, 1) << "need multiple cells to measure pruning";
+    EXPECT_GT(skipped_on, 0);
+    EXPECT_LT(skipped_on, cells_on);  // never prune a cell that holds a match
+    EXPECT_EQ(skipped_off, 0);
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, StorageV2PackingFollowsFlagRegardlessOfFooterMetrics) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid, true);
+    const std::string root = "skip_pr51441_packing_metrics_v2";
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE(all_null);
+        ::parquet::WriterProperties::Builder properties;
+        if (all_null) {
+            // The packed writer copies global writer properties, but Arrow
+            // does not preserve per-column overrides in that copy. Keep the
+            // null count while omitting the long payload's min/max bounds.
+            properties.enable_statistics();
+            properties.max_statistics_size(1);
+        } else {
+            properties.disable_statistics();
+        }
+        const auto rows = WriteSkipMeasureV2Parquet(schema,
+                                                    pk_fid,
+                                                    root,
+                                                    4 * 1024 * 1024,
+                                                    properties.build(),
+                                                    all_null);
+        auto metadata = LoadGroupChunkMetadata({root + "/0/10000.parquet"},
+                                               {{val_fid, DataType::INT64}},
+                                               "packing_regression");
+        const auto row_groups = metadata.row_group_meta_list.at(0).size();
+        ASSERT_GT(row_groups, 1);
+        for (const auto& metric :
+             metadata.skip_metrics_by_field.at(val_fid.get())) {
+            EXPECT_FALSE(metric->HasUsableStats());
+            EXPECT_EQ(metric->GetNullState() ==
+                          index::FieldChunkMetrics::NullState::AllNulls,
+                      all_null);
+        }
+
+        for (bool force : {false, true}) {
+            SCOPED_TRACE(force);
+            skip_index_guard.Set(force);
+            auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, rows, root);
+            EXPECT_EQ(segment->num_chunk_data(val_fid), force ? row_groups : 1);
+            auto view = segment->GetFieldSkipMetrics(val_fid);
+            EXPECT_EQ(view.HasMetrics(), force && all_null);
+            EXPECT_EQ(
+                view.CanSkipUnaryRange<int64_t>(0, OpType::GreaterThan, 0),
+                force && all_null);
+            // Layout is forced even for fields without statistics, but they
+            // must not acquire useless filters.
+            EXPECT_FALSE(
+                segment->GetFieldSkipMetrics(payload_fid).HasMetrics());
+            auto plan = UnaryRangePlan(val_fid, OpType::GreaterThan, 0);
+            auto result = query::ExecuteQueryExpr(
+                plan, segment.get(), rows, MAX_TIMESTAMP);
+            const auto expected =
+                all_null ? 0
+                         : rows - (rows + kSkipMeasureNullEvery - 1) /
+                                      kSkipMeasureNullEvery;
+            EXPECT_EQ(result.count(), expected);
+        }
+    }
+    (void)milvus::segcore::GetDefaultArrowFileSystem()->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, StorageV2VarcharInPrunesOnExecutedPath) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageUsageTrackingGuard tracking_guard;
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
+    const std::string root = "skip_pr51441_varchar_in_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    auto make_plan = [&](const std::vector<std::string>& strings) {
+        std::vector<proto::plan::GenericValue> values;
+        values.reserve(strings.size());
+        for (const auto& string : strings) {
+            proto::plan::GenericValue value;
+            value.set_string_val(string);
+            values.push_back(std::move(value));
+        }
+        auto expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(payload_fid, DataType::VARCHAR), values);
+        return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                      expr);
+    };
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(payload_fid), 1);
+
+    const std::vector<std::string> wanted = {SkipMeasurePayloadAt(N - 5000),
+                                             SkipMeasurePayloadAt(N - 3000)};
+    auto hash_values = wanted;
+    hash_values.insert(hash_values.end(),
+                       {"", "x", "y", std::string(128, 'z')});
+    for (bool driver_prefetch : {false, true}) {
+        DriverPrefetchGuard prefetch_guard(driver_prefetch);
+        for (const auto& values : {wanted, hash_values}) {
+            // Exercise both small-list and hash-set evaluation. The local
+            // GenericValues in make_plan are gone before prefetch/scan start;
+            // borrowed skip strings must be backed by the retained expression.
+            auto matching =
+                RunWithStorageUsage(make_plan(values), segment.get(), N);
+            EXPECT_EQ(matching.count, static_cast<int64_t>(wanted.size()));
+        }
+
+        // All stored maxima start with a digit. The long query literal is
+        // outside every range and must not cause a prefetch or scan read.
+        std::vector<std::string> outside_values;
+        for (int i = 0; i < 1024; ++i) {
+            outside_values.push_back(std::string(128, 'z') + std::to_string(i));
+        }
+        for (const auto& values :
+             {std::vector<std::string>{std::string(128, 'z')},
+              outside_values}) {
+            auto all_pruned =
+                RunWithStorageUsage(make_plan(values), segment.get(), N);
+            EXPECT_EQ(all_pruned.count, 0);
+            EXPECT_EQ(all_pruned.total_bytes, 0)
+                << "driver prefetch=" << driver_prefetch;
+        }
+    }
+
+    // Unsorted and repeated offsets cross pruned and matching cells. Reuse the
+    // same IN parameters without changing candidate order or multiplicity.
+    exec::OffsetVector offsets{static_cast<int32_t>(N - 3000),
+                               1,
+                               static_cast<int32_t>(N - 5000),
+                               2,
+                               static_cast<int32_t>(N - 3000)};
+    EXPECT_EQ(RunByOffsetsWithStorageUsage(
+                  make_plan(wanted), segment.get(), N, offsets)
+                  .count,
+              3);
+
+    skip_index_guard.Set(false);
+    auto without_skip = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    for (bool driver_prefetch : {false, true}) {
+        DriverPrefetchGuard prefetch_guard(driver_prefetch);
+        EXPECT_EQ(
+            RunWithStorageUsage(make_plan(hash_values), without_skip.get(), N)
+                .count,
+            static_cast<int64_t>(wanted.size()));
+    }
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, StorageV2OneSidedVarcharFooterStatsFailOpen) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
+    const std::string root = "skip_pr51441_one_sided_varchar_v2";
+    const int64_t N = WriteOneSidedVarcharStatsV2Parquet(schema, pk_fid, root);
+
+    // Exercise the real Arrow writer/reader boundary.  Arrow's default 4 KiB
+    // statistics cap drops only the 4097-byte maximum while retaining "a".
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto reader_result =
+        milvus_storage::FileRowGroupReader::Make(fs, root + "/0/10000.parquet");
+    ASSERT_TRUE(reader_result.ok()) << reader_result.status().ToString();
+    auto reader = reader_result.ValueOrDie();
+    auto file_metadata = reader->file_metadata();
+    auto field_mapping = file_metadata->GetFieldIDMapping();
+    auto parquet_metadata = file_metadata->GetParquetMetadata();
+    ASSERT_EQ(parquet_metadata->num_row_groups(), 1);
+    auto column_chunk = parquet_metadata->RowGroup(0)->ColumnChunk(
+        field_mapping.at(payload_fid.get()).col_index);
+    ASSERT_TRUE(column_chunk->is_stats_set());
+    auto statistics = column_chunk->statistics();
+    ASSERT_TRUE(statistics->HasMinMax());
+    EXPECT_EQ(statistics->EncodeMin(), "a");
+    EXPECT_TRUE(statistics->EncodeMax().empty());
+    ASSERT_TRUE(reader->Close().ok());
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_EQ(segment->num_chunk_data(payload_fid), 1);
+    EXPECT_FALSE(segment->GetFieldSkipMetrics(payload_fid)
+                     .CanSkipUnaryRange<std::string>(0, OpType::Equal, "a"));
+
+    proto::plan::GenericValue value;
+    value.set_string_val("a");
+    auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(payload_fid, DataType::VARCHAR),
+        proto::plan::OpType::Equal,
+        value);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto result =
+        query::ExecuteQueryExpr(plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(result.count(), 1);
+
+    (void)fs->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, PrunedCellsAreNotPrefetchedOrPinned) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageUsageTrackingGuard tracking_guard;
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_no_touch_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1);
+
+    for (bool driver_prefetch : {false, true}) {
+        DriverPrefetchGuard prefetch_guard(driver_prefetch);
+        auto all_pruned = RunWithStorageUsage(
+            UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, N),
+            segment.get(),
+            N);
+        auto full = RunWithStorageUsage(
+            UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, -1),
+            segment.get(),
+            N);
+        EXPECT_EQ(all_pruned.count, 0);
+        EXPECT_EQ(all_pruned.total_bytes, 0)
+            << "driver prefetch=" << driver_prefetch;
+        EXPECT_EQ(full.count, N);
+        EXPECT_GT(full.total_bytes, 0);
+    }
+
+    // Iterative filtering supplies offsets and reaches ProcessDataByOffsets.
+    // Spread candidates over every part of the segment so pre-fix code must
+    // pin multiple cells before discovering they are all prunable.
+    milvus::exec::OffsetVector offsets;
+    for (int64_t row = 0; row < N; row += std::max<int64_t>(1, N / 500)) {
+        offsets.push_back(static_cast<int32_t>(row));
+    }
+    {
+        DriverPrefetchGuard prefetch_guard(false);
+        auto all_pruned = RunByOffsetsWithStorageUsage(
+            UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, N),
+            segment.get(),
+            N,
+            offsets);
+        auto full = RunByOffsetsWithStorageUsage(
+            UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, -1),
+            segment.get(),
+            N,
+            offsets);
+        EXPECT_EQ(all_pruned.count, 0);
+        EXPECT_EQ(all_pruned.total_bytes, 0);
+        EXPECT_EQ(full.count, static_cast<int64_t>(offsets.size()));
+        EXPECT_GT(full.total_bytes, 0);
+    }
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// A binary-range literal that does not fit the column's physical type must
+// reach the same skip decision on the prefetch side as PreCheckOverflow<T>
+// reaches on the scan side. A bound past the far end of T makes the range
+// provably empty (the scan then reads nothing at all for a non-nullable
+// column); a bound past the near end constrains nothing and the remaining
+// bound must still prune. Before this was fixed, PrefetchRawData bailed out to
+// the whole-field overload and pulled every cell in for both shapes.
+TEST(SkipIndexPr51441, OutOfRangeBinaryRangePrefetchMatchesScan) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageUsageTrackingGuard tracking_guard;
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid,
+                                        pk_fid,
+                                        /*payload_fid=*/nullptr,
+                                        /*nullable_val=*/false,
+                                        DataType::INT32);
+    const std::string root = "skip_pr51441_out_of_range_range_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1);
+
+    constexpr int64_t kAboveInt32Max = 3000000000LL;
+    constexpr int64_t kBelowInt32Min = -3000000000LL;
+
+    for (bool driver_prefetch : {false, true}) {
+        DriverPrefetchGuard prefetch_guard(driver_prefetch);
+
+        // Lower bound above INT32_MAX: the range cannot contain any value of
+        // the column's type, so nothing may be read.
+        auto empty = RunWithStorageUsage(
+            BinaryRangePlan(
+                val_fid, DataType::INT32, kAboveInt32Max, kAboveInt32Max + 1),
+            segment.get(),
+            N);
+        EXPECT_EQ(empty.count, 0);
+        EXPECT_EQ(empty.total_bytes, 0)
+            << "provably empty range still fetched cells; driver prefetch="
+            << driver_prefetch;
+
+        // Lower bound below INT32_MIN clamps away, leaving `val <= 5000`, which
+        // the skip index must still use to prune the higher cells.
+        auto clamped = RunWithStorageUsage(
+            BinaryRangePlan(val_fid, DataType::INT32, kBelowInt32Min, 5000),
+            segment.get(),
+            N);
+        auto full = RunWithStorageUsage(
+            BinaryRangePlan(val_fid, DataType::INT32, kBelowInt32Min, N),
+            segment.get(),
+            N);
+        EXPECT_EQ(clamped.count, 5001);
+        EXPECT_EQ(full.count, N);
+        EXPECT_GT(full.total_bytes, 0);
+        EXPECT_LT(clamped.total_bytes, full.total_bytes)
+            << "clamped bound lost its pruning; driver prefetch="
+            << driver_prefetch;
+    }
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, ArithmeticPredicatesDoNotUseSkipIndex) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    StorageUsageTrackingGuard tracking_guard;
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
+    const std::string root = "skip_pr51441_arithmetic_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1);
+
+    for (bool driver_prefetch : {false, true}) {
+        DriverPrefetchGuard prefetch_guard(driver_prefetch);
+        auto no_match = RunWithStorageUsage(
+            BinaryArithPlan(val_fid,
+                            proto::plan::OpType::GreaterThan,
+                            proto::plan::ArithOpType::Add,
+                            N,
+                            1),
+            segment.get(),
+            N);
+        auto full = RunWithStorageUsage(
+            BinaryArithPlan(val_fid,
+                            proto::plan::OpType::GreaterThan,
+                            proto::plan::ArithOpType::Add,
+                            0,
+                            1),
+            segment.get(),
+            N);
+        EXPECT_EQ(no_match.count, 0);
+        EXPECT_EQ(full.count, N);
+        EXPECT_GT(full.total_bytes, 0);
+        EXPECT_EQ(no_match.total_bytes, full.total_bytes)
+            << "arithmetic predicate still pruned chunks; driver prefetch="
+            << driver_prefetch;
+    }
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+TEST(SkipIndexPr51441, NullableSkippedCellsPreserveNotSemantics) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    DriverPrefetchGuard prefetch_guard(false);
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid;
+    auto schema = MakeSkipMeasureSchema(
+        val_fid, pk_fid, /*payload_fid=*/nullptr, /*nullable_val=*/true);
+    const std::string root = "skip_pr51441_nullable_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+    const int64_t threshold = N - 10000;
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1);
+
+    auto skip_index = segment->GetFieldSkipMetrics(val_fid);
+    int64_t skipped_cells = 0;
+    for (int64_t cell_id = 0; cell_id < segment->num_chunk_data(val_fid);
+         ++cell_id) {
+        if (skip_index.CanSkipUnaryRange<int64_t>(
+                cell_id, OpType::GreaterThan, threshold)) {
+            ++skipped_cells;
+        }
+    }
+    EXPECT_GT(skipped_cells, 0);
+    EXPECT_LT(skipped_cells, segment->num_chunk_data(val_fid));
+
+    int64_t expected_greater = 0;
+    int64_t expected_not = 0;
+    for (int64_t value = 0; value < N; ++value) {
+        if (value % kSkipMeasureNullEvery == 0) {
+            continue;
+        }
+        if (value > threshold) {
+            ++expected_greater;
+        } else {
+            ++expected_not;
+        }
+    }
+
+    auto greater_plan =
+        UnaryRangePlan(val_fid, proto::plan::OpType::GreaterThan, threshold);
+    auto greater =
+        query::ExecuteQueryExpr(greater_plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(static_cast<int64_t>(greater.count()), expected_greater);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(threshold);
+    auto inner = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(val_fid, DataType::INT64),
+        proto::plan::OpType::GreaterThan,
+        value);
+    auto logical_not = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, inner);
+    auto not_plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_not);
+    auto not_result =
+        query::ExecuteQueryExpr(not_plan, segment.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(static_cast<int64_t>(not_result.count()), expected_not)
+        << "NOT must not turn NULL rows in a skipped cell into matches";
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
+}
+
+// Regression for https://github.com/milvus-io/milvus/issues/46053, re-based on
+// the storage-v2 footer-statistics path. When SkipIndex prunes a cell the scan
+// must still advance its per-batch cursor; otherwise the active-row bitmap it
+// hands to the next predicate of the conjunction is shifted and a matching row
+// is silently dropped. The original coverage drove pruning through the Storage
+// V1 lazy-compute skip index, which no longer exists (see the design doc), so
+// it is expressed here through footer statistics instead.
+TEST(SkipIndexPr51441, ConjunctBitmapInputStaysAlignedAcrossPrunedCells) {
+    ParquetStatsSkipIndexGuard skip_index_guard(true);
+    DriverPrefetchGuard prefetch_guard(false);
+    StorageUsageTrackingGuard tracking_guard;
+    StorageV2CellTargetGuard cell_target_guard(64 * 1024);
+    FieldId val_fid, pk_fid, payload_fid;
+    auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
+    const std::string root = "skip_pr51441_conjunct_cursor_v2";
+    const int64_t N =
+        WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
+    const int64_t threshold = N - 10000;
+
+    auto segment = LoadSkipMeasureV2Segment(schema, pk_fid, N, root);
+    ASSERT_GT(segment->num_chunk_data(val_fid), 1);
+
+    auto skip_index = segment->GetFieldSkipMetrics(val_fid);
+    int64_t pruned_cells = 0;
+    for (int64_t cell = 0; cell < segment->num_chunk_data(val_fid); ++cell) {
+        if (skip_index.CanSkipUnaryRange<int64_t>(
+                cell, OpType::GreaterThan, threshold)) {
+            ++pruned_cells;
+        }
+    }
+    ASSERT_GT(pruned_cells, 0) << "the range leaf must actually prune cells";
+
+    // `val > threshold` prunes every cell below the threshold and produces the
+    // active-row bitmap that the payload equality leaf then consumes. Build a
+    // conjunction over an arbitrary range threshold so the same plan can be run
+    // once with a pruning threshold and once with a non-pruning one.
+    auto make_conjunct_plan = [&](int64_t range_threshold, int64_t target_row) {
+        proto::plan::GenericValue threshold_value;
+        threshold_value.set_int64_val(range_threshold);
+        auto range = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(val_fid, DataType::INT64),
+            proto::plan::OpType::GreaterThan,
+            threshold_value);
+
+        proto::plan::GenericValue payload_value;
+        payload_value.set_string_val(SkipMeasurePayloadAt(target_row));
+        auto match = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(payload_fid, DataType::VARCHAR),
+            proto::plan::OpType::Equal,
+            payload_value);
+
+        auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, range, match);
+        return std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                      and_expr);
+    };
+
+    // A row above the threshold survives both leaves ...
+    auto above = RunWithStorageUsage(
+        make_conjunct_plan(threshold, N - 5000), segment.get(), N);
+    EXPECT_EQ(above.count, 1) << "a matching row was lost across a pruned cell";
+    // ... and one inside the pruned range is correctly excluded.
+    EXPECT_EQ(RunWithStorageUsage(
+                  make_conjunct_plan(threshold, 1000), segment.get(), N)
+                  .count,
+              0);
+
+    // Pin the reorder order behaviorally: ReorderConjunctExpr schedules the
+    // numeric range leaf before the VARCHAR equality leaf (Expr.cpp:884), and
+    // val + payload share a column group, so the range leaf's footer stats prune
+    // the bloated payload cells BEFORE the equality leaf materializes them.
+    // Compare the pruning conjunction against the same conjunction with a
+    // non-pruning threshold (`val > -1` matches every cell): the pruning plan
+    // must read strictly fewer bytes. If the range leaf no longer ran first and
+    // pruned first, the payload column would be read for every cell and the
+    // byte counts would converge.
+    auto full =
+        RunWithStorageUsage(make_conjunct_plan(-1, N - 5000), segment.get(), N);
+    EXPECT_EQ(full.count, 1);
+    EXPECT_GT(full.total_bytes, 0);
+    EXPECT_LT(above.total_bytes, full.total_bytes)
+        << "the numeric range leaf did not prune payload cells before the "
+           "string leaf materialized them (reorder order regressed?)";
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    (void)fs->DeleteDir(root);
 }

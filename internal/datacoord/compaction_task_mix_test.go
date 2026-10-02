@@ -316,4 +316,5 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	t1.QueryTaskOnWorker(cluster)
 
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
+	s.Equal("DataNode reported compaction timeout", t1.GetTaskProto().GetFailReason())
 }

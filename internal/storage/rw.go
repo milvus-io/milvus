@@ -65,6 +65,7 @@ type rwOptions struct {
 	version             int64
 	op                  rwOp
 	bufferSize          int64
+	parallelChunkRead   ParallelChunkRead
 	downloader          downloaderFn
 	uploader            uploaderFn
 	multiPartUploadSize int64
@@ -133,6 +134,38 @@ func WithVersion(version int64) RwOption {
 func WithBufferSize(bufferSize int64) RwOption {
 	return func(options *rwOptions) {
 		options.bufferSize = bufferSize
+	}
+}
+
+// ParallelChunkRead configures WithParallelChunkRead.
+type ParallelChunkRead struct {
+	// Concurrency is how many chunks are read at once. <= 1 keeps the serial
+	// reader, with the buffer size of WithBufferSize, exactly as without this
+	// option.
+	Concurrency int
+	// BufferSize is the size of one read round of a chunk. It applies only to
+	// the parallel reader. <= 0 means packed.DefaultReadBufferSize: the packed
+	// reader treats a non-positive size as unlimited, which would make one
+	// round the whole chunk.
+	BufferSize int64
+}
+
+// WithParallelChunkRead makes a StorageV2/V3 binlog reader read up to
+// Concurrency chunks at once, still delivering records in order.
+//
+// Memory, on top of what the caller keeps:
+//   - Decoded records: the reader does not wait for the caller, so up to the
+//     whole input may be decoded before the first record is consumed. Use this
+//     option only when the caller materializes its input anyway, such as a sort.
+//   - Raw file bytes: each in-flight chunk holds one read round, at most
+//     BufferSize, until the round is replaced or the chunk is closed. The total
+//     is up to Concurrency * BufferSize, and never more than the raw input.
+//
+// Only the binlog reader of NewBinlogRecordReader uses this option. Readers of
+// StorageV1 data and manifest readers ignore it, including its BufferSize.
+func WithParallelChunkRead(p ParallelChunkRead) RwOption {
+	return func(options *rwOptions) {
+		options.parallelChunkRead = p
 	}
 }
 
@@ -373,10 +406,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			if ferr != nil {
 				return nil, ferr
 			}
-			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
-			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, schema, rwOptions, pluginContext)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
@@ -437,6 +470,48 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	}
 	inner, err := NewRecordReaderFromManifest(manifestPath, presentSchema,
 		rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, option...)
+	if err != nil {
+		return nil, err
+	}
+	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
+}
+
+// NewTextDecodedManifestRecordReader resolves persisted TEXT references through
+// source-specific LOB paths and returns logical UTF8 columns. It is intended for
+// compaction that must rewrite LOB payloads into a different partition namespace.
+func NewTextDecodedManifestRecordReader(
+	_ context.Context,
+	manifestPath string,
+	neededSchema *schemapb.CollectionSchema,
+	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	present := rwOptions.presentFields
+	if present == nil {
+		var err error
+		present, err = packed.GetManifestFieldIDs(manifestPath, rwOptions.storageConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	presentSchema, err := filterSchemaToPresentFields(neededSchema, present)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := NewTextDecodedManifestReader(
+		manifestPath,
+		presentSchema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		textColumnConfigs,
+	)
 	if err != nil {
 		return nil, err
 	}

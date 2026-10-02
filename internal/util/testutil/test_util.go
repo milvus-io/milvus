@@ -1366,6 +1366,13 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 								arrayLen = len(data) / bytesPerVector
 							}
 						}
+					case schemapb.DataType_Int8Vector:
+						if data := vectorField.GetInt8Vector(); data != nil {
+							dim, _ := typeutil.GetDim(subField)
+							if dim > 0 {
+								arrayLen = len(data) / int(dim)
+							}
+						}
 					}
 				}
 			}
@@ -1441,7 +1448,12 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 									startIdx := j * bytesPerVector
 									endIdx := startIdx + bytesPerVector
 									if endIdx <= len(data) {
-										structElem[subField.GetName()] = data[startIdx:endIdx]
+										// []byte would be encoded as base64 instead of a numeric vector.
+										values := make([]int, bytesPerVector)
+										for k, value := range data[startIdx:endIdx] {
+											values[k] = int(value)
+										}
+										structElem[subField.GetName()] = values
 									}
 								}
 							}
@@ -1453,7 +1465,7 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 									startIdx := j * bytesPerVector
 									endIdx := startIdx + bytesPerVector
 									if endIdx <= len(data) {
-										structElem[subField.GetName()] = data[startIdx:endIdx]
+										structElem[subField.GetName()] = typeutil.Float16BytesToFloat32Vector(data[startIdx:endIdx])
 									}
 								}
 							}
@@ -1465,7 +1477,22 @@ func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema,
 									startIdx := j * bytesPerVector
 									endIdx := startIdx + bytesPerVector
 									if endIdx <= len(data) {
-										structElem[subField.GetName()] = data[startIdx:endIdx]
+										structElem[subField.GetName()] = typeutil.BFloat16BytesToFloat32Vector(data[startIdx:endIdx])
+									}
+								}
+							}
+						case schemapb.DataType_Int8Vector:
+							if data := vectorField.GetInt8Vector(); data != nil {
+								dim, _ := typeutil.GetDim(subField)
+								if dim > 0 {
+									startIdx := j * int(dim)
+									endIdx := startIdx + int(dim)
+									if endIdx <= len(data) {
+										values := make([]int8, int(dim))
+										for k, value := range data[startIdx:endIdx] {
+											values[k] = int8(value)
+										}
+										structElem[subField.GetName()] = values
 									}
 								}
 							}
@@ -1592,7 +1619,7 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 }
 
 // reconstructStructArrayForCSV reconstructs struct array data for CSV format
-// Returns a JSON string where each sub-field value is also a JSON string
+// Returns a JSON string containing an array of structs with numeric vector values.
 func reconstructStructArrayForCSV(structField *schemapb.StructArrayFieldSchema, insertData *storage.InsertData, rowIndex int) (string, error) {
 	// Use the JSON reconstruction function to get the struct array
 	structArray, err := reconstructStructArrayForJSON(structField, insertData, rowIndex)

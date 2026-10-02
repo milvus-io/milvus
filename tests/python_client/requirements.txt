@@ -26,8 +26,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==3.1.0rc83
-pymilvus[bulk_writer]==3.1.0rc83
+pymilvus==3.1.0rc89
+pymilvus[bulk_writer]==3.1.0rc89
 # for protobuf
 protobuf>=5.29.5
 
@@ -53,7 +53,7 @@ tenacity==8.2.3
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
-deepdiff==8.6.1
+deepdiff==8.6.2
 
 # for test result analyzer
 prettytable==3.8.0

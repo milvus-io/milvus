@@ -9,16 +9,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <algorithm>
+#include <exception>
+
+#include "common/EasyAssert.h"
 #include "Executor.h"
 #include "Future.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "future_c.h"
+#include "common/CGoCatch.h"
 #include "futures/future_c_types.h"
 #include "glog/logging.h"
+#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "prometheus/gauge.h"
 
+// Ring-3 note: future_cancel / future_is_ready / future_register_ready_callback
+// / future_leak_and_get delegate to IFuture methods that are declared noexcept
+// (futures/Future.h) — an exception inside them terminates at the noexcept
+// boundary itself, so a catch here would be dead code. The executor_set_*
+// entry points below call non-noexcept code and get catch tails.
 extern "C" void
 future_cancel(CFuture* future) {
     static_cast<milvus::futures::IFuture*>(static_cast<void*>(future))
@@ -56,16 +67,54 @@ future_destroy(CFuture* future) {
 
 extern "C" void
 executor_set_search_thread_num(int thread_num) {
-    milvus::futures::getSearchCPUExecutor()->setNumThreads(thread_num);
-    milvus::monitor::internal_cgo_pool_size_search.Set(thread_num);
-    LOG_INFO("future executor setup search cpu executor with thread num: {}",
-             thread_num);
+    try {
+        milvus::futures::getSearchCPUExecutor()->setNumThreads(thread_num);
+        milvus::monitor::internal_cgo_pool_size_search.Set(thread_num);
+        LOG_INFO(
+            "future executor setup search cpu executor with thread num: {}",
+            thread_num);
+    }
+    CGO_CATCH_AND_LOG("executor_set_search_thread_num")
 }
 
 extern "C" void
 executor_set_load_thread_num(int thread_num) {
-    milvus::futures::getLoadCPUExecutor()->setNumThreads(thread_num);
-    milvus::monitor::internal_cgo_pool_size_load.Set(thread_num);
-    LOG_INFO("future executor setup load cpu executor with thread num: {}",
-             thread_num);
+    try {
+        milvus::futures::getLoadCPUExecutor()->setNumThreads(thread_num);
+        milvus::monitor::internal_cgo_pool_size_load.Set(thread_num);
+        LOG_INFO("future executor setup load cpu executor with thread num: {}",
+                 thread_num);
+    }
+    CGO_CATCH_AND_LOG("executor_set_load_thread_num")
+}
+
+extern "C" CStatus
+executor_set_json_stats_build_thread_num(int thread_num) {
+    auto normalized_thread_num = std::max(1, thread_num);
+    try {
+        milvus::futures::getJsonStatsBuildExecutor()->setNumThreads(
+            normalized_thread_num);
+        LOG_INFO(
+            "future executor setup json stats build cpu executor with thread "
+            "num: {}",
+            normalized_thread_num);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+extern "C" CStatus
+executor_set_json_stats_build_max_inflight_bytes(int64_t max_inflight_bytes) {
+    try {
+        auto normalized_max_inflight_bytes =
+            static_cast<size_t>(std::max<int64_t>(0, max_inflight_bytes));
+        milvus::index::JsonStatsBuildMemoryBudget::GetInstance()
+            .SetCapacityBytes(normalized_max_inflight_bytes);
+        LOG_INFO(
+            "json stats build transient memory budget setup with max inflight "
+            "bytes: {}",
+            normalized_max_inflight_bytes);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

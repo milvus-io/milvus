@@ -5,6 +5,7 @@
 #include "rust-binding.h"
 #include "rust-array.h"
 #include "common/EasyAssert.h"
+#include "tantivy-error.h"
 
 namespace milvus::tantivy {
 
@@ -15,9 +16,8 @@ compute_phrase_match_slop(const std::string& tokenizer_params,
     uint32_t slop = 0;
     auto res = RustResultWrapper(tantivy_compute_phrase_match_slop(
         tokenizer_params.c_str(), query.c_str(), data.c_str(), &slop));
-    AssertInfo(res.result_->success,
-               "compute_phrase_match_slop failed: {}",
-               res.result_->error);
+    AssertTantivyOk(
+        res, "compute_phrase_match_slop failed: {}", res.result_->error);
     return slop;
 }
 

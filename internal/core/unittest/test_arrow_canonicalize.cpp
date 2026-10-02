@@ -254,6 +254,7 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
                                  dim,
                                  std::nullopt,
                                  nullable,
+                                 false,
                                  external_field);
     }
     if (milvus::IsVectorDataType(data_type)) {
@@ -282,6 +283,7 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
             data_type,
             element_type,
             nullable,
+            false,
             std::optional<milvus::DefaultValueType>{std::nullopt},
             external_field);
     }

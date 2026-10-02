@@ -28,6 +28,8 @@
 #include "fmt/core.h"
 #include "glog/logging.h"
 #include "index/TextMatchIndex.h"
+#include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
@@ -68,6 +70,26 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             /* support_eviction */ true,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
+    const auto files = index::GetValueFromConfig<std::vector<std::string>>(
+        config_, index::INDEX_FILES);
+    if (files && files->size() == 1 && files->front().ends_with(".v3")) {
+        file_manager_context_.use_async_load =
+            file_manager_context_.use_async_load.value_or(
+                storagev2translator::StorageV2AsyncLoadEnabled());
+        auto resources =
+            index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                DataType::VARCHAR,
+                load_info_.index_size,
+                {{index::INDEX_TYPE, index::INVERTED_INDEX_TYPE},
+                 {index::SCALAR_INDEX_ENGINE_VERSION, "3"}},
+                load_info_.enable_mmap,
+                load_info_.num_rows,
+                *files,
+                file_manager_context_,
+                /*is_index_file=*/false);
+        packed_load_resource_request_ = resources.request;
+        meta_.loading_overhead_config = std::move(resources.overhead);
+    }
 }
 
 size_t
@@ -84,6 +106,12 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
+    if (packed_load_resource_request_) {
+        const auto& request = *packed_load_resource_request_;
+        return {{request.final_memory_cost, request.final_disk_cost},
+                {request.max_memory_cost - request.final_memory_cost,
+                 request.max_disk_cost - request.final_disk_cost}};
+    }
     // ignore the cid checking, because there is only one cell
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
     if (load_info_.enable_mmap) {
@@ -130,10 +158,13 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
+        index->Load(config_, ctx);
         index->RegisterAnalyzer("milvus_tokenizer",
                                 load_info_.analyzer_params.c_str());
     }
+
+    CheckCancellation(
+        ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
 
     LOG_INFO("load text match index success for field:{} of segment:{}",
              load_info_.field_id,

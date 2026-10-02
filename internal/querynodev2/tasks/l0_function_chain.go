@@ -155,6 +155,9 @@ func validateL0FunctionChainOps(repr *chain.ChainRepr) error {
 		if op.Type != chaintypes.OpTypeMap {
 			return merr.WrapErrParameterInvalidMsg("op[%d] type %q is not supported by L0 rerank function chain", opIdx, op.Type)
 		}
+		if err := validateQueryNodeMapOp(&op, chaintypes.StageL0Rerank); err != nil {
+			return merr.Wrapf(err, "op[%d]", opIdx)
+		}
 	}
 	return nil
 }

@@ -171,14 +171,16 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+	ApplyArrowIOThreadPoolCapacity("querynode", "init")
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
 	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
 		return err
 	}
-	registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig)
+	if err := registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig); err != nil {
+		return err
+	}
 	cStorageV2AsyncLoadReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.GetAsInt64())
 	C.SetStorageV2AsyncLoadReadWindowSizeBytes(cStorageV2AsyncLoadReadWindowSizeBytes)
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()

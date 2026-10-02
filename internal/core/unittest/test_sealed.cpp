@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <fmt/core.h>
+#include "test_utils/skip_metrics_test_utils.h"
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
@@ -131,6 +132,23 @@ SetStorageV2AsyncLoadForTest(bool enabled) {
     });
 }
 
+class LazyColumnGroupConfigGuard {
+ public:
+    explicit LazyColumnGroupConfigGuard(bool enabled)
+        : previous_(
+              SegcoreConfig::default_config().get_lazy_column_group_enabled()) {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(enabled);
+    }
+
+    ~LazyColumnGroupConfigGuard() {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(
+            previous_);
+    }
+
+ private:
+    bool previous_;
+};
+
 void
 AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
                   const std::string& key,
@@ -178,10 +196,13 @@ MakeWarmupTestColumnGroups() {
 
 class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
  public:
-    explicit WarmupTestChunkReader(
-        std::thread::id* chunk_rows_thread = nullptr,
-        std::string* chunk_rows_thread_name = nullptr)
-        : chunk_rows_thread_(chunk_rows_thread),
+    WarmupTestChunkReader(size_t column_count,
+                          std::shared_ptr<std::atomic<int>> estimate_calls,
+                          std::thread::id* chunk_rows_thread = nullptr,
+                          std::string* chunk_rows_thread_name = nullptr)
+        : column_count_(column_count),
+          estimate_calls_(std::move(estimate_calls)),
+          chunk_rows_thread_(chunk_rows_thread),
           chunk_rows_thread_name_(chunk_rows_thread_name) {
     }
 
@@ -212,7 +233,12 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
 
     arrow::Result<std::vector<std::vector<uint64_t>>>
     get_chunk_column_estimated_size() override {
-        return std::vector<std::vector<uint64_t>>{{1}};
+        estimate_calls_->fetch_add(1, std::memory_order_relaxed);
+        std::vector<std::vector<uint64_t>> sizes;
+        for (size_t i = 0; i < column_count_; ++i) {
+            sizes.push_back({i + 1});
+        }
+        return sizes;
     }
 
     arrow::Result<std::vector<uint64_t>>
@@ -228,6 +254,8 @@ class WarmupTestChunkReader : public milvus_storage::api::ChunkReader {
     }
 
  private:
+    size_t column_count_;
+    std::shared_ptr<std::atomic<int>> estimate_calls_;
     std::thread::id* chunk_rows_thread_;
     std::string* chunk_rows_thread_name_;
 };
@@ -239,12 +267,18 @@ class WarmupTestReader : public milvus_storage::api::Reader {
         bool allow_sync_open = true,
         arrow::Status async_open_status = arrow::Status::OK(),
         std::thread::id* chunk_rows_thread = nullptr,
-        std::string* chunk_rows_thread_name = nullptr)
+        std::string* chunk_rows_thread_name = nullptr,
+        std::shared_ptr<std::atomic<int>> chunk_reader_calls =
+            std::make_shared<std::atomic<int>>(0),
+        std::shared_ptr<std::atomic<int>> estimate_calls =
+            std::make_shared<std::atomic<int>>(0))
         : column_groups_(std::move(column_groups)),
           allow_sync_open_(allow_sync_open),
           async_open_status_(std::move(async_open_status)),
           chunk_rows_thread_(chunk_rows_thread),
-          chunk_rows_thread_name_(chunk_rows_thread_name) {
+          chunk_rows_thread_name_(chunk_rows_thread_name),
+          chunk_reader_calls_(std::move(chunk_reader_calls)),
+          estimate_calls_(std::move(estimate_calls)) {
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups>
@@ -258,20 +292,23 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     }
 
     arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>
-    get_chunk_reader(int64_t, const std::shared_ptr<std::vector<std::string>>&)
-        const override {
+    get_chunk_reader(
+        int64_t index,
+        const std::shared_ptr<std::vector<std::string>>&) const override {
+        chunk_reader_calls_->fetch_add(1, std::memory_order_relaxed);
         if (!allow_sync_open_) {
             return arrow::Status::Invalid(
                 "synchronous chunk reader open must not be used");
         }
-        return MakeChunkReader();
+        return MakeChunkReader(index);
     }
 
     folly::SemiFuture<
         arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>>
     get_chunk_reader_async(
-        int64_t,
+        int64_t index,
         const std::shared_ptr<std::vector<std::string>>&) const override {
+        chunk_reader_calls_->fetch_add(1, std::memory_order_relaxed);
         if (!async_open_status_.ok()) {
             return folly::makeSemiFuture(
                 arrow::Result<
@@ -280,7 +317,7 @@ class WarmupTestReader : public milvus_storage::api::Reader {
         }
         return folly::makeSemiFuture(
             arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>(
-                MakeChunkReader()));
+                MakeChunkReader(index)));
     }
 
     arrow::Result<std::shared_ptr<arrow::Table>>
@@ -297,9 +334,12 @@ class WarmupTestReader : public milvus_storage::api::Reader {
 
  private:
     std::unique_ptr<milvus_storage::api::ChunkReader>
-    MakeChunkReader() const {
-        return std::make_unique<WarmupTestChunkReader>(chunk_rows_thread_,
-                                                       chunk_rows_thread_name_);
+    MakeChunkReader(int64_t index) const {
+        return std::make_unique<WarmupTestChunkReader>(
+            column_groups_->at(index)->columns.size(),
+            estimate_calls_,
+            chunk_rows_thread_,
+            chunk_rows_thread_name_);
     }
 
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
@@ -307,6 +347,8 @@ class WarmupTestReader : public milvus_storage::api::Reader {
     arrow::Status async_open_status_;
     std::thread::id* chunk_rows_thread_;
     std::string* chunk_rows_thread_name_;
+    std::shared_ptr<std::atomic<int>> chunk_reader_calls_;
+    std::shared_ptr<std::atomic<int>> estimate_calls_;
 };
 
 class CancellationObservingIndexTranslator
@@ -2101,379 +2143,6 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
     segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 }
 
-TEST(Sealed, SkipIndexSkipUnaryRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
-    auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
-    auto i8_fid = schema->AddDebugField("int8_field", DataType::INT8);
-    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double_field", DataType::DOUBLE);
-    size_t N = 10;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
-
-    //test for int64
-    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
-    pk_field_data->FillFieldData(pks.data(), N);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    pk_fid.get(),
-                                                    {pk_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index = segment->GetSkipIndex();
-    bool equal_5_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 5);
-    bool equal_12_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 12);
-    bool equal_10_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::Equal, 10);
-    ASSERT_FALSE(equal_5_skip);
-    ASSERT_TRUE(equal_12_skip);
-    ASSERT_FALSE(equal_10_skip);
-    bool less_than_1_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 5);
-    ASSERT_TRUE(less_than_1_skip);
-    ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index->CanSkipUnaryRange<int64_t>(pk_fid, 0, OpType::LessThan, 15);
-    ASSERT_FALSE(less_equal_than_1_skip);
-    ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterThan, 5);
-    ASSERT_TRUE(greater_than_10_skip);
-    ASSERT_FALSE(greater_than_5_skip);
-    bool greater_equal_than_10_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 10);
-    bool greater_equal_than_5_skip = skip_index->CanSkipUnaryRange<int64_t>(
-        pk_fid, 0, OpType::GreaterEqual, 5);
-    ASSERT_FALSE(greater_equal_than_10_skip);
-    ASSERT_FALSE(greater_equal_than_5_skip);
-
-    //test for int32
-    std::vector<int32_t> int32s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int32_field_data =
-        storage::CreateFieldData(DataType::INT32, DataType::NONE, false, 1, 10);
-    int32_field_data->FillFieldData(int32s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i32_fid.get(),
-                                               {int32_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    less_than_1_skip =
-        skip_index->CanSkipUnaryRange<int32_t>(i32_fid, 0, OpType::LessThan, 1);
-    ASSERT_TRUE(less_than_1_skip);
-
-    //test for int16
-    std::vector<int16_t> int16s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int16_field_data =
-        storage::CreateFieldData(DataType::INT16, DataType::NONE, false, 1, 10);
-    int16_field_data->FillFieldData(int16s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i16_fid.get(),
-                                               {int16_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    bool less_than_12_skip = skip_index->CanSkipUnaryRange<int16_t>(
-        i16_fid, 0, OpType::LessThan, 12);
-    ASSERT_FALSE(less_than_12_skip);
-
-    //test for int8
-    std::vector<int8_t> int8s = {2, 2, 3, 4, 5, 6, 7, 8, 9, 12};
-    auto int8_field_data =
-        storage::CreateFieldData(DataType::INT8, DataType::NONE, false, 1, 10);
-    int8_field_data->FillFieldData(int8s.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               i8_fid.get(),
-                                               {int8_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    bool greater_than_12_skip = skip_index->CanSkipUnaryRange<int8_t>(
-        i8_fid, 0, OpType::GreaterThan, 12);
-    ASSERT_TRUE(greater_than_12_skip);
-
-    // test for float
-    std::vector<float> floats = {
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto float_field_data =
-        storage::CreateFieldData(DataType::FLOAT, DataType::NONE, false, 1, 10);
-    float_field_data->FillFieldData(floats.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               float_fid.get(),
-                                               {float_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    greater_than_10_skip = skip_index->CanSkipUnaryRange<float>(
-        float_fid, 0, OpType::GreaterThan, 10.0);
-    ASSERT_TRUE(greater_than_10_skip);
-
-    // test for double
-    std::vector<double> doubles = {
-        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0};
-    auto double_field_data = storage::CreateFieldData(
-        DataType::DOUBLE, DataType::NONE, false, 1, 10);
-    double_field_data->FillFieldData(doubles.data(), N);
-    load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                               kPartitionID,
-                                               kSegmentID,
-                                               double_fid.get(),
-                                               {double_field_data},
-                                               cm);
-    segment->LoadFieldData(load_info);
-    skip_index = segment->GetSkipIndex();
-    greater_than_10_skip = skip_index->CanSkipUnaryRange<double>(
-        double_fid, 0, OpType::GreaterThan, 10.0);
-    ASSERT_TRUE(greater_than_10_skip);
-}
-
-TEST(Sealed, SkipIndexSkipBinaryRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    size_t N = 10;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    std::cout << "pk_fid:" << pk_fid.get() << std::endl;
-
-    //test for int64
-    std::vector<int64_t> pks = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto pk_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 10);
-    pk_field_data->FillFieldData(pks.data(), N);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    pk_fid.get(),
-                                                    {pk_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, -3, 1, true, false));
-
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 7, 9, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 8, 12, true, false));
-
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(pk_fid, 0, 10, 12, true, true));
-}
-
-TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-
-    auto dataset = DataGen(schema, 5);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-
-    //test for int64
-    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    std::array<uint8_t, 1> valid_data = {0x03};
-    auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
-
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    i64_fid.get(),
-                                                    {int64s_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    bool equal_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 5);
-    bool equal_4_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 4);
-    bool equal_2_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 2);
-    bool equal_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::Equal, 1);
-    ASSERT_TRUE(equal_5_skip);
-    ASSERT_TRUE(equal_4_skip);
-    ASSERT_FALSE(equal_2_skip);
-    ASSERT_FALSE(equal_1_skip);
-    bool less_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 1);
-    bool less_than_5_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 5);
-    ASSERT_TRUE(less_than_1_skip);
-    ASSERT_FALSE(less_than_5_skip);
-    bool less_equal_than_1_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessEqual, 1);
-    bool less_equal_than_15_skip =
-        skip_index.CanSkipUnaryRange<int64_t>(i64_fid, 0, OpType::LessThan, 15);
-    ASSERT_FALSE(less_equal_than_1_skip);
-    ASSERT_FALSE(less_equal_than_15_skip);
-    bool greater_than_10_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 10);
-    bool greater_than_5_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 5);
-    bool greater_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 2);
-    bool greater_than_1_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterThan, 1);
-    ASSERT_TRUE(greater_than_10_skip);
-    ASSERT_TRUE(greater_than_5_skip);
-    ASSERT_TRUE(greater_than_2_skip);
-    ASSERT_FALSE(greater_than_1_skip);
-    bool greater_equal_than_3_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 3);
-    bool greater_equal_than_2_skip = skip_index.CanSkipUnaryRange<int64_t>(
-        i64_fid, 0, OpType::GreaterEqual, 2);
-    ASSERT_TRUE(greater_equal_than_3_skip);
-    ASSERT_FALSE(greater_equal_than_2_skip);
-}
-
-TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
-    auto dataset = DataGen(schema, 5);
-    auto segment = CreateSealedSegment(schema);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-
-    //test for int64
-    std::vector<int64_t> int64s = {1, 2, 3, 4, 5};
-    std::array<uint8_t, 1> valid_data = {0x03};
-    auto int64s_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, true, 1, 5);
-
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    i64_fid.get(),
-                                                    {int64s_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, true));
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, -3, 1, true, false));
-
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 3, true, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 1, 2, true, false));
-
-    ASSERT_TRUE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, false, true));
-    ASSERT_FALSE(
-        skip_index.CanSkipBinaryRange<int64_t>(i64_fid, 0, 2, 3, true, true));
-}
-
-TEST(Sealed, SkipIndexSkipStringRange) {
-    auto schema = std::make_shared<Schema>();
-    auto dim = 4;
-    auto metrics_type = "L2";
-    schema->AddDebugField("pk", DataType::INT64);
-    auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
-    size_t N = 5;
-    auto dataset = DataGen(schema, N);
-    auto segment = CreateSealedSegment(schema);
-
-    //test for string
-    std::vector<std::string> strings = {"e", "f", "g", "g", "j"};
-    auto string_field_data = storage::CreateFieldData(
-        DataType::VARCHAR, DataType::NONE, false, 1, N);
-    string_field_data->FillFieldData(strings.data(), N);
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                    kPartitionID,
-                                                    kSegmentID,
-                                                    string_fid.get(),
-                                                    {string_field_data},
-                                                    cm);
-    segment->LoadFieldData(load_info);
-    auto skip_index_owner = segment->GetSkipIndex();
-    const auto& skip_index = *skip_index_owner;
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "w"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "e"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::Equal, "j"));
-
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessThan, "e"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::LessEqual, "e"));
-
-    ASSERT_TRUE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterThan, "j"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<std::string>(
-        string_fid, 0, OpType::GreaterEqual, "j"));
-    ASSERT_FALSE(skip_index.CanSkipUnaryRange<int64_t>(
-        string_fid, 0, OpType::GreaterEqual, 1));
-
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "a", "c", true, true));
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, false));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "c", "e", true, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "e", "k", false, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", true, true));
-    ASSERT_TRUE(skip_index.CanSkipBinaryRange<std::string>(
-        string_fid, 0, "j", "k", false, true));
-    ASSERT_FALSE(skip_index.CanSkipBinaryRange<int64_t>(
-        string_fid, 0, 1, 2, false, true));
-}
-
 TEST(Sealed, QueryAllFields) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
@@ -2973,7 +2642,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3256,7 +2925,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3368,8 +3037,8 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     }
 
     std::vector<milvus::VectorArray> vector_arrays;
-    vector_arrays.emplace_back(empty_row);
-    vector_arrays.emplace_back(single_row);
+    vector_arrays.emplace_back(empty_row, false);
+    vector_arrays.emplace_back(single_row, false);
 
     constexpr int64_t row_count = 2;
     std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
@@ -3450,7 +3119,7 @@ TEST(SealedVectorArrayNullable,
     for (int64_t i = 0; i < dataset_size; ++i) {
         if (i % 3 != 0) {
             valid_bitmap[i >> 3] |= (1 << (i & 0x07));
-            vector_arrays.emplace_back(vec_array_col[i]);
+            vector_arrays.emplace_back(vec_array_col[i], false);
         }
     }
 
@@ -3715,7 +3384,7 @@ TEST(SealedVectorArrayFallback,
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3852,7 +3521,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -4511,7 +4180,6 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
 
     auto old_state = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(old_state->runtime, nullptr);
-    ASSERT_NE(old_state->runtime->skip_index, nullptr);
     EXPECT_EQ(old_state->runtime->row_count, row_count);
     EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
     ASSERT_EQ(old_state->runtime->variable_fields_avg_size.count(payload), 1);
@@ -4519,11 +4187,9 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
         old_state->runtime->variable_fields_avg_size.at(payload).second;
 
     auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
-    ASSERT_NE(next_runtime->skip_index, old_state->runtime->skip_index);
     next_runtime->row_count = row_count + 1;
     next_runtime->mmap_field_ids.insert(payload);
     next_runtime->variable_fields_avg_size[payload] = {row_count + 1, 123};
-    next_runtime->skip_index->Erase(payload);
     sealed->TestPublishRuntimeResourceState(std::move(next_runtime));
 
     auto new_state = sealed->TestGetPublishedStateSnapshot();
@@ -4537,7 +4203,6 @@ TEST(SealedSegmentCowState, MiscRuntimeStateFollowsSnapshotLifetime) {
     EXPECT_EQ(old_state->runtime->mmap_field_ids.count(payload), 0);
     EXPECT_EQ(old_state->runtime->variable_fields_avg_size.at(payload).second,
               old_avg_size);
-    EXPECT_NE(old_state->runtime->skip_index, new_state->runtime->skip_index);
 }
 
 TEST(SealedSegmentCowState,
@@ -5076,6 +4741,258 @@ TEST(SealedSegmentCowState,
         << chunk_rows_thread_name;
 }
 
+TEST(SealedSegmentCowState,
+     StagedLazyManifestDefersChunkReaderAndSizeEstimate) {
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+    for (bool lazy_enabled : {false, true}) {
+        for (bool async_enabled : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "lazy=" << lazy_enabled
+                                              << ", async=" << async_enabled);
+            LazyColumnGroupConfigGuard lazy_group_guard(lazy_enabled);
+            auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+            // The vector belongs to the staged schema, not the published one.
+            auto segment = CreateSealedSegment(
+                CreateWarmupPolicySchema(/*include_vector=*/false),
+                nullptr,
+                1007,
+                SegcoreConfig::default_config());
+            auto* sealed =
+                dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+            ASSERT_NE(sealed, nullptr);
+            proto::segcore::SegmentLoadInfo load_proto;
+            load_proto.set_segmentid(1007);
+            load_proto.set_num_of_rows(1);
+            load_proto.set_storageversion(STORAGE_V3);
+            load_proto.set_manifest_path("test-manifest");
+            SegmentLoadInfo segment_load_info(load_proto, schema);
+
+            auto open_calls = std::make_shared<std::atomic<int>>(0);
+            auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+            auto column_groups = MakeWarmupTestColumnGroups();
+            auto async_status = async_enabled
+                                    ? arrow::Status::OK()
+                                    : milvus_storage::MakeExtendError(
+                                          milvus_storage::ExtendStatusCode::
+                                              StorageTransientTimeout,
+                                          "unexpected async reader open");
+            auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                             !async_enabled,
+                                                             async_status,
+                                                             nullptr,
+                                                             nullptr,
+                                                             open_calls,
+                                                             estimate_calls);
+            auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+                column_groups,
+                std::make_shared<milvus_storage::api::Properties>(),
+                {{0, {vec}}},
+                segment_load_info,
+                schema,
+                std::move(reader),
+                /*eager_load=*/true);
+            ASSERT_EQ(columns.size(), 1);
+            auto column =
+                std::dynamic_pointer_cast<ProxyChunkColumn>(columns.front());
+            ASSERT_NE(column, nullptr);
+            EXPECT_EQ(column->IsLazy(), lazy_enabled);
+            EXPECT_EQ(column->IsMaterialized(), !lazy_enabled);
+            EXPECT_EQ(open_calls->load(), lazy_enabled ? 0 : 1);
+            EXPECT_EQ(estimate_calls->load(), lazy_enabled ? 0 : 1);
+
+            // An installed factory must keep its mode across config changes.
+            storagev2translator::SetStorageV2AsyncLoadEnabled(!async_enabled);
+            SegcoreConfig::default_config().set_lazy_column_group_enabled(
+                !lazy_enabled);
+            EXPECT_EQ(column->num_chunks(), 1);
+            EXPECT_EQ(open_calls->load(), 1);
+            EXPECT_EQ(estimate_calls->load(), 1);
+        }
+    }
+}
+
+TEST(SealedSegmentCowState, MixedManifestTasksOnlyPreopenRegularReaders) {
+    LazyColumnGroupConfigGuard lazy_group_guard(true);
+    const auto previous =
+        cachinglayer::TieredStorageConfig::GetInstance().GetSnapshot();
+    auto restore_warmup = folly::makeGuard([&] {
+        cachinglayer::Manager::UpdateConfig(
+            previous.loading_timeout,
+            previous.warmup_loading_timeout,
+            previous.storage_usage_tracking_enabled,
+            previous.warmup_policies);
+    });
+    auto policies = previous.warmup_policies;
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    cachinglayer::Manager::UpdateConfig(previous.loading_timeout,
+                                        previous.warmup_loading_timeout,
+                                        previous.storage_usage_tracking_enabled,
+                                        policies);
+
+    auto schema = CreateWarmupPolicySchema(/*include_vector=*/true);
+    const FieldId vec(kWarmupVectorFieldId);
+    const FieldId pk(kWarmupPkFieldId);
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        auto async_guard = SetStorageV2AsyncLoadForTest(async_enabled);
+        auto segment = CreateSealedSegment(schema, nullptr, 1009);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        proto::segcore::SegmentLoadInfo load_proto;
+        load_proto.set_segmentid(1009);
+        load_proto.set_num_of_rows(1);
+        load_proto.set_storageversion(STORAGE_V3);
+        load_proto.set_manifest_path("test-manifest");
+        SegmentLoadInfo load_info(load_proto, schema);
+        auto column_groups = MakeWarmupTestColumnGroups();
+        column_groups->at(0)->columns.push_back(std::to_string(pk.get()));
+        auto open_calls = std::make_shared<std::atomic<int>>(0);
+        auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+        auto reader = std::make_shared<WarmupTestReader>(
+            column_groups,
+            !async_enabled,
+            async_enabled
+                ? arrow::Status::OK()
+                : milvus_storage::MakeExtendError(
+                      milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+                      "unexpected async reader open"),
+            nullptr,
+            nullptr,
+            open_calls,
+            estimate_calls);
+        // The leading lazy task must not shift the regular reader's assignment.
+        auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+            column_groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {vec}}, {0, {pk}}},
+            load_info,
+            schema,
+            std::move(reader),
+            /*eager_load=*/false);
+        ASSERT_EQ(columns.size(), 2);
+        auto lazy = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[0]);
+        auto regular = std::dynamic_pointer_cast<ProxyChunkColumn>(columns[1]);
+        ASSERT_NE(lazy, nullptr);
+        ASSERT_NE(regular, nullptr);
+        EXPECT_TRUE(lazy->IsLazy());
+        EXPECT_FALSE(lazy->IsMaterialized());
+        EXPECT_FALSE(regular->IsLazy());
+        EXPECT_TRUE(regular->IsMaterialized());
+        EXPECT_EQ(open_calls->load(), 1);
+        EXPECT_EQ(estimate_calls->load(), 1);
+        EXPECT_EQ(lazy->DataByteSize(), 1);
+        EXPECT_EQ(open_calls->load(), 2);
+        EXPECT_EQ(estimate_calls->load(), 1);
+    }
+}
+
+TEST(SealedSegmentCowState, StagedManifestTasksShareColumnGroupSizeEstimate) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto schema = std::make_shared<Schema>();
+    auto first = schema->AddDebugField("first", DataType::INT64);
+    auto second = schema->AddDebugField("second", DataType::INT64);
+
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 1008, SegcoreConfig::default_config());
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_proto;
+    load_proto.set_segmentid(1008);
+    load_proto.set_num_of_rows(1);
+    load_proto.set_storageversion(STORAGE_V3);
+    load_proto.set_manifest_path("test-manifest");
+    SegmentLoadInfo segment_load_info(load_proto, schema);
+
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto column_group = std::make_shared<milvus_storage::api::ColumnGroup>();
+    column_group->columns = {std::to_string(first.get()),
+                             std::to_string(second.get())};
+    column_groups->push_back(std::move(column_group));
+
+    auto chunk_reader_calls = std::make_shared<std::atomic<int>>(0);
+    auto estimate_calls = std::make_shared<std::atomic<int>>(0);
+    auto reader = std::make_shared<WarmupTestReader>(column_groups,
+                                                     true,
+                                                     arrow::Status::OK(),
+                                                     nullptr,
+                                                     nullptr,
+                                                     chunk_reader_calls,
+                                                     estimate_calls);
+    std::vector<std::pair<int, std::vector<FieldId>>> tasks = {
+        {0, {first}},
+        {0, {second}},
+    };
+    auto columns = sealed->TestStageLoadColumnGroupsWithReader(
+        column_groups,
+        std::make_shared<milvus_storage::api::Properties>(),
+        std::move(tasks),
+        segment_load_info,
+        schema,
+        std::move(reader),
+        /*eager_load=*/false);
+
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(chunk_reader_calls->load(std::memory_order_relaxed), 2);
+    EXPECT_EQ(estimate_calls->load(std::memory_order_relaxed), 1);
+
+    SegcoreConfig::default_config().set_lazy_column_group_enabled(true);
+    for (bool concurrent : {false, true}) {
+        SCOPED_TRACE(concurrent);
+        chunk_reader_calls->store(0, std::memory_order_relaxed);
+        estimate_calls->store(0, std::memory_order_relaxed);
+        auto lazy_reader =
+            std::make_shared<WarmupTestReader>(column_groups,
+                                               true,
+                                               arrow::Status::OK(),
+                                               nullptr,
+                                               nullptr,
+                                               chunk_reader_calls,
+                                               estimate_calls);
+        std::weak_ptr<WarmupTestReader> captured_reader = lazy_reader;
+        columns = sealed->TestStageLoadColumnGroupsWithReader(
+            column_groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {first}}, {0, {second}}},
+            segment_load_info,
+            schema,
+            std::move(lazy_reader),
+            /*eager_load=*/false);
+        ASSERT_EQ(columns.size(), 2);
+        EXPECT_EQ(chunk_reader_calls->load(), 0);
+        EXPECT_EQ(estimate_calls->load(), 0);
+
+        if (concurrent) {
+            std::promise<void> start;
+            auto ready = start.get_future().share();
+            auto first_read = std::async(std::launch::async, [&] {
+                ready.wait();
+                return columns[0]->DataByteSize();
+            });
+            auto second_read = std::async(std::launch::async, [&] {
+                ready.wait();
+                return columns[1]->DataByteSize();
+            });
+            start.set_value();
+            EXPECT_EQ(first_read.get(), 1);
+            EXPECT_EQ(second_read.get(), 2);
+        } else {
+            EXPECT_EQ(columns[0]->DataByteSize(), 1);
+            EXPECT_EQ(chunk_reader_calls->load(), 1);
+            EXPECT_EQ(estimate_calls->load(), 1);
+            // The unmaterialized sibling still owns the shared inputs.
+            EXPECT_FALSE(captured_reader.expired());
+            EXPECT_EQ(columns[1]->DataByteSize(), 2);
+        }
+        EXPECT_EQ(chunk_reader_calls->load(), 2);
+        EXPECT_EQ(estimate_calls->load(), 1);
+        EXPECT_TRUE(captured_reader.expired());
+    }
+}
+
 TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -5513,8 +5430,14 @@ TEST(SealedSegmentCowState, ReplaceProxyColumnClearsStaleSkipMetrics) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    ASSERT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
-              SkipIndex::MetricsSource::LoadedPayload);
+    InstallTestSkipMetrics(
+        sealed,
+        payload,
+        {std::make_shared<index::IntFieldChunkMetrics<int64_t>>(
+            0, 10, nullptr)});
+    auto old_view = sealed->GetFieldSkipMetrics(payload);
+    ASSERT_TRUE(old_view.CanSkipUnaryRange<int64_t>(
+        0, proto::plan::OpType::GreaterThan, 100));
 
     auto replacement_dataset = DataGen(schema, 4, /*seed=*/271828);
     auto replacement_segment =
@@ -5552,14 +5475,20 @@ TEST(SealedSegmentCowState, ReplaceProxyColumnClearsStaleSkipMetrics) {
         final_delta,
         /*is_proxy_column=*/true,
         [&] {
-            EXPECT_EQ(runtime->skip_index->GetMetricsSource(payload),
-                      SkipIndex::MetricsSource::None);
-            EXPECT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
-                      SkipIndex::MetricsSource::LoadedPayload);
+            auto staged_view =
+                FieldSkipMetricsView::FromProvider(runtime->fields.at(payload));
+            EXPECT_FALSE(staged_view.CanSkipUnaryRange<int64_t>(
+                0, proto::plan::OpType::GreaterThan, 100));
+            EXPECT_TRUE(
+                sealed->GetFieldSkipMetrics(payload).CanSkipUnaryRange<int64_t>(
+                    0, proto::plan::OpType::GreaterThan, 100));
         });
 
-    EXPECT_EQ(sealed->GetSkipIndexSnapshot()->GetMetricsSource(payload),
-              SkipIndex::MetricsSource::None);
+    EXPECT_FALSE(
+        sealed->GetFieldSkipMetrics(payload).CanSkipUnaryRange<int64_t>(
+            0, proto::plan::OpType::GreaterThan, 100));
+    EXPECT_TRUE(old_view.CanSkipUnaryRange<int64_t>(
+        0, proto::plan::OpType::GreaterThan, 100));
 }
 
 TEST(SealedSegmentCowState, ClearPublishedStateDropsRuntimeSnapshot) {

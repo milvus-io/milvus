@@ -13,6 +13,9 @@
 #include "common/FastMem.h"
 #include <fcntl.h>
 #include <unistd.h>
+#include <filesystem>
+#include <optional>
+#include <unordered_set>
 #include <algorithm>
 #include <cstdint>
 #include <exception>
@@ -37,7 +40,10 @@
 #include "geos_c.h"
 #include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -53,6 +59,17 @@
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+namespace {
+
+struct RTreeLoadContext {
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
+    std::shared_ptr<std::vector<size_t>> null_offsets;
+    std::string base_path;
+    bool has_null{false};
+};
+
+}  // namespace
 
 static constexpr size_t kMetaJsonSuffixLen = sizeof(".meta.json") - 1;
 
@@ -263,7 +280,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     disk_file_manager_->CacheIndexToDisk(files, load_priority);
 
     // 4. Determine local base path (without extension) for RTreeIndexWrapper.
-    auto local_paths = disk_file_manager_->GetLocalFilePaths();
+    const auto& local_paths = disk_file_manager_->GetLocalFilePaths();
     AssertInfo(!local_paths.empty(),
                "RTreeIndex local files are empty after caching to disk");
 
@@ -396,18 +413,21 @@ RTreeIndex<T>::Upload(const Config& config) {
             continue;
         }
 
-        AssertInfo(disk_file_manager_->AddFile(it->path().string()),
-                   "failed to add index file: {}",
-                   it->path().string());
+        if (!(disk_file_manager_->AddFile(it->path().string()))) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to add index file: {}",
+                      it->path().string());
+        }
     }
 
     // 3. Collect remote paths to size mapping
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     // 4. Serialize and register in-memory null_offset if any
     auto binary_set = Serialize(config);
     mem_file_manager_->AddFile(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         mem_file_manager_->GetRemotePathsToFileSize();
 
     // 5. Assemble IndexStats result
@@ -778,7 +798,9 @@ RTreeIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file = file_path.string();
         auto fd = open(file.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "open file failed: {}", file);
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed, "open file failed: {}", file);
+        }
         auto file_size = boost::filesystem::file_size(file);
         auto file_name = file_path.filename().string();
         writer->WriteEntry(file_name, fd, file_size);
@@ -801,8 +823,9 @@ template <typename T>
 void
 RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                            const Config& config) {
-    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
-    bool has_null = reader.GetMeta<bool>("has_null");
+    auto file_names = ReadRequiredIndexMeta<std::vector<std::string>>(
+        reader.IndexMeta(), "file_names");
+    bool has_null = ReadRequiredIndexMeta<bool>(reader.IndexMeta(), "has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
@@ -877,6 +900,110 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         file_names.size(),
         has_null,
         path_);
+}
+
+template <typename T>
+IndexLoadPlan
+RTreeIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                        const nlohmann::json& metadata,
+                        const Config& config) {
+    (void)config;
+    auto context = std::make_shared<RTreeLoadContext>();
+    context->has_null = ReadRequiredIndexMeta<bool>(metadata, "has_null");
+    IndexLoadPlan plan;
+    plan.load_context = context;
+    context->directory =
+        PlanIndexDirectory(directory, metadata, disk_file_manager_, true, plan);
+    for (const auto& file : context->directory->files) {
+        const auto& local = file->path;
+        if (ends_with(local, ".bgi")) {
+            context->base_path = local.substr(0, local.size() - 4);
+            break;
+        }
+        if (context->base_path.empty() && ends_with(local, ".meta.json")) {
+            context->base_path =
+                local.substr(0, local.size() - kMetaJsonSuffixLen);
+        }
+    }
+    if (context->base_path.empty()) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "corrupt RTree index: cannot determine base path from file_names");
+    }
+
+    if (!context->has_null) {
+        return plan;
+    }
+    static constexpr std::string_view kNullEntry = "index_null_offset";
+    if (!directory.HasEntry(kNullEntry)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt RTree index: null-offset Entry is missing");
+    }
+    auto null_bytes = directory.At(kNullEntry).plaintext_size;
+    if (null_bytes % sizeof(size_t) != 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt RTree index: null-offset Entry size {} is not a "
+                  "multiple of {}",
+                  null_bytes,
+                  sizeof(size_t));
+    }
+    context->null_offsets =
+        std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
+    plan.entries.push_back(storage::EntryLoadPlan{
+        std::string(kNullEntry),
+        storage::MemoryEntryTarget{
+            context->null_offsets,
+            reinterpret_cast<uint8_t*>(context->null_offsets->data()),
+            null_bytes}});
+    return plan;
+}
+
+template <typename T>
+folly::coro::Task<void>
+RTreeIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
+    (void)config;
+    auto context = std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(
+        plan.load_context);
+    AssertInfo(context != nullptr, "RTree FinishLoadAsync context is null");
+
+    auto new_wrapper = std::make_shared<RTreeIndexWrapper>(
+        context->base_path, /*is_build_mode=*/false);
+    new_wrapper->load();
+    std::vector<size_t> new_null_offsets;
+    if (context->has_null) {
+        AssertInfo(context->null_offsets != nullptr,
+                   "RTree null-offset target is null");
+        new_null_offsets = std::move(*context->null_offsets);
+    }
+    if (!(new_wrapper->count() <=
+          std::numeric_limits<int64_t>::max() -
+              static_cast<int64_t>(new_null_offsets.size()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "RTree row count overflow");
+    }
+    auto new_total_rows =
+        new_wrapper->count() + static_cast<int64_t>(new_null_offsets.size());
+
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = std::move(new_wrapper);
+        null_offset_ = std::move(new_null_offsets);
+        total_num_rows_ = new_total_rows;
+        path_ = context->base_path;
+        is_built_ = true;
+    }
+    ComputeByteSize();
+    LOG_INFO(
+        "FinishLoadAsync RTreeIndex done, file_count: {}, "
+        "has_null: "
+        "{}, "
+        "base_path: {}",
+        context->directory->files.size(),
+        context->has_null,
+        path_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinishLoadAsync");
+    co_return;
 }
 
 // Explicit template instantiation for std::string as we only support string field for now.

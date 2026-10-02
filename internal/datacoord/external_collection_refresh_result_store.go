@@ -27,13 +27,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
 	externalRefreshTaskResultStorageVersion = int32(1)
-	externalRefreshTaskResultRoot           = "external_refresh_results"
+	// Aliases the registered segment so this top-level directory stays in
+	// common.InternalStorageRootSegments, which import path validation denies.
+	externalRefreshTaskResultRoot = common.ExternalRefreshResultsRootPath
 )
 
 type externalCollectionRefreshResultStore struct {

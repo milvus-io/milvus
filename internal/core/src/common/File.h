@@ -42,15 +42,19 @@ class File {
     static File
     Open(const std::string_view filepath, int flags, size_t buf_size) {
         int fd = open(filepath.data(), flags, S_IRUSR | S_IWUSR);
-        AssertInfo(fd != -1,
-                   "failed to create mmap file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fd == -1) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to create mmap file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         FILE* fs = fdopen(fd, get_mode_from_flags(flags));
-        AssertInfo(fs != nullptr,
-                   "failed to open file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fs == nullptr) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         auto f = File(fd, fs, std::string(filepath));
         // setup buffer size file stream will use
         setvbuf(f.fs_, nullptr, _IOFBF, buf_size);
@@ -101,6 +105,18 @@ class File {
     FILE* fs_;
     std::string filepath_;
 };
+
+// Best-effort eviction of a file's pages from the OS page cache.
+inline void
+EvictFilePageCache(int fd) noexcept {
+#if defined(__linux__)
+    (void)posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+#elif defined(__APPLE__)
+    (void)fcntl(fd, F_NOCACHE, 1);
+#else
+    (void)fd;
+#endif
+}
 
 class MmapFileRAII {
  public:

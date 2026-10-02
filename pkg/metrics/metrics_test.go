@@ -25,9 +25,12 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestRegisterMetrics(t *testing.T) {
@@ -46,6 +49,31 @@ func TestRegisterMetrics(t *testing.T) {
 		RegisterStreamingNode(r)
 		RegisterLoggingMetrics(r)
 	})
+}
+
+func TestRegisterQueryCoordInitializesLoadDemandMetrics(t *testing.T) {
+	QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	t.Cleanup(func() {
+		QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+		QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
+	})
+
+	registry := prometheus.NewRegistry()
+	RegisterQueryCoord(registry)
+
+	require.NoError(t, testutil.GatherAndCompare(
+		registry,
+		strings.NewReader(`# HELP milvus_querycoord_load_demand_disk_bytes cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_disk_bytes counter
+milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group"} 0
+# HELP milvus_querycoord_load_demand_memory_bytes cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck
+# TYPE milvus_querycoord_load_demand_memory_bytes counter
+milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group"} 0
+`),
+		"milvus_querycoord_load_demand_memory_bytes",
+		"milvus_querycoord_load_demand_disk_bytes",
+	))
 }
 
 func TestGetRegisterer(t *testing.T) {
@@ -290,6 +318,7 @@ func observeProxyCollection(nodeID, db, collection string) {
 		ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxyRecallSearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, db, collection, queryType, "1").Observe(1)
+		ProxyResourceGroupSQLatency.WithLabelValues(nodeID, queryType, db, collection, "rg").Observe(1)
 	}
 	for _, msgType := range []string{InsertLabel, DeleteLabel, UpsertLabel, SearchLabel, HybridSearchLabel, QueryLabel} {
 		ProxyMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
@@ -302,6 +331,10 @@ func observeProxyCollection(nodeID, db, collection string) {
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	for _, parentType := range []string{"array", "struct_array"} {
+		ProxyPathReplaceParentOperations.WithLabelValues(nodeID, db, collection, parentType).Add(1)
+	}
+	ProxyPathReplaceMergeLatency.WithLabelValues(nodeID, db, collection).Observe(1)
 	ProxyFunctionCall.WithLabelValues(nodeID, "x", SuccessLabel, CauseNA, db, collection).Add(1)
 	ProxyFunctionlatency.WithLabelValues(nodeID, db, collection, "x", "x", "x").Observe(1)
 }

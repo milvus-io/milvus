@@ -92,6 +92,7 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/lob_column/lob_column_reader.h"
 #include "segcore/TextColumnCache.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::segcore {
 
@@ -145,13 +146,15 @@ AssertLoadedFieldRows(
         return;
     }
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
-    AssertInfo(rows == expected_rows,
-               "growing segment StorageV3 manifest loads {} rows for {} "
-               "field {}, but SegmentLoadInfo expects {} rows",
-               rows,
-               field_name,
-               field_id.get(),
-               expected_rows);
+    if (!(rows == expected_rows)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "growing segment StorageV3 manifest loads {} rows for {} "
+                  "field {}, but SegmentLoadInfo expects {} rows",
+                  rows,
+                  field_name,
+                  field_id.get(),
+                  expected_rows);
+    }
 }
 
 void
@@ -174,12 +177,14 @@ AssertAllLoadedFieldRows(
     }
 
     for (const auto& [field_id, rows] : loaded_rows) {
-        AssertInfo(rows == expected_rows,
-                   "growing segment StorageV3 manifest loads {} rows for "
-                   "field {}, but SegmentLoadInfo expects {} rows",
-                   rows,
-                   field_id.get(),
-                   expected_rows);
+        if (!(rows == expected_rows)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "growing segment StorageV3 manifest loads {} rows for "
+                      "field {}, but SegmentLoadInfo expects {} rows",
+                      rows,
+                      field_id.get(),
+                      expected_rows);
+        }
     }
 }
 
@@ -225,7 +230,8 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] = raw_data[source_index].length();
+                array_lengths[offset + i] =
+                    raw_data[source_index].physical_length();
             }
         } else {
             if (field_meta.is_nested_array()) {
@@ -1064,7 +1070,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
                        "binlog number should less than or equal row_count");
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
@@ -1162,7 +1168,7 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
-    auto field_meta = (*schema)[field_id];
+    const auto& field_meta = (*schema)[field_id];
 
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(reserved_offset,
@@ -1292,9 +1298,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
             auto reader = result.ValueOrDie();
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1302,12 +1311,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
             auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] failed to close file reader when get row group "
-                "metadata from file {} with error {}",
-                file,
-                status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] failed to close file reader when get "
+                          "row group "
+                          "metadata from file {} with error {}",
+                          file,
+                          status.ToString());
+            }
         }
 
         // create parallel degree split strategy
@@ -1555,9 +1566,27 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
         return;
     }
 
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            for (int64_t i = 0; i < count; ++i) {
+                if (!vec_index->IsRowValid(offsets[i])) {
+                    valid_result[i] = false;
+                }
+            }
+            return;
+        }
+    }
+
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid(offsets, count, valid_data.get());
     for (int64_t i = 0; i < count; ++i) {
-        if (!valid_vec_ptr->is_valid(offsets[i])) {
+        if (!valid_data[i]) {
             valid_result[i] = false;
         }
     }
@@ -1751,7 +1780,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                    logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
-                           vector_array->length(),
+                           vector_array->physical_length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
     };
@@ -3598,11 +3627,12 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 int64_t num_rows) {
     // Rows are written at their reserved ABSOLUTE offsets
     // (SimpleGeometryCache::AppendDataAt), matching how readers address the
-    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // cache (GetByOffset) and how the R-Tree index path's AddGeometry
     // works. This makes the write idempotent: a batch retried after a
     // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
-    // overwrites its own slots instead of re-appending after the partial
-    // prefix and shifting every later row to the wrong offset. It also
+    // addresses its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset (the slots it
+    // already published are simply skipped -- first writer wins). It also
     // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
     // in-order Insert() batches.
     try {
@@ -3685,7 +3715,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     segment_instance_uid(), get_segment_id(), field_id);
 
         // Process each field data chunk, writing rows at their reserved
-        // absolute offsets so a retried load overwrites in place (see
+        // absolute offsets so a retried load lands on the same slots (see
         // BuildGeometryCacheForInsert).
         int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {

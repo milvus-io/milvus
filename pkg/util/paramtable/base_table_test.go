@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	etcdkv "github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -58,6 +59,27 @@ func TestBaseTable_DuplicateValues(t *testing.T) {
 
 	assert.Equal(t, len(rootconfigs), len(configsWithPrefix))
 	assert.Equal(t, "11", rootconfigs["rootcoord.dmlchannelnum"])
+}
+
+func TestBaseTable_RemoveThenSaveGroupMember(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	require.NoError(t, os.WriteFile(dir+"/milvus.yaml", []byte("public:\n  group:\n    member: source-value\n"), 0o600))
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipRemote(true), SkipEnv(true), Interval(0))
+	t.Cleanup(base.mgr.Close)
+	group := ParamGroup{KeyPrefix: "public.group."}
+	group.Init(base.mgr)
+
+	const key = "public.group.member"
+	require.NoError(t, base.Remove(key))
+	assert.Empty(t, group.GetValue())
+	require.NoError(t, base.Save(key, "restored-value"))
+	source, value, err := base.mgr.GetRegisteredConfig(key)
+	require.NoError(t, err)
+	assert.Equal(t, config.RuntimeSource, source)
+	assert.Equal(t, "restored-value", value)
+	assert.Equal(t, value, base.Get(key))
+	assert.Equal(t, value, group.GetValue()["member"])
 }
 
 func TestBaseTable_SaveAndLoad(t *testing.T) {

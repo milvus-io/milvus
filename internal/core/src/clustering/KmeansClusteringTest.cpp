@@ -386,11 +386,9 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     ASSERT_EQ(v3.TotalRows(), num_rows);
     ASSERT_EQ(v3.NumColumnGroups(), 1);
 
-    // The fixture wrote to the LOCAL filesystem, and
-    // MakeInternalPropertiesFromStorageConfig copies storage_type/root_path
-    // verbatim into the loon properties. So the storage config must be
-    // local-typed and rooted at root_path (ManifestPathJson() returns a
-    // relative base_path; loon resolves it against PROPERTY_FS_ROOT_PATH).
+    // The fixture wrote to the local filesystem and ManifestPathJson() returns
+    // an absolute base_path. MakeInternalPropertiesFromStorageConfig uses "/"
+    // as the local filesystem root, leaving that complete path unchanged.
     // Leaving StorageConfig at its default ("minio") would send the manifest
     // reader to object storage.
     auto storage_config = gen_local_storage_config(root_path);
@@ -424,8 +422,7 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     pb_storage_config->set_root_path(storage_config.root_path);
 
     // Mirror analyze_c.cpp: the field schema is carried in FieldDataMeta, and
-    // the loon properties come from the storage config through the very
-    // production helper under test - not from MakeInternalLocalProperies.
+    // the loon properties come from the production storage-config helper.
     milvus::storage::FieldDataMeta field_data_meta{
         collection_id, partition_id, 0, vec_fid.get(), info.field_schema()};
     milvus::storage::IndexMeta index_meta{

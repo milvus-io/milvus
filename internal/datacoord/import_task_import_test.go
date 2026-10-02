@@ -112,6 +112,69 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
 
+	t.Run("ErrIDRangeTooSmall fails the job terminally", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 1,
+			},
+		}
+		err = im.AddJob(context.TODO(), job)
+		assert.NoError(t, err)
+
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(2000), nil).Maybe()
+
+		// 101 local rows, only 100 ids reserved: the cursor cannot cover the file, and
+		// no retry changes either number, so the job must fail now with the reason.
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			State:        datapb.ImportTaskStateV2_Pending,
+			FileStats: []*datapb.ImportFileStats{
+				{
+					ImportFile: &internalpb.ImportFile{
+						Id:      1,
+						Paths:   []string{"f1"},
+						IdRange: &commonpb.IDRange{Begin: 5000, End: 5100},
+					},
+					TotalRows: 101,
+				},
+			},
+		}
+		task := &importTask{
+			alloc:      alloc,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
+		}
+		task.task.Store(taskProto)
+		err = im.AddTask(context.TODO(), task)
+		assert.NoError(t, err)
+
+		// No CreateImport expectation: the mock fails the test if the RPC is attempted.
+		cluster := session.NewMockCluster(t)
+		task.CreateTaskOnWorker(1, cluster)
+
+		got := im.GetJob(context.TODO(), 1)
+		assert.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+		assert.Contains(t, got.GetReason(), "does not match the exactly reserved ID range")
+		assert.Contains(t, got.GetReason(), "101 rows, 100 ids reserved")
+		assert.Equal(t, int64(0), task.GetTaskVersion(),
+			"a terminal assemble failure must not consume a retry budget")
+	})
+
 	t.Run("CreateImport rpc failed", func(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)

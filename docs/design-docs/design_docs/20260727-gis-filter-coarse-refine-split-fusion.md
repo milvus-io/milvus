@@ -110,7 +110,7 @@ void PhyGISRefineConjunctExpr::Eval(EvalCtx& ctx, VectorPtr& result) {
                       : segment_->bulk_subscript(op_ctx_, st_->field_id, hits); // one bulk fetch
     for (size i : hits) {
       const Geometry& left = gcache
-          ? *gcache->GetByOffsetUnsafe(i)           // cache on: zero construction
+          ? *gcache->GetByOffset(i)                 // cache on: zero construction
           : Geometry(qctx, wkb[i]...);              // cache off: construct ONCE per row
       bool bit = st_->is_and;                       // apply all predicates to one left (fusion)
       for (size j = 0; j < st_->preds.size(); ++j) {
@@ -142,7 +142,7 @@ The `bitmap_input` chain: `B_coarse` contributes early → intermediate scalars 
 - OR blocks: hoisting `B_coarse` / `B_refine` as outer AND children is justified by the identity in Section 3.
 - `Refine` returns false for non-surviving rows; the conjunction ANDs the results again, so no error.
 - within/contains semantics swap: reuses the existing `evaluate_geometry_prepared`.
-- Null geometry: `GetByOffsetUnsafe` returns nullptr → false according to the op.
+- Null geometry: `GetByOffset` returns nullptr → false according to the op.
 - No R-Tree index: coarse = full set (no pruning), but refine still consumes `bitmap_input` and fuses, so the win is not lost.
 - growing / mmap: keeps the existing `std::string` vs `std::string_view` branches.
 - Orthogonal to the cache: this design is fast for bbox data even with the cache off; it does not depend on `enableGeometryCache`.
