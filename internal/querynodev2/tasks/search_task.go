@@ -386,7 +386,7 @@ func (t *SearchTask) Execute() error {
 			}
 		}
 	}
-	t.attributeStorageCost(results)
+	t.attributeStorageCost(results, searchReq.FeatureBits())
 
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the

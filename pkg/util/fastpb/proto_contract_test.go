@@ -85,8 +85,9 @@ func TestProtoContract_FieldDescriptorsPinned(t *testing.T) {
 		want string
 	}{
 		// top-level fast-pathed types (TryUnmarshal dispatch)
-		// mvcc_timestamp (20) is a plain scalar decoded by retrieveResults' protoMerge fallback.
-		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, "42abdb24ddf95ddd568ac4e80e0a0f01a40a4f887e6a72ec1a7bdfd75cb55004"},
+		// mvcc_timestamp (20) is a plain scalar decoded by retrieveResults' protoMerge fallback;
+		// feature_bits (21) is a varint scalar decoded directly.
+		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, "b44a0fef5dc74453366b7f2e0da7e4e35c67f0babe20b369efa60ce7cc38f2cc"},
 		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, "a334da7b112573d379549d8c81c1afcf0a8526488947c4868b6ff4d9413b29a7"},
 		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, "a0fc2a36ce1d4f67f0d73a4c7faabbf0d7c76b522ce8acc851c149f311c78d50"},
 		{"msgpb.InsertRequest", &msgpb.InsertRequest{}, "c98eeac7deeace0770cdafbb910aec8fb2a1de9e152f99821bb260afdd19c44d"},

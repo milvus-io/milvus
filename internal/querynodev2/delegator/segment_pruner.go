@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -175,6 +176,11 @@ func PruneSegments(ctx context.Context,
 				pruneType,
 			).Set(bias)
 
+		// Stale partition stats can name segments that are no longer in the
+		// sealed list; only a prune that removed a segment is a use.
+		if realFilteredSegments > 0 {
+			featureusage.Hit(featureusage.FeatureSegmentPrune)
+		}
 		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
 			WithLabelValues(paramtable.GetStringNodeID(),
