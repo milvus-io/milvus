@@ -265,6 +265,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
@@ -652,6 +653,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "", // Empty - should use default
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil)
 
 	server := &Server{
