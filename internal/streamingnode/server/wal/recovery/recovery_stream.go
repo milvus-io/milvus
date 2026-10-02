@@ -93,6 +93,7 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 			}
 		}
 	}
+	orphaned := 0
 	for segmentID, segment := range r.segments {
 		if !segment.IsGrowing() {
 			continue
@@ -101,24 +102,39 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		// or is not active, or whose partition has been dropped. This can happen due to
 		// non-atomic etcd persistence or Kafka offset compaction replaying CreateSegment
 		// for dropped collections/partitions.
+		// Such a segment is never handed to the shard manager, so no flush message can be
+		// written for it anymore. Move it into the flushed (terminal) state as well,
+		// otherwise its segment assignment meta is left behind in the catalog forever
+		// and reloaded (and skipped again) at every recovery.
 		if _, ok := vchannels[segment.meta.Vchannel]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with non-active vchannel",
+			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with non-active vchannel, remove it from recovery meta",
 				zap.Int64("segmentID", segmentID),
 				zap.String("vchannel", segment.meta.Vchannel),
 				zap.Int64("collectionID", segment.meta.CollectionId),
 			)
+			segment.ObserveOrphaned()
+			orphaned++
 			continue
 		}
 		if _, ok := activePartitions[segment.meta.PartitionId]; !ok {
-			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with dropped partition",
+			r.Logger().Warn("getSnapshot: skipping orphaned growing segment with dropped partition, remove it from recovery meta",
 				zap.Int64("segmentID", segmentID),
 				zap.String("vchannel", segment.meta.Vchannel),
 				zap.Int64("collectionID", segment.meta.CollectionId),
 				zap.Int64("partitionID", segment.meta.PartitionId),
 			)
+			segment.ObserveOrphaned()
+			orphaned++
 			continue
 		}
 		segments[segmentID] = proto.Clone(segment.meta).(*streamingpb.SegmentAssignmentMeta)
+	}
+	if orphaned > 0 {
+		// getSnapshot is only called once at the end of the recovery, before the background
+		// persist task is started, so the dirty counter can be updated without holding the lock.
+		// The orphaned segments are dirty now, the next persist operation removes them from the catalog.
+		r.dirtyCounter += orphaned
+		r.notifyPersist()
 	}
 	snapshot := &RecoverySnapshot{
 		VChannels:          vchannels,
