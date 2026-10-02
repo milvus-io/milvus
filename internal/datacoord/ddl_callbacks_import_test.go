@@ -352,7 +352,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
+	// Mock the canonical metadata read before file sizing.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
 
@@ -376,7 +376,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 	)
 
 	s.Error(err)
-	s.Contains(err.Error(), "failed to start broadcast with collection id")
+	s.Contains(err.Error(), "failed to get collection metadata before import preparation")
 }
 
 func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsError() {
@@ -402,11 +402,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
+	// Mock broker.DescribeCollectionInternal to return canonical metadata used
+	// before acquiring the collection resource key.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
@@ -470,12 +472,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
-	// second call returns error status (in broadcastImport after getting broadcaster)
+	// The pre-lock canonical read succeeds; the revalidation under the
+	// collection lock observes that the collection disappeared.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
 	}, nil).Once()
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Status: merr.Status(merr.ErrCollectionNotFound),
@@ -536,8 +539,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Mock broker: once before sizing and once under the collection lock.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -591,16 +593,28 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock StartBroadcastWithResourceKeys to succeed
+	files := []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}}
+	rowCounts := stubRowCounts(map[string]struct {
+		rows  int64
+		exact bool
+	}{"/test/file.json": {rows: 1, exact: true}})
+	defer rowCounts.UnPatch()
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(count int64) (int64, int64, error) {
+		return 100, 100 + count, nil
+	})
+
+	// Acquiring the collection lock must happen only after file sizing and ID
+	// reservation have completed.
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			s.NotNil(files[0].GetPreAllocatedAutoIds())
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// Mock broker: once before sizing and once under the collection lock.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -610,7 +624,13 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 			Version: 2,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
-				{FieldID: common.StartOfUserFieldID, Name: "id"},
+				{
+					FieldID:      common.StartOfUserFieldID,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
 			},
 		},
 	}, nil).Times(2)
@@ -619,13 +639,14 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		importMeta: &importMeta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
+		allocator:  mockAllocator,
 	}
 
 	_, _, err := server.broadcastImport(
 		ctx,
 		100,
 		[]int64{1},
-		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+		files,
 		[]*commonpb.KeyValuePair{
 			{Key: "timeout", Value: "300s"},
 			{Key: importutilv2.RLSPrincipal, Value: "mallory"},
@@ -655,6 +676,36 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.Equal(int32(2), body.GetSchema().GetVersion())
 	s.Require().Len(body.GetSchema().GetFields(), 1)
 	s.Equal(int64(common.StartOfUserFieldID), body.GetSchema().GetFields()[0].GetFieldID())
+}
+
+func TestBroadcastImport_RejectsChangedCanonicalSnapshot(t *testing.T) {
+	ctx := context.Background()
+	validate := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validate.UnPatch()
+	validateReplication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer validateReplication.UnPatch()
+
+	api := newMockBroadcastAPIImpl()
+	startBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+	defer startBroadcast.UnPatch()
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 1},
+	}, nil).Once()
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema:         &schemapb.CollectionSchema{Name: "test_collection", Version: 2},
+	}, nil).Once()
+
+	server := &Server{broker: mockBroker}
+	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "", "", false)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.Nil(t, api.capturedMsg)
 }
 
 // --------------------------------
