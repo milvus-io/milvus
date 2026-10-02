@@ -247,6 +247,43 @@ extraction, so this existing path is not evidence that the final recovery
 ownership protocol is fully integrated. See the
 [state machine](../qviews/query_view_state_machine.md#24-uprecovering-streamingnode-only-proto-state).
 
+### Live application failures: current PR decision
+
+The preparation retry protocol above does not apply to live events. In this PR,
+GrowingRuntime and IDF keep their fail-fast behavior: an application error
+panics the SN process. Do not skip the event, advance its MVCC frontier, or retry
+the entire event on the existing runtime. A transaction or multi-segment event
+may already have modified earlier segments/modules; segcore Insert reserves row
+offsets and writes columns without a whole-event rollback guarantee.
+
+This is an explicit scope/complexity tradeoff, not a claim that every error is
+permanent. Invariant violations and malformed data require investigation;
+resource failures such as native allocation failure may recover after capacity
+changes, but safe local runtime replacement is not implemented. Retain this
+behavior until a separate design defines failed-runtime isolation, rebuilding
+and the Ready/Up reporting protocol. The current `OnUnrecoverable` callback only
+handles Preparing/UpRecovering and is not sufficient for live failure recovery.
+
+Message decryption handles recoverable dependency failures with backoff before
+consumer application; see [decryption retry](message_body_cache.md#decryption-failures-and-retry).
+BM25/MinHash output is normally generated before WAL append. Older WAL and
+disabled/upgrade-period write-before materialization still use consumer-side
+compatibility filling; this PR retains its failure behavior rather than adding
+a new recovery mechanism for that compatibility path.
+
+Known limitation: legacy delegator Delete supports retries and marks failed
+segments offline for QueryCoord repair. New SN live Delete does not implement
+that retry/offline path; a returned Delete error follows the same panic path as
+Insert. Historical Delete replay during Prepare instead returns errors to the
+preparation machinery. Pending live events drained at the end of initialization
+still use live application and can panic.
+
+RecoveryStorage's existing PoisonedRelease protocol protects persistence/Ack
+completion and WAL retention. QueryRuntime owns plain immutable references,
+not persistence handles, so it does not participate in that protocol. Future
+query failure isolation must not make query progress gate persistence Ack or
+the global recovery checkpoint.
+
 ### Loaded partition scope
 
 Once load metadata is resolved, its partition list is authoritative for the

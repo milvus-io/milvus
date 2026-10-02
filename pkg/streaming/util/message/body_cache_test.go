@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bytedance/mockey"
@@ -55,6 +56,112 @@ func TestBodyCacheConcurrentConstruction(t *testing.T) {
 		require.NoError(t, errs[i])
 		require.Same(t, bodies[0], bodies[i])
 	}
+}
+
+func TestBodyCacheLoaderCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "cancel"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				m := newBodyCacheManager(1<<20, time.Hour, time.Hour)
+				defer m.close()
+				slot := &bodyCacheSlot{}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				var calls atomic.Int32
+				loaderDone := make(chan error, 1)
+				go func() {
+					_, err := m.get(ctx, slot, func() (proto.Message, error) {
+						calls.Add(1)
+						<-ctx.Done()
+						return nil, ctx.Err()
+					})
+					loaderDone <- err
+				}()
+				synctest.Wait()
+
+				const readers = 16
+				bodies := make([]proto.Message, readers)
+				errs := make([]error, readers)
+				var wg sync.WaitGroup
+				for i := range bodies {
+					wg.Go(func() {
+						bodies[i], errs[i] = m.get(context.Background(), slot, func() (proto.Message, error) {
+							calls.Add(1)
+							return &msgpb.InsertRequest{NumRows: 7}, nil
+						})
+					})
+				}
+				// All readers must join the original attempt before it fails.
+				waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+				defer cancelWaiter()
+				waiterDone := make(chan error, 1)
+				go func() {
+					_, err := m.get(waiterCtx, slot, func() (proto.Message, error) {
+						panic("canceled waiter must not decode")
+					})
+					waiterDone <- err
+				}()
+				synctest.Wait()
+				cancelWaiter()
+				require.ErrorIs(t, <-waiterDone, context.Canceled)
+				require.EqualValues(t, 1, calls.Load(), "waiter cancellation must not affect the loader")
+				if deadline {
+					time.Sleep(time.Second)
+				} else {
+					cancel()
+				}
+				require.ErrorIs(t, <-loaderDone, ctx.Err())
+				wg.Wait()
+				for i := range bodies {
+					require.NoError(t, errs[i])
+					require.Same(t, bodies[0], bodies[i])
+				}
+				require.EqualValues(t, 2, calls.Load(), "waiters share a single replacement decode")
+			})
+		})
+	}
+}
+
+func TestBodyCacheSharedDecodeError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := newBodyCacheManager(1<<20, time.Hour, time.Hour)
+		defer m.close()
+		slot := &bodyCacheSlot{}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		release := make(chan struct{})
+		var calls atomic.Int32
+		decode := func() (proto.Message, error) {
+			calls.Add(1)
+			<-release
+			return nil, ErrMalformedBody
+		}
+		const readers = 16
+		errs := make(chan error, readers+1)
+		go func() {
+			_, err := m.get(ctx, slot, decode)
+			errs <- err
+		}()
+		synctest.Wait()
+		for range readers {
+			go func() {
+				_, err := m.get(context.Background(), slot, decode)
+				errs <- err
+			}()
+		}
+		synctest.Wait()
+		// An unrelated decoding failure must propagate even if its caller cancels.
+		cancel()
+		close(release)
+		for range readers + 1 {
+			require.ErrorIs(t, <-errs, ErrMalformedBody)
+		}
+		require.EqualValues(t, 1, calls.Load(), "ordinary errors must not trigger waiter retries")
+	})
 }
 
 func TestBodyCacheRetryEvictionAndAdmission(t *testing.T) {
@@ -273,7 +380,9 @@ func TestImmutableBodyCacheDecryptsOnce(t *testing.T) {
 	properties[messageCipherHeader] = header
 	decrypt := mockey.Mock((*mockDecryptor).Decrypt).Return(mutable.Payload(), nil).Build()
 	defer decrypt.UnPatch()
-	getDecryptor := mockey.Mock(getDecryptorWithRetryContext).Return(&mockDecryptor{}, nil).Build()
+	getCipher := mockey.Mock(getCipher).Return(&mockCipher{}, nil).Build()
+	defer getCipher.UnPatch()
+	getDecryptor := mockey.Mock((*mockCipher).GetDecryptor).Return(&mockDecryptor{}, nil).Build()
 	defer getDecryptor.UnPatch()
 	raw := NewImmutableMesasge(nil, []byte("encrypted WAL payload"), properties)
 	first := MustAsImmutableInsertMessageV1(raw).MustBody()
