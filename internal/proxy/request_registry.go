@@ -100,12 +100,13 @@ func (node *Proxy) listRunningRequests(filter reqregistry.Filter) []reqregistry.
 }
 
 // cancelRequests cancels the given requests on this proxy on behalf of
-// operator, writes one audit line per canceled request and counts it.
-func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, operator, reason string) (canceled []reqregistry.Info, notFound []int64) {
+// operator, writes one audit line per canceled request and counts it. A
+// non-empty owner limits it to requests that user issued.
+func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, owner, operator, reason string) (canceled []reqregistry.Info, notFound []int64) {
 	if node.requests == nil {
 		return nil, requestIDs
 	}
-	canceled, notFound = node.requests.Cancel(requestIDs, operator, reason, time.Now())
+	canceled, notFound = node.requests.Cancel(requestIDs, owner, operator, reason, time.Now())
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	for _, info := range canceled {
 		mlog.Info(ctx, "request canceled by operator",
@@ -235,6 +236,14 @@ func (node *Proxy) ListRunningRequests(ctx context.Context, request *milvuspb.Li
 		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
 	}
 
+	if ownRequestsOnly(ctx) {
+		user, err := restrictToCaller(ctx, request.GetUser(), commonpb.ObjectPrivilege_PrivilegeListRunningRequests)
+		if err != nil {
+			return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
+		}
+		request.User = user
+	}
+
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRunningRequests")
 	defer sp.End()
 
@@ -246,6 +255,30 @@ func (node *Proxy) ListRunningRequests(ctx context.Context, request *milvuspb.Li
 	return resp, nil
 }
 
+// ownRequestsOnlyKey marks a running-request call whose caller lacks the
+// privilege for other users' requests.
+type ownRequestsOnlyKey struct{}
+
+func withOwnRequestsOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ownRequestsOnlyKey{}, true)
+}
+
+func ownRequestsOnly(ctx context.Context) bool {
+	held, _ := ctx.Value(ownRequestsOnlyKey{}).(bool)
+	return held
+}
+
+// restrictToCaller resolves the user a running-request call may act on when
+// the caller is held to their own requests: no user named means the caller,
+// and naming anyone else needs the privilege the caller does not have.
+func restrictToCaller(ctx context.Context, user string, privilege commonpb.ObjectPrivilege) (string, error) {
+	caller := GetCurUserFromContextOrDefault(ctx)
+	if user == "" || user == caller {
+		return caller, nil
+	}
+	return "", merr.WrapErrPrivilegeNotPermitted("%s is needed to act on requests of user %s", privilege.String(), user)
+}
+
 // CancelRequests stops the given requests wherever in the cluster they run.
 func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -255,6 +288,14 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 		return &milvuspb.CancelRequestsResponse{
 			Status: merr.Status(merr.WrapErrParameterMissingMsg("request_ids cannot be empty")),
 		}, nil
+	}
+
+	if ownRequestsOnly(ctx) {
+		user, err := restrictToCaller(ctx, request.GetUser(), commonpb.ObjectPrivilege_PrivilegeCancelRequests)
+		if err != nil {
+			return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
+		}
+		request.User = user
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CancelRequests")
@@ -321,7 +362,7 @@ func (node *Proxy) CancelLocalRequests(ctx context.Context, request *milvuspb.Ca
 	// call, not against this one, so the canceled client is told the reason
 	// rather than a name this node cannot vouch for. The audit line naming the
 	// operator is written there.
-	canceled, notFound := node.cancelRequests(ctx, request.GetRequestIds(), "", request.GetReason())
+	canceled, notFound := node.cancelRequests(ctx, request.GetRequestIds(), request.GetUser(), "", request.GetReason())
 	return &milvuspb.CancelRequestsResponse{
 		Status:   merr.Success(),
 		Canceled: toRunningRequestInfos(canceled),
