@@ -2254,7 +2254,9 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 			Name: "foo",
 			ID:   1,
 		}, nil).Twice()
-		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
+		meta.EXPECT().ListAllAvailCollections(mock.Anything).Return(map[int64][]int64{
+			util.DefaultDBID: {1, 2},
+		}).Once()
 		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
 		defer cleanTestEnv()
 

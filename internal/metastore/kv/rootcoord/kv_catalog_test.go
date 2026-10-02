@@ -1601,7 +1601,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 			RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
 				removeOtherKeys = append(removeOtherKeys, keys...)
 				return nil
-			}).Once()
+			}).Twice()
 
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
