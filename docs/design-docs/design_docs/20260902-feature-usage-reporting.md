@@ -432,7 +432,9 @@ times for one client call: the un-optimized re-search when `resultSizeInsufficie
 only; `HybridSearch` does the same. Without it, N user searches were reported as 2N–3N.
 
 The flush is deferred at the top of `PreExecute`, not placed at its end: a request the Proxy rejects
-still asked for the feature, and the parse that marks a feature can be the step that fails.
+still asked for the feature, and the parse that marks a feature can be the step that fails. The query
+task follows the same rule: its hooks mark into the task's own set and it is flushed once when
+`PreExecute` returns, so a query rejected part-way is counted as completely as one accepted.
 
 **The query path marks internal tasks.** The Proxy synthesizes a `queryTask` for itself in three
 places — the requery that fetches vectors after a search (`requeryOperator`), the retrieval an upsert
@@ -549,9 +551,9 @@ are checked in, so the numbers below can be re-measured rather than trusted.
 | Execution features, when collected | per expression per segment, one relaxed atomic load, plus one `fetch_or` the first time a bit is set in the request; one C call per QueryNode task to read the set; one `uint64` per result |
 | Request hot path, expressions | one walk of the parsed `planpb.Expr`: 4.0 ns at one term, 740 ns at a hundred, 0 allocations |
 | Request hot path, legacy `norm_score` | 20 ns and no allocation when the key is absent, which is every request that does not ask for normalization; about 450 ns and 795 B when it is present and the `params` object is unmarshalled. This is the only hook that allocates |
-| Resident memory per search task | 165 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
+| Resident memory per search task | 166 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
 | Counter update itself | one `atomic.Add`, plus one forward-only compare-and-swap of the timestamp at most once per second per counter |
-| Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`): 165 × 16 = 2,640 bytes in this build, constant for the life of the process |
+| Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`): 166 × 16 = 2,656 bytes in this build, constant for the life of the process |
 | `GetFeatureUsage` on a node | copy of a fixed-size counter array |
 | Static statistics | one pass over collections + one over indexes; milliseconds at thousands of collections |
 | Segment traits | one pass over segment meta; tens of milliseconds at tens of thousands of segments |
@@ -733,8 +735,9 @@ These differ in kind from the rest: they report what was **materialized**, not w
 They require a pass over segment metadata, which is why they were planned as a separate phase.
 
 Import file types and compaction types are not coordinator metadata (the job records are
-garbage-collected), so they are **request-group counters**: `import_file_type=<JSON|JSONLine|NumPy|Parquet|CSV>` (`CSV` is
-*(undocumented)*) and `compaction=<mix|l0|clustering|sort|partition_key_sort|clustering_partition_key_sort|bump_schema_version>`,
+garbage-collected), so they are **request-group counters**: `import_file_type=<JSON|JSONLine|NumPy|Parquet|CSV|binlog>` (`CSV` is
+*(undocumented)*; `binlog` is a milvus-backup restore or an L0 import, whose files are binlog path
+prefixes with no file type of their own, decided from the `backup` / `l0_import` option) and `compaction=<mix|l0|clustering|sort|partition_key_sort|clustering_partition_key_sort|bump_schema_version>`,
 one value per `CompactionType` (`sort` and `mix` are *(undocumented)*; unrecognized types fold to
 `compaction=_other`). They are counted in
 **DataCoord**, where the job is created, not on the DataNode that executes it. On a deployment where
@@ -789,7 +792,7 @@ task carries a single `DataScope`. Compare these counters against each other, no
 | Entry | Signal |
 |---|---|
 | `two_stage_search` *(undocumented)* | the delegator took the two-stage search branch |
-| `segment_prune` | segment pruning removed at least one sealed segment from a search or query |
+| `segment_prune` | segment pruning removed at least one sealed segment from a search or query (stale partition statistics that name only segments no longer in the sealed list do not count) |
 | `run_analyzer` | the `RunAnalyzer` RPC, the one user-facing feature only a QueryNode serves |
 
 A `brute_force_search` counter was implemented and removed during review. It fired when a search reached
@@ -840,6 +843,12 @@ Semantics the consumer relies on:
   the designed path (membership filters, timestamptz arithmetic, IS NULL over a JSON path index).
 - **Only searches and queries report.** The retrieval behind a delete or an upsert, and the Proxy's own
   requery, do not.
+- **A row-level-security predicate counts as a filter.** RLS merges the policy predicate into the plan
+  before it is sent, and the execution features are collected per plan, so the paths it takes are
+  reported like the user's own filter. On a collection with RLS a query with no filter can therefore
+  report a `filter_exec_path`. Skipping it would need the merged subtree marked in the plan and in
+  segcore, as the TTL filter is; that is left for later, since it only affects collections with RLS and
+  does not change whether a filter feature is in use.
 - **Growing and sealed segments are not reported separately.** A request that used a feature on either
   counts once; splitting every entry by segment state would double the catalog without changing whether
   a feature takes effect. `interim_index_search` is the one entry that is about growing data in the
@@ -1040,6 +1049,7 @@ compare only those. Each side is still an exact delta.
 | `TestCompactionTypesAreCounted` | sort, level-zero delete and schema-version-bump compactions, each triggered by the user action that produces it |
 | `TestClusteringCompactionAndSegmentPrune` | clustering compaction, and the QueryNode `segment_prune` counter it makes reachable |
 | `TestBinaryImportFileTypesAreCounted` | the Parquet and NumPy import formats |
+| `TestBinlogImportIsCounted` | a milvus-backup style restore of one flushed segment counts as `import_file_type=binlog` and moves no other import counter |
 | `TestSearchParameterDistributions` | every bucket of `ef`, `nprobe`, `limit` and `nq`, asserted on the per-subrequest counters only; a three-subrequest hybrid search adding three to its buckets and one to `hybrid_search_reqs`; the remaining `hybrid_search_reqs` buckets |
 | `TestRetrievalKinds` | `retrieval=sparse_vector` and `retrieval=full_text_search` on a collection with a dense, a sparse and a BM25 output field, and every combination `hybrid_search=*` can report |
 | `TestAggregationAndOrdering` | each query aggregation operator, `avg` next to its own parts counting each operator once, `order_by` on query, `order_by_fields` on search, `search_aggregation` |
@@ -1313,7 +1323,7 @@ requests built directly where no SDK sends a shape. Its latest full run on the s
 
 | | |
 |---|---|
-| Test methods | 24, all passing |
+| Test methods | 25, all passing |
 | Wall clock | 271 s for the package, one cluster |
 | Counters exercised | every entry in the surface file except the six listed under "The acceptance gate"; `auth_method=password` is driven in the sibling authentication suite, which also passes |
 | Groups present | all 16 |
