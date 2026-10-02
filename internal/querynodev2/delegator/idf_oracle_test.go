@@ -601,30 +601,34 @@ func (suite *IDFOracleSuite) TestConcurrentPreloadMatchesSerial() {
 	suite.assertIDFEqual(expected, vocab)
 }
 
-func (suite *IDFOracleSuite) TestFetchSealedStatsError() {
+func (suite *IDFOracleSuite) TestFetchStatsDiff() {
 	suite.registerSealed(1, 1, 5)
 	suite.registerSealed(2, 5, 9)
-	removed, ok := suite.idfOracle.sealed.Get(2)
-	suite.Require().True(ok)
-	removed.Remove()
-
-	segs := []*sealedBm25Stats{}
-	suite.idfOracle.sealed.Range(func(_ int64, s *sealedBm25Stats) bool {
-		segs = append(segs, s)
-		return true
-	})
-	_, err := fetchSealedStats(segs)
-	suite.Error(err)
-
 	kept, ok := suite.idfOracle.sealed.Get(1)
 	suite.Require().True(ok)
-	byID, err := fetchSealedStats([]*sealedBm25Stats{kept})
-	suite.NoError(err)
-	suite.Equal(int64(4), byID[1][102].NumRow())
+	removed, ok := suite.idfOracle.sealed.Get(2)
+	suite.Require().True(ok)
 
-	byID, err = fetchSealedStats(nil)
+	// one activated, one deactivated: the diff holds the difference and records what was read
+	add := &statsCandidate{seg: kept}
+	sub := &statsCandidate{seg: removed, minus: true}
+	diff, err := fetchStatsDiff(map[int64]*statsCandidate{1: add, 2: sub})
 	suite.NoError(err)
-	suite.Empty(byID)
+	suite.Equal(int64(0), diff.NumRow())
+	suite.Equal([]int64{102}, add.fields)
+	suite.Equal(kept.version, add.version)
+
+	diff, err = fetchStatsDiff(map[int64]*statsCandidate{1: {seg: kept}})
+	suite.NoError(err)
+	suite.Equal(int64(4), diff.NumRow())
+
+	removed.Remove()
+	_, err = fetchStatsDiff(map[int64]*statsCandidate{1: {seg: kept}, 2: {seg: removed}})
+	suite.Error(err)
+
+	diff, err = fetchStatsDiff(nil)
+	suite.NoError(err)
+	suite.Equal(int64(0), diff.NumRow())
 }
 
 func TestIDFOracle(t *testing.T) {
