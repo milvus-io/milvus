@@ -108,8 +108,9 @@ var StreamingNodeStateService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingCoordBroadcastService_Broadcast_FullMethodName = "/milvus.proto.streaming.StreamingCoordBroadcastService/Broadcast"
-	StreamingCoordBroadcastService_Ack_FullMethodName       = "/milvus.proto.streaming.StreamingCoordBroadcastService/Ack"
+	StreamingCoordBroadcastService_Broadcast_FullMethodName          = "/milvus.proto.streaming.StreamingCoordBroadcastService/Broadcast"
+	StreamingCoordBroadcastService_Ack_FullMethodName                = "/milvus.proto.streaming.StreamingCoordBroadcastService/Ack"
+	StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName = "/milvus.proto.streaming.StreamingCoordBroadcastService/WaitVChannelsAcked"
 )
 
 // StreamingCoordBroadcastServiceClient is the client API for StreamingCoordBroadcastService service.
@@ -121,6 +122,18 @@ type StreamingCoordBroadcastServiceClient interface {
 	Broadcast(ctx context.Context, in *BroadcastRequest, opts ...grpc.CallOption) (*BroadcastResponse, error)
 	// Ack acknowledge broadcast message is consumed.
 	Ack(ctx context.Context, in *BroadcastAckRequest, opts ...grpc.CallOption) (*BroadcastAckResponse, error)
+	// WaitVChannelsAcked blocks until every named vchannel of the given
+	// broadcast has been acked in THIS cluster, or the context ends.
+	//
+	// It exists for the secondary cluster's append gate: a replicated
+	// broadcast whose header names append-first vchannels must land those
+	// replicas before any other replica of the same broadcast is appended
+	// here, and the broadcast task's per-vchannel ack state is the only fact
+	// a secondary has to order them by. The broadcast task itself may not
+	// exist yet when the call arrives -- the first replica to reach a
+	// secondary is whichever the replicate streams deliver first -- so the
+	// wait covers the task's creation too.
+	WaitVChannelsAcked(ctx context.Context, in *WaitVChannelsAckedRequest, opts ...grpc.CallOption) (*WaitVChannelsAckedResponse, error)
 }
 
 type streamingCoordBroadcastServiceClient struct {
@@ -149,6 +162,15 @@ func (c *streamingCoordBroadcastServiceClient) Ack(ctx context.Context, in *Broa
 	return out, nil
 }
 
+func (c *streamingCoordBroadcastServiceClient) WaitVChannelsAcked(ctx context.Context, in *WaitVChannelsAckedRequest, opts ...grpc.CallOption) (*WaitVChannelsAckedResponse, error) {
+	out := new(WaitVChannelsAckedResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StreamingCoordBroadcastServiceServer is the server API for StreamingCoordBroadcastService service.
 // All implementations should embed UnimplementedStreamingCoordBroadcastServiceServer
 // for forward compatibility
@@ -158,6 +180,18 @@ type StreamingCoordBroadcastServiceServer interface {
 	Broadcast(context.Context, *BroadcastRequest) (*BroadcastResponse, error)
 	// Ack acknowledge broadcast message is consumed.
 	Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error)
+	// WaitVChannelsAcked blocks until every named vchannel of the given
+	// broadcast has been acked in THIS cluster, or the context ends.
+	//
+	// It exists for the secondary cluster's append gate: a replicated
+	// broadcast whose header names append-first vchannels must land those
+	// replicas before any other replica of the same broadcast is appended
+	// here, and the broadcast task's per-vchannel ack state is the only fact
+	// a secondary has to order them by. The broadcast task itself may not
+	// exist yet when the call arrives -- the first replica to reach a
+	// secondary is whichever the replicate streams deliver first -- so the
+	// wait covers the task's creation too.
+	WaitVChannelsAcked(context.Context, *WaitVChannelsAckedRequest) (*WaitVChannelsAckedResponse, error)
 }
 
 // UnimplementedStreamingCoordBroadcastServiceServer should be embedded to have forward compatible implementations.
@@ -169,6 +203,9 @@ func (UnimplementedStreamingCoordBroadcastServiceServer) Broadcast(context.Conte
 }
 func (UnimplementedStreamingCoordBroadcastServiceServer) Ack(context.Context, *BroadcastAckRequest) (*BroadcastAckResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ack not implemented")
+}
+func (UnimplementedStreamingCoordBroadcastServiceServer) WaitVChannelsAcked(context.Context, *WaitVChannelsAckedRequest) (*WaitVChannelsAckedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WaitVChannelsAcked not implemented")
 }
 
 // UnsafeStreamingCoordBroadcastServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -218,6 +255,24 @@ func _StreamingCoordBroadcastService_Ack_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamingCoordBroadcastService_WaitVChannelsAcked_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WaitVChannelsAckedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordBroadcastServiceServer).WaitVChannelsAcked(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordBroadcastService_WaitVChannelsAcked_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordBroadcastServiceServer).WaitVChannelsAcked(ctx, req.(*WaitVChannelsAckedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamingCoordBroadcastService_ServiceDesc is the grpc.ServiceDesc for StreamingCoordBroadcastService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -232,6 +287,10 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ack",
 			Handler:    _StreamingCoordBroadcastService_Ack_Handler,
+		},
+		{
+			MethodName: "WaitVChannelsAcked",
+			Handler:    _StreamingCoordBroadcastService_WaitVChannelsAcked_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
