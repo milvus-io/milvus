@@ -1224,9 +1224,9 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     is_built_ = true;
     ComputeByteSize();
 
-    LOG_INFO("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
-             field_id_,
-             is_mmap_);
+    LOG_DEBUG("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
+              field_id_,
+              is_mmap_);
 }
 
 template class ScalarIndexSort<bool>;
