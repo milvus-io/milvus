@@ -38,7 +38,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	cache := newTestCache()
 	collectionID := int64(1000)
 	mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(collectionID, nil).Build()
-	mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{CollID: collectionID}, nil).Build()
+	mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{CollID: collectionID, VChannels: []string{"test-ch"}}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitions).Return(map[string]int64{"_default": 2000}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&metacache.PartitionInfo{Name: "_default", PartitionID: 2000, IsDefault: true}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(2000), nil).Build()
@@ -127,7 +127,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
 		}
@@ -191,7 +190,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	cache := newTestCache()
 	collectionID := int64(1000)
 	mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(collectionID, nil).Build()
-	mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{CollID: collectionID}, nil).Build()
+	mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{CollID: collectionID, VChannels: []string{"test-ch"}}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitions).Return(map[string]int64{"_default": 2000}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&metacache.PartitionInfo{Name: "_default", PartitionID: 2000, IsDefault: true}, nil).Build()
 	mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(2000), nil).Build()
@@ -281,7 +280,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
 		}

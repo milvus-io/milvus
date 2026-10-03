@@ -69,7 +69,9 @@ func TestPartitionKey(t *testing.T) {
 	}
 	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
 	schema.Fields = append(schema.Fields, partitionKeyField)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
+	// The write path reads the collection's routing and channel list on every
+	// attempt; a collection with no modulus has never been split.
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema), VChannels: []string{"test-channel"}}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -133,7 +135,6 @@ func TestPartitionKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
 		}
@@ -251,7 +252,9 @@ func TestDefaultPartition(t *testing.T) {
 	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
 	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
+	// The write path reads the collection's routing and channel list on every
+	// attempt; a collection with no modulus has never been split.
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema), VChannels: []string{"test-channel"}}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -312,7 +315,6 @@ func TestDefaultPartition(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			chMgr:       chMgr,
-			vChannels:   nil,
 			pChannels:   nil,
 			schema:      nil,
 		}
