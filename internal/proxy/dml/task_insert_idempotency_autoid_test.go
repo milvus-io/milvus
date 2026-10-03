@@ -300,6 +300,7 @@ func TestInsertTaskReassignAutoIDForIdempotencySkipsNamespacePartitionKeyRouting
 
 	require.NoError(t, task.reassignAutoIDForIdempotencyIfNeeded(context.Background(), true, primary))
 	require.Equal(t, originalRowIDs, task.insertMsg.GetRowIDs())
+	require.Nil(t, task.stableAutoIDPrimary, "a namespace insert is not pinned")
 }
 
 func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(t *testing.T) {
@@ -343,6 +344,8 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 	}
 
 	require.NoError(t, task.reassignAutoIDForIdempotencyIfNeeded(ctx, true, primary))
+	require.Same(t, primary, task.stableAutoIDPrimary, "Execute re-pins the rows it has yet to place")
+	require.Equal(t, autoIDRouteKey(legacyWriteRoute(channels)), task.stableAutoIDRouteKey)
 	require.Equal(t, task.insertMsg.GetRowIDs(), task.result.GetIDs().GetIntId().GetData())
 	requireOffsetRoutesToModuloChannels(t, task.result.GetIDs(), channels)
 }

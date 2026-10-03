@@ -1043,6 +1043,73 @@ func TestDeleteByExpressionSettlesEachBatchPerMessage(t *testing.T) {
 	}
 }
 
+// keyedInsertTask is an idempotent insert of pks under key, whose ids are the
+// primary keys themselves.
+func (f *splitFenceFixture) keyedInsertTask(pks []int64, key string) *InsertTask {
+	task := f.insertTask(pks)
+	task.idempotencyEnabled = true
+	task.idempotencyKey = key
+	return task
+}
+
+func idempotentResult(offsets []uint32, ids ...int64) *messagespb.IdempotentInsertResult {
+	return streamingmessage.NewIdempotentInsertResult(offsets, int64IDs(ids...))
+}
+
+// A keyed retry whose earlier attempt landed on one shard is answered there
+// from the idempotency window: its rows are not written again, and the result
+// carries the ids of the first attempt.
+func TestInsertExecuteMergesTheIdempotentDuplicateOfAnEarlierAttempt(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, _ := twoShardSplit()
+	f := newSplitFenceFixture(t, pre, pre)
+	wal := installSplitFenceTestWAL(t)
+	pks := seqPKs(16)
+	var siblingOffsets []uint32
+	var siblingIDs []int64
+	for i, pk := range pks {
+		if splitOwner(t, pre, pk) == splitSibling {
+			siblingOffsets = append(siblingOffsets, uint32(i))
+			siblingIDs = append(siblingIDs, 1000+pk)
+		}
+	}
+	require.NotEmpty(t, siblingOffsets)
+	wal.windows[splitSibling] = map[string]*splitFenceTestWindowEntry{
+		"key": {tick: 7, result: idempotentResult(siblingOffsets, siblingIDs...)},
+	}
+	task := f.keyedInsertTask(pks, "key")
+
+	require.NoError(t, task.Execute(context.Background()))
+	require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
+	assert.Empty(t, wal.insertedRowIDs[splitSibling], "the sibling answered from its window")
+	assert.NotEmpty(t, wal.insertedRowIDs[splitSource])
+	ids := task.result.GetIDs().GetIntId().GetData()
+	for i, offset := range siblingOffsets {
+		assert.Equal(t, siblingIDs[i], ids[offset])
+	}
+}
+
+// A key reused with a payload of another shape cannot be merged; the data the
+// key wrote exists, so the request fails as an input error, not as a write
+// failure.
+func TestInsertExecuteReportsAKeyReusedWithADifferentPayload(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, _ := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, pre)
+	wal := installSplitFenceTestWAL(t)
+	wal.windows[splitSource] = map[string]*splitFenceTestWindowEntry{
+		"key": {tick: 7, result: idempotentResult([]uint32{100}, 1)},
+	}
+	task := f.keyedInsertTask(seqPKs(4), "key")
+
+	require.NoError(t, task.Execute(context.Background()))
+	st := task.result.GetStatus()
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), st.GetCode(), st.GetReason())
+	assert.Empty(t, wal.insertedRowIDs[splitSource])
+}
+
+// A never-split collection routes by the channel list of its routing lookup;
+// the channel manager is not read a second time.
 func TestInsertExecuteReadsNoSecondChannelList(t *testing.T) {
 	useSingleMessageRepack(t)
 	pre, _ := twoShardSplit()
@@ -1284,6 +1351,40 @@ func TestUpsertAppendToleratesAShortResponse(t *testing.T) {
 // asked on a retry (the first attempt has nothing fenced to probe yet), and a
 // plain, uncoded error from it -- e.g. a transport hiccup -- must not be
 // confused with the vchannel telling the probe it holds no proof of the key.
+func TestKeyedInsertBacksOffOnATransientProbeFailureDuringARetry(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t)
+	// The source's every append or probe is routed through wal.failing rather
+	// than wal.fenced, so its first (real) refusal, its transient hiccup, and
+	// its later (real) refusal of the probe can each be swapped in in turn.
+	wal.failing[splitSource] = fencedErr(splitSource)
+	f.onEvict = func(eviction int) {
+		switch eviction {
+		case 1:
+			// Between the fenced first attempt and the retry that probes the
+			// source's window, a transient, uncoded failure takes the probe.
+			wal.failing[splitSource] = errors.New("transient probe hiccup")
+		case 2:
+			// The retry that backed off from the transient failure asks again;
+			// the source is still fenced.
+			wal.failing[splitSource] = fencedErr(splitSource)
+		}
+	}
+	pks := seqPKs(4)
+	task := f.keyedInsertTask(pks, "key")
+
+	require.NoError(t, task.Execute(context.Background()))
+	require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
+	assert.Equal(t, 2, f.evictions, "one refresh for the fence, one more backing off the transient probe failure")
+	assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 1)
+	assert.Empty(t, wal.insertedRowIDs[splitSource], "the source never actually took a write")
+}
+
+// realBuildDeleteMessages is buildDeleteMessages' own logic, reused by
+// TestDeleteExecuteBacksOffOnATransientBuildFailureDuringARetry to answer every
+// call its mock does not inject a failure into.
 func realBuildDeleteMessages(
 	dt *DeleteTask,
 	result map[uint32][]*msgstream.DeleteMsg,
