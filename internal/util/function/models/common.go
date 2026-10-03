@@ -400,6 +400,19 @@ func retrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 			return body, nil
 		}
 
+		// send() has already classified the failure: transport errors, 429 and
+		// 5xx are transient (ErrServiceUnavailable, retriable), every other
+		// non-200 status is caused by the request or the configuration
+		// (ErrFunctionFailed, not retriable). Repeating a permanently failing
+		// request cannot make it succeed; it only triples the load on the model
+		// service and adds the whole backoff to the user-visible error.
+		// Stop only on a typed error explicitly classified non-retriable:
+		// merr.IsRetryableErr is false for any non-merr error, so an error
+		// that reaches here unclassified is treated as transient.
+		if merr.IsMilvusError(err) && !merr.IsRetryableErr(err) {
+			return nil, err
+		}
+
 		// Don't sleep after the last retry attempt
 		if i == maxRetries-1 {
 			break
