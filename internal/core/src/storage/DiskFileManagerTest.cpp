@@ -178,6 +178,32 @@ NewFilesAfter(const std::vector<std::string>& before,
 
 }  // namespace
 
+TEST_F(DiskAnnFileManagerTest, AddFileMetaAccountsForStreamedBytes) {
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
+
+    FileMeta file_meta;
+    file_meta.file_path = "index_files/streamed.index";
+    file_meta.file_size = 1024;
+
+    EXPECT_TRUE(file_manager->AddFileMeta(file_meta));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), 1024);
+    auto files = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_EQ(files.begin()->second, 1024);
+
+    file_meta.file_size = 2048;
+    EXPECT_TRUE(file_manager->AddFileMeta(file_meta));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), 2048);
+
+    file_meta.file_path = "index_files/another.index";
+    file_meta.file_size = 4096;
+    EXPECT_TRUE(file_manager->AddFileMeta(file_meta));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), 6144);
+}
+
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string indexFilePath =
