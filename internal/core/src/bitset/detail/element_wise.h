@@ -24,6 +24,7 @@
 #include "proxy.h"
 
 #include "ctz.h"
+#include "count_bulk.h"
 #include "popcount.h"
 
 #include "bitset/common.h"
@@ -228,6 +229,15 @@ struct ElementWiseBitsetPolicy {
            const size_t start_left,
            const size_t start_right,
            const size_t size) {
+        if (op_binary_unaligned(
+                left,
+                right,
+                start_left,
+                start_right,
+                size,
+                [](data_type a, data_type b) { return a & b; })) {
+            return;
+        }
         op_func(left,
                 right,
                 start_left,
@@ -236,6 +246,31 @@ struct ElementWiseBitsetPolicy {
                 [](const data_type left_v, const data_type right_v) {
                     return left_v & right_v;
                 });
+    }
+
+    // Preserve AND-then-FLIP traversal when the inputs alias. Fusing writes in
+    // that case could expose complemented bits to a later read of right.
+    static inline void
+    op_and_flip(data_type* const left,
+                const data_type* const right,
+                const size_t start_left,
+                const size_t start_right,
+                const size_t size) {
+        if (size == 0) {
+            return;
+        }
+        if (ranges_overlap(left, start_left, right, start_right, size)) {
+            op_and(left, right, start_left, start_right, size);
+            op_flip(left, start_left, size);
+            return;
+        }
+        const auto nand = [](data_type a, data_type b) {
+            return data_type(~(a & b));
+        };
+        if (!op_binary_unaligned(
+                left, right, start_left, start_right, size, nand)) {
+            op_func(left, right, start_left, start_right, size, nand);
+        }
     }
 
     static BITSET_ALWAYS_INLINE inline void
@@ -262,6 +297,15 @@ struct ElementWiseBitsetPolicy {
           const size_t start_left,
           const size_t start_right,
           const size_t size) {
+        if (op_binary_unaligned(
+                left,
+                right,
+                start_left,
+                start_right,
+                size,
+                [](data_type a, data_type b) { return a | b; })) {
+            return;
+        }
         op_func(left,
                 right,
                 start_left,
@@ -359,6 +403,9 @@ struct ElementWiseBitsetPolicy {
         // inner loop vectorizes) and branch once per block
         constexpr size_t block_elements = 64 / sizeof(data_type);
         size_t i = start_element;
+        if (i < end_element && data[i] != data_type(-1)) {
+            return false;
+        }
         for (; i + block_elements <= end_element; i += block_elements) {
             data_type acc = data_type(-1);
             for (size_t k = 0; k < block_elements; k++) {
@@ -429,6 +476,9 @@ struct ElementWiseBitsetPolicy {
         // inner loop vectorizes) and branch once per block
         constexpr size_t block_elements = 64 / sizeof(data_type);
         size_t i = start_element;
+        if (i < end_element && data[i] != data_type(0)) {
+            return false;
+        }
         for (; i + block_elements <= end_element; i += block_elements) {
             data_type acc = data_type(0);
             for (size_t k = 0; k < block_elements; k++) {
@@ -465,6 +515,13 @@ struct ElementWiseBitsetPolicy {
             const size_t start_dst,
             const size_t size) {
         if (size == 0) {
+            return;
+        }
+
+        if (size >= 4 * data_bits &&
+            ((start_src | start_dst) % data_bits) != 0 &&
+            !ranges_overlap(src, start_src, dst, start_dst, size)) {
+            op_copy_unaligned(src, start_src, dst, start_dst, size);
             return;
         }
 
@@ -590,14 +647,19 @@ struct ElementWiseBitsetPolicy {
         const auto start_shift = get_shift(start);
         const auto end_shift = get_shift(start + size);
 
-        // same element?
-        if (start_element == end_element) {
-            const data_type existing_v = data[start_element];
+        // Include a range ending exactly at the element boundary. In
+        // particular, an aligned 64-bit count must not enter bulk dispatch.
+        if (size <= data_bits - start_shift) {
+            const data_type value =
+                data[start_element] & get_shift_mask_end(start_shift);
+            // Discard bits above the range by shifting, avoiding a special
+            // mask branch for a full element. size > 0 makes the shift safe.
+            return PopCountHelper<data_type>::count(
+                data_type(value << (data_bits - start_shift - size)));
+        }
 
-            const data_type existing_mask = get_shift_mask_end(start_shift) &
-                                            get_shift_mask_begin(end_shift);
-
-            return PopCountHelper<data_type>::count(existing_v & existing_mask);
+        if (size >= 16384) {
+            return op_count_large(data, start, size);
         }
 
         // process the first element
@@ -611,7 +673,7 @@ struct ElementWiseBitsetPolicy {
             start_element += 1;
         }
 
-        // process the middle
+        // Keep short ranges on the existing inline path.
         for (size_t i = start_element; i < end_element; i++) {
             count += PopCountHelper<data_type>::count(data[i]);
         }
@@ -625,6 +687,26 @@ struct ElementWiseBitsetPolicy {
                 PopCountHelper<data_type>::count(existing_v & existing_mask);
         }
 
+        return count;
+    }
+
+    static __attribute__((noinline)) size_t
+    op_count_large(const data_type* data, size_t start, size_t size) {
+        auto first = get_element(start);
+        const auto last = get_element(start + size);
+        const auto left_shift = get_shift(start);
+        const auto right_shift = get_shift(start + size);
+        size_t count = 0;
+        if (left_shift != 0) {
+            count += PopCountHelper<data_type>::count(
+                data[first++] & get_shift_mask_end(left_shift));
+        }
+        count += CountBytesBulk(reinterpret_cast<const uint8_t*>(data + first),
+                                (last - first) * sizeof(data_type));
+        if (right_shift != 0) {
+            count += PopCountHelper<data_type>::count(
+                data[last] & get_shift_mask_begin(right_shift));
+        }
         return count;
     }
 
@@ -714,6 +796,15 @@ struct ElementWiseBitsetPolicy {
            const size_t start_left,
            const size_t start_right,
            const size_t size) {
+        if (op_binary_unaligned(
+                left,
+                right,
+                start_left,
+                start_right,
+                size,
+                [](data_type a, data_type b) { return a ^ b; })) {
+            return;
+        }
         op_func(left,
                 right,
                 start_left,
@@ -730,6 +821,15 @@ struct ElementWiseBitsetPolicy {
            const size_t start_left,
            const size_t start_right,
            const size_t size) {
+        if (op_binary_unaligned(
+                left,
+                right,
+                start_left,
+                start_right,
+                size,
+                [](data_type a, data_type b) { return a & ~b; })) {
+            return;
+        }
         op_func(left,
                 right,
                 start_left,
@@ -1035,6 +1135,114 @@ struct ElementWiseBitsetPolicy {
         }
 
         return inactive;
+    }
+
+    // Conservative byte overlap check, including partial boundary elements.
+    // Preserve the old traversal for aliasing inputs (including shifted views).
+    static inline bool
+    ranges_overlap(const data_type* a,
+                   size_t a_start,
+                   const data_type* b,
+                   size_t b_start,
+                   size_t size) {
+        const uintptr_t ap =
+            reinterpret_cast<uintptr_t>(a + get_element(a_start));
+        const uintptr_t bp =
+            reinterpret_cast<uintptr_t>(b + get_element(b_start));
+        const size_t an =
+            get_required_size_in_elements(get_shift(a_start) + size) *
+            sizeof(data_type);
+        const size_t bn =
+            get_required_size_in_elements(get_shift(b_start) + size) *
+            sizeof(data_type);
+        return ap <= bp ? bp - ap < an : ap - bp < bn;
+    }
+
+    static inline void
+    op_copy_unaligned(const data_type* src,
+                      size_t src_start,
+                      data_type* dst,
+                      size_t dst_start,
+                      size_t size) {
+        if (get_shift(dst_start) != 0) {
+            const size_t prefix = data_bits - get_shift(dst_start);
+            op_write(dst, dst_start, prefix, op_read(src, src_start, prefix));
+            dst_start += prefix;
+            src_start += prefix;
+            size -= prefix;
+        }
+        const size_t count = size / data_bits;
+        const auto* input = src + get_element(src_start);
+        auto* output = dst + get_element(dst_start);
+        const size_t shift = get_shift(src_start);
+        if (shift == 0) {
+            std::memcpy(output, input, count * sizeof(data_type));
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                output[i] = data_type((input[i] >> shift) |
+                                      (input[i + 1] << (data_bits - shift)));
+            }
+        }
+        const size_t bits = count * data_bits;
+        if (bits != size) {
+            op_write(dst,
+                     dst_start + bits,
+                     size - bits,
+                     op_read(src, src_start + bits, size - bits));
+        }
+    }
+
+    // Only pure binary operators use this path. op_func also accepts counting
+    // callbacks whose accounting relies on its original data_bits-sized chunks.
+    template <typename Func>
+    static BITSET_ALWAYS_INLINE inline bool
+    op_binary_unaligned(data_type* left,
+                        const data_type* right,
+                        size_t left_start,
+                        size_t right_start,
+                        size_t size,
+                        Func func) {
+        if (size < 4 * data_bits ||
+            ((left_start | right_start) % data_bits) == 0 ||
+            ranges_overlap(left, left_start, right, right_start, size)) {
+            return false;
+        }
+        if (get_shift(left_start) != 0) {
+            const size_t prefix = data_bits - get_shift(left_start);
+            op_write(left,
+                     left_start,
+                     prefix,
+                     func(op_read(left, left_start, prefix),
+                          op_read(right, right_start, prefix)));
+            left_start += prefix;
+            right_start += prefix;
+            size -= prefix;
+        }
+        const size_t count = size / data_bits;
+        auto* output = left + get_element(left_start);
+        const auto* input = right + get_element(right_start);
+        const size_t shift = get_shift(right_start);
+        if (shift == 0) {
+            for (size_t i = 0; i < count; ++i) {
+                output[i] = func(output[i], input[i]);
+            }
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                const data_type rhs =
+                    data_type((input[i] >> shift) |
+                              (input[i + 1] << (data_bits - shift)));
+                output[i] = func(output[i], rhs);
+            }
+        }
+        const size_t bits = count * data_bits;
+        if (bits != size) {
+            op_write(left,
+                     left_start + bits,
+                     size - bits,
+                     func(op_read(left, left_start + bits, size - bits),
+                          op_read(right, right_start + bits, size - bits)));
+        }
+        return true;
     }
 
     // data_type Func(const data_type left_v, const data_type right_v);
