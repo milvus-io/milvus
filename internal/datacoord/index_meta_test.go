@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -1864,6 +1865,131 @@ func TestRemoveSegmentIndex(t *testing.T) {
 		assert.Equal(t, 0, m.segmentIndexes.Len())
 		assert.Equal(t, len(m.segmentBuildInfo.List()), 0)
 	})
+}
+
+func TestRemoveSegmentIndexConcurrentCreateDifferentIndex(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := newSegmentIndexMeta(catalog)
+	old := &model.SegmentIndex{
+		CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5,
+		IndexState: commonpb.IndexState_Finished,
+	}
+	definition := &model.Index{CollectionID: 1, FieldID: 100, IndexID: 4, IndexName: "idx"}
+	require.NoError(t, m.CreateIndex(ctx, definition))
+	require.NoError(t, m.AddSegmentIndex(ctx, old))
+	require.NoError(t, m.MarkIndexAsDeleted(ctx, old.CollectionID, []int64{old.IndexID}))
+
+	// Dropping a definition allows a new index on the same field before GC
+	// removes the old segment record. The new index has different IDs.
+	indexID, err := m.CanCreateIndex(&indexpb.CreateIndexRequest{
+		CollectionID: 1, FieldID: 100, IndexName: "idx",
+	}, false)
+	require.NoError(t, err)
+	require.Zero(t, indexID)
+	definition = model.CloneIndex(definition)
+	definition.IndexID = 6
+	require.NoError(t, m.CreateIndex(ctx, definition))
+	created := &model.SegmentIndex{
+		CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 6, BuildID: 7,
+		IndexState: commonpb.IndexState_Unissued,
+	}
+
+	type segmentIndexMap = typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+	createdDone := make(chan struct{})
+	var createErr error
+	var remove func(*segmentIndexMap, UniqueID)
+	patch := mockey.Mock((*segmentIndexMap).Remove).Origin(&remove).To(
+		func(indexes *segmentIndexMap, segmentID UniqueID) {
+			if indexes == m.segmentIndexes && segmentID == old.SegmentID {
+				// GC has decided the segment's index map is empty. Give the
+				// inspector a chance to install a new index before removing it.
+				go func() {
+					createErr = m.AddSegmentIndex(ctx, created)
+					close(createdDone)
+				}()
+				select {
+				case <-createdDone:
+				case <-time.After(100 * time.Millisecond):
+					// With serialization, creation waits for GC to finish.
+				}
+			}
+			remove(indexes, segmentID)
+		}).Build()
+	defer patch.UnPatch()
+
+	require.NoError(t, m.RemoveSegmentIndex(ctx, old.BuildID))
+	select {
+	case <-createdDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("new index creation did not finish after GC")
+	}
+	require.NoError(t, createErr)
+	rows, err := catalog.ListSegmentIndexes(ctx, old.CollectionID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, created.BuildID, rows[0].BuildID)
+	_, exists := m.GetIndexJob(old.BuildID)
+	assert.False(t, exists)
+	_, exists = m.GetIndexJob(created.BuildID)
+	assert.True(t, exists)
+	current := m.GetSegmentIndexes(created.CollectionID, created.SegmentID)
+	require.Contains(t, current, created.IndexID, "GC must not discard the new index's segment mapping")
+	assert.Equal(t, created.BuildID, current[created.IndexID].BuildID)
+}
+
+func TestSegmentIndexMapUpdatesDoNotBlockOtherSegments(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := newSegmentIndexMeta(catalog)
+	first := &model.SegmentIndex{CollectionID: 1, SegmentID: 2, IndexID: 3, BuildID: 4}
+	other := &model.SegmentIndex{CollectionID: 1, SegmentID: 5, IndexID: 3, BuildID: 6}
+	require.NoError(t, m.AddSegmentIndex(ctx, first))
+
+	type segmentIndexMap = typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+	otherDone := make(chan struct{})
+	var otherErr error
+	var published, completedBeforeRemoval bool
+	var remove func(*segmentIndexMap, UniqueID)
+	patch := mockey.Mock((*segmentIndexMap).Remove).Origin(&remove).To(
+		func(indexes *segmentIndexMap, segmentID UniqueID) {
+			if indexes == m.segmentIndexes && segmentID == first.SegmentID {
+				// Pause GC while it holds the map lock for the first segment.
+				// All three map-update paths must still progress for another.
+				go func() {
+					defer close(otherDone)
+					if otherErr = m.AddSegmentIndex(ctx, other); otherErr != nil {
+						return
+					}
+					m.keyLock.Lock(other.BuildID)
+					m.updateSegmentIndexManifestPublished(other, true)
+					m.keyLock.Unlock(other.BuildID)
+					record, ok := m.GetIndexJob(other.BuildID)
+					published = ok && record.ManifestPublished
+					otherErr = m.RemoveSegmentIndex(ctx, other.BuildID)
+				}()
+				select {
+				case <-otherDone:
+					completedBeforeRemoval = true
+				case <-time.After(5 * time.Second):
+					// Let GC finish so a blocked worker can also exit.
+				}
+			}
+			remove(indexes, segmentID)
+		}).Build()
+	defer patch.UnPatch()
+
+	require.NoError(t, m.RemoveSegmentIndex(ctx, first.BuildID))
+	select {
+	case <-otherDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("updates to the other segment did not finish")
+	}
+	require.NoError(t, otherErr)
+	assert.True(t, published)
+	assert.True(t, completedBeforeRemoval, "one segment's GC must not block another segment's map updates")
+	assert.Zero(t, m.segmentIndexes.Len())
+	assert.Empty(t, m.segmentBuildInfo.List())
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
