@@ -391,6 +391,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
+		// Set only for a shard split rewrite: the two targets (the residues
+		// each owns, the vchannel its outputs belong to) and the post-split
+		// modulus the residues are taken against.
+		HashSplitTargets: taskProto.GetHashSplitTargets(),
+		HashSplitModulus: taskProto.GetHashSplitModulus(),
 	}
 
 	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources in ref mode.
