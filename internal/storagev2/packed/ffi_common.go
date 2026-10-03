@@ -65,6 +65,12 @@ var (
 	PropertyFSMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
 	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
+	// Why: the multipart part size is an fs-level property in milvus-storage
+	// (PROPERTY_FS_MULTI_PART_UPLOAD_SIZE, consumed by both the filesystem
+	// producers and the Parquet writer). Not a "writer.*" key because the pinned
+	// milvus-storage silently ignores undefined property keys, so a writer-scoped
+	// key would leave uploads on the 10 MiB default without any error.
+	PropertyFSMultiPartUploadSize = C.GoString(C.loon_properties_fs_multi_part_upload_size)
 
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
 	PropertyWriterFormat             = C.GoString(C.loon_properties_writer_format)
