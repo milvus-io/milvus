@@ -1458,6 +1458,40 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.False(t, metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(nodeID, "ch-retired"), "the delisted vchannel's gauge must be gone")
 		assert.True(t, metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(nodeID, "ch-kept"), "a listed vchannel keeps its gauge")
 	})
+
+	// A shard split and its adoption change the collection's vchannel list while
+	// it lives, and rootcoord announces the new list only through this broadcast.
+	// A cache hit that kept the old list would hide the split's targets from
+	// every datacoord reader until a restart reloaded the cache.
+	t.Run("a cache hit takes the altered vchannel list", func(t *testing.T) {
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{
+			ID:            1,
+			Partitions:    []int64{10},
+			VChannelNames: []string{"by-dev-rootcoord-dml_0_1v0"},
+		})
+		s := &Server{meta: &meta{metaStore: ms}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		grown := []string{"by-dev-rootcoord-dml_0_1v0", "by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"}
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			PartitionIDs: []int64{10},
+			VChannels:    grown,
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		coll := s.meta.GetCollection(1)
+		require.NotNil(t, coll)
+		assert.Equal(t, grown, coll.VChannelNames)
+
+		// An adoption retires the source: the list shrinks as well as grows.
+		adopted := []string{"by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"}
+		resp, err = s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			VChannels:    adopted,
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Equal(t, adopted, s.meta.GetCollection(1).VChannelNames)
+	})
 }
 
 func TestServer_GcConfirm(t *testing.T) {
