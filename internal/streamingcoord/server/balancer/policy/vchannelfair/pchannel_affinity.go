@@ -8,6 +8,9 @@ import (
 // newPChannelAffinity creates a new pchannel affinity from the given channels.
 func newPChannelAffinity(channels map[types.ChannelID]channel.PChannelStatsView) *pchannelAffinity {
 	affinities := make(map[sortedChannelID]float64)
+	// Reused across all pairs to avoid allocating a new transient map for every
+	// pchannel pair; cleared before each pair is processed.
+	counter := make(map[int64]int)
 	for channelID1, stats1 := range channels {
 		for channelID2, stats2 := range channels {
 			id := newSortedChannelID(channelID1, channelID2)
@@ -18,7 +21,7 @@ func newPChannelAffinity(channels map[types.ChannelID]channel.PChannelStatsView)
 				continue
 			}
 
-			counter := map[int64]int{}
+			clear(counter)
 			for _, collectionID := range stats1.VChannels {
 				counter[collectionID]++
 			}
