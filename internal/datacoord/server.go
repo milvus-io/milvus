@@ -747,8 +747,11 @@ func (s *Server) initCompaction() {
 		cph.setChannelSplitTargetChecker(s.shardSplitManager.IsVChannelSplitTarget)
 		s.shardSplitManager.setCompactionPreempter(cph)
 		// A split redistributes its source by rewrite plans the inspector runs.
+		// s.importMeta is built above, before initCompaction: the rewrite
+		// reads it to tell whether an import that could still publish an L0
+		// on the split's family is in flight.
 		s.shardSplitManager.setRedistributor(newHashSplitRewriter(s.shardSplitManager,
-			newInspectorRewriteDispatcher(s.ctx, s.meta, cph, s.meta, s.allocator)))
+			newInspectorRewriteDispatcher(s.ctx, s.meta, cph, s.meta, s.allocator), s.importMeta))
 	}
 	cph.loadMeta()
 	s.compactionInspector = cph
