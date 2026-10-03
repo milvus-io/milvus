@@ -237,7 +237,14 @@ func (n *noopWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []
 			},
 		}
 	}
-	return AppendResponses{}
+	// One response per message, as the real accesser returns: a caller that
+	// settles its write per message must be able to read every message as
+	// committed.
+	resp := types.NewAppendResponseN(len(msgs))
+	for i := range resp.Responses {
+		resp.Responses[i].AppendResult = &types.AppendResult{}
+	}
+	return resp
 }
 
 func (n *noopWALAccesser) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {

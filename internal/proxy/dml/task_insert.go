@@ -41,7 +41,6 @@ type InsertTask struct {
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
 	chMgr           channelmgr.ChannelsMgr
-	vChannels       []vChan
 	pChannels       []pChan
 	schema          *schemapb.CollectionSchema
 	partitionKeys   *schemapb.FieldData
