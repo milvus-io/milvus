@@ -18,11 +18,14 @@ package dml
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -136,11 +139,29 @@ func allRowOffsets(numRows int) []int {
 type pendingRows struct {
 	rows    rowSet
 	numRows int
-	fence   *splitFence
+	// placedOn records, for a keyed insert, the vchannel holding each offset
+	// that is durable: the one that took it, or the one whose idempotency
+	// window answered for it. nil for every other write, which never gets a
+	// window's answer.
+	placedOn map[int]string
+	// checkPlacement is set once the write routes against a collection a split
+	// has touched, or meets a fence: from then on a window's answer that does
+	// not match where the rows went is refused (see settleAnswered). Until
+	// then the idempotent-write contract of an untouched collection holds.
+	checkPlacement bool
+	fence          *splitFence
 }
 
 func newPendingRows(numRows int, fence *splitFence) *pendingRows {
 	return &pendingRows{rows: newRowSet(allRowOffsets(numRows)), numRows: numRows, fence: fence}
+}
+
+// newKeyedPendingRows is newPendingRows for a keyed insert, which checks every
+// answer of an idempotency window against where its rows went.
+func newKeyedPendingRows(numRows int, fence *splitFence) *pendingRows {
+	p := newPendingRows(numRows, fence)
+	p.placedOn = make(map[int]string, numRows)
+	return p
 }
 
 // retain narrows a routing result to the rows still pending, and holds back the
@@ -159,11 +180,100 @@ func (p *pendingRows) retain(channel2RowOffsets map[string][]int) map[string][]i
 	return retained
 }
 
-// settleLanded settles the offsets of a message a vchannel took: they are
-// durable now and are never sent again.
+// checkPlacementFrom makes every later window answer be checked against where
+// this write placed its rows (see settleAnswered). A keyed insert calls it
+// once it routes against a collection a split has touched, or meets a fence.
+func (p *pendingRows) checkPlacementFrom() {
+	p.checkPlacement = true
+}
+
+// settleLanded settles the offsets of a message vchannel took. Only pending
+// offsets are ever sent, so under placement checks an offset that is no
+// longer pending was placed elsewhere by an answer of the same append: it is
+// now durable twice.
 func (p *pendingRows) settleLanded(vchannel string, offsets []int) error {
-	p.rows.remove(offsets)
+	for _, offset := range offsets {
+		if _, ok := p.rows[offset]; !ok && p.checkPlacement {
+			return merr.WrapErrServiceInternalMsg(
+				"row %d was written on vchannel %s after the idempotency window of %s answered for it", offset, vchannel, p.placedOn[offset])
+		}
+		p.place(vchannel, offset)
+	}
 	return nil
+}
+
+func (p *pendingRows) place(vchannel string, offset int) {
+	delete(p.rows, offset)
+	if p.placedOn != nil {
+		p.placedOn[offset] = vchannel
+	}
+}
+
+// settleAnswered settles the offsets the idempotency window of vchannel
+// answered for: the offsets the key's first append wrote there. carried are
+// the offsets the answered message addressed to vchannel.
+//
+// On a collection no split has touched, and before this write met a fence,
+// this is the idempotent-write contract as it was before splits: the message
+// is answered, so its own offsets are settled with the answered ones, and a
+// key reused with a same-size but different payload returns the first
+// request's result (20260604-idempotent_write.md). An answered offset
+// outside the request is left to the result merge, which reports the reused
+// key.
+//
+// Once rows may have been re-routed by a fence -- by this request or by the
+// earlier request the key comes from -- the answered offsets, and only those,
+// are durable, and the answer must match where the rows went:
+//   - an answered offset outside the request, or a carried offset the answer
+//     leaves out, is a key reused with a different payload: an identical
+//     retry sends each vchannel exactly the offsets the first request wrote
+//     there, since auto ids stay pinned to residues (repinPendingAutoIDs).
+//     Input error. Keeping such a row pending would only loop: the window
+//     gives the same answer every time;
+//   - an answer for a row this write placed on another vchannel, or never
+//     placed, is an inconsistency of the placement across the fence: settling
+//     it would call durable a row never written here, or write one twice.
+//     System error.
+func (p *pendingRows) settleAnswered(vchannel string, answered, carried []int) error {
+	if !p.checkPlacement {
+		for _, offset := range carried {
+			p.place(vchannel, offset)
+		}
+		for _, offset := range answered {
+			if offset >= 0 && offset < p.numRows {
+				p.place(vchannel, offset)
+			}
+		}
+		return nil
+	}
+	for _, offset := range answered {
+		if offset < 0 || offset >= p.numRows {
+			return errKeyReusedWithAnotherPayload(vchannel, "answered for row %d of a %d-row insert", offset, p.numRows)
+		}
+	}
+	answeredSet := newRowSet(answered)
+	for _, offset := range carried {
+		if _, ok := answeredSet[offset]; !ok {
+			return errKeyReusedWithAnotherPayload(vchannel, "does not answer for row %d this insert routes there", offset)
+		}
+	}
+	for _, offset := range answered {
+		if _, ok := p.rows[offset]; ok {
+			p.place(vchannel, offset)
+			continue
+		}
+		if p.placedOn == nil || p.placedOn[offset] != vchannel {
+			return merr.WrapErrServiceInternalMsg(
+				"the idempotency window of vchannel %s answered for row %d, which this insert placed on %q", vchannel, offset, p.placedOn[offset])
+		}
+	}
+	return nil
+}
+
+func errKeyReusedWithAnotherPayload(vchannel string, format string, args ...any) error {
+	return merr.WrapErrParameterInvalidMsg(
+		"idempotency key was reused with a different payload: the idempotency window of vchannel %s %s",
+		vchannel, fmt.Sprintf(format, args...))
 }
 
 // dropFenced removes the messages addressed to a vchannel a fence already
@@ -197,6 +307,27 @@ func (p *pendingRows) pendingSet() rowSet {
 	return p.rows
 }
 
+// sortedOffsets returns the pending offsets in ascending order.
+func (p *pendingRows) sortedOffsets() []int {
+	offsets := make([]int, 0, len(p.rows))
+	for offset := range p.rows {
+		offsets = append(offsets, offset)
+	}
+	sort.Ints(offsets)
+	return offsets
+}
+
+// first is the smallest pending offset, or -1 when nothing is pending.
+func (p *pendingRows) first() int {
+	first := -1
+	for offset := range p.rows {
+		if first < 0 || offset < first {
+			first = offset
+		}
+	}
+	return first
+}
+
 func (p *pendingRows) done() bool {
 	return len(p.rows) == 0
 }
@@ -211,10 +342,45 @@ type splitFence struct {
 	// firstRefresh is when the write first had to refresh, which is where the
 	// wait of a request with no deadline is measured from.
 	firstRefresh time.Time
+	// probed lists the fenced vchannels whose idempotency window already
+	// answered for this write's key (see probeFencedWindows).
+	probed map[string]struct{}
+	// staleProbes lists the vchannels whose probe answered as a vchannel that
+	// no longer serves the collection, and got the refresh that normally
+	// delists it (see retryProbeAnswer).
+	staleProbes map[string]struct{}
 }
 
 func newSplitFence() *splitFence {
-	return &splitFence{fenced: make(map[string]struct{})}
+	return &splitFence{
+		fenced:      make(map[string]struct{}),
+		probed:      make(map[string]struct{}),
+		staleProbes: make(map[string]struct{}),
+	}
+}
+
+// unprobed returns, sorted, the fenced vchannels -- the ones the route lists
+// and the ones this write learned -- whose window has not answered yet.
+func (f *splitFence) unprobed(listed []string) []string {
+	candidates := make(map[string]struct{}, len(listed)+len(f.fenced))
+	for _, vchannel := range listed {
+		candidates[vchannel] = struct{}{}
+	}
+	for vchannel := range f.fenced {
+		candidates[vchannel] = struct{}{}
+	}
+	out := make([]string, 0, len(candidates))
+	for vchannel := range candidates {
+		if _, ok := f.probed[vchannel]; !ok {
+			out = append(out, vchannel)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (f *splitFence) markProbed(vchannel string) {
+	f.probed[vchannel] = struct{}{}
 }
 
 func (f *splitFence) isFenced(vchannel string) bool {
@@ -240,7 +406,10 @@ func (f *splitFence) observe(resp streaming.AppendResponses) {
 // settle reads one append's responses into pending, and returns the first
 // error that is not a fence.
 //
-// A message that landed makes its own offsets durable.
+// A message that landed makes its own offsets durable. A message an
+// idempotency window answered as a duplicate was not appended again: the
+// window answers with the offsets its key's first append wrote on that
+// vchannel, and exactly those are durable (see pendingRows.settleAnswered).
 //
 // An error that is not a fence is not ours to retry -- the caller fails the
 // request rather than replaying rows that may already be durable. A message
@@ -275,11 +444,42 @@ func (f *splitFence) settle(resp streaming.AppendResponses, msgs []message.Mutab
 		if i < len(offsets) {
 			own = offsets[i]
 		}
-		if err := pending.settleLanded(msg.VChannel(), own); err != nil {
+		answered, duplicate, err := duplicateAnsweredOffsets(resp.Responses[i])
+		if err != nil {
+			fail(err)
+			continue
+		}
+		if duplicate {
+			err = pending.settleAnswered(msg.VChannel(), answered, own)
+		} else {
+			err = pending.settleLanded(msg.VChannel(), own)
+		}
+		if err != nil {
 			fail(err)
 		}
 	}
 	return fatal
+}
+
+// duplicateAnsweredOffsets returns the row offsets an idempotency window
+// answered for, and whether the response is such an answer at all; a fresh
+// append carries no answer.
+func duplicateAnsweredOffsets(resp streaming.AppendResponse) ([]int, bool, error) {
+	if resp.AppendResult == nil || resp.AppendResult.Extra == nil {
+		return nil, false, nil
+	}
+	extra := &messagespb.IdempotentInsertResult{}
+	if !resp.AppendResult.Extra.MessageIs(extra) {
+		return nil, false, nil
+	}
+	if err := resp.AppendResult.GetExtra(extra); err != nil {
+		return nil, false, merr.WrapErrServiceInternalErr(err, "decode the idempotent insert result of a duplicate append")
+	}
+	offsets := make([]int, 0, len(extra.GetRowOffsets()))
+	for _, offset := range extra.GetRowOffsets() {
+		offsets = append(offsets, int(offset))
+	}
+	return offsets, true, nil
 }
 
 // retryPreparation decides what a write does with an error met before its

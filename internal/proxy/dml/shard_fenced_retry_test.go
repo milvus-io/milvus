@@ -25,10 +25,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	streamingtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -293,3 +295,142 @@ func TestShardFencedErrorIsRecognised(t *testing.T) {
 
 // answeredResponses is one landed response per answer; a non-nil answer is an
 // idempotency window's duplicate answer naming those offsets.
+func answeredResponses(t *testing.T, answers ...[]uint32) streaming.AppendResponses {
+	t.Helper()
+	resp := appendResponses(make([]error, len(answers))...)
+	for i, offsets := range answers {
+		if offsets == nil {
+			continue
+		}
+		ids := make([]int64, len(offsets))
+		for k, offset := range offsets {
+			ids[k] = int64(offset) * 10
+		}
+		answer, err := anypb.New(streamingmessage.NewIdempotentInsertResult(offsets, int64IDs(ids...)))
+		require.NoError(t, err)
+		resp.Responses[i].AppendResult.Extra = answer
+	}
+	return resp
+}
+
+// checkedPendingRows is a keyed insert's pending rows once rows may have been
+// re-routed by a fence.
+func checkedPendingRows(numRows int, fence *splitFence) *pendingRows {
+	p := newKeyedPendingRows(numRows, fence)
+	p.checkPlacementFrom()
+	return p
+}
+
+// CZ-F1: once rows may have been re-routed, a message an idempotency window
+// answered as a duplicate settles the offsets the window answered for -- all
+// of them, since every message of one transaction gets the transaction's
+// answer -- and nothing else.
+func TestSplitFenceSettleCountsOnlyTheOffsetsAWindowAnsweredFor(t *testing.T) {
+	fence := newSplitFence()
+	pending := checkedPendingRows(8, fence)
+	resp := answeredResponses(t, []uint32{1, 5}, []uint32{1, 5}, nil)
+
+	err := fence.settle(resp, fenceTestMessages(t, "a", "a", "b"), [][]int{{1}, {5}, {2}}, pending)
+	require.NoError(t, err)
+	assert.Equal(t, rowSet{0: {}, 3: {}, 4: {}, 6: {}, 7: {}}, pending.pendingSet())
+	assert.Equal(t, map[int]string{1: "a", 5: "a", 2: "b"}, pending.placedOn)
+
+	// The same window answering again, for a vchannel fenced later on, is no
+	// news.
+	require.NoError(t, pending.settleAnswered("a", []int{1, 5}, nil))
+}
+
+// N-2: before anything may have been re-routed, a window's answer is the
+// idempotent-write contract of master: the answered message's own rows and
+// the answered ones are settled, whatever payload the key came with.
+func TestSplitFenceSettleKeepsTheIdempotentWriteContractWithoutAReroute(t *testing.T) {
+	fence := newSplitFence()
+	pending := newKeyedPendingRows(8, fence)
+	resp := answeredResponses(t, []uint32{0, 2, 100}, nil)
+
+	err := fence.settle(resp, fenceTestMessages(t, "a", "b"), [][]int{{0, 4}, {2, 6}}, pending)
+	require.NoError(t, err, "a row landing after another vchannel answered for it is no error either")
+	assert.Equal(t, rowSet{1: {}, 3: {}, 5: {}, 7: {}}, pending.pendingSet())
+}
+
+// Once rows may have been re-routed, an answer that does not match where this
+// insert placed its rows fails the request rather than settling a row never
+// written here: a reused key as an input error, an inconsistent placement as
+// a System error.
+func TestSplitFenceSettleRefusesAnAnswerThatDoesNotMatchThePlacement(t *testing.T) {
+	t.Run("an answer for a row another vchannel took in the same append", func(t *testing.T) {
+		fence := newSplitFence()
+		pending := checkedPendingRows(8, fence)
+		resp := answeredResponses(t, nil, []uint32{0, 2})
+
+		err := fence.settle(resp, fenceTestMessages(t, "b", "a"), [][]int{{2, 6}, {0, 2}}, pending)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.False(t, merr.IsRetryableErr(err))
+	})
+	t.Run("a landing of a row another vchannel answered for in the same append", func(t *testing.T) {
+		fence := newSplitFence()
+		pending := checkedPendingRows(8, fence)
+		resp := answeredResponses(t, []uint32{0, 2}, nil)
+
+		err := fence.settle(resp, fenceTestMessages(t, "a", "b"), [][]int{{0, 2}, {2, 6}}, pending)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Contains(t, err.Error(), "row 2 was written on vchannel b")
+	})
+	t.Run("an answer that leaves a carried row out", func(t *testing.T) {
+		pending := checkedPendingRows(8, newSplitFence())
+		err := pending.settleAnswered("a", []int{0}, []int{0, 4})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, 8, len(pending.pendingSet()), "nothing is settled")
+	})
+	t.Run("an answer for a row this write never tracked", func(t *testing.T) {
+		pending := newPendingRows(8, newSplitFence())
+		pending.checkPlacementFrom()
+		require.NoError(t, pending.settleLanded("a", []int{0}))
+		assert.ErrorIs(t, pending.settleAnswered("a", []int{0}, nil), merr.ErrServiceInternal)
+	})
+	t.Run("an answer for a row outside the request", func(t *testing.T) {
+		pending := checkedPendingRows(4, newSplitFence())
+		err := pending.settleAnswered("a", []int{1, 100}, nil)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, 4, len(pending.pendingSet()), "nothing is settled")
+	})
+}
+
+func TestDuplicateAnsweredOffsets(t *testing.T) {
+	offsets, duplicate, err := duplicateAnsweredOffsets(streaming.AppendResponse{})
+	assert.NoError(t, err)
+	assert.False(t, duplicate)
+	assert.Nil(t, offsets)
+
+	other, err := anypb.New(&messagespb.PartialUpdateCAS{ReadTs: 1})
+	require.NoError(t, err)
+	_, duplicate, err = duplicateAnsweredOffsets(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{Extra: other}})
+	assert.NoError(t, err)
+	assert.False(t, duplicate, "an extra of another kind is no answer")
+
+	corrupt := &anypb.Any{TypeUrl: "type.googleapis.com/milvus.proto.messages.IdempotentInsertResult", Value: []byte{0xff, 0xff}}
+	_, _, err = duplicateAnsweredOffsets(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{Extra: corrupt}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	fence := newSplitFence()
+	resp := appendResponses(nil)
+	resp.Responses[0].AppendResult.Extra = corrupt
+	err = fence.settle(resp, fenceTestMessages(t, "a"), [][]int{{0}}, newPendingRows(1, fence))
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestSplitFenceUnprobedListsEveryFencedVChannelOnce(t *testing.T) {
+	fence := newSplitFence()
+	fence.markFenced("b")
+	fence.markFenced("c")
+	assert.Equal(t, []string{"a", "b", "c"}, fence.unprobed([]string{"c", "a"}))
+	fence.markProbed("b")
+	assert.Equal(t, []string{"a", "c"}, fence.unprobed([]string{"c", "a"}))
+
+	pending := newPendingRows(0, fence)
+	assert.Equal(t, -1, pending.first())
+	pending = newPendingRows(3, fence)
+	require.NoError(t, pending.settleLanded("a", []int{0}))
+	assert.Equal(t, 1, pending.first())
+	assert.Equal(t, []int{1, 2}, pending.sortedOffsets())
+}
