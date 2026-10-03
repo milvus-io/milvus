@@ -68,6 +68,9 @@ extraConfigFiles:
         compressionEnabled: true
         compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         enablev2: true
         # enable storage v3
@@ -89,6 +92,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

@@ -18,6 +18,7 @@ package tasks
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func histogramSampleCount(t *testing.T, observer prometheus.Observer) uint64 {
@@ -301,4 +303,48 @@ func TestApplyL0RerankMetrics(t *testing.T) {
 		require.Equal(t, successBefore, histogramSampleCount(t, successObserver))
 		require.Equal(t, failBefore, histogramSampleCount(t, failObserver))
 	})
+}
+
+func TestL0ComputedInvalidScoreRejectedAtMergeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value float32
+		null  bool
+	}{
+		{"null", 0, true},
+		{"nan", float32(math.NaN()), false},
+		{"overflow", math.MaxFloat32, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withBoostScoreCheckedAllocator(t)
+			source := makeBoostScoreTestDF(t, []int64{1, 2}, []float32{1, math.MaxFloat32}, []int64{10, 20}, []int64{2})
+			defer source.Release()
+			builder := chain.NewDataFrameBuilder().SetChunkSizes(source.ChunkSizes())
+			defer builder.Release()
+			for _, name := range source.ColumnNames() {
+				require.NoError(t, builder.AddColumnFrom(source, name))
+			}
+			bonus := array.NewFloat32Builder(defaultAllocator)
+			bonus.AppendValues([]float32{1, tc.value}, []bool{true, !tc.null})
+			values := bonus.NewArray()
+			bonus.Release()
+			require.NoError(t, builder.AddColumnFromChunks("bonus", []arrow.Array{values}))
+			segDFs := []*chain.DataFrame{builder.Build()}
+			defer func() { segDFs[0].Release() }()
+			repr, err := chain.ProtoChainToRepr(l0FunctionChainForTest(mapOpWithParamsForTest(
+				types.ScoreFieldName, chainexpr.NumCombineFuncName,
+				map[string]*schemapb.FunctionParamValue{types.NumCombineParamMode: stringParamForTest(types.NumCombineModeSum)},
+				columnArgForTest(types.ScoreFieldName), columnArgForTest("bonus"),
+			)))
+			require.NoError(t, err)
+			task := &SearchTask{ctx: t.Context()}
+			// Intermediate chain results remain nullable/non-finite, including
+			// overflow produced by adding two otherwise finite inputs.
+			require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: repr}))
+			result, err := task.executeGoReduce(segDFs, 1, nil, 0, 1)
+			require.Nil(t, result)
+			require.ErrorIs(t, err, merr.ErrFunctionFailed)
+			require.Contains(t, err.Error(), "heapMergeReduce: input 0")
+		})
+	}
 }

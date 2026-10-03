@@ -34,8 +34,9 @@ import (
 
 const (
 	// Parameter keys for NumCombineExpr
-	ModeKey    = types.NumCombineParamMode
-	WeightsKey = types.NumCombineParamWeights
+	ModeKey       = types.NumCombineParamMode
+	WeightsKey    = types.NumCombineParamWeights
+	NullPolicyKey = types.NumCombineParamNullPolicy
 
 	// Mode values
 	ModeMultiply = types.NumCombineModeMultiply
@@ -148,7 +149,24 @@ func NewNumCombineExprFromParams(_ types.FunctionBuildContext, cfg types.Functio
 		return nil, err
 	}
 
-	return NewNumCombineExpr(mode, weights)
+	nullPolicy := NumCombineNullPropagate
+	if _, exists := cfg.Params[NullPolicyKey]; exists {
+		value, err := reader.String(NullPolicyKey, true)
+		if err != nil {
+			return nil, err
+		}
+		switch value {
+		case "propagate":
+			nullPolicy = NumCombineNullPropagate
+		case "as_zero":
+			nullPolicy = NumCombineNullAsZero
+		case "skip":
+			nullPolicy = NumCombineNullSkip
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("num_combine: invalid null_policy %q, must be one of [propagate, as_zero, skip]", value)
+		}
+	}
+	return NewNumCombineExpr(mode, weights, WithNullPolicy(nullPolicy))
 }
 
 // =============================================================================

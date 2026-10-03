@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	mock_segcore "github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -1605,14 +1606,28 @@ func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
 
 func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	const (
-		numSegments = 2
-		msgLength   = 200
-		maxTopK     = int64(8)
+		numSegments     = 2
+		msgLength       = 200
+		maxTopK         = int64(8)
+		floatVecFieldID = 107
 	)
 	originNqs := []int64{1, 2}
 	originTopks := []int64{3, maxTopK}
 
-	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{SkipSearchReq: true})
+	// With zero query vectors, these rows have exact L2 distances
+	// (row + 0.5)^2, all with a .25 fractional part. The default mock
+	// queries produce large distances whose float32 precision can lose
+	// fractional parts and make the rounding assertion flaky.
+	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{
+		SkipSearchReq: true,
+		MutateInsertData: func(segmentIdx int, data *storage.InsertData) {
+			vectors := data.Data[floatVecFieldID].(*storage.FloatVectorFieldData)
+			clear(vectors.Data)
+			for row := 0; row < msgLength; row++ {
+				vectors.Data[row*vectors.Dim] = float32(segmentIdx*msgLength+row) + 0.5
+			}
+		},
+	})
 	defer ts.cleanup()
 	ctx := context.Background()
 
@@ -1629,6 +1644,15 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	for i := range originNqs {
 		req, err := mock_segcore.GenQueryRequest(
 			ts.collection.GetCCollection(), ts.segIDs, originNqs[i], originTopks[i], testCollectionID)
+		require.NoError(t, err)
+		placeholder := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(req.Req.PlaceholderGroup, placeholder))
+		for _, value := range placeholder.GetPlaceholders() {
+			for _, vector := range value.GetValues() {
+				clear(vector)
+			}
+		}
+		req.Req.PlaceholderGroup, err = proto.Marshal(placeholder)
 		require.NoError(t, err)
 		rawRequests[i] = req
 	}
@@ -1717,17 +1741,12 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 	for i := range baseline {
 		require.Equal(t, baseline[i].GetTopks(), reranked[i].GetTopks())
 		require.Len(t, reranked[i].GetScores(), len(baseline[i].GetScores()))
-		for _, score := range reranked[i].GetScores() {
-			assert.Equal(t, float32(math.Trunc(float64(score))), score)
+		require.Len(t, baseline[i].GetScores(), int(originNqs[i]*originTopks[i]))
+		for j, score := range baseline[i].GetScores() {
+			require.Equal(t, 0.25, math.Abs(float64(score)-math.Trunc(float64(score))),
+				"baseline scores must be fractional to prove L1 rounding executed")
+			assert.Equal(t, float32(math.Round(float64(score))), reranked[i].GetScores()[j])
 		}
-		var changed bool
-		for _, score := range baseline[i].GetScores() {
-			if score != float32(math.Trunc(float64(score))) {
-				changed = true
-				break
-			}
-		}
-		require.True(t, changed, "baseline scores must contain a fractional value to prove L1 rounding executed")
 	}
 }
 

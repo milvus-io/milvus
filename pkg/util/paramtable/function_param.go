@@ -55,6 +55,16 @@ type functionConfig struct {
 	//     takes effect after a MixCoord restart. Operators can still intervene
 	//     at any time by setting "true" or "false" explicitly.
 	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
+
+	PyUDFEnabled            ParamItem `refreshable:"false"`
+	PyUDFAddress            ParamItem `refreshable:"false"`
+	PyUDFRPCTimeout         ParamItem `refreshable:"false"`
+	PyUDFConnectionPoolSize ParamItem `refreshable:"false"`
+	PyUDFMaxMessageBytes    ParamItem `refreshable:"false"`
+	PyUDFWorkerCount        ParamItem `refreshable:"false"`
+	PyUDFGRPCConcurrency    ParamItem `refreshable:"false"`
+	PyUDFMaxConcurrentRPCs  ParamItem `refreshable:"false"`
+	PyUDFShutdownTimeout    ParamItem `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -268,6 +278,88 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.EnableWriteBeforeMaterialization.Init(base.mgr)
+
+	p.PyUDFEnabled = ParamItem{
+		Key:          "function.pyUDF.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.",
+	}
+	p.PyUDFEnabled.Init(base.mgr)
+
+	p.PyUDFAddress = ParamItem{
+		Key:          "function.pyUDF.address",
+		Sensitivity:  Sensitive,
+		Version:      "3.0.0",
+		DefaultValue: "127.0.0.1:19090",
+		Export:       true,
+		Doc:          "Shared local IPv4 address and port of the PyUDF workers. Restart is required after changing this value.",
+	}
+	p.PyUDFAddress.Init(base.mgr)
+
+	p.PyUDFRPCTimeout = ParamItem{
+		Key:          "function.pyUDF.rpcTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Deadline for one PyUDF Execute call, including serialization. Range: 5s to 300s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFRPCTimeout.Init(base.mgr)
+
+	p.PyUDFConnectionPoolSize = ParamItem{
+		Key:          "function.pyUDF.connectionPoolSize",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Number of reused client connections; this does not limit concurrent RPCs. Restart is required after changing this value.",
+	}
+	p.PyUDFConnectionPoolSize.Init(base.mgr)
+
+	p.PyUDFMaxMessageBytes = ParamItem{
+		Key:          "function.pyUDF.maxMessageBytes",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		Export:       true,
+		Doc:          "Maximum serialized size of one PyUDF gRPC message in bytes. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxMessageBytes.Init(base.mgr)
+
+	p.PyUDFWorkerCount = ParamItem{
+		Key:          "function.pyUDF.server.workerCount",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Number of Python worker processes sharing the configured address. Restart is required after changing this value.",
+	}
+	p.PyUDFWorkerCount.Init(base.mgr)
+
+	p.PyUDFGRPCConcurrency = ParamItem{
+		Key:          "function.pyUDF.server.grpcConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Per-worker gRPC executor threads. Restart is required after changing this value.",
+	}
+	p.PyUDFGRPCConcurrency.Init(base.mgr)
+
+	p.PyUDFMaxConcurrentRPCs = ParamItem{
+		Key:          "function.pyUDF.server.maxConcurrentRPCs",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		Export:       true,
+		Doc:          "Maximum in-flight RPCs per Python worker, including requests waiting in the gRPC executor. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxConcurrentRPCs.Init(base.mgr)
+
+	p.PyUDFShutdownTimeout = ParamItem{
+		Key:          "function.pyUDF.server.shutdownTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Python worker termination escalation deadline. Range: 5s to 60s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFShutdownTimeout.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

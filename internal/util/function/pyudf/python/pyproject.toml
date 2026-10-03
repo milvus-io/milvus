@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "milvus-pyudf-runtime"
+version = "0.1.0"
+description = "Python gRPC worker runtime for Milvus PyUDF"
+requires-python = ">=3.10"
+dependencies = ["pyarrow==23.0.1", "grpcio==1.74.0", "grpcio-health-checking==1.74.0", "protobuf==6.31.1"]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.optional-dependencies]
+codegen = ["grpcio-tools==1.74.0"]
+
+[tool.setuptools.packages.find]
+include = ["milvus_pyudf_runtime*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = ["*_pb2.py", "*_pb2_grpc.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

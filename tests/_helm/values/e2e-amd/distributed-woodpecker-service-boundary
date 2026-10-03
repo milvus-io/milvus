@@ -84,6 +84,9 @@ extraConfigFiles:
         compressionEnabled: true
         compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       bloomFilterApplyBatchSize: 511
       storage:
         enablev2: true
@@ -132,6 +135,9 @@ extraConfigFiles:
       flushRate:
         collection:
           max: 4
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

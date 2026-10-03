@@ -17,6 +17,7 @@
 package tasks
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -31,10 +32,55 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestPrepareQueryNodePyUDFRejectsStageBeforeRuntimeInitialization(t *testing.T) {
+	item := &paramtable.Get().FunctionCfg.PyUDFEnabled
+	old := item.SwapTempValue("false")
+	t.Cleanup(func() { item.SwapTempValue(old) })
+	configCalls, clientCalls := 0, 0
+	defer mockey.Mock(pyudf.NewConfig).To(func(context.Context) (pyudf.Config, error) {
+		configCalls++
+		return pyudf.Config{}, merr.ErrServiceInternal
+	}).Build().UnPatch()
+	defer mockey.Mock(pyudf.NewClient).To(func(pyudf.Config) (*pyudf.Client, error) {
+		clientCalls++
+		return nil, merr.ErrServiceUnavailable
+	}).Build().UnPatch()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	for _, enabled := range []string{"false", "true"} {
+		for _, stage := range []schemapb.FunctionChainStage{
+			schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+			schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+		} {
+			t.Run(enabled+"/"+stage.String(), func(t *testing.T) {
+				item.SwapTempValue(enabled)
+				op := mapOpForTest(types.ScoreFieldName, chainexpr.PyUDFFuncName, columnArgForTest(types.ScoreFieldName))
+				op.Expr.Params = map[string]*schemapb.FunctionParamValue{
+					"resource_name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "rank_udf"}},
+				}
+				plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{{Stage: stage, Ops: []*schemapb.FunctionChainOp{op}}}}
+				_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorContains(t, err, `function "py_udf" does not support stage`)
+				require.NotContains(t, err.Error(), "enabled")
+				status := merr.Status(err)
+				require.EqualValues(t, 1100, status.Code)
+				require.Equal(t, "true", status.ExtraInfo[merr.InputErrorFlagKey])
+				require.False(t, status.Retriable)
+				require.Zero(t, configCalls)
+				require.Zero(t, clientCalls)
+			})
+		}
+	}
+}
 
 func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
