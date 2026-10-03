@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -60,22 +61,71 @@ type rewritePlanDispatcher interface {
 	HashSplitPlanState(planID int64) (done bool, running bool, inputSegments []int64)
 }
 
+// importL0Guard reports whether an import that may still publish an L0 segment
+// on one of these vchannels is in flight. The rewrite will not retire a
+// source's L0s while one is (retireSourceLevelZeroSegments).
+type importL0Guard func(ctx context.Context, vchannels []string) bool
+
 // hashSplitRewriter is the split manager's redistribution: the rewrite.
 type hashSplitRewriter struct {
 	manager    *shardSplitManager
 	dispatcher *inspectorRewriteDispatcher
+	// importMeta is datacoord's own import record, read for the L0 guard
+	// above. It is read here rather than through the split manager because
+	// the import is the rewrite's concern, not the orchestration's: the
+	// drain's import check answers a different question (may the task adopt)
+	// and cannot answer this one. nil on a datacoord with no import meta.
+	importMeta ImportMeta
 }
 
 var _ splitRedistributor = (*hashSplitRewriter)(nil)
 
-func newHashSplitRewriter(manager *shardSplitManager, dispatcher *inspectorRewriteDispatcher) *hashSplitRewriter {
-	return &hashSplitRewriter{manager: manager, dispatcher: dispatcher}
+func newHashSplitRewriter(
+	manager *shardSplitManager,
+	dispatcher *inspectorRewriteDispatcher,
+	importMeta ImportMeta,
+) *hashSplitRewriter {
+	return &hashSplitRewriter{manager: manager, dispatcher: dispatcher, importMeta: importMeta}
 }
 
 // redistribute runs one rewrite round of a fenced task.
 func (r *hashSplitRewriter) redistribute(ctx context.Context, task *datapb.SplitShardTask) {
 	batchSize := paramtable.Get().DataCoordCfg.ShardSplitRewriteBatchSize.GetAsInt()
-	r.manager.rewriteRound(ctx, task, r.dispatcher.forTask(task.GetTaskId()), batchSize)
+	r.manager.rewriteRound(ctx, task, r.dispatcher.forTask(task.GetTaskId()), batchSize, r.importMayPublishL0)
+}
+
+// importMayPublishL0 is the rewrite's importL0Guard over datacoord's import
+// meta.
+func (r *hashSplitRewriter) importMayPublishL0(ctx context.Context, vchannels []string) bool {
+	return importMayPublishLevelZero(ctx, r.importMeta, vchannels)
+}
+
+// importMayPublishLevelZero reports whether an import job that is neither
+// Completed nor Failed names one of these vchannels -- an import that may still
+// publish a segment on them, an L0 among them.
+//
+// An import task with delete data and no insert data publishes its segment at
+// level L0 (internal/datanode/importv2/util.go), which reaches datacoord as
+// SaveBinlogPaths{SegLevel: L0} -> CreateL0Operator and is stored Flushed with
+// IsImporting unset -- indistinguishable, afterwards, from an L0 the WAL
+// materialized. The job's vchannels are fixed at creation, so this is a purely
+// datacoord-local read; it is deliberately the same predicate the drain's
+// import conjunct applies (hasActiveImportOnAnyVChannel), so the two cannot
+// disagree about which imports are still in flight.
+func importMayPublishLevelZero(ctx context.Context, importMeta ImportMeta, vchannels []string) bool {
+	if importMeta == nil || len(vchannels) == 0 {
+		return false
+	}
+	wanted := typeutil.NewSet(vchannels...)
+	for _, job := range importMeta.GetJobBy(ctx, WithoutJobStates(
+		internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+		for _, vchannel := range job.GetVchannels() {
+			if wanted.Contain(vchannel) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rewriteRoundResult summarizes one rewrite round for logging and tests.
@@ -150,6 +200,7 @@ func (m *shardSplitManager) rewriteRound(
 	task *datapb.SplitShardTask,
 	dispatcher rewritePlanDispatcher,
 	batchSize int,
+	importGuard importL0Guard,
 ) rewriteRoundResult {
 	logger := m.taskLogger(task)
 	result := rewriteRoundResult{}
@@ -206,7 +257,7 @@ func (m *shardSplitManager) rewriteRound(
 	// outputs it wrote; once no data is left on the source to fold them, they
 	// hold nothing that is not already applied, and they are all that keeps the
 	// drain false.
-	m.retireSourceLevelZeroSegments(ctx, task)
+	m.retireSourceLevelZeroSegments(ctx, task, importGuard)
 
 	// 3. Dispatch, bounded by the plans the task has in flight.
 	dispatchedNow := make([]int64, 0)
@@ -269,8 +320,38 @@ func (m *shardSplitManager) rewriteRound(
 // would ever run to carry it. Its own write, after the last commit: a crash in
 // between leaves the deletes applied twice, harmlessly, and the next round
 // retires them.
-func (m *shardSplitManager) retireSourceLevelZeroSegments(ctx context.Context, task *datapb.SplitShardTask) {
+//
+// The segment scan is not the whole guard, because it only sees what datacoord
+// already holds. An import that was in flight when the split started can still
+// publish a NEW L0 on the family -- importv2 writes an import task with delete
+// data and no insert data at level L0 -- and that L0 has folded nothing, so
+// retiring the set while such an import is live would throw away deletes that
+// never reached the rows the rewrite has already moved to the targets. Neither
+// import refusal covers it: both judge a NEW import against the collection's
+// current shards, and this one predates the split. So the whole family is held
+// while any such import is in flight (importMayPublishLevelZero), checked once
+// before the per-source loop -- the job names a family vchannel, not
+// necessarily this source.
+//
+// It has to be this predicate and not the drain's: the drain counts the
+// source's L0s as live segments, so gating the retire on the drain would have
+// the retire wait for the drain while the drain waits for the retire. The
+// dispatch is deliberately NOT held -- a plan carries the source's L0s and
+// folds them, so rewriting on is safe; only discarding them is not.
+func (m *shardSplitManager) retireSourceLevelZeroSegments(
+	ctx context.Context,
+	task *datapb.SplitShardTask,
+	importGuard importL0Guard,
+) {
 	logger := m.taskLogger(task)
+	if importGuard != nil {
+		family := append(splitSourceVChannels(task), splitTaskTargetVChannels(task)...)
+		if importGuard(ctx, family) {
+			logger.RatedInfo(ctx, 30, "not retiring the source's L0 segments yet, an import may still publish one on the split's family",
+				mlog.Strings("family", family))
+			return
+		}
+	}
 	for _, source := range task.GetSources() {
 		vchannel := source.GetVchannel()
 		if blocking := m.unfoldedSourceData(vchannel); blocking != nil {
