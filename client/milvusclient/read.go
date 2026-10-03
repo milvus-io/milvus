@@ -126,6 +126,17 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 			}
 			entry.Scores = results.GetScores()[offset : offset+rc]
 
+			// parse highlights for this nq's row window. offset..offset+rc
+			// matches the row-aligned slice of each HighlightResult.Datas.
+			if len(results.GetHighlightResults()) > 0 {
+				highlights, err := parseHighlights(results, offset, offset+rc)
+				if err != nil {
+					entry.Err = err
+					return
+				}
+				entry.Highlights = highlights
+			}
+
 			// set recall if returned
 			if i < len(results.Recalls) {
 				entry.Recall = results.Recalls[i]
