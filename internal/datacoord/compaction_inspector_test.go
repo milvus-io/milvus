@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1275,6 +1276,36 @@ func (s *CompactionPlanHandlerSuite) newScheduleTask(planID int64, kind datapb.C
 	return newMixCompactionTask(proto, nil, s.mockMeta, newMockVersionManager())
 }
 
+// dataCoord.enableCompaction, read when the inspector is built, keeps every
+// compaction off but a shard split's own rewrite: the schedule loop always
+// runs for the split, and a Mix task left in the queue (one persisted before a
+// restart) stays unscheduled while the switch is off.
+func (s *CompactionPlanHandlerSuite) TestSchedule_CompactionOffAdmitsOnlyShardSplitRewrites() {
+	params := paramtable.Get()
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+	cases := []struct {
+		enabled bool
+		want    []int64
+	}{
+		{enabled: false, want: []int64{2}},
+		{enabled: true, want: []int64{1, 2}},
+	}
+	for _, tc := range cases {
+		params.Save(params.DataCoordCfg.EnableCompaction.Key, strconv.FormatBool(tc.enabled))
+		s.SetupTest()
+		s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return().Maybe()
+		s.NoError(s.handler.submitTask(s.newScheduleTask(1, datapb.CompactionType_MixCompaction, "ch-mix")))
+		s.NoError(s.handler.submitTask(s.newScheduleTask(2, datapb.CompactionType_HashSplitCompaction, "src")))
+		got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
+		s.ElementsMatch(tc.want, got, "enableCompaction=%v", tc.enabled)
+		if !tc.enabled {
+			// The Mix task is kept queued, not dropped: it runs once the
+			// switch is back on.
+			s.Equal(1, s.handler.queueTasks.Len())
+		}
+	}
+}
+
 // The rewrite plans of one shard split all run on its source channel, each
 // with its own input: one schedule pass admits all of them, bounded only by
 // the split's in-flight batch and the global slots.
@@ -1336,4 +1367,41 @@ func (s *CompactionPlanHandlerSuite) TestSchedule_ShardSplitRewriteNeverRunsNext
 		got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
 		s.ElementsMatch([]int64{2, 3}, got)
 	})
+}
+
+// The compaction switch gates only the policy-driven compactions: the
+// inspector's schedule loop starts either way, so the rewrite of a shard
+// split already in the WAL runs on every cluster. With the switch on, the
+// policy-driven triggers start next to it.
+func TestStartCompactionStartsThePolicyTriggersWhenOn(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableCompaction.Key, "true")
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+
+	inspector := NewMockCompactionInspector(t)
+	inspector.EXPECT().start().Return().Once()
+	trigger := NewMockTrigger(t)
+	trigger.EXPECT().start().Return().Once()
+	triggerManager := NewMockTriggerManager(t)
+	triggerManager.EXPECT().Start().Return().Once()
+	svr := &Server{ctx: context.Background(), compactionInspector: inspector, compactionTrigger: trigger, compactionTriggerManager: triggerManager}
+	svr.startCompaction()
+}
+
+// With the switch off the inspector still starts, and nothing else does: the
+// trigger mocks would fail the test on an unexpected start.
+func TestStartCompactionKeepsTheScheduleLoopWithCompactionOff(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableCompaction.Key, "false")
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+
+	inspector := NewMockCompactionInspector(t)
+	inspector.EXPECT().start().Return().Once()
+	svr := &Server{
+		ctx:                      context.Background(),
+		compactionInspector:      inspector,
+		compactionTrigger:        NewMockTrigger(t),
+		compactionTriggerManager: NewMockTriggerManager(t),
+	}
+	svr.startCompaction()
 }
