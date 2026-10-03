@@ -66,6 +66,9 @@ func TestFunctionConfig(t *testing.T) {
 		"huggingface.credential",
 		"huggingface.url",
 		"huggingface.enable",
+		"orcarouter.credential",
+		"orcarouter.url",
+		"orcarouter.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
