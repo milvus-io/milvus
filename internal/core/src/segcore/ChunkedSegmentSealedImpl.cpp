@@ -915,11 +915,6 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
             !has_index,
             "vector index has been exist at " + std::to_string(field_id.get()));
     }
-    LOG_INFO(
-        "Before setting field_bit for field index, fieldID:{}. "
-        "segmentID:{}, ",
-        info.field_id,
-        id_);
     auto& field_meta = schema_snapshot->operator[](field_id);
     LoadResourceRequest request{};
     if (info.load_resource_request.has_value()) {
@@ -949,9 +944,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
                    "staged vector index load requires committer");
         committer->StageVectorIndexMutationLocked(
             field_id, metric_type, std::move(info.cache_index), drop_existing);
-        LOG_INFO("Has staged vec index load, fieldID:{}. segmentID:{}, ",
-                 info.field_id,
-                 id_);
+        LOG_DEBUG("Has staged vec index load, fieldID:{}. segmentID:{}, ",
+                  info.field_id,
+                  id_);
 
         clear_bit_if_present(staged_state->published_binlog_index_ready_bitset,
                              field_id);
@@ -967,9 +962,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
         }
         next_runtime->vector_indexings[field_id] =
             BuildVectorIndexEntry(metric_type, std::move(info.cache_index));
-        LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
-                 info.field_id,
-                 id_);
+        LOG_DEBUG("Has load vec index done, fieldID:{}. segmentID:{}, ",
+                  info.field_id,
+                  id_);
         PublishIndexReadyLocked(field_id,
                                 request.has_raw_data,
                                 ToConstRuntimeState(std::move(next_runtime)));
@@ -1014,10 +1009,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
         }
     };
 
-    LOG_INFO("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
-             info.field_id,
-             id_,
-             is_pk);
+    LOG_DEBUG("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
+              info.field_id,
+              id_,
+              is_pk);
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_pk && is_sorted_by_pk_) {
         LOG_INFO(
@@ -1143,7 +1138,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             field_meta.get_data_type(), request.has_raw_data);
     // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
     // not here. This avoids unsafe ManualEvictCache on column groups.
-    LOG_INFO(
+    LOG_DEBUG(
         "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
         info.field_id,
         id_,
@@ -9168,11 +9163,6 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                                        &committer]() mutable -> void {
                 // Early exit if cancelled while queued
                 CheckCancellation(op_ctx, id_, field_id.get(), "LoadIndex");
-
-                LOG_INFO("Loading index for segment {} field {} with {} files",
-                         id_,
-                         field_id.get(),
-                         load_index_info_ptr->index_files.size());
 
                 // Download & compose index
                 LoadIndexData(trace_ctx, load_index_info_ptr, op_ctx);
