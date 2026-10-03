@@ -73,6 +73,7 @@ knowhere	internal/core/src/segcore/Utils.cpp
 knowhere	internal/core/src/segcore/vector_index_c.cpp
 knowhere	internal/core/src/storage/DiskFileManagerImpl.cpp
 knowhere	internal/core/src/storage/Event.cpp
+knowhere	internal/core/src/storage/Util.cpp
 arrow	internal/core/src/common/ArrowDataWrapper.h
 arrow	internal/core/src/common/ChunkWriter.cpp
 arrow	internal/core/src/common/ChunkWriter.h

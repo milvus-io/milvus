@@ -6654,7 +6654,7 @@ func TestValidateAddFieldRequest(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("external collection rejects unsupported field type", func(t *testing.T) {
+	t.Run("external collection allows precomputed sparse field", func(t *testing.T) {
 		schema := baseSchema()
 		for _, field := range schema.GetFields() {
 			field.ExternalField = field.GetName()
@@ -6665,10 +6665,7 @@ func TestValidateAddFieldRequest(t *testing.T) {
 			ExternalField: "sparse",
 		}
 		err := validateAddFieldRequest(schema, newField)
-		if assert.Error(t, err) {
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "does not support field type")
-		}
+		assert.NoError(t, err)
 	})
 
 	t.Run("external collection rejects duplicate external field mapping", func(t *testing.T) {
