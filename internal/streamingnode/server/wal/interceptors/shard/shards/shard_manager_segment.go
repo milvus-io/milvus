@@ -89,6 +89,15 @@ func (m *shardManagerImpl) CreateSegment(msg message.ImmutableCreateSegmentMessa
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The partition managers are keyed by (collection, partition), not by
+	// vchannel: a CreateSegment for a vchannel this pchannel does not hold (a
+	// fenced split source, whose slot a target of the same collection may hold)
+	// must not reach the manager registered under that key. The shard
+	// interceptor refuses it before the append; this keeps the apply honest.
+	if err := m.checkIfVChannelCanBeWritten(msg.Header().CollectionId, msg.VChannel()); err != nil {
+		logger.Warn(m.ctx, "create segment skipped: this pchannel does not hold the vchannel", mlog.Err(err))
+		return
+	}
 	uniquePartitionKey := PartitionUniqueKey{CollectionID: msg.Header().CollectionId, PartitionID: msg.Header().PartitionId}
 	if err := m.checkIfSegmentCanBeCreated(uniquePartitionKey, msg.Header().SegmentId); err != nil {
 		logger.Warn(m.ctx, "segment already exists")
@@ -112,6 +121,11 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Keyed by (collection, partition) like CreateSegment; see there.
+	if err := m.checkIfVChannelCanBeWritten(collectionID, msg.VChannel()); err != nil {
+		logger.Warn(m.ctx, "flush segment skipped: this pchannel does not hold the vchannel", mlog.Err(err))
+		return
+	}
 	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 	if err := m.checkIfSegmentCanBeFlushed(uniquePartitionKey, segmentID); err != nil {
 		logger.Warn(m.ctx, "segment can not be flushed", mlog.Err(err))

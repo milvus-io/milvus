@@ -95,7 +95,7 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
-	flush := isL0FlushMessage(msg.MessageType())
+	flush := m.isL0Boundary(msg)
 	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
 	m.mu.Lock()
 	if m.terminalErr != nil {
@@ -130,12 +130,42 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 	m.submit(task)
 }
 
-// isL0FlushMessage identifies explicit WAL boundaries for L0 materialization.
+// isL0Boundary identifies explicit WAL boundaries for L0 materialization: the
+// messages after which this vchannel's delete prefix must be durable.
+func (m *WALMaterializer) isL0Boundary(msg message.ImmutableMessage) bool {
+	if msg.MessageType() == message.MessageTypeAlterCollection {
+		alterHeader := message.MustAsImmutableAlterCollectionMessageV2(msg).Header()
+		if !messageutil.IsShardSplitRouting(alterHeader) {
+			// Not a routing commit, so not this vchannel's drop. Checked on the
+			// header, before the body is decoded: every other AlterCollection
+			// would otherwise pay a decode here for nothing.
+			return false
+		}
+		// A shard split's routing commit whose post-image no longer names this
+		// vchannel is the vchannel's drop, like DropCollection below. The
+		// vchannel's tombstone cannot be published before the materialization
+		// frontier passes the drop tick, so the drop has to end the batch or
+		// the retirement waits for the stale-flush timer.
+		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		return messageutil.RetiresVChannel(alterHeader, alter.MustBody().GetUpdates(), m.vchannel)
+	}
+	return isL0FlushMessage(msg.MessageType())
+}
+
+// isL0FlushMessage identifies the message types that are always an L0
+// boundary, whatever they carry.
 func isL0FlushMessage(t message.MessageType) bool {
 	switch t {
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
 		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
-		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
+		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot,
+		// A shard split's fence is a boundary like any other: the source takes
+		// no delete after it, so its last deletes must be materialized at
+		// T_switch rather than whenever the sync period next comes round. The
+		// drop that retires the source cannot complete before the L0 frontier
+		// passes its tick, and the split's redistribution reads the source's
+		// L0 output, so both would otherwise wait on a timer.
+		message.MessageTypeSplitShard:
 		return true
 	default:
 		return false
@@ -191,7 +221,7 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 	// behind an active task. Later deletes belong to the next batch.
 	end := len(m.pending)
 	for i, handle := range m.pending {
-		if isL0FlushMessage(handle.Message().MessageType()) {
+		if m.isL0Boundary(handle.Message()) {
 			end = i + 1
 			break
 		}
