@@ -296,6 +296,44 @@ func (w *TestWriter) Close() error {
 	return nil
 }
 
+func TestValidateLogPath(t *testing.T) {
+	t.Run("empty path and normal filename", func(t *testing.T) {
+		assert.NoError(t, validateLogPath("", "access.log"))
+	})
+
+	t.Run("empty path and empty filename", func(t *testing.T) {
+		assert.NoError(t, validateLogPath("", ""))
+	})
+
+	t.Run("valid path and filename", func(t *testing.T) {
+		assert.NoError(t, validateLogPath("/tmp/milvus_accesslog", "access.log"))
+	})
+
+	t.Run("filename with traversal should fail", func(t *testing.T) {
+		err := validateLogPath("/tmp/milvus_accesslog", "../../../etc/cron.d/pwn")
+		assert.Error(t, err)
+	})
+
+	t.Run("empty path with traversal filename should fail", func(t *testing.T) {
+		err := validateLogPath("", "../../../etc/cron.d/pwn")
+		assert.Error(t, err)
+	})
+
+	t.Run("filename with separator should fail", func(t *testing.T) {
+		err := validateLogPath("/tmp/logs", "sub/file.log")
+		assert.Error(t, err)
+	})
+
+	t.Run("filename with dotdot should fail", func(t *testing.T) {
+		err := validateLogPath("/tmp/logs", "..hidden")
+		assert.Error(t, err)
+	})
+
+	t.Run("custom operator path is allowed", func(t *testing.T) {
+		assert.NoError(t, validateLogPath("/data/logs/milvus", "access.log"))
+	})
+}
+
 func TestCacheWriter_WithAutoFlush(t *testing.T) {
 	buffer := &TestWriter{buffer: bytes.NewBuffer(make([]byte, 0))}
 	writer := NewCacheWriterWithCloser(buffer, buffer, 512, 1*time.Second)
