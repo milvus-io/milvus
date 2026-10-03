@@ -171,3 +171,54 @@ func splitSwitchTimeTickOf(msg message.ImmutableSplitShardMessageV2) uint64 {
 	}
 	return msg.TimeTick()
 }
+
+// RequiresSummarySeal reports whether a message is the last one its own
+// vchannel may ever take, so the pchannel's WAL summary has to seal the records
+// that vchannel staged before it.
+//
+// The WAL summary only seals a staged span when it crosses FlushMaxBytes or
+// when somebody asks (walsummary.Manager.RequestFlushThrough); there is no
+// age-based seal. Until the span is sealed and its manifest published,
+// Manager.LastAcked() stays at the previous coverage end -- and LastAcked is a
+// hard cap on the PUBLISHED recovery checkpoint
+// (recoveryStorageImpl.consumeDirtySnapshot -> Tracker.CheckpointThrough).
+// A vchannel that goes quiet forever therefore pins the whole pchannel's
+// published checkpoint at a tick before its own last records, however far the
+// in-memory ack frontier has moved on.
+//
+// For a shard split that is not a latency problem, it is a deadlock: the
+// published checkpoint is the only one DataCoord sees, and the split's drain
+// gate waits for it to pass T_switch before the targets may be adopted. The
+// source takes no DML after the fence and no message at all after the routing
+// commit that retires it, so nothing of its own would ever seal the span.
+//
+// Two messages qualify, and both are already explicit L0 boundaries
+// (isL0Boundary) for the same reason:
+//
+//   - the SOURCE replica of a SplitShard: the write fence. Its tick is
+//     T_switch, which is exactly the value the drain gate waits for.
+//   - the routing commit that delists this vchannel: its drop. The source's
+//     catalog row is collected only once the summary confirms the drop tick
+//     (walsummary.Manager.CanCleanupVChannel reads LastAcked), so without a
+//     seal the row, the module and the vchannel's transform history all leak.
+//
+// Unconditional on purpose. What pins the frontier is that ANY record was
+// staged, not what staged it: a delete stages one, and so does an insert
+// appended with a client idempotency key. The shape that escaped in testing
+// did so only because unkeyed inserts stage nothing at all.
+func RequiresSummarySeal(msg message.ImmutableMessage) bool {
+	switch msg.MessageType() {
+	case message.MessageTypeSplitShard:
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleSource
+	case message.MessageTypeAlterCollection:
+		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		// Header gate first; only a routing commit's body is worth decoding.
+		if !messageutil.IsShardSplitRouting(alter.Header()) {
+			return false
+		}
+		return messageutil.RetiresVChannel(alter.Header(), alter.MustBody().GetUpdates(), msg.VChannel())
+	default:
+		return false
+	}
+}
