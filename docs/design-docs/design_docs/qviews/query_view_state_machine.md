@@ -30,10 +30,12 @@ L0 compaction advances DataView compact_version (a Manifest-version change
 with no dedicated counter). It invalidates the current
 QueryView: the state machine generates a new QueryView at the latest
 DataVersion so the old Manifest revision can be released. The TransformLog
-start frontier remains a TODO pending the StreamingNode shard barrier
-described in
-[Transform Start-After TimeTick](transform_start_after_timetick.md). The
-scheduling policy is not implemented by the current DataView-only PR.
+start frontier remains a TODO pending the checkpoint-bounded DataCoord
+producer described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). It will
+persist `min(K, S, G)` with each DataView; a Manifest update need not advance
+the frontier. The scheduling policy is not implemented by the current
+DataView-only PR.
 
 ### 1.1 Preparing
 

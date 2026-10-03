@@ -1,200 +1,290 @@
-# TODO: Transform Start-After TimeTick
+# Transform Start-After TimeTick
 
 - Feature DRI: @chyezh
 - Primary Approver: @czs007
 - Independent Approver: @congqixia
 - Design Review: 2026-07-29
+- Design Update: 2026-10-03
 
-Status: blocked on a StreamingNode shard-lifecycle refactor. The current
-DataView branch keeps `transform_start_after_timetick` on the wire (on
-`DataViewOfShard` and `QueryViewMeta`, for compatibility with the QueryView
-consumer) but the DataCoord does not advance it: the frontier is not carried in
-DataView membership updates, and it is not used for TransformLog GC. SegmentInfo
-does not carry the field.
+Status: design agreed; producer, persistence, and retention integration remain
+unimplemented. The current branch carries `transform_start_after_timetick` on
+`DataViewOfShard` and `QueryViewMeta`, but does not produce a meaningful value.
+The rules below define the intended implementation, not existing guarantees of
+the DataView manager.
 
-This document records the target protocol so the future StreamingNode PR can
-introduce the capability without making Coordinator infer the latest Growing
-Segment state.
+DataCoord will calculate the shard frontier from the existing reported channel
+checkpoint, published Segment coverage, and unpublished Segment constraints.
+This replaces the earlier mandatory shard-wide rotation/Flush barrier proposal.
+Partitions may Flush independently, and no new SN-to-DataCoord watermark RPC is
+required while the existing Growing registration/checkpoint contract is retained.
 
-## Required semantics
+## 1. Two levels of coverage
 
-For a Segment `s`, `C(s) = T` will mean that every Transform event on the same
-VChannel with `timetick <= T` has either:
+### Segment cursor
 
-1. been applied to the exact Segment contents referenced by SegmentInfo; or
-2. been evaluated and proven irrelevant to that Segment.
+`C(s, base) = T` means that every relevant Transform through T has already been
+included in the exact Segment data version being loaded, or cannot affect its
+rows. Loading that base and consuming TransformLog entries strictly after T
+must recover all required changes.
 
-QueryNode may consume TransformLog entries strictly after `T`. The value is a
-continuous-prefix proof, not the timestamp of the last observed Delete. It
-must not be inferred from Manifest version, maximum deltalog timestamp, or an
-L0 scheduling position.
+C is a continuous-prefix guarantee. A maximum Delete timestamp, Manifest
+version, or task scheduling position alone does not prove it. C must be stored
+with its base/Manifest/deltalog revision and supplied to the Segment loader.
+An old View must not combine an old base with a newer cursor from SegmentMeta.
+Indirect Manifest version 0 loading must also freeze a matching base/cursor
+pair when resolving metadata.
 
-The future SegmentInfo field is expected to be equivalent to:
-
-```proto
-// TODO: Add after StreamingNode implements the shard Flush barrier.
-// Every Transform through this TimeTick has been applied to this Segment or
-// proven irrelevant. Zero means unknown coverage.
-uint64 transform_start_after_timetick = <new-field-number>;
-```
-
-For a normal Streaming Flush Segment, its initial value will be the exclusive
-Insert start boundary:
-
-```text
-C(flushSegment) = flushSegment.start_position.Timestamp
-```
-
-The start-position contract must guarantee that every stored row has an Insert
-timestamp strictly greater than the boundary.
-
-DataView will publish only one frontier per shard. For frontier `F`, every
-Segment in that shard's DataView must satisfy:
-
-```text
-C(segment) >= F
-```
-
-Across DataViews, `F` must never decrease. Each effective L0 materialization
-must strictly increase it.
-
-## Why the capability is deferred
-
-Coordinator observes asynchronously projected SegmentMeta. It cannot prove
-that it has already seen every Growing Segment on the shard, so it cannot
-safely decide that an L0 completion may advance the shard frontier.
-
-The current L0 path is also partition-oriented. Publishing a partition task's
-position as a shard frontier can miss an older Growing Segment in another
-partition. For this reason, the current branch hard-triggers compact_version on
-Manifest-version updates and omits the frontier entirely.
-
-StreamingNode owns the shard WAL order, Growing Segment lifecycle, and
-Transform input. The safety barrier therefore belongs on StreamingNode.
-
-## Future shard-level barrier
-
-Assume the current DataView shard frontier is `F`. To publish a higher
-frontier `T`, StreamingNode must execute:
-
-```text
-1. Establish a shard WAL barrier T, where T > F.
-2. Rotate every current Growing Segment on the shard.
-3. Route post-barrier Inserts into new Growing Segments.
-4. Flush every rotated Segment.
-5. Wait for all corresponding flushes to commit to DataView (flush atomic txn).
-6. Materialize the complete shard's L0 prefix through T.
-7. Persist Manifest/deltalog changes and Segment coverage proofs.
-8. Enqueue one coalesced DataView recompute with shard frontier T.
-```
-
-The design intentionally does not select Growing Segments by partition or
-primary key. Rotation is shard-wide. Once rotation completes, new writes may
-continue while the old Segments Flush asynchronously.
-
-Step 5 is the publication fence: L0 frontier `T` must not become visible before
-every pre-barrier Growing Segment has entered DataView. Coordinator consumes
-the acknowledged event order and does not scan SegmentMeta to determine
-whether its view is current.
-
-The certified L0 materialization evaluates every loadable Segment in the
-shard. A Segment with no matching Delete still receives a coverage proof to
-`T`, because the Transform prefix was evaluated and proven irrelevant.
-
-Raw TransformLog-to-L0 staging may happen earlier. It does not advance Segment
-coverage, DataView frontier, or TransformLog GC until the shard protocol above
-completes.
-
-## Target invariants
-
-After every successful L0 publication:
-
-```text
-all DataView Segment coverage >= F
-all current Growing Segment start boundaries > F
-```
-
-An ordinary later Flush therefore joins with:
-
-```text
-C(newSegment) = newSegment.start_position.Timestamp >= F
-```
-
-and cannot force the DataView frontier backward.
-
-The resulting DataVersion behavior is:
-
-| Event | Frontier | DataVersion |
-|---|---|---|
-| Barrier-induced Flush | remains `F` | StreamingVersion increases |
-| Completed shard L0 materialization | `F -> T`, `T > F` | compact_version increases |
-| Ordinary post-barrier Flush | remains `F` | StreamingVersion increases |
-
-Partial Segment L0 work may commit a newer Manifest in SegmentMeta before the
-whole shard reaches `T`. It must not advance compact_version with an
-unchanged frontier merely to expose that Manifest. The future producer will
-coalesce the revisions and publish them with the next strictly higher shard
-frontier. An older DataView stays correct by retaining its old Manifest and
-consuming the corresponding TransformLog suffix.
-
-## Target Segment update rules
-
-| Operation | Future coverage rule |
+| Segment source/update | Cursor rule |
 |---|---|
-| Legacy or unknown Segment | `0` |
-| Streaming Flush | `start_position.Timestamp` |
-| L0, Delete matched | `max(oldC, T)` |
-| L0, no Delete matched | `max(oldC, T)` after an explicit zero-match proof |
-| Segment not evaluated by L0 | keep `oldC`; frontier `T` cannot be published |
-| Sort Compaction | inherit input coverage |
-| Multi-input Compaction | minimum input coverage |
-| Split | every output inherits source coverage |
-| Exact Manifest copy | inherit source coverage |
-| Index-only or metadata-only update | keep `oldC` |
+| Ordinary WAL-flushed L1 | Earliest effective Insert TimeTick, available as the first data StartPosition |
+| Import | CommitImport TimeTick for this business VChannel |
+| Non-L0 compaction | Minimum C of the actual input data versions |
+| Split or exact data copy | Inherit the source data version's C |
+| L0 compaction into Segment deltalogs | Advance to T only after complete coverage of the required interval through T is durable |
+| No matching Delete | May advance after a complete evaluation proves the interval irrelevant |
+| Index-only update | Keep C |
+| Unknown/legacy coverage | Unknown; do not manufacture a usable cursor |
 
-For the same Segment ID, coverage may only increase. A replacement or imported
-Segment may join DataView only when its coverage is at least the current shard
-frontier.
+The earliest Insert itself can be the exclusive cursor: current Delete MVCC
+only deletes rows with `insert_ts < delete_ts`. A Delete at or before the
+earliest Insert cannot delete any row in that Segment. Transactions use their
+effective outer commit time. Imported rows use their per-VChannel commit time.
 
-## Failure and recovery requirements
+Compaction inherits the versions it actually read. If concurrent work advances
+a parent or the shard frontier, an output requiring an earlier cursor cannot
+be published by reading a newer parent cursor or merely clamping the output.
+It needs the missing coverage or a retry against valid inputs.
 
-The future StreamingNode implementation needs an idempotent state machine:
+### DataView shard cursor
+
+`F(view, vchannel)` defines the full shared TransformLogBuffer range required
+by that View: `(F, consumedThrough]`. It covers all Segments in the shard's
+View, including Segments assigned to other nodes. Moving a Segment between
+nodes serving that View must not require a separate historical subscription.
+
+DataView membership contains only flushed, published, loadable Segments.
+Growing Segments constrain F but are not added to DataView membership.
+Successive DataVersions must have nondecreasing F for each VChannel; unchanged
+F is valid, including after a Manifest update or partial compaction.
+
+QueryView history and live incremental consumption use **TransformLog only**.
+QueryView must not load or forward L0 Segments to fill a gap before F. Storage
+compaction may still inline changes into the selected base; query recovery
+consumes the remaining suffix from WAL/WALSummary.
+
+## 2. Generation in DataCoord
+
+At collection creation, initialize each shard independently:
 
 ```text
-Open
-  -> BarrierEstablished(T)
-  -> GrowingSegmentsRotated
-  -> FlushDataDurable
-  -> FlushDataViewCommitted
-  -> L0Materialized
-  -> TransformDataViewCommitted(T)
-  -> Open
+B = this VChannel's CreateCollection WAL TimeTick
+F(initialView, vchannel) = B
 ```
 
-- Failure before the Flush DataView commit prevents L0 frontier publication.
-- Failure after Flush commit leaves a valid DataView at the old frontier.
-- Failure after SegmentMeta/Manifest update but before DataView publication
-  leaves the new materialization unpublished and safe to retry.
-- Only the final DataView commit makes `T` eligible for TransformLog GC.
+Preserve B as an immutable origin. Do not substitute the control-channel
+TimeTick, the broadcast maximum, wall-clock time, or a later checkpoint.
 
-Every transition must be recoverable from WAL or durable task state. Replayed
-Flush and L0 events must be idempotent.
+For each subsequent snapshot, calculate:
 
-## Follow-up implementation checklist
+```text
+K = accepted channel checkpoint for this VChannel
+S = min C(s, selected base) over members of the new DataView
+G = min safe start over registered data that can still enter a later DataView
 
-The StreamingNode refactor PR must provide all of the following before the TODO
-can be removed:
+F(newView, vchannel) = min(K, S, G)
+```
 
-- a shard-wide Growing Segment rotation barrier;
-- durable and replayable barrier progress;
-- acknowledged ordering from all barrier Flush commits to L0 publication;
-- complete-shard L0 evaluation, including zero-match proofs;
-- SegmentInfo coverage persisted with the corresponding Manifest/deltalogs;
-- a shard frontier carried by DataView and QueryView;
-- DataViewManager validation that the frontier never regresses;
-- QueryViewRef-based TransformLog retention and GC integration; and
-- recovery tests covering failures at every barrier phase.
+Omit an empty S or G set from the minimum. G covers **all partitions** of the
+VChannel and includes Growing, Sealed/Flushing, and data whose output is durable
+but whose publication into DataView is not yet committed. It is defined by
+publication status, not just the `Growing` enum. Pending Import and other new
+data publication paths must supply equivalent constraints as described below.
 
-Until those prerequisites exist, `transform_start_after_timetick` remains a
-design TODO and must not be approximated with Coordinator-observed SegmentMeta
-or a partition L0 task position.
+K is the recovery checkpoint already delivered through
+`PChannelCheckpointUpdater -> UpdateChannelCheckpoint`. It is a completeness
+boundary, not the Segment cursor or the Transform materialization cursor.
+Use the checkpoint belonging to the shard; do not compare timestamps from
+unrelated PChannels to derive a collection-wide minimum.
+
+If K is missing or predates B, it cannot authorize advancement: keep the
+initialized safe frontier. With no current members, remaining unpublished data
+still constrains F; with neither set, K supplies a finite bound. Never replace
+an empty set with a published infinity or reset the frontier to zero.
+Unknown coverage must not be skipped. It needs a proven conservative lower
+bound or must prevent publication of the affected new View. A candidate below
+the previous F is an invariant violation; `max(oldF, candidate)` would conceal
+missing history and is not a repair.
+
+Example, with X and Y in different partitions of the same shard:
+
+| Event | DataView members | Unpublished constraint | K | F |
+|---|---|---|---|---|
+| Y, with C=100, Flushes before X | Y | X starts at 50 | 200 | 50 |
+| X later Flushes | X, Y | none | 200 | 50 |
+
+X moves from G to S. Neither early Flush of X nor delayed publication of Y is
+required. A cold Growing Segment can retain more Transform history, but does
+not impose a cross-partition Flush ordering requirement.
+
+## 3. Why the checkpoint makes the calculation complete
+
+The existing ordinary streaming L1 path has this ordering:
+
+```text
+persist the first Insert pack
+  -> PersistGrowingSegment registers its StartPosition in DataCoord
+  -> install stable Segment state and release Insert handles
+  -> publish the continuous recovery checkpoint
+  -> report that checkpoint to DataCoord
+```
+
+CreateSegment registration also precedes completion of its retained handle.
+A Segment's first data position is the first effective Insert, not its creation
+TimeTick. Later packs preserve the original StartPosition.
+
+For an Insert at t whose initial data registration has not completed, K cannot
+pass t. Thus DataCoord does not need to see the latest complete Growing list:
+
+- Registered but unpublished data is constrained by G.
+- Not-yet-registered data is constrained by K, with `F <= K <= t`.
+- Published data is constrained by S, with `F <= C(s, base)`.
+
+For every current member, replaying from F therefore includes every required
+Transform. For later ordinary Flushes, the incoming cursor was already
+protected by G or was no earlier than the previous K. Transferring a cursor
+from G to S without a gap cannot lower F. K and existing coverage advance
+monotonically; removing a constraint cannot lower a minimum. Atomic parent-to-
+output replacement preserves this argument only when compaction inheritance
+uses valid input versions.
+
+These are the proof obligations of the proposed producer. The current
+`PersistGrowingSegment` bridge and checkpoint updater are marked for removal
+when the legacy path is retired. They must not be removed until an equivalent
+registration-completeness protocol is installed. A dedicated SN safe-watermark
+RPC is a possible replacement, not a prerequisite for this design.
+
+## 4. Consistent publication and other data sources
+
+### Snapshot construction
+
+1. Capture K before reading the Segment projection.
+2. Under collection publication synchronization, construct a consistent new
+   membership and unpublished set, with coverage for the selected base versions.
+3. Calculate F and check that it does not regress.
+4. Persist the complete immutable DataView and any membership transfer that
+   must be atomic, then expose the new version.
+
+Do not pair a newer checkpoint with an older Segment list. The synchronization
+must include state/coverage changes relevant to S and G; a DataView lock alone
+is insufficient if a producer mutates the projected metadata outside it.
+
+For ordinary Flush, keep the existing atomic SegmentMeta + DataView commit:
+before it the Segment contributes to G, and after it the Segment contributes
+to S. Observing Flush, finishing object writes, or changing a state enum must
+not create an intermediate state where the Segment belongs to neither set.
+Retries return the original `sealed_at_data_version`.
+
+Checkpoint advancement requests a coalesced, retryable recompute. A changed F
+alone creates a new `compact_version`; it does not increment streaming_version.
+Ordinary Flush retains its existing streaming_version transition. Membership
+or Manifest changes can publish with unchanged F. Unchanged snapshot content
+creates no new version. Recovery must reconcile persisted inputs even if the
+notification preceding a crash was lost.
+
+### Import and other new data
+
+The streaming Insert proof does not automatically cover an asynchronous
+CommitImport callback. Pending imports must remain represented in G until
+publication, including the interval after WAL commit but before its TimeTick
+has reached DataCoord's callback.
+
+One concrete implementation is to persist the current shard F as a task's
+conservative constraint **before** issuing CommitImport. Retain it across
+retries and recovery. After obtaining each VChannel's commit TimeTick, persist
+that value as the imported Segments' C and publish the members before removing
+the task constraint. These transitions must participate in the same collection
+publication synchronization.
+
+This ordering must cover replicated imports and recovered tasks as well as
+local broadcasts. An already-issued commit cannot retrospectively be protected
+by pinning today's F. Legacy tasks without a proof need reconciliation before
+advancement. Equivalent obligations apply to copy/external publication paths;
+do not assume their cursors satisfy the ordinary Insert registration rule.
+
+## 5. Recovery, retention, and shared buffers
+
+Persist F in each immutable DataView and C with each referenced data revision.
+Restore an old View's F directly; never recompute it from current SegmentMeta.
+Recover channel checkpoints, publication state, and pending task constraints
+before permitting frontier advancement. The next new View may then use the
+normal calculation. A zero legacy field is unknown, not a request to consume
+from a fabricated current timestamp.
+
+The cursor proof and history availability are separate requirements:
+
+```text
+complete readable TransformLog lower bound <= required F
+```
+
+WAL/WALSummary must retain the suffix needed by every View still eligible for
+serving, in-flight preparation, and future reload. Merely materializing Delete
+records into L0 does not authorize dropping that suffix. Aggregate View
+retention with SN local Segment retention; one owner must not overwrite the
+other's requirement in `SetQueryRetention`.
+
+A conservative initial implementation can pin history from B for the live
+VChannel, installed before GC during creation/recovery. This trades storage
+space for avoiding an incomplete distributed View-retention protocol. Advancing
+storage GC later requires the minimum across the latest reloadable View and
+all still-protected older Views. Collection drop may release the protection
+only after the relevant serving/lifecycle obligations end. No pin can recreate
+history already deleted; existing collections require a readable-history check.
+
+Each QN buffer retains the minimum F of all locally held Views and any pending
+Segment registrations. It must not trim based only on local assigned Segments.
+Acquire replacement references before releasing old ones. Avoid admitting an
+older View after its range has been trimmed. Within that continuously retained
+buffer, forward View evolution and Segment moves need no separate historical
+copy. Restart, a new node, or a destroyed buffer still requires initialization.
+Subscription success alone is not readiness: Segment application must catch up.
+
+## 6. Implementation and validation
+
+The producer is complete only after these pieces are wired:
+
+- Per-VChannel CreateCollection origin and initial F propagation.
+- Segment C production, version-bound persistence, snapshot/load propagation,
+  and compaction inheritance/coverage validation.
+- A consistent K/S/G projection over every partition, including unpublished
+  and pending external-data states.
+- Atomic G-to-S transfer, monotonic F validation, checkpoint-driven recompute,
+  and immutable snapshot recovery.
+- WALSummary retention that protects the TransformLog-only query path.
+
+Required scenarios include out-of-order Flush across partitions; delayed first
+pack registration; checkpoint/projection races; concurrent compaction;
+Import callback delay and restart; empty shards; metadata publication failures;
+SN/DataCoord/QN restart; old/new View coexistence; Segment moves; and reload
+while Summary GC runs after SN local Segments have been released. Assert both
+nondecreasing persisted F and exact Delete/Upsert query results.
+
+## Key packages and current evidence
+
+- `internal/streamingnode/server/wal/vchannel/segment/view.go`:
+  `FlushInsertChunk` publishes Growing data before releasing Insert handles.
+- `internal/streamingnode/server/wal/vchannel/segment/lifecycle_writer.go`:
+  Growing registration and final `SaveBinlogPaths` commit.
+- `internal/streamingnode/server/wal/vchannel/checkpoint_updater.go`:
+  existing recovery-checkpoint reporting, not a safe-start producer.
+- `internal/datacoord/services.go` and `internal/dataview/manager.go`:
+  atomic Flush publication and immutable snapshot management.
+- `internal/datacoord/ddl_callbacks_import.go`: per-VChannel commit timestamps.
+- `internal/core/src/segcore/DeletedRecord.h`: strict Delete/Insert MVCC ordering.
+- `internal/querynodev2/transformlogbuffer/buffer.go`: shared range retention
+  and per-Segment replay/application.
+- `internal/streamingnode/server/wal/walsummary/gc.go`: retention integration.
+
+Related contracts: [DataView](data_view.md),
+[Transform subscriptions](pure_transform_subscription.md),
+[Segment persistence](../wal/segment_view_module.md), and
+[Checkpoint persistence](../wal/checkpoint-persistence.md).

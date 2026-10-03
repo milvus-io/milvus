@@ -34,6 +34,13 @@ For this workflow, local QueryNode `Ready` means:
 After local `Ready`, QueryNode keeps the view-scoped resources until the same
 view is applied as `Dropped`.
 
+The planned [Transform start producer](../transform_start_after_timetick.md)
+distinguishes the shard cursor F, which pins the entire View's shared buffer,
+from each Segment's cursor C, which belongs to its selected base version.
+Loading and moving Segments uses that shared TransformLog history; QueryView
+does not use L0 loading/forwarding as a historical fallback. The producer and
+version-bound Segment cursor propagation remain to be implemented.
+
 ## 3. Component Responsibilities
 
 The QueryNode entry point wires the resource managers as:
@@ -256,9 +263,10 @@ segment, the late result is released and ignored.
 `QueryViewSegmentReadinessManager` turns physically loaded segments into
 QueryView-ready segments.
 
-Recovery baseline events written into TransformLog/TransformingBuffer are
-defined by
-[RecoveryBarrier](../../../../agent_guides/streaming-system/message/message-semantic-recovery-barrier.md).
+RecoveryBarrier is the writer fence and startup catch-up marker described in
+[WAL recovery startup](../../wal/wal-recovery-architecture.md#5-recovery-startup).
+TransformLog delivery and SyncUp semantics are defined by the
+[subscription adaptor](../../wal/transform_log.md).
 
 For each physically loaded segment:
 
