@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -914,8 +915,12 @@ func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgs
 	return nil, merr.WrapErrParameterInvalidMsg("partition key not specify when insert")
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
-	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
+// assignChannelsByPK maps a write's primary keys to the vchannels that own them.
+//
+// table is the routing table of a collection that has been split, nil for one
+// that has never been split (see pkChannelIndexes).
+func assignChannelsByPK(table *routing.ResidueTable, pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	hashValues, err := pkChannelIndexes(table, pks, channelNames)
 	if err != nil {
 		return nil, err
 	}
