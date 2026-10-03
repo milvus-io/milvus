@@ -57,6 +57,32 @@ func (s *ProxyManagementSuite) TearDownTest() {
 	s.mixcoord.AssertExpectations(s.T())
 }
 
+func (s *ProxyManagementSuite) TestWriteJSONResp() {
+	s.Run("escape_message", func() {
+		recorder := httptest.NewRecorder()
+		msg := `boom "quoted" \and\ slashed`
+
+		writeJSONWithMsg(context.Background(), recorder, http.StatusBadRequest, msg)
+
+		s.Equal(http.StatusBadRequest, recorder.Code)
+		s.Equal("application/json", recorder.Header().Get("Content-Type"))
+		var payload map[string]string
+		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload))
+		s.Equal(msg, payload["msg"])
+	})
+
+	s.Run("marshal_error", func() {
+		recorder := httptest.NewRecorder()
+
+		writeJSONResp(context.Background(), recorder, http.StatusOK, make(chan int))
+
+		s.Equal(http.StatusInternalServerError, recorder.Code)
+		var payload map[string]string
+		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload))
+		s.Contains(payload["msg"], "failed to marshal response")
+	})
+}
+
 func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 	s.Run("normal", func() {
 		s.SetupTest()
@@ -232,7 +258,7 @@ func (s *ProxyManagementSuite) TestListQueryNode() {
 		recorder := httptest.NewRecorder()
 		s.proxy.ListQueryNode(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"nodeInfos":[{"ID":1,"address":"localhost","state":"Healthy"}]}`, recorder.Body.String())
+		s.JSONEq(`{"nodeInfos":[{"ID":1,"address":"localhost","state":"Healthy"}]}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -283,7 +309,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 		recorder := httptest.NewRecorder()
 		s.proxy.GetQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"channel_names":["channel-1"],"sealed_segmentIDs":["1","2","3"]}`, recorder.Body.String())
+		s.JSONEq(`{"channel_names":["channel-1"],"sealed_segmentIDs":["1","2","3"]}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -342,7 +368,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryCoordBalance() {
 		recorder := httptest.NewRecorder()
 		s.proxy.SuspendQueryCoordBalance(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -385,7 +411,7 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 		recorder := httptest.NewRecorder()
 		s.proxy.ResumeQueryCoordBalance(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -431,7 +457,7 @@ func (s *ProxyManagementSuite) TestCheckBalanceStatus() {
 		recorder := httptest.NewRecorder()
 		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK", "status": "active"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK", "status": "active"}`, recorder.Body.String())
 
 		s.mixcoord.EXPECT().CheckBalanceStatus(mock.Anything, mock.Anything).Return(&querypb.CheckBalanceStatusResponse{
 			Status:   merr.Success(),
@@ -443,7 +469,7 @@ func (s *ProxyManagementSuite) TestCheckBalanceStatus() {
 		recorder = httptest.NewRecorder()
 		s.proxy.CheckQueryCoordBalanceStatus(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK", "status": "suspended"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK", "status": "suspended"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -491,7 +517,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 		recorder := httptest.NewRecorder()
 		s.proxy.SuspendQueryNode(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -551,7 +577,7 @@ func (s *ProxyManagementSuite) TestResumeQueryNode() {
 		recorder := httptest.NewRecorder()
 		s.proxy.ResumeQueryNode(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -610,7 +636,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		recorder := httptest.NewRecorder()
 		s.proxy.TransferSegment(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 
 		// test use default param
 		req, err = http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1"))
@@ -619,7 +645,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		recorder = httptest.NewRecorder()
 		s.proxy.TransferSegment(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -640,6 +666,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		recorder = httptest.NewRecorder()
 		s.proxy.TransferSegment(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
+		s.True(gojson.Valid(recorder.Body.Bytes()))
 
 		// test rpc return error
 		s.mixcoord.EXPECT().TransferSegment(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
@@ -678,7 +705,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		recorder := httptest.NewRecorder()
 		s.proxy.TransferChannel(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 
 		// test use default param
 		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1"))
@@ -687,7 +714,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		recorder = httptest.NewRecorder()
 		s.proxy.TransferChannel(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -708,6 +735,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		recorder = httptest.NewRecorder()
 		s.proxy.TransferChannel(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
+		s.True(gojson.Valid(recorder.Body.Bytes()))
 
 		// test rpc return error
 		s.mixcoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
@@ -746,7 +774,7 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 		recorder := httptest.NewRecorder()
 		s.proxy.CheckQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
+		s.JSONEq(`{"msg": "OK"}`, recorder.Body.String())
 	})
 
 	s.Run("return_error", func() {
@@ -767,6 +795,7 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 		recorder = httptest.NewRecorder()
 		s.proxy.CheckQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
+		s.True(gojson.Valid(recorder.Body.Bytes()))
 
 		// test rpc return error
 		s.mixcoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
