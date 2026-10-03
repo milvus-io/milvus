@@ -683,3 +683,71 @@ func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "duplicate import option key: backup")
 }
+
+// splitTestShardInfo and splitTestCollectionInfo build the cache entry of a
+// collection a shard split has touched, as a describe reports it.
+func splitTestShardInfo(state schemapb.ShardState, vchannel string, buckets ...uint64) *schemapb.CollectionShardInfo {
+	info := &schemapb.CollectionShardInfo{State: state, VchannelName: vchannel}
+	if len(buckets) > 0 {
+		info.Routing = &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: buckets},
+		}
+	}
+	return info
+}
+
+func splitTestCollectionInfo(modulus uint64, vchannels []string, infos ...*schemapb.CollectionShardInfo) *collectionInfo {
+	return &collectionInfo{
+		CollID:    100,
+		VChannels: vchannels,
+		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+			Name:   "c",
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		}},
+		ShardInfos:     infos,
+		RoutingModulus: modulus,
+	}
+}
+
+// Import is not supported into a collection a shard split has touched: the
+// import path places imported rows by the vchannel count, which no longer
+// matches a split collection's residues. Refused before anything is planned.
+func TestImportTaskPreExecuteRefusesASplitCollection(t *testing.T) {
+	for name, info := range map[string]*collectionInfo{
+		"split": splitTestCollectionInfo(2, []string{"v0", "v1", "v2"},
+			splitTestShardInfo(schemapb.ShardState_ShardSplitting, "v0"),
+			splitTestShardInfo(schemapb.ShardState_ShardCreating, "v1", 0),
+			splitTestShardInfo(schemapb.ShardState_ShardCreating, "v2", 1)),
+		"adopted": splitTestCollectionInfo(2, []string{"v1", "v2"},
+			splitTestShardInfo(schemapb.ShardState_ShardNormal, "v1", 0),
+			splitTestShardInfo(schemapb.ShardState_ShardNormal, "v2", 1)),
+		"splitting shard listed": splitTestCollectionInfo(0, []string{"v0"},
+			splitTestShardInfo(schemapb.ShardState_ShardSplitting, "v0")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "db", "c").Return(int64(100), nil)
+			cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(100)).Return(info, nil)
+			task := &importTask{req: &internalpb.ImportRequest{DbName: "db", CollectionName: "c"}}
+			task.MetaCache = cache
+
+			err := task.PreExecute(context.Background())
+			assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			assert.False(t, merr.IsRetryableErr(err))
+		})
+	}
+}
+
+// A never-split collection, with a shard list and no modulus, imports as before.
+func TestRefuseImportIntoSplitCollectionAllowsANeverSplitCollection(t *testing.T) {
+	assert.NoError(t, refuseImportIntoSplitCollection(splitTestCollectionInfo(0, []string{"v0", "v1"},
+		splitTestShardInfo(schemapb.ShardState_ShardNormal, "v0"),
+		splitTestShardInfo(schemapb.ShardState_ShardNormal, "v1"))))
+}
+
+// A nil collectionInfo -- the cache never returns one alongside a nil error,
+// but refuseImportIntoSplitCollection is a plain function and must not panic
+// dereferencing an absent info -- never refuses.
+func TestRefuseImportIntoSplitCollectionAllowsANilInfo(t *testing.T) {
+	assert.NoError(t, refuseImportIntoSplitCollection(nil))
+}
