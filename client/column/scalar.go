@@ -225,15 +225,43 @@ func NewColumnTimestamptz(name string, values []time.Time) *ColumnTimestamptz {
 			name:      name,
 			fieldType: entity.FieldTypeTimestamptz,
 			values: lo.Map(values, func(t time.Time, _ int) string {
-				return t.Format(time.RFC3339Nano)
+				return formatTimestamptz(t)
 			}),
 		},
 	}
 }
 
+// formatTimestamptz normalizes a time.Time to the timestamptz wire format:
+// the UTC instant truncated to microsecond precision, matching how the server
+// stores timestamptz (UTC microseconds). Formatting the original location
+// directly is unsafe: historical offsets may carry seconds (e.g. Shanghai LMT
+// +08:05:43) which RFC3339 (minute precision) cannot represent, shifting the
+// instant on re-parse.
+func formatTimestamptz(t time.Time) string {
+	return t.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+}
+
 func (c *ColumnTimestamptz) Slice(start, end int) Column {
 	return &ColumnTimestamptz{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
+// AppendValue appends a value into the column. It accepts time.Time, *time.Time
+// and ISO 8601 string (RFC3339Nano), since the column stores timestamptz as
+// RFC3339Nano strings internally. time.Time values are normalized to UTC with
+// microsecond precision before formatting.
+func (c *ColumnTimestamptz) AppendValue(a any) error {
+	switch v := a.(type) {
+	case time.Time:
+		return c.genericColumnBase.AppendValue(formatTimestamptz(v))
+	case *time.Time:
+		if v == nil {
+			return c.AppendNull()
+		}
+		return c.genericColumnBase.AppendValue(formatTimestamptz(*v))
+	default:
+		return c.genericColumnBase.AppendValue(a)
 	}
 }
 

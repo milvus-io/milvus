@@ -298,10 +298,10 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 		s.Equal(entity.FieldTypeTimestamptz, column.Type())
 		s.Equal(name, column.Name())
-		// verify time values are converted to RFC3339Nano strings
+		// verify time values are converted to normalized RFC3339Nano strings
 		expectedStrings := []string{
-			compactData[0].Format(time.RFC3339Nano),
-			compactData[1].Format(time.RFC3339Nano),
+			formatTimestamptz(compactData[0]),
+			formatTimestamptz(compactData[1]),
 		}
 		s.Equal(expectedStrings, column.Data())
 		for i := 0; i < len(validData); i++ {
@@ -313,9 +313,9 @@ func (s *NullableScalarSuite) TestBasic() {
 		// sparse mode
 		sparseData := []time.Time{now, {}, now.Add(2 * time.Hour)}
 		sparseExpected := []string{
-			sparseData[0].Format(time.RFC3339Nano),
-			sparseData[1].Format(time.RFC3339Nano),
-			sparseData[2].Format(time.RFC3339Nano),
+			formatTimestamptz(sparseData[0]),
+			formatTimestamptz(sparseData[1]),
+			formatTimestamptz(sparseData[2]),
 		}
 		column, err = NewNullableColumnTimestamptz(name, sparseData, validData, WithSparseNullableMode[string](true))
 		s.NoError(err)

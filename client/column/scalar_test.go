@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,11 +246,11 @@ func (s *ScalarSuite) TestBasic() {
 		column := NewColumnTimestamptz(name, data)
 		s.Equal(entity.FieldTypeTimestamptz, column.Type())
 		s.Equal(name, column.Name())
-		// verify data is converted to RFC3339Nano format
+		// verify data is converted to normalized RFC3339Nano format
 		expectedStrings := []string{
-			data[0].Format(time.RFC3339Nano),
-			data[1].Format(time.RFC3339Nano),
-			data[2].Format(time.RFC3339Nano),
+			formatTimestamptz(data[0]),
+			formatTimestamptz(data[1]),
+			formatTimestamptz(data[2]),
 		}
 		s.Equal(expectedStrings, column.Data())
 
@@ -292,6 +293,48 @@ func (s *ScalarSuite) TestBasic() {
 			s.Equal(entity.FieldTypeTimestamptz, parsed.Type())
 		}
 	})
+}
+
+func (s *ScalarSuite) TestTimestamptzAppendValue() {
+	name := fmt.Sprintf("field_%d", rand.Intn(1000))
+	column := NewColumnTimestamptz(name, nil)
+
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	s.NoError(column.AppendValue(now))
+	s.NoError(column.AppendValue(now.Add(time.Hour)))
+	s.NoError(column.AppendValue(now.Format(time.RFC3339Nano)))
+
+	expected := []string{
+		formatTimestamptz(now),
+		formatTimestamptz(now.Add(time.Hour)),
+		// raw ISO string inputs are stored as-is, without normalization
+		now.Format(time.RFC3339Nano),
+	}
+	s.Equal(expected, column.Data())
+	s.Equal(expected, column.FieldData().GetScalars().GetStringData().GetData())
+
+	s.Error(column.AppendValue(now.UnixMilli()))
+}
+
+func (s *ScalarSuite) TestTimestamptzNormalization() {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	s.Require().NoError(err)
+	// Pre-1901 Shanghai LMT offset carries seconds (+08:05:43) that RFC3339
+	// (minute precision) cannot represent; formatting the raw location emits
+	// +08:05 and shifts the instant by 43s on re-parse.
+	lmt := time.Date(1900, 1, 1, 0, 0, 0, 0, shanghai)
+	orig := lmt.UTC()
+
+	column := NewColumnTimestamptz("ts", []time.Time{lmt})
+	s.Require().NoError(column.AppendValue(lmt))
+
+	s.Require().Len(column.Data(), 2)
+	for i, got := range column.Data() {
+		parsed, err := time.Parse(time.RFC3339Nano, got)
+		s.Require().NoError(err, "value %d %q must be RFC3339Nano parseable", i, got)
+		s.Equal(orig, parsed.UTC(), "value %d %q must preserve the instant of %v", i, got, lmt)
+		s.True(strings.HasSuffix(got, "Z"), "value %d %q must be normalized to UTC", i, got)
+	}
 }
 
 func (s *ScalarSuite) TestSlice() {
