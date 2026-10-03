@@ -80,6 +80,11 @@ type lineageSegment struct {
 	// segment sorted by pk.
 	compacted bool
 	sorted    bool
+	// noMsgID builds a timestamp-only StartPosition, with no MsgID. Since
+	// #53595 an L0 materialized by the streamingnode has exactly that: it has
+	// no physical WAL position, and meta.UpdateStartPosition stores it anyway
+	// because it is still a valid delete-retention boundary.
+	noMsgID bool
 }
 
 func (f *lineageFixture) add(t *testing.T, s lineageSegment) {
@@ -106,6 +111,9 @@ func (f *lineageFixture) add(t *testing.T, s lineageSegment) {
 		}},
 	}
 	info.CreatedByCompaction = s.compacted
+	if s.noMsgID {
+		info.StartPosition = &msgpb.MsgPosition{ChannelName: s.channel, Timestamp: s.startTs}
+	}
 	require.NoError(t, f.svr.meta.AddSegment(context.TODO(), NewSegmentInfo(info)))
 	if s.indexed {
 		require.NoError(t, f.svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
@@ -574,6 +582,43 @@ func TestSplitSourceDeleteCheckpointStaysPinnedAtTheFence(t *testing.T) {
 		assert.EqualValues(t, hashFenceTick, view.GetDeleteCheckpoint().GetTimestamp())
 		assert.EqualValues(t, 300, f.svr.meta.GetSegment(context.TODO(), 202).GetStartPosition().GetTimestamp(),
 			"the L0's own start position in meta is not touched")
+	})
+
+	t.Run("a timestamp-only L0 start position is still clamped", func(t *testing.T) {
+		// Post-#53595 the streamingnode's L0 materializer has no physical WAL
+		// position, so the L0's StartPosition -- and the delete checkpoint
+		// derived from it -- carries a timestamp and no MsgID at all. The
+		// clamp lowers the timestamp on a copy and must neither panic nor
+		// invent a MsgID.
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), src,
+			&msgpb.MsgPosition{ChannelName: src, MsgID: []byte{1}, Timestamp: 500}))
+		f.add(t, lineageSegment{
+			id: 203, channel: src, state: commonpb.SegmentState_Flushed,
+			level: datapb.SegmentLevel_L0, startTs: 300, noMsgID: true,
+		})
+		require.Empty(t, f.svr.meta.GetSegment(context.TODO(), 203).GetStartPosition().GetMsgID(),
+			"the fixture must keep the position timestamp-only")
+
+		view := f.view(src)
+		assert.ElementsMatch(t, []int64{203}, view.GetLevelZeroSegmentIds())
+		require.NotNil(t, view.GetDeleteCheckpoint())
+		assert.EqualValues(t, hashFenceTick, view.GetDeleteCheckpoint().GetTimestamp())
+		assert.Empty(t, view.GetDeleteCheckpoint().GetMsgID(), "a MsgID cannot be lowered, so none is invented")
+		assert.Equal(t, src, view.GetDeleteCheckpoint().GetChannelName())
+	})
+
+	t.Run("a timestamp-only position below the fence is left alone", func(t *testing.T) {
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), src,
+			&msgpb.MsgPosition{ChannelName: src, MsgID: []byte{1}, Timestamp: 500}))
+		f.add(t, lineageSegment{
+			id: 204, channel: src, state: commonpb.SegmentState_Flushed,
+			level: datapb.SegmentLevel_L0, startTs: 50, noMsgID: true,
+		})
+		view := f.view(src)
+		assert.EqualValues(t, 50, view.GetDeleteCheckpoint().GetTimestamp())
+		assert.Empty(t, view.GetDeleteCheckpoint().GetMsgID())
 	})
 
 	t.Run("a channel that is no split source is untouched", func(t *testing.T) {
