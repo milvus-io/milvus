@@ -20,7 +20,9 @@ import (
 	context2 "context"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -80,6 +82,33 @@ func (suite *StreamPipelineSuite) TestBasic() {
 		output := <-suite.outChannel
 		suite.Equal(int64(1001), int64(output))
 	}
+}
+
+func TestStreamPipelineReportsTerminalStreamError(t *testing.T) {
+	expected := errors.New("terminal stream error")
+	input := make(chan *msgstream.MsgPack)
+	dispatcher := msgdispatcher.NewMockClient(t)
+	dispatcher.EXPECT().Register(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context2.Context, config *msgdispatcher.StreamConfig) (<-chan *msgstream.MsgPack, error) {
+			config.OnStreamError(expected)
+			return input, nil
+		},
+	).Once()
+	dispatcher.EXPECT().Deregister("test-channel").Once()
+
+	reported := make(chan error, 1)
+	pipeline := NewPipelineWithStream(
+		dispatcher,
+		time.Second,
+		false,
+		"test-channel",
+		staticMVCCGetter{},
+		WithStreamErrorHandler(func(err error) { reported <- err }),
+	)
+	require.NoError(t, pipeline.ConsumeMsgStream(context2.Background(), &msgpb.MsgPosition{}))
+	require.ErrorIs(t, <-reported, expected)
+	require.Contains(t, pipeline.Status(), expected.Error())
+	pipeline.Close()
 }
 
 func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherMergesBufferedDeletePacks() {

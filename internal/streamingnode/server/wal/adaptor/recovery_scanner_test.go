@@ -112,7 +112,7 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), capacity, time.Hour, barrier)
 			t.Cleanup(buffer.Close)
 			liveReady := make(chan struct{})
-			ro := adaptImplsToROWAL(l, func() {})
+			ro := adaptImplsToROWAL(l, func() {}, nil)
 			t.Cleanup(ro.Close)
 			stream := newRecoveryStreamBuilder(ro, buffer, liveReady).Build(recovery.BuildRecoveryStreamParam{
 				StartCheckpoint: historical.MessageID(), RecoveryBarrier: barrier,
@@ -197,7 +197,7 @@ func TestRecoveryScannerCloseWhilePaused(t *testing.T) {
 			}
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1024, time.Hour, barrier)
 			t.Cleanup(buffer.Close)
-			ro := adaptImplsToROWAL(l, func() {})
+			ro := adaptImplsToROWAL(l, func() {}, nil)
 			t.Cleanup(ro.Close)
 			ready := make(chan struct{})
 			stream := newRecoveryStreamBuilder(ro, buffer, ready).Build(recovery.BuildRecoveryStreamParam{

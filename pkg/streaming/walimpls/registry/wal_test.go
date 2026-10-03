@@ -18,6 +18,9 @@ func TestRegister(t *testing.T) {
 	RegisterBuilder(b)
 	b2 := MustGetBuilder(name)
 	assert.Equal(t, b.Name(), b2.Name())
+	b3, ok := GetBuilder(name)
+	assert.True(t, ok)
+	assert.Equal(t, b.Name(), b3.Name())
 
 	// Panic if register twice.
 	assert.Panics(t, func() {
@@ -28,6 +31,8 @@ func TestRegister(t *testing.T) {
 	assert.Panics(t, func() {
 		MustGetBuilder(message.WALName(100))
 	})
+	_, ok = GetBuilder(message.WALName(100))
+	assert.False(t, ok)
 
 	// Test concurrent.
 	wg := sync.WaitGroup{}
