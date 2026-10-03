@@ -479,6 +479,11 @@ func (mr *MilvusRoles) Run() {
 
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
+		// Do not start MixCoord with local fallback config when the external
+		// etcd source did not complete its initial load.
+		if !paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool() && !paramtable.GetBaseTable().EtcdSourceInitialized() {
+			mlog.Fatal(ctx, "MixCoord requires an initialized etcd config source")
+		}
 		// Resolve the actual walName instead of default
 		walName := util.InitAndSelectWALName()
 		// persist immutable configs if necessary; mq.type's literal "default" is
