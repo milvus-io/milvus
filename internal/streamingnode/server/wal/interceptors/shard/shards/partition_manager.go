@@ -34,8 +34,13 @@ func newPartitionSegmentManager(
 			fencedAssignTimeTick = segment.CreateSegmentTimeTick()
 		}
 	}
+	// The segment-alloc worker gets its own lifetime, ended when the partition
+	// manager is dropped (FlushAndDropPartition). See allocCtx.
+	allocCtx, allocCancel := context.WithCancel(ctx)
 	m := &partitionManager{
 		ctx:                  ctx,
+		allocCtx:             allocCtx,
+		allocCancel:          allocCancel,
 		txnManager:           txnManager,
 		wal:                  wal,
 		pchannel:             pchannel,
@@ -55,7 +60,15 @@ func newPartitionSegmentManager(
 type partitionManager struct {
 	mlog.Binder
 
-	ctx                  context.Context
+	ctx context.Context
+	// allocCtx bounds the segment-alloc worker, and allocCancel ends it when the
+	// partition manager is dropped. A worker outliving its manager keeps
+	// appending a CreateSegment for a (collection, partition) this pchannel no
+	// longer holds under that vchannel -- after a split fence, one a target of
+	// the same collection may have registered since. Such a message is refused
+	// by the shard interceptor's name gate anyway; this stops the retry loop.
+	allocCtx             context.Context
+	allocCancel          context.CancelFunc
 	txnManager           TxnManager // the txn manager is used to manage the transaction of the segment.
 	wal                  *syncutil.Future[wal.WAL]
 	pchannel             types.PChannelInfo
@@ -114,6 +127,9 @@ func (m *partitionManager) WaitPendingGrowingSegmentReady() <-chan struct{} {
 // !!! caller should ensure that the returned segment is flushed by other message (not FlushMessage), such as DropPartition, DropCollection.
 func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int64 {
 	m.fencedAssignTimeTick = math.MaxInt64
+	// Stop a segment-alloc worker still retrying for this partition: nothing it
+	// could create belongs to a partition manager any more.
+	m.allocCancel()
 	if m.onAllocating != nil {
 		close(m.onAllocating)
 		m.onAllocating = nil
