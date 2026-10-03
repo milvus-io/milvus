@@ -13,8 +13,21 @@ routing and fence retry (§3.3), and the per-cluster replication pieces (§6.5).
 No split of a namespace collection is issued for now: the trigger never selects
 one and the split message's own validation refuses one (§1.3). What this
 document describes but the code does not do is marked **not implemented** or
-*deferred* where it appears, and §11 lists it with every known limitation.
+*deferred* where it appears, §11 lists it with every known limitation, and §12
+says what has actually been run.
 The feature ships off (`dataCoord.shardSplit.enable`, §9).
+
+**Base.** The implementation sits on master *after* the WAL recovery and
+`WALSummary` refactor (#53595). That refactor deleted
+`internal/streamingnode/server/flusher` and made vchannel lifecycle, L1
+persistence and Delete→L0 materialization the job of one per-vchannel
+`VChannelRecoveryModule` under a `PChannelRecoveryManager`
+(`internal/streamingnode/server/wal/vchannel`), with a single global recovery
+checkpoint per pchannel. The split's write switch is built on that module: the
+fence is a field of the source's `VChannelMeta`, a target vchannel is created
+by the `SplitShard` message itself, and the source is retired by the module's
+own drop path (§5, §6.1 step 3, §6.5). §13 lists what the refactor absorbed
+and what was deleted with it.
 
 ## 1. Overview
 
@@ -141,6 +154,29 @@ These properties of the current system shape the design:
 5. **Growing segments are released only via `SyncTargetVersion`** from
    QueryCoord. A delegator QueryCoord cannot see cannot hand its growing
    segments over to sealed ones.
+6. **A vchannel's lifecycle, its L1 persistence and its deletes belong to one
+   recovery module, and a pchannel has one checkpoint.** Since #53595 every
+   vchannel of a pchannel has a `VChannelRecoveryModule`: it is created by a
+   genesis message, it publishes the vchannel's segments and L0 output, and it
+   is closed by a *drop* that fences metadata publication at the drop tick and
+   completes only once the module's own dependencies have finished (the L0
+   materialization frontier has passed that tick, every segment created before
+   it has a durable tombstone), after which the vchannel is `TOMBSTONED` and
+   its catalog row is collected. The pchannel's recovery checkpoint is one
+   value, published after the component snapshots behind it are durable, and
+   it obeys the **handle-release rule**: it passes a time tick only once every
+   message handle at that tick has been released, an Insert handle is held
+   until its growing segment is published to DataCoord
+   (`segment/lifecycle_writer.go PersistGrowingSegment`) and a Delete handle
+   until its L0 output is registered with DataCoord
+   (`l0materializer`'s `WALMaterializer`). So `cp(pchannel) >= T` means every
+   Insert and every Delete of that pchannel at or below `T` is in DataCoord's
+   meta. The split's fence, genesis, retirement and drain are all expressed in
+   these terms (§5, §6.3). The checkpoint DataCoord still receives *per
+   vchannel* is this one pchannel value, reported under every active vchannel
+   of the pchannel (`vchannel/checkpoint_updater.go`), which is why the drain
+   is stronger per source than it used to be and why it couples a source to
+   its pchannel neighbours (§6.3 step 3).
 
 ## 3. Routing Design
 
@@ -287,7 +323,9 @@ vchannel; the proxy does the retry, against refreshed routing.
 - `SHARD_FENCED` is permanent for the vchannel, recovered by refreshing routing
   and writing to a *different* vchannel.
 
-**The proxy's reaction** (`internal/proxy/shard_fenced_retry.go`). The proxy
+**The proxy's reaction** (`internal/proxy/dml/shard_fenced_retry.go`; the
+write path lives in `internal/proxy/dml` since #53806 extracted it, and so do
+the split's three files). The proxy
 places every row by residue (`split_routing.go`; a never-split collection keeps
 `typeutil.HashPK2Channels` verbatim). On `SHARD_FENCED` it evicts that one
 collection's entry from its meta cache (`Cache.RefreshCollectionByID`) and
@@ -321,7 +359,14 @@ tick and delete what was written there in between.
   - a transient answer (no streaming code, i.e. a transport error or an ended
     context; `CHANNEL_NOT_EXIST`, `CHANNEL_FENCED`, `UNMATCHED_CHANNEL_TERM`,
     `ON_SHUTDOWN`, `INNER`, `RESOURCE_ACQUIRED`, `RATE_LIMIT_REJECTED`; a
-    retriable Milvus error) backs off and retries;
+    retriable Milvus error) backs off and retries. `RATE_LIMIT_REJECTED` is
+    also what the WAL's recovery-tail reject mode answers
+    (`wal_adaptor.go`, `streaming.walRecovery.tail.highWatermark`, 16 GB): it
+    is decided *ahead of* the interceptor chain, so a probe refused that way
+    never reached the window and asking again is sound. It can hold for
+    minutes behind a large recovery backlog, and it is the one answer that can
+    exhaust `proxy.shardSplit.maxFenceRetryWait` on an otherwise healthy
+    split;
   - `UNRECOVERABLE`, which is the redo interceptor's answer for a collection it
     no longer finds on that vchannel (a source already retired), refreshes the
     routing once per vchannel and retries; if the refreshed routing still
@@ -350,7 +395,17 @@ tick and delete what was written there in between.
   `OperationNotSupported` for now; DataCoord refuses an import that names a
   shard a split is moving with a retriable `ServiceUnavailable` (§8.10).
 
-**Keyed inserts across the fence (N-4).** A keyed insert whose first attempt
+**Keyed inserts across the fence (N-4).** Deduplication covers exactly the
+inserts a client keyed explicitly, with an `idempotency-key`. There is no
+global and no per-collection enable switch, and the proxy never derives a key
+from the payload (#53595 deleted both), so **an insert with no key is not
+deduplicated at all** -- by a split or without one. An unkeyed insert whose
+response is lost while a split is in flight and which the client retries
+writes its rows twice, exactly as it would with no split in flight: unkeyed
+writes are at-least-once, across a fence as anywhere else (§7, §11). The rest
+of this paragraph is about a keyed insert.
+
+A keyed insert whose first attempt
 landed on the source, and whose response was lost, would be re-routed to a
 target, whose idempotency window never saw the key. So before it places a row,
 a keyed insert asks the window of every fenced vchannel it knows of -- the
@@ -391,10 +446,14 @@ evicted from the window: it is written again, on the targets, and can
 duplicate rows. This is accepted. Three ways to extend it were rejected:
 - a minimum delay before adoption only moves the bound -- the window is
   byte-bounded and has no TTL anyway -- and lengthens every split;
-- probing retired sources is unsafe: a retired source's dedup history lasts
-  only until the WAL summary's retention GC drops it, and a delisted source
-  never receives the `TruncateCollection` or `DropPartition` that invalidates
-  a window, so it could answer "duplicate" for rows that no longer exist;
+- probing retired sources is unsafe for a different reason than it used to
+  be. No message type invalidates a window any more (§7), so a retired
+  source's window keeps answering for as long as the summary retains it --
+  which means it would answer "duplicate" for rows a `TruncateCollection` or
+  a `DropPartition` has since removed, with no mechanism left that clears the
+  key. The binding limit is anyway the proxy's routing view, not the
+  window's retention: once the adoption delists the source the proxy never
+  learns its name again;
 - handing the source's keys to the targets at the fence needs a new WAL-level
   mechanism to seed a window with answers that belong to another vchannel's
   append, and would still not make the guarantee unconditional, since windows
@@ -424,15 +483,25 @@ Five principles work around §2:
    DataCoord reports it drained. There is no partial ownership migration.
 4. **The whole write switch is one broadcast.** One `SplitShard` message goes
    to exactly three kinds of vchannel: the source, the two targets, and the
-   control channel. Every replica carries the same header and body, and what a
-   replica does is decided by its vchannel's role (`message.SplitShardRoleOf`):
+   control channel (which the broadcaster adds to every broadcast it issues,
+   so the builder does not name it). Every replica carries the same header and
+   body, and what a replica does is decided by its vchannel's role
+   (`message.SplitShardRoleOf`):
    - **source**: the write fence. Its node seals every growing segment of the
      vchannel, embeds their ids in the header, and tears the registration down,
      leaving a fence tombstone keyed by name. After `T_switch` the vchannel
-     never accepts DML again.
-   - **target**: the genesis of a new vchannel, registered exactly as
-     `CreateCollection` does. The body carries the schema (in
-     `CreateCollection`'s body shape) and the header the partition snapshot.
+     never accepts DML again. The record is also the source vchannel's **seal
+     record** and an explicit **L0 boundary**: its recovery module flushes the
+     growing L1 at the fence tick and materializes every delete below
+     `T_switch` at `T_switch`, rather than whenever the stale-flush timer next
+     comes round (§5, §6.3 step 2).
+   - **target**: the genesis of a new vchannel. The replica *creates* the
+     vchannel's recovery module -- `vchannel.Manager.moduleForMessage` builds
+     one for a genesis message, and a `SplitShard` replica in the target role
+     is one, exactly as `CreateCollection` is -- and seeds its meta from the
+     body, which carries the schema in `CreateCollection`'s body shape, and
+     from the header's partition snapshot. The target's first checkpoint is
+     this message.
    - **control channel**: no effect in any consumer; it orders the ack
      callback.
    - **anything else**: a misroute. It is refused on the append path, and
@@ -492,8 +561,9 @@ Five principles work around §2:
     same task cannot lose each other's fields (§6.1 step 4).
   - `CheckShardSplitDrained` (§6.3 step 3).
 
-  It also counts a drained split source as flushed in flush-state checks
-  (§6.3).
+  Flush state needs no exception for a split source any more: the checkpoint
+  DataCoord receives for the source keeps advancing with its pchannel, so
+  `GetFlushState` and `GetFlushAllState` are master's (§6.3 step 3).
 - **RootCoord.** Owns both callbacks: the `SplitShard` one (§6.1 step 4) and
   the `AlterCollection(shard_split_routing)` one, which judges and
   drain-gates an adoption before applying it (§6.3 step 4). Both write the
@@ -510,52 +580,64 @@ Five principles work around §2:
     shard count is capped by pchannel count (§8.5; §11 M5).
 - **StreamingNode (source).** It receives the fence on the normal append path
   by owning the source pchannel. Under the vchannel-exclusive lock the shard
-  handler seals the growing segments, embeds their ids, and force-fails active
-  transactions. It installs the fence *before* it appends the fence record, and
-  keeps it whatever the append returns (§6.1 step 3). Three things then happen
-  at different times:
-  - **Shard-manager registration.** It is torn down in the same critical
-    section as the fence, leaving `SplitFence{TimeTick, TaskID}` keyed by name.
-    This frees the pchannel's per-collection slot, so a target can be placed
-    there at once. The tombstone answers a stale route with `SHARD_FENCED` and
-    gives a re-sent fence its recorded tick.
-  - **Data sync service.** It receives the source record, and its `dd_node`
-    seals every growing segment of the vchannel, not only the ids in the header.
-    It is closed on the flusher's dispatch goroutine once its acked channel
-    checkpoint reaches its close gate
-    (`flusherComponents.closeDrainedFencedSources`). The gate is the own tick of
-    the first source record dispatched to the service, i.e. the seal record it
-    actually consumed. It is not `T_switch`: after a failed first append, the
-    first record in the WAL is the re-drive, whose tick is later, and gating on
-    `T_switch` could close the service before that record reached it. On
-    restart the gate is reseeded from `max(split_time_tick, checkpoint tick)`.
-    An ack that would open the gate is not taken at its word: DataCoord
-    answers Success to an update it stored clamped (for a collection with TEXT
-    fields, to the earliest segment still Growing there, which a sealed
-    segment with an empty buffer can be when the checkpoint passes the fence),
-    so the flusher reads the checkpoint DataCoord holds
-    (`GetChannelRecoveryInfo`'s seek position) and counts that one
-    (`flusherComponents.ObserveCheckpointAck`). While it is short of the gate
-    the service stays open and keeps reporting.
-    It is never closed from
-    the checkpoint callback, and the drop-collection teardown is not reused,
-    because that teardown reaches DataCoord's `DropVirtualChannel`. Once
-    closed, the source's flusher checkpoint is frozen at or past that gate.
-    RecoveryStorage keeps the same gate (`recovery.SplitFenceGate`, one
-    definition shared with the flusher) and calls a source whose own flusher
-    checkpoint has reached it *drained* (`DrainedPastFence`): that is what an
-    `AlterWAL` FLUSHING wait skips (§8.4) and what makes a retired source
-    collectable (§6.5).
-  - **Recovery meta.** It moves to `VCHANNEL_STATE_SPLITTED` with
-    `split_time_tick = T_switch`, read from the record's `_ae`, and stays there
-    until retired and collected (§6.5). A `CreateSegment` the storage observes
-    on a `SPLITTED` vchannel -- only a replay can deliver one -- is skipped and
-    reported as an inconsistency, as on a `DROPPED` vchannel (§8.11).
+  handler seals the growing segments (`FlushAndFenceSegmentAllocUntil`, so each
+  of them takes `SEGMENT_ASSIGNMENT_STATE_SEALED`), embeds their ids, and
+  force-fails active transactions. It installs the fence *before* it appends
+  the fence record, and keeps it whatever the append returns (§6.1 step 3).
+  Two things then happen, in the write path and in the recovery module:
+  - **Shard-manager registration** (write path). It is torn down in the same
+    critical section as the fence, leaving `SplitFence{TimeTick, TaskID}` keyed
+    by name. This frees the pchannel's per-collection slot, so a target can be
+    placed there at once. The tombstone answers a stale route with
+    `SHARD_FENCED` and gives a re-sent fence its recorded tick. It is rebuilt
+    after a restart from the write-path recovery snapshot, from the persisted
+    fence below (`shards.newFencedVChannels` over
+    `moduleapi.VChannelWritePathRecoveryState.SplitFenceTimeTick` /
+    `.SplitFenceTaskID`): a restart therefore lands on the same state, the
+    source's registration deliberately *not* rebuilt, since a live successor
+    may already hold that pchannel's single slot for the collection.
+  - **The source's recovery module** (`vchannel.VChannelRecoveryModule`). It
+    observes its own replica and does three things with it, all in
+    `ObserveSplitShardSourceMessageV2` and the module's dispatch
+    (`vchannel/split.go`, `vchannel/module.go`):
+    - it flushes every segment created before the record, because the record
+      *is* the seal record for `T_switch` (there is no `ManualFlush` ahead of
+      it any more, and no `SealAllSegments` either);
+    - it records the fence in the vchannel meta:
+      `VChannelMeta.split_fence_time_tick` = `T_switch` and
+      `split_fence_task_id` = the task that placed it. `T_switch` is read from
+      the record's `_ae` (`SplitShardExtraResponse`), so a re-driven first
+      fence records the first attempt's tick, not the record's own. The fence
+      is written once and never moved; it is also written through every
+      outstanding pending drop's stable pre-image, exactly as the L0
+      materialization frontier is, so a fence landing while a partition drop
+      is pending cannot be withheld from the published snapshot (§7, crash
+      recovery);
+    - the record is an **L0 boundary** (`WALMaterializer.isL0Boundary`), so
+      the batch it ends materializes every delete of the vchannel below
+      `T_switch` at `T_switch`.
+
+    The vchannel stays `VCHANNEL_STATE_NORMAL`. There is no `SPLITTED` state:
+    enum 4 is `reserved` in `streaming.proto` with a comment saying why. A
+    fenced source is still on the collection's vchannel list, still observes
+    the collection's DDL, and still drains its own data, so the fence is one
+    field and the retirement is a separate, later observation
+    (`ObserveRetireVChannel`, §6.5). Nothing closes anything at the fence:
+    there is no data sync service, no close gate, and no per-vchannel flusher
+    checkpoint to freeze.
 - **StreamingNode (targets).** Whichever nodes own the target pchannels create
-  the targets from their replicas of the same broadcast. The recovery meta
-  records each target's genesis position in
-  `VChannelMeta.split_genesis_checkpoint`, and the flusher never recovers a
-  target from before it (§10).
+  the targets from their replicas of the same broadcast: the replica is a
+  genesis message, so `vchannel.Manager.moduleForMessage` builds the
+  vchannel's recovery module for it
+  (`isVChannelGenesisMessage`), and the module seeds the meta from the body's
+  genesis schema and the header's partition snapshot
+  (`NewVChannelMetaFromSplitShardTargetMessage`). The target's own
+  `checkpoint_time_tick` is the message's tick, exactly as a fresh
+  `CreateCollection`'s is, so **no genesis position is persisted beside it**
+  (`split_genesis_checkpoint` is gone): a split target is an ordinary vchannel
+  from there on. A replay of the genesis is ignored; a target name reused
+  after its predecessor was collected starts a new lifetime only past the
+  retained checkpoint (`CanStartNewCollectionAt`).
 - **delegator0, delegator1/2, QueryCoord.** See §6.2 to §6.4.
 - **Proxy.**
   - Routing by residue, reacting to `SHARD_FENCED`, and the keyed-insert probe
@@ -686,7 +768,7 @@ discovery, retry across pchannel reassignment, and term fencing.
    |---|---|
    | Header (`SplitShardMessageHeader`) | `collection_id`, `split_task_id` (never zero), `source_vchannel`, `target_vchannels` (exactly two), `flushed_segment_ids` (filled on the source replica), `partition_ids` |
    | Body | `genesis`: a `CreateCollectionRequest` whose schema carries the collection properties. `routing`: the post-image, which is the grown vchannel list, every shard's state and residues, the modulus and `shard_by` |
-   | Recipients | the source, the two targets, the control channel |
+   | Recipients | the source and the two targets, named by the builder; the control channel, added to every broadcast by the broadcaster itself (`message.WithBroadcastControlChannel`), which is why `SplitShardParam` has no `ControlChannel` field |
    | Idempotency key | collection-scoped, `shard-split-<task id>` |
    | Resource keys | An obligation on the issuer, not a property of the message: the broadcast is started under `SharedDBName + ExclusiveCollectionName`, which the broadcaster then holds until the ack callback returns. DataCoord's issuer (`startSplitCollectionBroadcast`) reads the collection's name, takes the keys, reads the collection again under them, and refuses a rename in between as a retriable `ServiceUnavailable`; the next attempt takes the new name's keys. Keys are collection names; §10 says what that means for ordering on a secondary |
 
@@ -698,12 +780,14 @@ discovery, retry across pchannel reassignment, and term fencing.
    - a target placed on a pchannel another listed vchannel of the collection
      occupies. The source's own pchannel is free, because the fence frees its
      slot;
-   - a control channel that is not one (`funcutil.IsControlChannel`), and a
-     control channel named as the source or a target. The control-channel
-     result is found in the broadcast result by name, so a plain vchannel in
-     that role builds a broadcast with no control-channel replica, whose
-     callback could never take its commit tick; a control channel as the
-     source reaches a builder invariant that panics instead of erroring.
+   - a control channel named as the source or as a target
+     (`funcutil.IsControlChannel`). A target named like one would be created
+     as a shard nothing routes to and, on the broadcast result, be mistaken
+     for the control-channel replica whose tick orders the commit; a control
+     channel as the source reaches a builder invariant
+     (`OptBuildBroadcastAppendFirst`) that panics instead of erroring. The
+     control channel itself is no longer validated as a parameter, because it
+     is no longer one.
 
    `Validate` cannot make the checks that need the collection's meta. **The
    issuer calls `streaming.CheckSplitShardAgainstCollection` under the
@@ -751,8 +835,11 @@ discovery, retry across pchannel reassignment, and term fencing.
      the record;
    - on a re-fence by the **same** task, it appends again and **moves nothing**.
      The broadcaster re-drives a source replica whose append it has not
-     persisted, whether that append landed or failed. The tombstone,
-     `split_time_tick` and the flusher's close gate do not move;
+     persisted, whether that append landed or failed. The tombstone and the
+     recorded `split_fence_time_tick` do not move, and the re-fence reports
+     the recorded tick: raising `T_switch` would be unsafe and not merely
+     useless, since DataCoord has recorded the first tick and the drain is
+     judged against it;
    - on a fence already placed by **another** task, it refuses with
      `SHARD_FENCED`, carrying the recorded tick and task id on the error. No
      extra response is reported.
@@ -761,9 +848,9 @@ discovery, retry across pchannel reassignment, and term fencing.
    recorded tick back as `SplitShardExtraResponse{split_time_tick}`, in two
    places: on the append result, and on the record itself under the reserved
    `_ae` property. An ack from either side therefore carries it, and the
-   broadcaster persists it in `AckedCheckpoint.extra`. RecoveryStorage reads
-   `split_time_tick` from `_ae` too, falling back to the record's own tick only
-   when the record carries none.
+   broadcaster persists it in `AckedCheckpoint.extra`. The source's recovery
+   module reads `T_switch` from `_ae` too (`splitSwitchTimeTickOf`), falling
+   back to the record's own tick only when the record carries none.
 
    **A first append that definitely failed.** No record carries `T_switch`
    then. Nothing was accepted after it either, so it is still a valid
@@ -771,8 +858,6 @@ discovery, retry across pchannel reassignment, and term fencing.
    Until the re-drive lands, DML on the source is refused with `SHARD_FENCED`.
    If the StreamingNode restarts first, the fence is lost with its memory and
    nothing recorded it, so the re-drive is a genuine first fence at a new tick.
-   This is also why the flusher's close gate is the tick of the seal record it
-   consumed rather than `T_switch` (§5).
 
    **A chunked fence record.** Chunking happens below every interceptor, so a
    source replica whose payload is split into chunks carries the same time tick
@@ -785,10 +870,10 @@ discovery, retry across pchannel reassignment, and term fencing.
    The targets and the control channel are appended only after the source is
    durable. `SplitShard` is `FreshTimeTick`, so each of them takes a freshly
    allocated tick, strictly greater than `T_switch`. No barrier value is
-   computed, carried or compared. The three consumers that treat
-   `CreateCollection` as vchannel genesis (the shard manager, RecoveryStorage
-   and the flusher) read a target replica by its role and share the schema
-   parser.
+   computed, carried or compared. The two consumers that treat
+   `CreateCollection` as vchannel genesis -- the shard manager on the write
+   path and the vchannel recovery module on the consume path -- read a target
+   replica by its role and share the schema parser.
 
    > **The source must be persisted before the rest is appended.** The
    > `> T_switch` guarantee rests on that order alone. Appending concurrently
@@ -880,11 +965,11 @@ discovery, retry across pchannel reassignment, and term fencing.
    coordinator-side reader to discover. Until a target has a checkpoint,
    DataCoord's seek position for it falls back to the collection's creation
    position, and the post-image is what makes the target discoverable to
-   QueryCoord. The StreamingNode flusher does not depend on the seed. It
-   recovers a target from `split_genesis_checkpoint` when DataCoord has no
-   position for it, and never recovers a target from before its genesis (§10).
-   Both halves are idempotent, so a crash between them is repaired by the
-   retry.
+   QueryCoord. The StreamingNode does not depend on the seed at all: the
+   target's recovery module was created by the `SplitShard` replica itself and
+   its first checkpoint is that record, so there is nothing for the seed to
+   tell it (§5). Both halves are idempotent, so a crash between them is
+   repaired by the retry.
 
 5. **Proxy refresh.** The cache expiry in step 4, or a `SHARD_FENCED` refusal
    before it reaches the proxy, makes the proxy describe the collection again
@@ -923,7 +1008,7 @@ sequenceDiagram
     SN0-->>BC: AppendResult + SplitShardExtraResponse{T_switch}
     BC->>BC: AckPartial persists the source result
     BC->>SNT: target replicas + CChannel (fresh tick > T_switch)
-    Note over SNT: target genesis: shard manager, recovery meta, data sync service
+    Note over SNT: target genesis: shard manager registration + a new vchannel recovery module
     BC->>CB: every replica landed
     CB->>CB: ValidateSplitShardMessage (read-only)
     CB->>DC: CommitShardSplit(task, T_switch, genesis checkpoints)
@@ -1176,8 +1261,9 @@ split source from the watch itself, not from a describe of every collection:
   recovery info whose seek is past `T_switch` carries the signal. On a
   secondary the task is created only by the SplitShard ack callback, which runs
   after every replica is appended; between the source replica's append and
-  that callback, the source's flusher can report a checkpoint past `T_switch`
-  while its recovery info has no signal. A QueryNode restart inside that window
+  that callback, the source's pchannel can report a recovery checkpoint past
+  `T_switch` while its recovery info has no signal. A QueryNode restart inside
+  that window
   (or for as long as the callback keeps failing) rebuilds the source without
   its children: target rows missing, target deletes not applied, no error,
   until the flip.
@@ -1234,10 +1320,19 @@ children read their full views.
    rest, keeping the work list and the in-flight plan ids on the task record
    so a restart resumes where it left off:
    1. **Precondition.** Redistribution, rewrite and relabel alike, starts only
-      once every source's channel checkpoint is ≥ its `T_switch`. The source
-      WAL is closed to DML at `T_switch` (§6.1 step 3), so from then on the
-      source's L0 set is final and every segment the fence sealed is
-      `Flushed`.
+      once every source's channel checkpoint is ≥ its `T_switch`
+      (`fenceFlushBlockReason`, step 3). What that proves is the
+      handle-release rule of §2.6, not a frozen flusher checkpoint: the
+      checkpoint is the pchannel's global recovery point, it passes `T_switch`
+      only once every Insert handle at or below `T_switch` has published its
+      growing segment to DataCoord and every Delete handle has registered its
+      L0 output, so from then on every segment the fence sealed is in meta and
+      the source's L0 set is complete. The source takes no DML after
+      `T_switch` (§6.1 step 3), and the fence is itself an L0 boundary, so its
+      last deletes are materialized **at** `T_switch` rather than one sync
+      period later. The set is then frozen as far as the WAL is concerned; an
+      import is the one other producer of a source L0, which is what step 2.6
+      guards against.
    2. **Inputs.** A rewrite is a compaction task with one plan per input,
       run on the source channel. Inputs are the source's `Flushed` non-L0
       segments, except a compaction's invisible staging output (a clustering
@@ -1245,7 +1340,15 @@ children read their full views.
       rows); its inputs are rewritten instead. Once the checkpoint is
       ≥ `T_switch` (step 1), no fence-sealed segment is still unflushed.
       Every round still re-scans the source, for an import's segment that
-      became an input later and for a plan that must be retried. A round
+      became an input later and for a plan that must be retried. Two things
+      the new write path publishes are deliberately **not** inputs: a
+      `Growing` L1, which is now published to DataCoord before its Insert
+      completes, so a source can carry real durable rows in `Growing` state --
+      it joins the work list when it flushes, while the L0-retire guard
+      (step 2.6) and the drain (step 3) both hold for it -- and an **empty**
+      L1, which is committed `Dropped` (`CommitL1Segment` with
+      `modifiedRows == 0`), so a residue class that took no writes during the
+      window holds nothing at all. A round
       dispatches only up to `rewriteBatchSize` plans in flight (§9), and skips
       an input that is compacting or importing, or that a snapshot protects
       (or whose collection's compaction is blocked until a snapshot's
@@ -1278,7 +1381,10 @@ children read their full views.
       coordinator restart all see the full set; no record of which L0s a plan
       folded is persisted. The input's own deltalogs and the L0 set are read
       in **one** meta scan of the source channel (`hashSplitPlanSegments`),
-      so an L0 commit cannot fall between the two reads. The DataNode folds
+      so an L0 commit cannot fall between the two reads. The set a plan reads
+      is complete because the round runs only past the fence checkpoint (step
+      2.1) and the fence is an L0 boundary, so the source's last deletes are
+      already L0 segments in meta by then. The DataNode folds
       them with the entity-filter rule mix and
       L0 compaction use: a delete applies to a row iff the row's effective
       timestamp is below the delete's. The outputs are written with those
@@ -1330,9 +1436,35 @@ children read their full views.
         capped per collection per tick, so a large batch is indexed over
         several ticks.
    6. **Source L0 retire.** In a redistribution round, the split manager
-      retires a source's L0 segments (marks them `Dropped`) only once no
-      non-`Dropped` non-L0 data remains on that source. Every input has then
-      folded them. They are never retired earlier, and the retirement is its
+      retires a source's L0 segments (marks them `Dropped`) only once **both**
+      of these hold:
+      - no non-`Dropped` non-L0 data remains on that source
+        (`unfoldedSourceData`): every input has then folded them. A published
+        `Growing` or `Sealed` segment counts as such data, so the retire waits
+        for it;
+      - no import job that is neither `Completed` nor `Failed` names any
+        vchannel of the split's family
+        (`importMayPublishLevelZero`, the same predicate the drain's import
+        conjunct applies). An import task that carries delete data and no
+        insert data is written at level `L0`
+        (`internal/datanode/importv2/util.go`) and reaches DataCoord as
+        `SaveBinlogPaths{SegLevel: L0}` → `CreateL0Operator`, stored `Flushed`
+        with `IsImporting` unset -- afterwards indistinguishable from an L0
+        the WAL materialized. An import already in flight when the split
+        started passes both import refusals (§8.10) by construction, so it can
+        still publish a **new** L0 on the family after the rewrite has stopped
+        folding; that L0 has folded nothing, and retiring the set while it can
+        appear would discard deletes that never reached the rows the rewrite
+        has already moved to the targets. The guard is the family, not just
+        the source, because the job names a family vchannel and nothing else
+        can name a target during the window anyway. It cannot be the drain
+        predicate instead: the drain counts the source's L0s as live
+        segments, so gating the retire on the drain would have the retire wait
+        for the drain while the drain waits for the retire. The **dispatch** is
+        deliberately not held -- a plan carries the source's L0s and folds
+        them, so rewriting on is safe; only discarding them is not.
+
+      They are never retired earlier, and the retirement is its
       own write after the last commit: a crash in between leaves the deletes
       applied twice, harmlessly, and the next round retires them.
    7. **Delete checkpoint.** While its task is not Done or Aborted, a split
@@ -1354,13 +1486,34 @@ children read their full views.
    8. **Slot.** A rewrite task's slot is the flat mix-compaction slot for its
       input plus an L0 price over the delete rows it folds, priced the way an
       L0 compaction's is.
-   9. **What 1 and 6 rest on.** That no L0 segment registers on the source
-      after its checkpoint reaches `T_switch` is the StreamingNode's fence
-      invariant: the source WAL refuses DML after `T_switch`. DataCoord does
-      not check it. If it were ever broken, an L0 registered after a plan was
-      built would be missed by that plan and could still be retired once the
-      other inputs had folded it, and the rows it deleted from that plan's
-      input would reappear in the outputs.
+   9. **What 1 and 6 rest on (L0-2).** The whole rewrite rests on one rule:
+      *every plan carries every L0 of its source channel, folds them into the
+      outputs it writes, and the source's L0s are retired only once nothing is
+      left on the source to fold them.* Its chain, on the WAL side:
+      1. the fence is an explicit L0 boundary
+         (`WALMaterializer.isL0Boundary`), and the batch a boundary ends is
+         cut there, so every delete below `T_switch` is materialized at
+         `T_switch`;
+      2. a Delete handle is released only after its L0 output is registered
+         with DataCoord, and the pchannel's recovery checkpoint cannot pass a
+         message whose handle is still held (§2.6);
+      3. therefore `cp(source) >= T_switch` -- the gate both halves of the
+         rewrite sit behind (step 2.1) -- implies the source's whole pre-fence
+         L0 set is already in meta;
+      4. nothing in the WAL path can add to it afterwards: the shard
+         interceptor refuses a Delete on a fenced vchannel, `FlushStale` and
+         `RequestPersistThrough` only flush what is already pending, and a
+         boundary message the source still sees (`ManualFlush`,
+         `TruncateCollection` and `CreateSnapshot` through the name gate
+         without effect; `FlushAll` and `AlterWAL` because they are
+         pchannel-level) is retained and released with an empty entry list, so
+         it creates no L0 segment.
+
+      That is strictly stronger than the pre-#53595 argument, which rested on
+      the flusher closing the source's data sync service at the fence. What it
+      does **not** cover is the second L0 producer, a delete-only import task;
+      step 2.6's second conjunct is what covers that. Steps 1, 2 and 4 are
+      traced by reading the WAL code, not by fault injection (§12).
    10. The drain predicate below is unchanged. Rewrite satisfies it through 4
        and 6: a rewritten input and a retired L0 are `Dropped`.
 
@@ -1374,11 +1527,43 @@ children read their full views.
    - the source's channel checkpoint exists and is ≥ that `T_switch`;
    - no unfinished import job names the source vchannel.
 
-   The checkpoint conjunct closes the async-flush window. The fence only writes
-   the message, and the sealed segments reach DataCoord meta asynchronously.
-   The checkpoint passes a position only after that position's data is synced
-   and reported, so `checkpoint ≥ T_switch` proves the fence-sealed set is in
-   meta. This is why the task carries the `T_switch` the fence actually landed
+   The predicate is one function, `splitDrainBlockReason`, which returns the
+   first conjunct that does not hold -- naming the segment by id, level and
+   state, or the source and its ticks -- or `""` once the source is drained.
+   `splitSourcesDrained` is defined as that string being empty, and the
+   manager's stall logs, the adoption gate and the answer
+   `CheckShardSplitDrained` gives all read it, so nothing that logs why a
+   split is waiting can disagree with what the RPC answers.
+
+   **What the checkpoint conjunct proves, and what it costs.** Not what it
+   used to. Before #53595 the flusher closed the fenced source's data sync
+   service, so the source's own vchannel checkpoint froze at `T_switch`. There
+   is no flusher; the value DataCoord receives under a vchannel's name is the
+   recovery checkpoint of its **whole pchannel**, and a fenced source keeps
+   reporting it until adoption drops its module, so it never freezes. What
+   carries the proof is the handle-release rule (§2.6): `cp(source) >=
+   T_switch` says every Insert and every Delete of that pchannel at or below
+   `T_switch` is in DataCoord's meta. That is strictly stronger per source
+   than the old statement, and it is what makes the segment scan conclusive
+   rather than merely empty -- including for the source's last L0, which the
+   fence itself cuts.
+
+   The cost is a liveness coupling the old mechanism did not have: the point
+   is pchannel-wide, so a **different** collection's vchannel on the same
+   pchannel that cannot persist (its L0 materialization failing, DataCoord
+   unreachable, a poisoned handle) holds this split's drain back with it. The
+   segment scan runs first, so when this conjunct is the one that blocks, the
+   source itself has nothing left in meta; what remains is either the source's
+   own deletes not yet materialized or a neighbour of the pchannel, and
+   DataCoord cannot tell the two apart. Rather than claim a distinction it
+   cannot make, the reason string names the pchannel so an operator knows
+   where else to look. There is **no metric** for this stall mode (§11), and
+   no second safety net: `meta.UpdateChannelCheckpoints` clamps an incoming
+   position to `GetMinGrowingSegmentCheckpoint`, but that clamp applies only
+   to TEXT collections, and a collection with a TEXT field is refused a split
+   outright.
+
+   This is also why the task carries the `T_switch` the fence actually landed
    on in *this* cluster.
 
    The import conjunct covers a job still in `Pending`/`PreImporting`, which has
@@ -1387,23 +1572,35 @@ children read their full views.
    A source L0 segment is a non-`Dropped` segment like any other, so it holds
    the drain until the split manager retires it (step 2.6).
 
-   **Flush state during the window.** Once the source's data sync service
-   closes, its checkpoint stops near `T_switch`. The source stays in the
-   collection's vchannel list until adoption. DataCoord's `GetFlushState` and
-   `GetFlushAllState` therefore count a split source as flushed once its
-   channel checkpoint ≥ its recorded `T_switch`; zero never counts.
-   Everything the source ever accepted is ≤ `T_switch`, so this is exact, and a
-   flush taken during the window does not wait for adoption. A
-   `TruncateCollection` issued during the window waits on the same rule
-   (`DropSegmentsByTime` asks `channelCheckpointCovers`): the source's
-   checkpoint never reaches the truncate tick, and the waiting callback holds
-   the `ExclusiveCollectionName` key the adoption needs. Dropping the source's
-   segments by time stays exact, since each has its DML position at or before
-   `T_switch`, below the truncate tick. `CommitShardSplit` wakes a truncate
-   already waiting when it records `T_switch`. The exception
-   needs a recorded `T_switch`, and only `CommitShardSplit` records one. While
-   the SplitShard ack callback is wedged or still retrying, a flush wait whose
-   timestamp is past the source's frozen checkpoint therefore stays false.
+   **Flush, truncate and snapshot during the window.** A fenced source's
+   checkpoint no longer freezes, so **none of the exceptions the pre-#53595
+   design needed exists any more**: `GetFlushState` and `GetFlushAllState` are
+   master's (`cp == nil || cpTs < flushTs`), `channelCheckpointCovers` and
+   `WatchChannelCheckpointUntil` are deleted, and `DropSegmentsByTime` waits
+   for no checkpoint at all -- `TruncateCollection`'s own consuming-side acks
+   are what prove L1/L0 persistence now. Three things take their place:
+   - **A flush must reach the targets.** `Server.flushCollection` broadcasts
+     `ManualFlush` with `OptBuildBroadcastAckSyncUp()` to the vchannel list in
+     DataCoord's **cached** collection, and rootcoord announces a changed list
+     only through `BroadcastAlteredCollection`, whose cache-hit path ignored
+     the request's list. Refreshing the cached list from that request is
+     therefore a correctness fix, not a convenience: without it a `Flush`
+     during the whole window would be broadcast to the pre-split list, the
+     targets' growing segments would never be persisted, and `Flush` would
+     still answer success. `FlushAll` is a pchannel-level broadcast and
+     reaches the targets whatever the cache says.
+   - **A boundary replica on the fenced source has no effect and is still
+     acked.** The source stays on the collection's list until adoption, so it
+     keeps receiving `ManualFlush` and `TruncateCollection` replicas -- which
+     the name gate appends *without effect* rather than refusing (§8.11) --
+     and `FlushAll`, which is pchannel-level and not gated at all. The
+     materializer retains and releases each of them with an empty entry list,
+     so the consuming-side ack has nothing to wait for. Nobody has observed
+     that ack firing on a real fenced source; if it did not, `Flush` and
+     `FlushAll` would hang for the length of a split (§11, §12).
+   - **A snapshot is refused** for a split collection before any of this
+     (§8.12), and `CreateSnapshot` is in the name gate so a replica addressed
+     to a fenced source cannot seal a target's segments instead.
 
 4. **Adoption.** It is an ordinary `AlterCollection` broadcast under the
    `shard_split_routing` field mask, carrying a post-image that moves the
@@ -1430,6 +1627,22 @@ children read their full views.
    let QueryCoord pull the source together with `Normal` targets, so the
    issuer never builds one. The broadcast is deduplicated by the idempotency
    key `shard-split-adoption-<task id>`.
+
+   It is deliberately **not** built with `OptBuildBroadcastAckSyncUp()`. A
+   consuming-side ack would hold the routing commit -- and with it the
+   collection's exclusive keys and every later DDL of the collection -- until
+   the source's vchannel module had finished its drop on the StreamingNode,
+   which upstream completes asynchronously after its own dependencies pass the
+   drop tick. The drop needs no waiting for: the source is fenced, so it takes
+   no write after `T_switch`, and the drain this adoption is gated on has
+   already proved everything of the source up to `T_switch` is registered in
+   DataCoord. Waiting would only add the wedge -- a StreamingNode that cannot
+   complete the drop would freeze the collection's DDL instead of just its own
+   retirement (§11).
+
+   The source's replica of this very broadcast is what retires it: its
+   recovery module takes a routing commit whose post-image no longer names the
+   vchannel as that vchannel's **drop** (§6.5).
 
    Its ack callback (`shardSplitRoutingAlterV2AckCallback`) runs on every
    cluster and goes through the single apply path:
@@ -1521,7 +1734,8 @@ children read their full views.
      but it reloads the target's half of the shard, the child is never
      adopted, and the source's reads never reach the handover. In-place
      conversion on a multi-node replica is covered by unit tests only; the
-     end-to-end runs use one QueryNode (§11).
+     earlier end-to-end runs, which were made against the pre-#53595
+     implementation, used one QueryNode (§11, §12).
    - **No re-subscribe.** `WatchDmChannel` no-ops when the channel's
      delegator exists; on an un-adopted child it marks the child adopted and
      reports it to QueryCoord. The child keeps its consume position, and the
@@ -1655,8 +1869,9 @@ prefix replaced.
   info's `vchannel_name` (a mismatched name makes the table unreadable); and the
   genesis channel lists. The header's `flushed_segment_ids` is cleared: the ids
   are the primary's sealed segments, a same-task re-fence appends the header as
-  received, and no consumer reads them off the record (the flusher seals every
-  growing segment of the vchannel).
+  received, and no consumer reads them off the record (the source's recovery
+  module flushes every segment created before the fence record, whatever the
+  header lists).
 - `AlterCollection` with the `shard_split_routing` mask: the same lists and
   shard infos. No other `AlterCollection` carries channel names.
 
@@ -1691,8 +1906,8 @@ The control-channel replica is **never gated**. A gated replica blocks its
 whole pchannel stream, and the control channel's stream carries the
 control-channel replica of every collection's DDL, so a wait there would stall
 replicated DDL for **every** collection on the secondary behind one split's
-source pchannel. The wait would buy nothing: the replica has no shard, flusher
-or recovery effect, and the ack callback still runs only once every replica,
+source pchannel. The wait would buy nothing: the replica has no shard or
+recovery effect at all, and the ack callback still runs only once every replica,
 the source included, is appended here. On a secondary the control-channel
 replica's tick is local to the control pchannel and may be below the local
 `T_switch`, which is why the routing commit is not stamped with it but with the
@@ -1816,40 +2031,45 @@ secondary drains split 1. While the spawn is pending, reads through that
 family are refused with a retriable `ServiceUnavailable` (§6.2 step 2), for
 the rest of the secondary's split-1 rewrite. This is an availability loss on
 the secondary, never a correctness one. The fix direction is to let a child
-spawn seek from its target's genesis, which streaming records as
-`split_genesis_checkpoint`, instead of waiting for rootcoord's listing (§11).
+spawn seek from the target's own first checkpoint -- which is the `SplitShard`
+record that created the target's recovery module (§5), so it exists on the
+StreamingNode before any coordinator lists the vchannel -- instead of waiting
+for rootcoord's listing (§11).
 
-**Retiring the source's WAL-side state.** When the adoption replica reaches the
-source's node:
+**Retiring the source's WAL-side state.** The adoption replica addressed to
+the source *is* its retirement. There is no separate message, no `retired`
+flag, no drain gate and no close loop of our own: the vchannel is dropped the
+way `DropCollection` drops one, by upstream's own drop path.
+
+When the replica reaches the source's node:
 - the shard interceptor's name gate appends it with no shard effect, since the
-  registration is gone;
-- the flusher does not forward it;
-- the data sync service has been closed, or will be, on the dispatch goroutine
-  once its acked checkpoint passes its close gate (§5). On a secondary the adoption
-  can arrive before the fenced segments are flushed, which is why the adoption
-  itself closes nothing.
+  registration is gone (§8.11);
+- the source's recovery module observes it. `ObserveRetireVChannel` takes it as
+  the vchannel's drop when, and only when, the header carries the
+  `shard_split_routing` field mask (`messageutil.IsShardSplitRouting`, a
+  header-only test, so no other `AlterCollection` pays a body decode), the
+  post-image's vchannel list no longer names this vchannel
+  (`messageutil.RetiresVChannel`), and this vchannel carries a fence. A
+  vchannel with no fence takes no action, so a stale or malformed commit can
+  never drop a live shard, and a replayed retire is ignored because a closing
+  vchannel is left alone;
+- that observation calls `beginDropLocked`, the ordinary runtime drop:
+  metadata publication is fenced at the drop tick, and the drop **completes**
+  only once the module's own dependencies have finished -- the L0
+  materialization frontier has passed the drop tick and every segment created
+  before it has a durable tombstone. The vchannel then becomes `TOMBSTONED`
+  and its catalog row is collected by the ordinary cleanup pass;
+- the retiring commit is itself an **L0 boundary**
+  (`WALMaterializer.isL0Boundary` special-cases exactly this one
+  `AlterCollection`), so the frontier is cut at the drop tick instead of
+  waiting for the stale-flush timer. Without it the retirement would sit for
+  up to `dataNode.segment.syncPeriod`.
 
-RecoveryStorage marks the `SPLITTED` meta `retired` and removes the row once
-the source's **own** flusher checkpoint has reached its fence gate
-(`vchannelRecoveryInfo.DrainedPastFence`): the seal record's tick, which is
-`split_time_tick` except after a re-driven fence, where it is later, and is
-reseeded on restart as `max(split_time_tick, checkpoint tick)`
-(`recovery.SplitFenceGate`, the flusher's close gate). That is the condition
-the flusher closed the source's data sync service on, so it holds once that
-service closed; a source whose checkpoint passed `T_switch` but whose service
-has not consumed the seal record is not collected, since its segments are
-still growing. It is judged per vchannel, not by the pchannel-wide minimum
-flusher checkpoint: with two splits on one pchannel that minimum is the first
-source's frozen checkpoint, below the second's fence until the first is
-adopted, and a vchannel with no checkpoint yet (a data sync service just
-rebuilt) would pause every collection on the pchannel. The pchannel-wide
-minimum keeps one job, the truncation bound (§8.4). The flusher checkpoint
-update wakes the persist loop the moment a pending retirement crosses its
-gate. It removes it by handing
-the catalog a `DROPPED` snapshot with `retired` still set, which
-`dropAllVirtualChannel` recognizes and skips `DropVirtualChannel` for. There is
-no `DropVChannel` message, because when a source may be collected is a local
-fact.
+Nothing of the split waits for any of this: the adoption is not ack-sync-up
+(§6.3 step 4), and DataCoord's Done check reads QueryCoord, not the
+StreamingNode. `DropVirtualChannel` is still never called for a retired source
+(§11), and a real `DropCollection` of a split collection is a drop, not a
+retirement (§8.11).
 
 **Operator rules.** These are rules, not mechanisms:
 
@@ -1889,19 +2109,40 @@ fence landed on.
 - **No loss, no duplication.** A write the fence rejects is refused in the shard
   interceptor, before the backend append (interceptor order: idempotency →
   redo → lock → replicate → timetick → shard). It is never persisted, and its
-  allocated tick is acked with the error. The fence does not invalidate the
-  source vchannel's idempotency window (`InvalidatesIdempotencyWindow` lists
-  only DropCollection, TruncateCollection and DropPartition): a split drops no
-  data, so a retried keyed insert that landed before the fence is answered as a
-  duplicate with its original result, which is correct, while one the fence
-  refused never entered the window (the owner's failed append releases its key)
-  and is refused with `SHARD_FENCED` again. The WAL summary records nothing for
-  a `SplitShard` or an adoption, so a retired source keeps its dedup history
-  until the summary's retention GC drops it. A retry the proxy re-routes to a
+  allocated tick is acked with the error. **Deduplication is for keyed inserts
+  only**: an insert with no `idempotency-key` is not deduplicated at all, so
+  a retry of one across a fence writes its rows twice -- at-least-once, as
+  without a split (§3.3, §11).
+
+  For a keyed insert, three facts carry the guarantee, and all three are
+  upstream's:
+  - **no message type invalidates a window.** A vchannel's window is dropped
+    only when its WAL closes (`idempotency_interceptor.go Close`), and DDL --
+    `DropCollection`, `TruncateCollection` and `DropPartition` included --
+    neither clears it nor filters the retained `WALSummary` records, which are
+    rebuilt from the summary at recovery (`recovery_stream.go
+    buildIdempotencySnapshots`, a read failure failing the WAL open rather
+    than yielding a partial window). Retained history is bounded only by
+    `streaming.idempotency.maxBytesPerWindow` per vchannel (16 MiB) and
+    `streaming.summary.maxBytesPerPChannel` per pchannel (4 GB);
+  - **nothing is written to a fenced vchannel after the fence**, so its window
+    is frozen at what it held when the fence landed;
+  - **the fence is persisted**, on the source's
+    `VChannelMeta.split_fence_time_tick` / `split_fence_task_id` and on
+    `moduleapi.VChannelWritePathRecoveryState`, so a StreamingNode that
+    restarts mid-split rebuilds the gate and the source keeps refusing writes
+    instead of coming back writable.
+
+  So a retried keyed insert that landed before the fence is answered as a
+  duplicate with its original result, while one the fence refused never
+  entered the window (the owner's failed append releases its key) and is
+  refused with `SHARD_FENCED` again. A retry the proxy re-routes to a
   target is covered only while the source is still listed `Splitting`: the
-  proxy probes the fenced source's window first (§3.3). A retry that arrives
-  after adoption is treated as if its key had been evicted and can write the
-  rows twice (N-4, accepted). A transaction force-failed by the fence never
+  proxy probes the fenced source's window first (§3.3). The limiting factor is
+  the **proxy's routing view**, not the window's retention: once adoption
+  delists the source the proxy never asks it again, so a retry that arrives
+  after adoption can write the rows twice (N-4, accepted). A transaction
+  force-failed by the fence never
   committed, so its body messages in WAL0 are dropped by the consumer-side
   TxnBuffer. The split's own appends are idempotent:
   - a duplicate target replica is a no-op;
@@ -1947,17 +2188,32 @@ fence landed on.
   broadcast task is durable in the streamingcoord catalog, including each
   replica's persisted extra response. The task record and genesis checkpoints
   are written by the callback, which is retried until it succeeds. If the
-  StreamingNode restarts, the fence persists with the message, and the
-  tombstone and the flusher's close gate are rebuilt from every `SPLITTED`
-  vchannel. §10 has the full table.
+  StreamingNode restarts, the fence persists with the message *and* in the
+  source's vchannel meta, and the write path's gate is rebuilt from the
+  write-path recovery snapshot (§5). The one window that needs care is between
+  the record and that meta being durable: the fence is in the WAL and in the
+  shard manager before the append returns, and in the catalog only after the
+  next dirty-snapshot round, which is safe because the global recovery
+  checkpoint cannot pass a record whose vchannel meta is not yet published --
+  the same exposure `CreateCollection` has. Our own code broke that chain
+  once, and it is fixed: a fence landing while a **partition** drop was
+  pending was published nowhere, because the stable snapshot is the pre-image
+  taken before the fence, so a crash in that window recovered a source with no
+  fence -- writable again for keys its targets already own. The fence is now
+  written through every pending drop's pre-image, as the L0 materialization
+  frontier already was (§5). §10 has the full table.
 
 ## 8. Engineering Constraints
 
 1. **Delete retention is L0-based.** An L0 segment's deletes must reach the
    segments they apply to before the L0 is dropped. On a split source L0
-   compaction is frozen (below). Every rewrite plan folds the source's L0
+   compaction is frozen (below). The fence and the retiring routing commit are
+   both explicit L0 boundaries, so the source's last deletes are materialized
+   at `T_switch` and the retirement is not held by the stale-flush timer (§5,
+   §6.5). Every rewrite plan folds the source's L0
    deletes into its outputs, and the split manager retires those L0 segments
-   only once every input has folded them (§6.3 step 2). A namespace-scoped L0
+   only once every input has folded them and no import can still publish one
+   (§6.3 step 2). A namespace-scoped L0
    that is relabeled keeps its deletes until L0 forwarding applies them after
    adoption *(relabel is deferred, §1.3)*.
 2. **A compaction freeze** (`shard_split_freeze.go`). From the moment the
@@ -2025,36 +2281,31 @@ fence landed on.
 3. **In-place handoff.** QueryCoord's watch path converts an existing child
    instead of releasing and re-watching; the adopted target is placed on the
    node that fronts it when it can be (§6.3 step 4).
-4. **Old-vchannel lifecycle.** WAL truncation of the source's pchannel is bounded
-   by the minimum flusher checkpoint over its vchannels. It therefore proceeds
-   up to the source's frozen flusher checkpoint and no further, until the source
-   is retired and collected. Two gauges per pchannel signal that pin:
-   - `milvus_wal_recovery_oldest_splitted_vchannel_age_seconds` is the age of
-     the oldest `SPLITTED` vchannel not yet collected, 0 when there is none;
-   - `milvus_wal_recovery_truncation_lag_seconds` is now minus the minimum
-     flusher checkpoint, absent while some vchannel has none.
+4. **Old-vchannel lifecycle.** This is where #53595 removed the most. WAL
+   truncation is no longer bounded by a per-vchannel flusher checkpoint,
+   because there are none: the pchannel truncates at its one published
+   recovery checkpoint. A fenced source takes no message after `T_switch` and
+   holds no handle past it, so **it does not pin the WAL** -- the pchannel's
+   checkpoint advances with its other vchannels while the source waits for
+   adoption. The two gauges that used to measure that pin
+   (`milvus_wal_recovery_oldest_splitted_vchannel_age_seconds` and
+   `milvus_wal_recovery_truncation_lag_seconds`) are deleted with it, and so
+   is the fence gate they were about (`recovery.SplitFenceGate`,
+   `DrainedPastFence`).
 
-   Both refresh on each persist-loop round. A fenced source pins the WAL until
-   its adoption applies and it is collected (§6.5). After adoption the
-   source is *retired*, not dropped, and DataCoord's `DropVirtualChannel` is
-   never called for it (§6.5).
+   The same holds for a WAL backend switch. `AlterWAL`'s FLUSHING stage now
+   waits for the **published global checkpoint** to pass the switch's time
+   tick, not for every vchannel's flusher checkpoint, so the deadlock a
+   fenced source used to cause (its checkpoint frozen at the fence, counted by
+   the wait, the RW WAL never reopening) is structurally impossible and the
+   skip that worked around it is gone. The advance stage reseeds every
+   vchannel's checkpoint to the new WAL's initial position, the fenced source
+   included.
 
-   The truncation bound is deliberately the pchannel-wide minimum, drained
-   sources included: on restart the flusher rebuilds every vchannel of the
-   snapshot, the source included, from the position DataCoord holds for it, so
-   the WAL must keep that position until the source is collected. A WAL backend
-   switch (`AlterWAL`) asks a different question, whether everything is
-   persisted, and its FLUSHING wait (`GetFlusherCheckpointByTimeTick`) skips a
-   `SPLITTED` source that has drained past its fence gate (`DrainedPastFence`,
-   §5): the source's checkpoint is frozen there for as long as adoption takes,
-   and counting it made the wait a deadlock the RW WAL never came back from. A
-   source that has not drained yet, or has no checkpoint yet, is still waited
-   on; a pchannel whose vchannels are all drained sources answers with the
-   storage's own checkpoint. The switch's advance stage still seeds a new-WAL
-   position for the drained source, like every other vchannel, because the
-   position DataCoord holds for a vchannel is decoded under the current WAL's
-   name on the next open; the rebuilt service acks past its reseeded gate at
-   once and closes again, and DataCoord's drain predicate keeps holding.
+   What does outlive the adoption is the source's **catalog row**, until its
+   drop completes and the cleanup pass collects it (§6.5), and its channel
+   mark in DataCoord: after adoption the source is *retired*, not dropped, and
+   `DropVirtualChannel` is never called for it (§6.5, §11).
 5. **Shard count cap.** One vchannel per collection per pchannel, so a
    collection's shard count is capped by `rootCoord.dmlChannelNum`. Because
    the allocator still counts the source's pchannel as taken, a split needs
@@ -2103,6 +2354,14 @@ fence landed on.
       a split that is only `Preparing`, before any fence and while the split
       could still abort. While a write-switch issue is stuck in flight, imports
       into that shard are refused, retriably, the whole time (§11).
+    - **A delete-bearing import can produce a source L0.** Both refusals judge
+      a *new* import against the collection's current shards, so an import
+      that already existed when the split started passes them, and an import
+      task with delete data and no insert data is written at level `L0`. The
+      rewrite's L0 retire therefore has its own conjunct: while such a job is
+      in flight on any vchannel of the family, the source's L0s are not
+      retired (§6.3 step 2.6). It costs nothing in liveness, since the drain
+      is waiting for that import anyway.
 11. **Collection-keyed messages addressed to a vchannel this pchannel does not hold.** The
     registration map is keyed by collection id, and the fence frees the source's
     slot. A replica can therefore reach a pchannel that no longer holds its
@@ -2114,10 +2373,11 @@ fence landed on.
     | Message | Vchannel not held by this pchannel |
     |---|---|
     | `CreatePartition`, `DropPartition`, `SchemaChange`, `AlterCollection` | appended with no effect on shard state |
-    | `TruncateCollection` | appended with no effect on shard state. DataCoord's `DropSegmentsByTime` then waits for each vchannel's checkpoint to reach the truncate tick. A source whose checkpoint has reached its recorded `T_switch` counts as covered (the `GetFlushState` rule), because its data sync service has closed and the checkpoint will not move again. All of the source's segments fall inside the truncate range and are dropped. Without the exception the callback would wait forever while holding the collection's key, and the adoption could never be issued. |
+    | `TruncateCollection` | appended with no effect on shard state, and still an L0 boundary for the vchannel, so it is retained and released with an empty entry list. DataCoord's `DropSegmentsByTime` waits for no checkpoint any more -- truncate's own consuming-side acks are what prove persistence -- so the split needs no exception here, and all of the source's segments fall inside the truncate range and are dropped (each has its DML position at or before `T_switch`). |
     | `DropCollection` | appended; only the addressed vchannel's function-runner key is released |
     | `ManualFlush` | fenced source: appended with an empty segment list and `ManualFlushExtraResponse{[]}`, so `Flush` succeeds; never held: refused unrecoverable, as before |
     | `Insert`, `Delete` | not gated here; their own admission refuses a fenced vchannel with `SHARD_FENCED` and any other with an unrecoverable error. The redo interceptor, which re-resolves the partition outside the vchannel lock, asks `CheckIfVChannelCanBeWritten` when that lookup fails, so an insert racing a fence that lands between its iterations is `SHARD_FENCED` too, not unrecoverable |
+    | `CreateSnapshot` | appended with no effect on shard state. It flushes and fences by **collection id**, so a replica addressed to a fenced source would otherwise seal whichever vchannel holds this pchannel's entry for the collection -- a split target. Nothing is growing on a fenced source anyway, and refusing a broadcast replica would wedge the broadcaster, so it is appended without effect. (A split collection is refused a snapshot outright one level up, §8.12.) |
     | `CreateCollection`, `SplitShard` | not gated; they create or release the registration themselves |
     | `CreateSegment`, `Flush` | refused: `SHARD_FENCED` on a fenced source, unrecoverable on a vchannel never held; a `Flush` from the old architecture is exempt |
     | `FlushAll`, `Import` | not gated; pchannel-level, or no handler |
@@ -2134,22 +2394,22 @@ fence landed on.
     `FlushSegment` also re-check the vchannel name under the manager lock.
     Dropping a partition manager (at the fence, `DropCollection` or
     `DropPartition`) cancels its segment-alloc worker. The source's segments
-    are sealed by the fence itself: the flusher seals every growing segment of
-    the vchannel when it consumes the fence record (§5).
+    are sealed by the fence itself, twice over: the write path's
+    `FlushAndFenceSegmentAllocUntil` marks each of them `SEALED` as the fence
+    is placed, and the source's recovery module flushes every segment created
+    before the fence record when it observes it (§5).
 
-    On the consume side, RecoveryStorage skips a `CreateSegment` it observes on
-    a `SPLITTED` vchannel and reports it as an inconsistency, as it skips one on
-    a `DROPPED` vchannel. The name gate keeps one from being written, so one
-    observed can only be a replay -- a WAL offset reset, or a snapshot
-    persisted `SPLITTED` with a checkpoint from before the fence -- and
-    registering it would leave a `GROWING` assignment nothing ever seals: the
-    fence record, the only thing that seals the source's segments, was already
-    consumed.
+    On the consume side there is nothing special left to do about a replayed
+    `CreateSegment`: a fenced source keeps an ordinary `NORMAL` vchannel meta,
+    its module flushes everything created before the fence, and a
+    `CreateSegment` can no longer be appended to it (the name gate refuses it).
+    The pre-#53595 rule -- skip one observed on a `SPLITTED` vchannel and
+    report an inconsistency -- went away with the state.
 
-    A real `DropCollection` of a split collection is a drop, not a retirement.
-    The source's recovery meta goes `DROPPED` with `retired` cleared, and
-    `DropVirtualChannel` is called for it. This is intended: the
-    "never `DropVirtualChannel`" rule is about retirement only.
+    A real `DropCollection` of a split collection is a drop, not a retirement:
+    the source's module takes it as a drop like any vchannel's, and
+    `DropVirtualChannel` is called for it. The "never `DropVirtualChannel`"
+    rule is about retirement only (§6.5).
 
 12. **Snapshots.** `CreateSnapshot` of a collection with a non-zero routing
     modulus is refused with `OperationNotSupported` (3000). A snapshot records
@@ -2161,9 +2421,16 @@ fence landed on.
 
 ## 9. Configuration
 
-Every parameter below is registered in `pkg/util/paramtable/component_param.go`
-and tagged refreshable; the manager reads its intervals and thresholds afresh
-on every tick. "Exported" means it appears in `configs/milvus.yaml`.
+These nine keys are the whole configuration surface of the feature: they are
+all of what the six branches register in
+`pkg/util/paramtable/component_param.go`, and nothing else was added. Eight
+are DataCoord's (the write-switch layer registers `shardSplit.enable`, the
+orchestration layer the trigger's thresholds and the manager's cadence, the
+rewrite layer `rewriteBatchSize`); `proxy.shardSplit.maxFenceRetryWait` is the
+write path's. The read-path and handover layers register none. Every one is
+tagged refreshable, and the manager reads its intervals and thresholds afresh
+on every tick. "Exported" means it appears in `configs/milvus.yaml`, which
+carries exactly the six exported ones under `dataCoord.shardSplit`.
 
 | Key | Default | Refreshable | Exported | Effect |
 |---|---|---|---|---|
@@ -2181,6 +2448,16 @@ on every tick. "Exported" means it appears in `configs/milvus.yaml`.
 read once at startup, and while it is off the split trigger does not run, but
 the compaction schedule loop still runs and admits only rewrite plans, so a
 split already in the WAL finishes on every cluster (§8.2).
+
+Four upstream knobs the design now reasons about, none of them changed by this
+feature:
+
+| Key | Default | Why it matters here |
+|---|---|---|
+| `streaming.idempotency.maxBytesPerWindow` | 16 MiB | per vchannel, one of the two bounds on how long a fenced source can answer a keyed retry (§7) |
+| `streaming.summary.maxBytesPerPChannel` | 4 GB | the other one, per pchannel |
+| `streaming.walRecovery.tail.highWatermark` | 16 GB | past it the WAL rejects DML with `RATE_LIMIT_REJECTED`, which a fence retry and a keyed probe both treat as transient (§3.3) |
+| `dataNode.segment.syncPeriod` | 600 s | what the fence and the retiring commit being L0 boundaries saves: without them the source's last L0, and its retirement, would wait a sync period (§5, §6.5) |
 
 ## 10. Failure Handling
 
@@ -2254,8 +2531,8 @@ split already in the WAL finishes on every cluster (§8.2).
 | QueryNode serving the source restarts mid-window | QueryCoord re-watches the source (recovery, not a move: no node of the replica serves it, and every live node has reported its distribution). The watch carries `split_target_channels`, so the QueryNode refuses reads through the source until it has re-derived the children, and each respawned child reloads its target's L0 and unflushed or invisible segments and forwards their deletes to the rebuilt source (§6.2, recovery). On a secondary before the SplitShard callback has recorded the task, the signal can be missing (§11). |
 | QueryCoord restarts mid-window | The recovered targets keep each channel's `split_target_channels` next to its seek (`ChannelTarget.split_target_channels`), so a watch made from them still carries the split signal (§6.2, recovery). |
 | QueryNode serving the source dies between the window-end re-pull and the flip | The source is not re-watched (the collection no longer lists it), so reads of the collection fail, retriably, until the targets are watched fresh, synced and flipped in (§6.2). |
-| StreamingNode restart | `SPLITTED` vchannels are restored and tombstones rebuilt by name (`split_time_tick`, `split_task_id`). The flusher's close gate is reseeded from `max(split_time_tick, checkpoint tick)`. The flusher recovers every vchannel of the recovery snapshot, the source included, so a source whose data sync service had already closed is rebuilt from its DataCoord checkpoint. The pchannel's scan then starts no later than that checkpoint, about `T_switch`, and the service closes again once drained. A target is rebuilt from its own recovery meta and recovered no earlier than `split_genesis_checkpoint`. That covers both cases before `CommitShardSplit` seeds the target: DataCoord has no position for it, or DataCoord falls back to the collection's creation position. A target whose genesis was recorded before a WAL backend switch recovers from the checkpoint the switch gave DataCoord: the genesis is compared by time tick, and by message id only on the same WAL. |
-| `AlterWAL` while a drained split source is closed | The FLUSHING wait skips the source, since its own flusher checkpoint has reached its fence gate; the advance stage seeds it a new-WAL position like every other vchannel; the rebuilt service closes again on its first ack (§8.4). A source that has not drained yet is waited on. |
+| StreamingNode restart | The write path's fence tombstones are rebuilt by name from the write-path recovery snapshot's `SplitFenceTimeTick` / `SplitFenceTaskID`, so a fenced source comes back refusing DML, and its registration is deliberately not rebuilt (a live successor may hold the pchannel's slot for the collection). Every vchannel of the snapshot gets its recovery module back, the fenced source included, from the pchannel's published checkpoint; the source has nothing left to publish, so its module only waits for the adoption that drops it. A target comes back from its own vchannel meta, whose `checkpoint_time_tick` is the `SplitShard` record that created it, so it is never recovered from before its genesis and needs no seeded position of its own. |
+| `AlterWAL` during a split | Nothing special. The FLUSHING stage waits for the pchannel's published global checkpoint to pass the switch tick, which a fenced source does not hold back, and the advance stage reseeds every vchannel's checkpoint to the new WAL, the source included (§8.4). The pre-#53595 deadlock and the skip that worked around it are both gone. |
 | Secondary proxy restart while gated | The stream reconnects, replays from its checkpoint, and either short-circuits on the replicate checkpoint or re-enters the wait. |
 | Forced promotion, adoption not yet replicated | `fixIncompleteBroadcastsForForcePromote` re-drives the pending replicas through the normal path, reproducing the two-phase order. The new primary drains and adopts. |
 | Forced promotion after the adoption replicated, before the local drain | The promotion's callback queues behind the retrying adoption, which holds the cluster key. **Operator rule** (§6.5 rule 4). |
@@ -2293,17 +2570,17 @@ split already in the WAL finishes on every cluster (§8.2).
 
 | Component | Work |
 |-----------|------|
-| Common | The `SplitShard` message type (49; `ExclusiveRequired`, `FreshTimeTick`, replicable) with its header, body and `message.SplitShardRoleOf`. `SplitShardExtraResponse`. `BroadcastHeader.append_first_vchannels`. The `_ae` record property (`message.SetAppendExtra`). `AckedCheckpoint.extra`. `AlterCollectionMessageUpdates.split_task_id` and `messageutil.RetiresVChannel`. `SplitShard` in the delegator msgstream whitelist (`delegatorMessageTypes`). `STREAMING_CODE_SHARD_FENCED` = 18 (unrecoverable; carries tick and task id only on a re-fence refusal; 19, the former `ROUTING_STALE`, stays reserved). The `schemapb` routing fields. `internal/util/routing`: `ShardsFromMeta`, `Derive`, `CheckShardByAdmission`, `CheckNamespaceRelabelGranularity`, `CheckAdmissionPropertiesAgree`, `JudgeCommit` with `CommitDelta`, `CheckNoListedDroppedShard`, and `CheckPostImageShape` / `CheckPostImageTiling`, the message-only checks shared with `ValidateSplitShardMessage`; the primary-key residue helpers (`PKResidue`, `PKResidueInt64`, `PKResidueVarChar`, `PKResidues`, `ResidueTable.Modulus` / `Lookup` / `VChannelOfPK`, `TableFromMeta`), which hash exactly as `typeutil.HashPK2Channels` does. |
-| DataCoord | `CommitShardSplit` and `CheckShardSplitDrained` as internal RPCs; the former marks each target added before seeding its checkpoint and is serialized per task id; the latter describes the recorded task (`recorded`, source and target vchannels) as well as the drain, and answers `recorded=false` for a task it does not hold. The `SplitShardTask` record and store, indexed by source vchannel. The flush-state exception for a drained split source (`channelCheckpointCovers`). `CreateSnapshot` refusal for a split collection. The append gate's record checker (`splitSourceFenceRecorded`). The split manager (`shard_split_manager.go`, `_executor.go`): the trigger and planner with the runaway-doubling guard, target allocation, the write-switch issuer under the collection's keys, the task state machine, the adoption issuer and the Done check through `GetShardLeaders`. The trigger's allocation probe (no task recorded whose targets cannot be allocated), issues off the manager's loop with one in flight per task, and the reopen of a regressed drain from `Adopting` to `Redistributing`. The rewrite: rounds, the `HashSplitCompaction` dispatcher with its per-plan source L0s read with the input in one meta scan, the failed-plan backoff and the lost-plan grace, the commit that publishes the outputs and drops the input in one write, drops a torn commit's orphan outputs and refuses to overwrite an output it did not write, the source L0 retire, the slot price. The compaction freeze, enforced at enqueue, at dispatch and on restart, and preemption; the target-sort exemption (lineage parents all dropped) and the import-sort exemption; the always-running schedule loop; and the GC hold on splitting channels. The import guard in `broadcastImport`. The lineage view and attribution in `GetRecoveryInfoV2`, `VchannelInfo.split_target_channels` on an unfinished split source, the cross-channel index-fallback refusal, and the held delete checkpoint. The task metrics `milvus_datacoord_shard_split_task_num`, `_task_total` and `_duration`. |
+| Common | The `SplitShard` message type (50; `ExclusiveRequired`, `FreshTimeTick`, replicable) with its header, body and `message.SplitShardRoleOf`. `SplitShardExtraResponse`. `BroadcastHeader.append_first_vchannels`. The `_ae` record property (`message.SetAppendExtra`). `AckedCheckpoint.extra`. `AlterCollectionMessageUpdates.split_task_id`, `messageutil.IsShardSplitRouting` (header-only, the gate in front of every routing-commit test) and `messageutil.RetiresVChannel`. `SplitShard` in the delegator msgstream whitelist (`delegatorMessageTypes`). `STREAMING_CODE_SHARD_FENCED` = 18 (unrecoverable; carries tick and task id only on a re-fence refusal; 19, the former `ROUTING_STALE`, stays reserved). The `schemapb` routing fields. `internal/util/routing`: `ShardsFromMeta`, `Derive`, `CheckShardByAdmission`, `CheckNamespaceRelabelGranularity`, `CheckAdmissionPropertiesAgree`, `JudgeCommit` with `CommitDelta`, `CheckNoListedDroppedShard`, and `CheckPostImageShape` / `CheckPostImageTiling`, the message-only checks shared with `ValidateSplitShardMessage`; the primary-key residue helpers (`PKResidue`, `PKResidueInt64`, `PKResidueVarChar`, `PKResidues`, `ResidueTable.Modulus` / `Lookup` / `VChannelOfPK`, `TableFromMeta`), which hash exactly as `typeutil.HashPK2Channels` does. |
+| DataCoord | `CommitShardSplit` and `CheckShardSplitDrained` as internal RPCs; the former marks each target added before seeding its checkpoint and is serialized per task id; the latter describes the recorded task (`recorded`, source and target vchannels) as well as the drain, and answers `recorded=false` for a task it does not hold. The `SplitShardTask` record and store, indexed by source vchannel. The drain as one function (`splitDrainBlockReason`, naming the first unmet conjunct), with no flush-state exception of any kind. The vchannel-list refresh in `BroadcastAlteredCollection`, without which a `Flush` during the window misses the targets. `CreateSnapshot` refusal for a split collection. The append gate's record checker (`splitSourceFenceRecorded`). The split manager (`shard_split_manager.go`, `_executor.go`): the trigger and planner with the runaway-doubling guard, target allocation, the write-switch issuer under the collection's keys, the task state machine, the adoption issuer and the Done check through `GetShardLeaders`. The trigger's allocation probe (no task recorded whose targets cannot be allocated), issues off the manager's loop with one in flight per task, and the reopen of a regressed drain from `Adopting` to `Redistributing`. The rewrite: rounds, the `HashSplitCompaction` dispatcher with its per-plan source L0s read with the input in one meta scan, the failed-plan backoff and the lost-plan grace, the commit that publishes the outputs and drops the input in one write, drops a torn commit's orphan outputs and refuses to overwrite an output it did not write, the source L0 retire with its unfolded-data and in-flight-import conjuncts, the slot price. The compaction freeze, enforced at enqueue, at dispatch and on restart, and preemption; the target-sort exemption (lineage parents all dropped) and the import-sort exemption; the always-running schedule loop; and the GC hold on splitting channels. The import guard in `broadcastImport`. The lineage view and attribution in `GetRecoveryInfoV2`, `VchannelInfo.split_target_channels` on an unfinished split source, the cross-channel index-fallback refusal, and the held delete checkpoint. The task metrics `milvus_datacoord_shard_split_task_num`, `_task_total` and `_duration`. |
 | RootCoord | The `SplitShard` ack callback, with its properties-agreement check, its refusal of a result with no control-channel replica, and its judge before `CommitShardSplit`. The `AlterCollection(shard_split_routing)` callback: shape, judge with the task record's delta, reach, drain gate, apply, cache expiry from the loaded collection's name and aliases plus the header's list. `MetaTable.ApplyShardSplitRouting` with `routing.JudgeCommit`, stamped with the broadcast's max tick and keeping an existing shard's `last_truncate_time_tick`, and the topology bookkeeping a changed vchannel list needs (`generalCnt`, pchannel stats).  `AddCollectionField` and `AlterCollectionSchema` refuse a TEXT field, retriably, while a shard is `Splitting` or `Creating`. |
 | StreamingCoord | The broadcaster's two-phase append with `AckPartial`. Persisting the extra append response. `WaitVChannelsAcked`, its shutdown release and its exit on a recorded append-first replica (`registry.RegisterAppendFirstReplicaRecordedChecker`); a vchannel outside the broadcast is answered as a `ReplicateViolation`. The counter `milvus_streamingcoord_broadcaster_append_unrecoverable_total` for replica appends refused as unrecoverable (still retried). The ack callback scheduler and the resource key locker are unchanged. |
-| StreamingNode | Source: the fence (task id required, seal, tombstone, registration teardown, function-runner key release, installed before the append and kept on error, first-tick re-fence); `SPLITTED` + `split_time_tick` (from `_ae`) + `retired` with local collection; the flusher sealing every growing segment of the vchannel, and the data sync service closed on the dispatch goroutine at the seal record's tick; the two truncation gauges. Target: the three genesis paths, and `VChannelMeta.split_genesis_checkpoint`, from which the flusher recovers a target and before which it never recovers one. The single name gate (§8.11), covering `CreateSegment` and `Flush`; a dropped partition manager cancels its segment-alloc worker. Misroute refusal. The fence gate shared by the flusher and RecoveryStorage (`recovery.SplitFenceGate`, `DrainedPastFence`): a drained source is skipped by the `AlterWAL` FLUSHING wait and, once retired, collected by its own checkpoint. A `CreateSegment` replayed onto a `SPLITTED` vchannel is skipped with an inconsistency. The redo interceptor answers `SHARD_FENCED` to an insert racing the fence. |
+| StreamingNode | Source, write path: the fence (task id required, seal through `FlushAndFenceSegmentAllocUntil`, tombstone, registration teardown, function-runner key release, installed before the append and kept on error, first-tick re-fence reporting the recorded tick), and its rebuild after a restart from the write-path recovery snapshot. Source, recovery module (`vchannel/split.go`): `VChannelMeta.split_fence_time_tick` / `split_fence_task_id` written on the fence record and written through every pending drop's pre-image, the flush of every segment created before the fence, the fence as an L0 boundary, and the retirement as an ordinary pending drop driven by the delisting routing commit (`ObserveRetireVChannel`), which is an L0 boundary too (`WALMaterializer.isL0Boundary`). Target: the module created for a genesis `SplitShard` replica (`isVChannelGenesisMessage`) and its meta seeded from the body and the partition snapshot, with the record itself as its first checkpoint. `moduleapi.VChannelWritePathRecoveryState.SplitFenceTimeTick` / `.SplitFenceTaskID`. The single name gate (§8.11), covering `CreateSegment`, `Flush` and `CreateSnapshot`; a dropped partition manager cancels its segment-alloc worker. Misroute refusal. The redo interceptor answers `SHARD_FENCED` to an insert racing the fence. |
 | Proxy | On a secondary: name remap for `SplitShard` and `AlterCollection(shard_split_routing)` (clearing `flushed_segment_ids`; refusing a malformed broadcast header -- ack-sync-up with append-first, more than one append-first, a name outside the broadcast -- as `ReplicateViolation`), the append gate with its checkpoint short-circuit, and the gated-appends gauge. `DescribeCollection` returns the routing fields on both paths. |
 | Proxy (write path) | Residue routing for inserts, deletes and upserts; the per-row fence retry with held-back rows, its backoff contract and its per-collection cache refresh; the keyed-insert probe of fenced windows with its answer classification, and settling only the offsets a window answers, with the placement guards once rows may have been re-routed; residue bucketing of idempotent auto ids and their re-pin after a re-route; the import refusal (§3.3). |
 | DataNode | `HashSplitCompaction`: one input read once, each row written to its target's writer by residue, source L0 deletes and the collection TTL applied, row order kept. |
-| QueryNode | In-process children spawned on the fence, built from the target's recovery view (L0 and unflushed or invisible segments) and forwarding their known deletes to the source; re-derived on recovery only for a watch carrying `split_target_channels`, with reads refused until then; a spawner on every delegator (the cascade), refusal while a spawn is pending, every failed spawn retried, attaching a target delegator no source fronts, fronting only its own children, the family-tree fan-out with its two phases, delete forwarding into an order-keeping delete buffer, Strong reads at the family's max MVCC served at the minimum of the family's and the source's own tsafe, the in-place convert on adoption, detach or release of children with the source, and the retired-source read refusal. The metrics `milvus_querynode_split_child_num`, `_split_child_spawned_total` and `_split_child_adopted_total`. |
+| QueryNode | In-process children spawned on the fence, built from the target's recovery view (L0 and unflushed or invisible segments) and forwarding their known deletes to the source; re-derived on recovery only for a watch carrying `split_target_channels`, with reads refused until then; a spawner on every delegator (the cascade), refusal while a spawn is pending, every failed spawn retried, attaching a target delegator no source fronts, fronting only its own children, the family-tree fan-out with its two phases, delete forwarding into an order-keeping delete buffer, Strong reads at the family's max MVCC served at the minimum of the family's and the source's own tsafe, the in-place convert on adoption -- which goes through `markLeaderViewUpdated`, so the adopted child's channel is both marked dirty and reported (a mark that only sets the delta can sit unreported on an otherwise idle node) -- detach or release of children with the source, and the retired-source read refusal. The metrics `milvus_querynode_split_child_num`, `_split_child_spawned_total` and `_split_child_adopted_total`. |
 | QueryCoord | Window marking, hold-back and window-end refresh (QC1–QC3), the narrowed promotion (O1) with its segment readiness narrowed the same way, the balance freeze (`meta.ShardSplitFreeze`: whole collection for normal balance, per family channel for stopping balance, re-checked at submit) with its shard-state cache, the channel checker's hold-back and fail-closed rule, never re-watching a delisted vchannel, the executor's move-versus-recovery rule, keeping the older delegator of a duplicated family channel, `ChannelTarget.split_target_channels` kept across a restart and a merge, the adopted target's placement on its fronting node, and the shard-leader invalidation at the flip and at a delegator's release. |
-| `streaming` package | `SplitShardParam.Validate` / `ValidateSplitShardMessage`, shared by the builder and the callback; `Validate` requires a real control channel, and neither accepts one as the source or a target. `ValidateSplitShardMessage` refuses a namespace collection (§1.3). `CheckSplitShardAgainstCollection`, called by DataCoord's issuer, which also refuses a collection whose meta has `enable_namespace` set. |
+| `streaming` package | `SplitShardParam.Validate` / `ValidateSplitShardMessage`, shared by the builder and the callback; neither accepts a control channel as the source or a target, and neither takes one as a parameter (the broadcaster adds it). `ValidateSplitShardMessage` refuses a namespace collection (§1.3). `CheckSplitShardAgainstCollection`, called by DataCoord's issuer, which also refuses a collection whose meta has `enable_namespace` set. |
 
 **Not implemented, and known limitations.** Each is either deferred by
 decision or parked with its cost stated; none is a silent correctness gap
@@ -2320,8 +2597,24 @@ unless it says so.
 - **A TEXT-aware rewrite.** A collection with a TEXT field is never split, and
   a TEXT field cannot be added while a split is in flight (§6.1 step 1).
 - **BM25 statistics rebuild** for the new shards (§8.7).
+- **Dedup for unkeyed inserts, across a fence or anywhere else.** Only an
+  insert carrying an explicit `idempotency-key` is deduplicated; an unkeyed
+  one is at-least-once, so a client retry of one whose response was lost
+  during a split writes its rows twice. This is the pre-existing contract,
+  not something the split introduces, and it is deliberately not fixed here
+  (§3.3, §7).
 - **Keyed-insert dedup after adoption** (N-4). Accepted: a retry after
   adoption can duplicate rows (§3.3, §7).
+- **A public compaction type for the rewrite.** `HashSplitCompaction` has no
+  `commonpb.CompactionType` member in milvus-proto, so the rewrite is reported
+  to clients as `CompactionTypeUndefined` rather than as a numeric value their
+  enum cannot name (`publicCompactionType`). It needs a milvus-proto change,
+  which is an outward action.
+- **Namespace collections are not split at all** (§1.3), until the
+  namespace(=partition) work gives every segment a single residue. The
+  namespace design in this document -- `hash($namespace_id)` routing, relabel
+  as its redistribution, the admission and granularity checks -- is the target
+  for then, not what runs now.
 
 *Stalls and availability limits:*
 
@@ -2338,6 +2631,19 @@ unless it says so.
   its input. An input larger than the maximum segment size does not fail:
   once the one id is spent, the DataNode keeps writing the current segment, so
   the plan produces one oversized output per target (§6.3 step 2.2).
+- **The drain is coupled to the source's pchannel neighbours, and nothing
+  meters it.** The checkpoint conjunct reads the pchannel's global recovery
+  point, so another collection's vchannel on the same pchannel that cannot
+  persist stalls this split's rewrite gate and its drain for as long as it
+  lasts. The reason string names the pchannel, and DataCoord cannot tell that
+  case from the source's own deletes not yet being materialized. There is no
+  metric that separates the two, and none that counts split drains stalled on
+  a neighbour (§6.3 step 3).
+- **The held dropped-segment backlog has no bound.** The garbage collector
+  holds every dropped segment of a splitting channel until the task is Done,
+  and every empty L1 is now published `Dropped`, so a long window on a
+  write-heavy collection grows that set much faster than it used to. Nothing
+  bounds it and no metric counts it (§6.4 defense 2).
 - **One stuck task blocks every new split.** `maxConcurrentTasks` defaults to
   1, so a task stuck in `Redistributing` (a snapshot-protected segment, a
   rewrite that keeps timing out) or in `Adopting` (below) keeps the trigger from
@@ -2358,8 +2664,9 @@ unless it says so.
   into that shard are refused, retriably, the whole time (§8.10).
 - **A secondary still inside the previous split meets a cascade** (§6.5):
   reads through that family are refused, retriably, for the rest of the
-  secondary's rewrite. Fix direction: spawn a child from its target's
-  `split_genesis_checkpoint` instead of waiting for rootcoord's listing.
+  secondary's rewrite. Fix direction: spawn a child from the target's own
+  first checkpoint, which is the `SplitShard` record that created its recovery
+  module, instead of waiting for rootcoord's listing.
 - **A QueryNode lost between the window-end re-pull and the flip** leaves the
   collection unreadable, retriably, until the flip (§6.2).
 - **Fail closed without shard states.** When the describe fails with an empty
@@ -2426,7 +2733,8 @@ unless it says so.
   new delegator gets a post-adoption version, never a window snapshot's. That
   such a delegator becomes serviceable and is counted correctly before the
   flip is covered by unit tests only, as is in-place conversion on a
-  multi-node replica; the end-to-end runs use one QueryNode.
+  multi-node replica. The earlier end-to-end runs used one QueryNode, and
+  they were made against the pre-#53595 implementation (§12).
 - **Children keep target-written rows as growing data** for the whole window
   and until the target-flushed segments are sorted after Done (§6.2 step 4):
   a memory cost proportional to the write rate during the window.
@@ -2458,7 +2766,7 @@ Other follow-ups:
   drain wait (§6.5 rule 4). Fixing it changes locker semantics, so it is
   tracked separately.
 - **A streaming-version gate for `SplitShard`.** Nothing before
-  `NewSplitShardBroadcastMessage` checks that every node understands type 49
+  `NewSplitShardBroadcastMessage` checks that every node understands type 50
   (there is no `WaitUntilWALbasedDDLReady`-style marker for it); the mixed
   version cases under Rollout are what such a gate would prevent.
 - **A terminal state for a persisted broadcast task.** `pendingBroadcastTask`
@@ -2469,22 +2777,53 @@ Other follow-ups:
   a refusal is logged as unrecoverable and counted
   (`milvus_streamingcoord_broadcaster_append_unrecoverable_total`, §10); the
   retry semantics are unchanged.
-- **A per-channel result contract for `UpdateChannelCheckpoint`.** DataCoord
-  filters out a channel whose `GetLatestWALLocated` fails or names another
-  node and still answers Success for the batch; the StreamingNode's
-  checkpoint updater then runs every task's callback, so the flusher counts
-  the source's checkpoint as acked -- and closes its data sync service once
-  that ack reaches the gate -- on an ack DataCoord never persisted. The
-  flowgraph's close message reports the checkpoint once more; if that is
-  filtered too, DataCoord's drain predicate is not satisfied until a restart
-  rebuilds the service and re-reports it. Fixing it needs DataCoord to answer
-  per channel. The close gate no longer depends on it: an ack that would open
-  the gate is checked against the checkpoint DataCoord holds (§5), which
-  covers a filtered update as well as one DataCoord clamped
-  (`GetMinGrowingSegmentCheckpoint`, TEXT collections). What still trusts the
-  bare ack is the flusher checkpoint RecoveryStorage keeps
-  (`DrainedPastFence`, WAL truncation), on every vchannel as on master; with
-  the persisted position in the answer the extra read goes away too.
+- **The adoption is deliberately not ack-sync-up** (§6.3 step 4), so nothing
+  waits for the source's vchannel drop to complete on the StreamingNode. That
+  is the right trade -- waiting would hold the collection's exclusive keys and
+  every later DDL behind a node that cannot finish the drop -- but it means a
+  drop that never completes is invisible to the split: the task reaches Done
+  on QueryCoord's answer alone, and a source whose module is stuck in a
+  pending drop shows up only in that StreamingNode's own logs. Nothing on the
+  split's side reports it, and nothing counts vchannels stuck that way.
+- **`meta.MarkChannelCheckpointDropped(source)` is deliberately not called**
+  on a retired source. Retirement is the StreamingNode's (the routing commit
+  drives the module's drop), and the only DataCoord-local place to mark it
+  would be the manager at Done -- where a mis-ordering is dangerous, because a
+  late publication on a dropped channel becomes `ErrChannelNotFound`, which
+  `lifecycle_writer.saveBinlogPaths` **swallows as success**, silently
+  discarding a registration instead of failing it. What that leaves open: a
+  completed split leaves the source's channel "live" from `SaveBinlogPaths`'
+  point of view, so a stale publisher could still be accepted onto a shard
+  nobody serves. The drain makes the ordering safe in theory; it has not been
+  exercised under a real fence.
+- **A delete-bearing import that straddles a split** is handled, on the
+  retire guard, and the rule is worth repeating because it is the one place
+  the two subsystems meet: *while an import job that is neither `Completed`
+  nor `Failed` names any vchannel of the split's family, the source's L0
+  segments are not retired* (§6.3 step 2.6, §8.10). It cannot be expressed in
+  the drain predicate instead -- that would deadlock, since the drain counts
+  those very L0s -- and the dispatch is deliberately not held. What remains
+  open is the cheaper alternative nobody took: refusing to *start* a split on
+  a channel with an import in flight, which would close the case at the
+  trigger instead of in the rewrite.
+- **Nothing calls `IntoPoisoned()` on a source replica.** Upstream gives a
+  local consumer a first-class way to say "this message's local work failed"
+  (`OwnedImmutableMessage.IntoPoisoned`), and the broadcast ack never fires
+  for a poisoned message. The split does not use it: a source replica whose
+  local work half-applied is recovered only by the broadcaster's retry, never
+  by failing the split fast. The cost: while such a replica is unacked the
+  collection's exclusive key is held, and a secondary blocked in
+  `WaitVChannelsAcked` is blocked with it, bounded only by the replicate
+  append's context (it is observable -- the gated-appends gauge and a Warn
+  naming the broadcast, §6.5 -- but not acted on).
+- **A mid-window pchannel owner change is unverified.** WAL ownership loss is
+  terminal (`ErrChannelMisrouted`) and the new owner replays from the
+  published checkpoint. The read path is insulated by design (a respawn
+  rebuilds from `VchannelInfo.split_target_channels`, which does not depend on
+  the WAL owner), and the fence and the targets' metas are durable, but no
+  test moves a pchannel while the lineage window is open, and the rewrite's
+  commit path has no `ErrChannelMisrouted` handling of its own (a stale
+  publisher on a retired source hot-loops rather than failing terminally).
 - **DDL whose broadcast vchannels differ from the local list.** A split lets
   a secondary list a source the primary has already delisted while its own
   adoption waits for its drain (a rename in between gives the two callbacks
@@ -2520,20 +2859,12 @@ Other follow-ups:
   to have emptied `hash_routing.buckets`. Nothing routes by it (a `Splitting`
   shard is not routable), but it contradicts `CommitDelta`'s own stated
   invariant that a split strips the source's residues.
-- **Post-fence collection DDL moves the fence gate after a restart.** The
-  RecoveryStorage `Observe*` helpers for `AlterCollection`, `DropPartition`,
-  `CreatePartition` and schema changes do not skip a `SPLITTED` vchannel, so
-  a collection-wide DDL replica after the fence bumps the source's
-  `CheckpointTimeTick`, and after a restart `SplitFenceGate` reseeds from that
-  later tick instead of the seal record. Drained and collectable are then
-  judged later than they could be; it heals itself. Guarding those helpers as
-  `ObserveSplitShard` and `ObserveRetire` already are would close it.
-- **A stale route to a collected source degrades after a restart.**
-  `fencedVChannels` is never pruned in process; after a StreamingNode restart,
-  a proxy route to a retired source that has already been collected is
-  answered `ErrCollectionNotFound`, which the proxy treats as unrecoverable,
-  instead of `SHARD_FENCED` (refresh and retry). It needs a proxy cache that
-  survived the split's cache expiry.
+- **A stale route to a retired source degrades after a restart.** The write
+  path's fence tombstones are never pruned in process, and after a restart
+  they are rebuilt only for vchannels the write-path snapshot still carries.
+  Once the retired source's row is collected, a proxy route that survived the
+  split's cache expiry is answered `ErrCollectionNotFound`, which the proxy
+  treats as unrecoverable, instead of `SHARD_FENCED` (refresh and retry).
 
 **Rollout.** `dataCoord.shardSplit.enable` is off by default, and with it off
 nothing issues a split, so the mixed-version cases below are the constraints
@@ -2548,10 +2879,14 @@ rows on shards that do not own them -- no error, and a delete or upsert
 routed by residue never reaches those rows.
 
 Wire changes:
-- All proto changes on the Milvus side are additive: message type 49,
+- All proto changes on the Milvus side are additive: message type 50 (49 is
+  master's `UpdateImport`),
   `SplitShardMessageHeader`/`Body`, `SplitShardExtraResponse`,
-  `AckedCheckpoint.extra` (field 4), `VChannelMeta.split_genesis_checkpoint`
-  (field 8), and the DataCoord split RPCs, whose
+  `AckedCheckpoint.extra` (field 4),
+  `VChannelMeta.split_fence_time_tick` (field 6) and `split_fence_task_id`
+  (field 7) -- field 5 is master's `transform_materialized_time_tick`, and
+  `VChannelState` 4 is `reserved`, since a fenced source stays `NORMAL` --
+  and the DataCoord split RPCs, whose
   `CheckShardSplitDrainedResponse` carries `recorded` (3), `source_vchannels`
   (4) and `target_vchannels` (5). Streaming code 19 is reserved. The split
   task record (`datapb.SplitShardTask`, with `pending_segments` (3) on its
@@ -2565,37 +2900,31 @@ Wire changes:
 - `etcd_meta.proto`'s `shard_infos` moved from a local `CollectionShardInfo`
   to `schemapb.CollectionShardInfo`, whose field 1 is the same
   `last_truncate_time_tick` varint, so persisted bytes stay compatible.
-- The milvus-proto pin moves from `c39cddab3fac` (master) to `a301a6af926b`.
-  From #618, part of this feature: `commonpb.MsgType_SplitShard = 120`,
+- **The milvus-proto pin does not move.** Everything this feature needs from
+  milvus-proto #618 is already in the pinned
+  `go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4`:
+  `commonpb.MsgType_SplitShard = 120`,
   `DescribeCollectionResponse.shard_infos = 20 / shard_by = 21 /
   routing_modulus = 22`, and `CollectionShardInfo`/`HashRouting`/`ShardState`.
-  The bump also brings unrelated fields the server does not implement:
-  - `CreateSnapshotRequest.skip_index = 7`,
-    `DescribeSnapshotResponse.skip_index = 8`,
-    `RestoreSnapshotRequest.skip_index = 8`,
-    `RestoreExternalSnapshotRequest.skip_index = 6` (#658);
-  - `SubSearchRequest.function_chains = 8` (#659).
+  No `go.mod` change is part of the feature. What is still missing there is a
+  `commonpb.CompactionType` member for the rewrite (§11, not implemented).
 
 What is not compatible is behavior:
 
-- An **old StreamingNode** has no handler for type 49. Its produce server
+- An **old StreamingNode** has no handler for type 50. Its produce server
   refuses the append outright (`MessageType.Valid` looks the type up in the
   node's own enum), so a broadcast whose phase 1 already fenced the source on
   a new node retries the rest forever, holding the collection key, until the
   old node is upgraded. An old node that takes over a pchannel holding a
-  `SplitShard` record does not fence, and its flusher forwards the source
-  replica into the data sync service, where `fromMessageToTsMsgV2` panics on
-  the unknown type.
+  `SplitShard` record does not fence it, does not create the target's recovery
+  module, and does not treat the record as an L0 boundary: the source comes
+  back writable for keys its targets own.
 - A **StreamingNode without `SplitShardExtraResponse`** (neither the append
   extra nor `_ae`) makes the SplitShard callback return `ServiceUnavailable`,
   and the collection's DDL is wedged. Upgrading the node does not clear it: a
   checkpoint persisted without the extra is never replaced, and an acked
   source is never re-driven. Only manual repair of the broadcast task clears
   it, so every StreamingNode must be upgraded before any split is issued.
-- **A flush wait while the SplitShard callback is wedged** stays false for the
-  split collection once its timestamp passes the source's frozen checkpoint,
-  because the flush-state exception needs the `T_switch` that only
-  `CommitShardSplit` records (§6.3 step 3).
 - An **old secondary proxy** neither remaps a replicated `SplitShard` nor gates
   it, so the secondary would create targets under primary names, in any order.
 - A **new secondary proxy with an old secondary StreamingCoord**: the append
@@ -2607,8 +2936,11 @@ What is not compatible is behavior:
   response. A routing commit that overtakes an earlier one there is applied
   instead of retried, and its SplitShard callback wedges as above. Every
   secondary must be upgraded before any split is issued.
-- **Rolling back** to a version without `VCHANNEL_STATE_SPLITTED` (4), after a
-  source was fenced, registers that source as a live shard again.
+- **Rolling back** to a version that does not know
+  `VChannelMeta.split_fence_time_tick`, after a source was fenced, loses the
+  fence at the next StreamingNode restart and registers that source as a live
+  shard again. (A rollback to the pre-#53595 line, which expected
+  `VCHANNEL_STATE_SPLITTED`, would do the same for the same reason.)
 - **Rolling back StreamingCoord** while a two-phase broadcast is `PENDING`:
   the old recovery knows no `append_first_vchannels` and re-drives every
   remaining replica in one `AppendMessages` call, so a target genesis can land
@@ -2618,3 +2950,98 @@ What is not compatible is behavior:
 So: upgrade every secondary and every StreamingNode (and every other node)
 before any split is issued, and do not roll back across a split that has
 fenced.
+
+## 12. Verification status
+
+This section is about *this* implementation -- the one re-authored on master
+after #53595 -- and it is deliberately blunt about what has not been run. The
+earlier end-to-end runs this document refers to (the one-QueryNode runs in
+§6.3 step 4 and §11) were made against the **pre-#53595** implementation,
+whose write switch no longer exists; they are evidence about the read path, the
+handover and the rewrite, and no evidence at all about the fence, the target
+genesis, the retirement or the drain.
+
+**What has been run.** Per branch, not only on the full stack: `go build` over
+`./internal/...` and `pkg/`, `go vet` on every touched tree, and the unit
+tests of every package the layer touches, with `-tags dynamic,test
+-gcflags="all=-N -l"`. The orchestration and rewrite layers were run against a
+C++ core built from this base commit; the write-switch, proxy write-path,
+read-path and handover layers were run against a borrowed core behind a header
+shim, which leaves three known environmental failures, two of them reproduced
+on the unmodified base commit in the same environment: four
+`querycoordv2/autoscale` `TestEstimateSegmentsLoadResource*` cases, which call
+a core symbol the borrowed core does not export; the root `internal/proxy`
+package, which dies on SIGQUIT with no failing test named (its split-specific
+tests pass when run by name); and, on the real core,
+`datanode/importv2 TestRepublishCopiedManifestIndexes_WritePlacementMatrix`,
+which writes to `/files`, and which the stack does not touch but whose
+pre-existence was argued from the diff rather than from a baseline run.
+
+The rewrite layer's new behaviour is pinned by tests written
+RED first, including the L0-2 gate and the import conjunct; the fence's
+pending-partition-drop hole (§7) was found by audit and fixed with a test that
+was confirmed to fail without the fix.
+
+**What has not been run.**
+
+- **No end-to-end run, on any cluster.** Nothing below "the unit tests pass"
+  has been exercised against a live streamingnode, datanode, querynode or
+  querycoord: not a fence on a real WAL, not a target genesis, not a
+  retirement, not a drain, not an adoption, not a handover, and not the whole
+  path in sequence. Every cross-component claim in this document is a trace by
+  reading plus in-process fakes.
+- **The L0-2 chain's streaming half is read, not injected** (§6.3 step 2.9).
+  Nobody has fenced a real source with pending deletes and watched its L0
+  appear at `T_switch` rather than one sync period later, or confirmed in a
+  live WAL that the `SplitShard` handle is retained by the materializer. That
+  is the single most valuable end-to-end check for the rewrite.
+- **A fenced source's boundary-replica ack has not been observed** (§6.3 step
+  3). If it does not fire, `Flush` and `FlushAll` hang for the length of a
+  split.
+- **No restart, no fault injection.** A streamingnode restart between the
+  fence and the adoption, a poisoned source replica, a secondary's append
+  gate under load, a pchannel handover mid-window, and the pchannel-neighbour
+  drain stall are all unexercised.
+- **The mocks are hand-edited, not regenerated.** `make generate-mockery`
+  cannot run on the toolchain used (the vendored mockery refuses
+  `pkg/proto/streamingpb/extends.go`), so a drift check in CI is the first
+  real test of them.
+- **The two reserved read-path proto fields are declared but dead in the
+  branch that owns them** (`VchannelInfo.split_target_channels`,
+  `querypb.ChannelTarget.split_target_channels`): their producer and their
+  consumers are in later layers, so a wrong number or cardinality would not
+  show up until those layers are stacked.
+
+## 13. What the WAL recovery refactor absorbed
+
+#53595 made a large part of the pre-#53595 design unnecessary rather than
+wrong: the mechanism it needed is now upstream's, and in each case upstream's
+is stronger. This is the list, so a reader of the older document can see what
+became of each piece.
+
+| Deleted from the split | What does the job now |
+|---|---|
+| The whole flusher-side implementation: the fence gates, `WhenCreateVChannel`, `genesisSeekPosition`, `RecordFence`, `ObserveCheckpointAck`, `closeDrainedFencedSources`, `splitTargetGenesisRecoveryInfo`, `HandleSplitShard` (~900 production lines and ~1600 test lines) | `internal/streamingnode/server/flusher` is deleted upstream. The per-vchannel recovery module owns L1 persistence, Delete→L0 and the vchannel's lifecycle (§2.6) |
+| Our drain-and-retire scaffolding: `DrainedPastFence`, `SplitFenceGate`, `retiredVChannels`, `hasCollectableRetiredVChannelLocked`, `VChannelMeta.retired`, the `DROPPED`-rewrite hack and the `dropAllVirtualChannel` special case | `beginDrop` → `CompleteDrop` → `TOMBSTONED`, which also waits for L0 materialization and is collected by the ordinary cleanup pass (§6.5) |
+| `VCHANNEL_STATE_SPLITTED` | The fence is a field (`split_fence_time_tick`), the source stays `NORMAL`, and enum 4 is `reserved` (§5) |
+| `VChannelMeta.split_genesis_checkpoint` | A target's own `checkpoint_time_tick` is the `SplitShard` record that created its module, and DataCoord learns its start position from the ack callback like any new vchannel's (§5) |
+| The checkpoint-waiting APIs: `channelCheckpointCovers`, `WatchChannelCheckpointUntil`, `NotifyChannelCheckpointWatchers`, and the `TruncateCollection` checkpoint wait | The pchannel's one published recovery checkpoint, which the drain reads directly, and truncate's own consuming-side acks (§6.3 step 3) |
+| The fenced-source exception in `GetFlushState` / `GetFlushAllState` | Nothing: a fenced source's checkpoint keeps advancing with its pchannel, so the flush-state check is master's (§6.3 step 3) |
+| The `AlterWAL` FLUSHING deadlock fix, and the metrics that watched for it (`milvus_wal_recovery_oldest_splitted_vchannel_age_seconds`, `milvus_wal_recovery_truncation_lag_seconds`) | The FLUSHING stage waits for the published global checkpoint, so the deadlock is structurally impossible (§8.4) |
+| `SplitShardParam.ControlChannel`, its two validations and the explicit control-channel append | `broadcaster_with_rk.go` adds the control channel to every broadcast, idempotently (§4, §6.1 step 2) |
+| `SealAllSegments` at the fence | `FlushAndFenceSegmentAllocUntil` plus the per-segment `SEGMENT_ASSIGNMENT_STATE_SEALED`, and the fence record is itself the seal record (§5) |
+| Our changes under `internal/flushcommon/pipeline` (`flow_graph_dd_node.go`, `util/msg_handler.go` and the `MsgHandler` mock) | Nothing: the package has no importers upstream, so they were dead code |
+
+Three things moved rather than disappeared, and are worth naming because the
+reasoning around them changed even though the code looks similar:
+
+- **The drain's checkpoint conjunct** is unchanged as a predicate and
+  completely different as an argument: it used to mean "the source's flusher
+  checkpoint froze at the fence", and it now means "every handle of the
+  pchannel at or below `T_switch` has been released" (§6.3 step 3).
+- **The fence is now an explicit L0 boundary**, and so is the routing commit
+  that retires the source. Neither was needed before, because the flusher
+  closed the source's data sync service instead (§5, §6.5).
+- **Keyed-write dedup across a fence narrowed**, because the auto-derived
+  content key and both enable switches are gone: it covers explicitly keyed
+  inserts only, and no message type invalidates a window any more (§3.3, §7).
