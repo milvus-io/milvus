@@ -106,7 +106,7 @@ class TestResourceGroupParams(TestcaseBase):
         self.utility_wrap.describe_resource_group(name=m_rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", ct.invalid_resource_names)
+    @pytest.mark.parametrize("rg_name", [name for name in ct.invalid_resource_names if name != "n-ame"])
     def test_create_n_drop_rg_invalid_name(self, rg_name):
         """
         method: create a rg with an invalid name(what are invalid names? types, length, chinese,symbols)
@@ -137,6 +137,22 @@ class TestResourceGroupParams(TestcaseBase):
         rg_name = cf.gen_str_by_length(name_max_length + 1)
         error = {ct.err_code: 999, ct.err_msg: "Invalid resource group name"}
         self.init_resource_group(name=rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
+    def test_create_n_drop_rg_hyphen_name(self):
+        """
+        method: create a rg whose name contains hyphens after the first character
+        verify: create, describe and drop succeed; a leading hyphen is still refused
+        """
+        self._connect()
+        rg_name = f"rg-{cf.gen_digits_by_length(6)}-a"
+        self.init_resource_group(name=rg_name)
+        self.utility_wrap.describe_resource_group(
+            name=rg_name, check_task=ct.CheckTasks.check_rg_property, check_items={"name": rg_name}
+        )
+        self.utility_wrap.drop_resource_group(rg_name)
+        error = {ct.err_code: 999, ct.err_msg: "Invalid resource group name"}
+        self.init_resource_group(name="-rg", check_task=ct.CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_create_rg_dup_name(self):
