@@ -873,6 +873,40 @@ func (_c *MockCache_RemoveAliasHolders_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// RefreshCollectionByID provides a mock function with given fields: ctx, collectionID
+func (_m *MockCache) RefreshCollectionByID(ctx context.Context, collectionID int64) {
+	_m.Called(ctx, collectionID)
+}
+
+// MockCache_RefreshCollectionByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshCollectionByID'
+type MockCache_RefreshCollectionByID_Call struct {
+	*mock.Call
+}
+
+// RefreshCollectionByID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MockCache_Expecter) RefreshCollectionByID(ctx interface{}, collectionID interface{}) *MockCache_RefreshCollectionByID_Call {
+	return &MockCache_RefreshCollectionByID_Call{Call: _e.mock.On("RefreshCollectionByID", ctx, collectionID)}
+}
+
+func (_c *MockCache_RefreshCollectionByID_Call) Run(run func(ctx context.Context, collectionID int64)) *MockCache_RefreshCollectionByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCache_RefreshCollectionByID_Call) Return() *MockCache_RefreshCollectionByID_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RefreshCollectionByID_Call) RunAndReturn(run func(context.Context, int64)) *MockCache_RefreshCollectionByID_Call {
+	_c.Run(run)
+	return _c
+}
+
 // RemoveCollection provides a mock function with given fields: ctx, database, collectionName
 func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string) {
 	_m.Called(ctx, database, collectionName)
