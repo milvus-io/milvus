@@ -21,10 +21,12 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -48,6 +50,17 @@ type shardSplitTasks struct {
 	sourceMu    sync.RWMutex
 	sourceIndex map[string][]int64
 
+	// activeSources and activeTargets count, per vchannel, the tasks that are
+	// not Done or Aborted naming it as their source and as one of their
+	// targets: the channels a split freezes (activeSplitRoles). The compaction
+	// freeze and the garbage collector ask about one vchannel at a time on hot
+	// paths, and records are never removed, so they must not walk every task
+	// ever recorded. Maintained by cache, from the record it replaces and the
+	// one it stores, under activeMu.
+	activeMu      sync.RWMutex
+	activeSources map[string]int
+	activeTargets map[string]int
+
 	// taskLocks serializes the read-modify-write of one task id
 	// (lockTask/unlockTask): a writer reads the record, merges its own
 	// fields into it and upserts the result, and two such writers on the
@@ -59,9 +72,11 @@ type shardSplitTasks struct {
 
 func newShardSplitTasks() *shardSplitTasks {
 	return &shardSplitTasks{
-		tasks:       typeutil.NewConcurrentMap[int64, *datapb.SplitShardTask](),
-		sourceIndex: make(map[string][]int64),
-		taskLocks:   lock.NewKeyLock[int64](),
+		tasks:         typeutil.NewConcurrentMap[int64, *datapb.SplitShardTask](),
+		sourceIndex:   make(map[string][]int64),
+		activeSources: make(map[string]int),
+		activeTargets: make(map[string]int),
+		taskLocks:     lock.NewKeyLock[int64](),
 	}
 }
 
@@ -89,9 +104,19 @@ func (s *shardSplitTasks) load(ctx context.Context, catalog metastore.DataCoordC
 	return nil
 }
 
-// cache stores the task and indexes its sources.
+// cache stores the task and indexes its sources and, while it is active, the
+// channels it freezes.
+//
+// Writers of one task id are serialized by its lock (lockTask) and load runs
+// alone at start, so the record replaced here is the one the index counted.
 func (s *shardSplitTasks) cache(task *datapb.SplitShardTask) {
+	s.activeMu.Lock()
+	previous, _ := s.tasks.Get(task.GetTaskId())
 	s.tasks.Insert(task.GetTaskId(), task)
+	s.countActiveChannels(previous, -1)
+	s.countActiveChannels(task, 1)
+	s.activeMu.Unlock()
+
 	s.sourceMu.Lock()
 	defer s.sourceMu.Unlock()
 	for _, source := range task.GetSources() {
@@ -100,6 +125,46 @@ func (s *shardSplitTasks) cache(task *datapb.SplitShardTask) {
 			s.sourceIndex[source.GetVchannel()] = append(ids, task.GetTaskId())
 		}
 	}
+}
+
+// isSplitShardTaskActive reports whether the task is not in a terminal state.
+// The channels a split holds -- the compaction freeze, the garbage collector's
+// dropped-segment hold, the trigger's exclusion -- are exactly the ones an
+// active task names, so this is the one definition all of them read.
+func isSplitShardTaskActive(task *datapb.SplitShardTask) bool {
+	return task.GetState() != datapb.SplitShardTaskState_SplitShardTaskDone &&
+		task.GetState() != datapb.SplitShardTaskState_SplitShardTaskAborted
+}
+
+// countActiveChannels adds delta to the counts of the channels an active task
+// names; an inactive or absent task counts for nothing. Under activeMu.
+func (s *shardSplitTasks) countActiveChannels(task *datapb.SplitShardTask, delta int) {
+	if task == nil || !isSplitShardTaskActive(task) {
+		return
+	}
+	count := func(index map[string]int, vchannel string) {
+		if vchannel == "" {
+			// A target not allocated yet.
+			return
+		}
+		if index[vchannel] += delta; index[vchannel] <= 0 {
+			delete(index, vchannel)
+		}
+	}
+	for _, source := range task.GetSources() {
+		count(s.activeSources, source.GetVchannel())
+	}
+	for _, target := range task.GetTargets() {
+		count(s.activeTargets, target.GetVchannel())
+	}
+}
+
+// activeSplitRoles reports whether a task that is not Done or Aborted names
+// vchannel as its source, and whether one names it as a target.
+func (s *shardSplitTasks) activeSplitRoles(vchannel string) (source bool, target bool) {
+	s.activeMu.RLock()
+	defer s.activeMu.RUnlock()
+	return s.activeSources[vchannel] > 0, s.activeTargets[vchannel] > 0
 }
 
 // sourceSwitchTimeTick returns the recorded T_switch of vchannel as the source
@@ -153,6 +218,61 @@ func (s *shardSplitTasks) upsert(ctx context.Context, catalog metastore.DataCoor
 	}
 	s.cache(task)
 	return nil
+}
+
+// modify applies mutate to a private copy of the latest record of taskID and
+// persists the result through upsert, all under the task's write lock
+// (lockTask), the same lock CommitShardSplit holds around its own
+// read-merge-upsert. So the split manager and the SplitShard ack callback, the
+// two writers of one record, never write back a stale copy over each other: a
+// manager write that raced the callback cannot revert the T_switch and the
+// fence the callback recorded, and a redelivered callback cannot drop what the
+// manager wrote.
+//
+// mutate returns false to leave the record untouched, and nothing is persisted.
+// It returns the record as it stands afterwards. A task the store does not hold
+// is a System error: every caller acts on a task it has already observed, and
+// records are never removed.
+func (s *shardSplitTasks) modify(
+	ctx context.Context,
+	catalog metastore.DataCoordCatalog,
+	taskID int64,
+	mutate func(task *datapb.SplitShardTask) bool,
+) (*datapb.SplitShardTask, error) {
+	s.lockTask(taskID)
+	defer s.unlockTask(taskID)
+	latest, ok := s.tasks.Get(taskID)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("shard split task %d is not in the store", taskID)
+	}
+	cloned := proto.Clone(latest).(*datapb.SplitShardTask)
+	if !mutate(cloned) {
+		return latest, nil
+	}
+	if err := s.upsert(ctx, catalog, cloned); err != nil {
+		return nil, err
+	}
+	return cloned, nil
+}
+
+// create persists a task the store does not hold yet, under its write lock.
+// Refused when the id is already recorded: a task id is allocated once, so an
+// existing record under it is either this very task (a retry, which must not
+// overwrite what has happened since) or another split's, and neither may be
+// replaced.
+func (s *shardSplitTasks) create(ctx context.Context, catalog metastore.DataCoordCatalog, task *datapb.SplitShardTask) error {
+	s.lockTask(task.GetTaskId())
+	defer s.unlockTask(task.GetTaskId())
+	if _, ok := s.tasks.Get(task.GetTaskId()); ok {
+		return merr.WrapErrServiceInternalMsg("shard split task %d is already recorded", task.GetTaskId())
+	}
+	return s.upsert(ctx, catalog, task)
+}
+
+// list returns every recorded task. The records are the store's own and must
+// not be mutated; modify is the only way to change one.
+func (s *shardSplitTasks) list() []*datapb.SplitShardTask {
+	return s.tasks.Values()
 }
 
 // splitSourceVChannels lists a task's source vchannel names.
