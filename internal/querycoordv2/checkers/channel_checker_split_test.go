@@ -518,3 +518,44 @@ func TestChannelLoadTasksReadNoShardStatesWithNothingToWatch(t *testing.T) {
 
 	assert.Empty(t, checker.createChannelLoadTask(context.Background(), nil, utils.CreateTestReplica(1, 1, []int64{1})))
 }
+
+// A membership flap mid-window must not strand the split source. The node
+// holding it leaves the replica, or stops, and the plain checker rules drop its
+// delegator from dist ("dirty channel exists" / "collection released", both
+// untouched by the split rules); #53595's new checkStale guard cancels the
+// segment half of that cleanup once the node is back in a replica, so the
+// source's own segments stay put. What the split rules decide is the re-watch:
+// a FENCED source (ShardSplitting) is still listed and still the only server of
+// its key range, so it is re-watched like any other channel -- its rebuilt
+// delegator re-derives its children from split_target_channels. Only the
+// not-yet-adopted targets stay held back. (A RETIRED source is the opposite
+// case and is pinned by TestADelistedSourceIsNotReWatchedAfterItsNodeStops.)
+func TestAFencedSourceIsReWatchedAfterAMidWindowFlap(t *testing.T) {
+	window := &milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0", "v1", "v2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardSplitting, VchannelName: "v0"},
+			{State: schemapb.ShardState_ShardCreating, VchannelName: "v1"},
+			{State: schemapb.ShardState_ShardCreating, VchannelName: "v2"},
+		},
+	}
+	next := map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 1),
+		"v1": servingChannel("v1", 1),
+		"v2": servingChannel("v2", 1),
+	}
+	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
+
+	// the node left the replica: the source's delegator is gone from dist.
+	loaded, released := channelDiff(t, window, next, current)
+	assert.Equal(t, []string{"v0"}, loaded, "a fenced source must be re-watched, it is still the only server of its range")
+	assert.Empty(t, released, "nothing of an open window is released")
+
+	// the same flap while the window mark is live -- the targets are held back
+	// by the mark as well as by the states, and the source still comes back.
+	loaded, released = channelDiffWith(t, func(broker *meta.MockBroker) {
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(window, nil).Maybe()
+	}, typeutil.NewSet("v1", "v2"), next, current)
+	assert.Equal(t, []string{"v0"}, loaded)
+	assert.Empty(t, released)
+}

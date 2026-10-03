@@ -57,3 +57,36 @@ func TestCollectionTargetKeepsTheSplitSignalAcrossARestart(t *testing.T) {
 	assert.Equal(t, uint64(200), restored.GetAllDmChannels()["src"].GetSeekPosition().GetTimestamp())
 	assert.Empty(t, restored.GetAllDmChannels()["v9"].GetSplitTargetChannels())
 }
+
+// A split source's delete checkpoint is now routinely a timestamp-only
+// position: since the L0 materializer took over (#53595), an L0 segment
+// materialized from the WAL summary has no physical WAL position, so DataCoord
+// keeps its StartPosition with an empty MsgID
+// (datacoord.meta.UpdateStartPosition), and the source's clamped delete
+// checkpoint inherits that shape. QueryCoord only carries the position --
+// nothing here seeks from it, and the delegator discards its delete buffer by
+// the timestamp alone -- so neither the save/restore nor the split signal next
+// to it may require a MsgID.
+func TestCollectionTargetKeepsATimestampOnlyDeleteCheckpoint(t *testing.T) {
+	src := &DmChannel{VchannelInfo: &datapb.VchannelInfo{
+		CollectionID: 1,
+		ChannelName:  "src",
+		SeekPosition: &msgpb.MsgPosition{ChannelName: "src", Timestamp: 200},
+		// no MsgID and no WAL name: not seekable, consumed by timestamp only.
+		DeleteCheckpoint:    &msgpb.MsgPosition{ChannelName: "src", Timestamp: 150},
+		SplitTargetChannels: []string{"t1", "t2"},
+	}}
+	target := NewCollectionTarget(nil, map[string]*DmChannel{"src": src}, []int64{100})
+
+	saved, err := proto.Marshal(target.toPbMsg())
+	require.NoError(t, err)
+	restoredPb := &querypb.CollectionTarget{}
+	require.NoError(t, proto.Unmarshal(saved, restoredPb))
+	restored := FromPbCollectionTarget(restoredPb)
+
+	cp := restored.GetAllDmChannels()["src"].GetDeleteCheckpoint()
+	require.NotNil(t, cp, "a timestamp-only delete checkpoint must survive the round trip")
+	assert.Equal(t, uint64(150), cp.GetTimestamp())
+	assert.Empty(t, cp.GetMsgID(), "nothing in querycoord may invent a MsgID for it")
+	assert.Equal(t, []string{"t1", "t2"}, restored.GetAllDmChannels()["src"].GetSplitTargetChannels())
+}
