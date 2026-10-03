@@ -105,13 +105,29 @@ func (r *hashSplitRewriter) importMayPublishL0(ctx context.Context, vchannels []
 // publish a segment on them, an L0 among them.
 //
 // An import task with delete data and no insert data publishes its segment at
-// level L0 (internal/datanode/importv2/util.go), which reaches datacoord as
-// SaveBinlogPaths{SegLevel: L0} -> CreateL0Operator and is stored Flushed with
-// IsImporting unset -- indistinguishable, afterwards, from an L0 the WAL
-// materialized. The job's vchannels are fixed at creation, so this is a purely
+// level L0 (internal/datanode/importv2/util.go). It does NOT travel the
+// SaveBinlogPaths path a WAL-materialized L0 travels: the import sync task is
+// built without a metaWriter, so syncmgr skips writeMeta entirely, and the
+// only channel from the datanode to meta is the QueryImport reply, which
+// importTask.QueryTaskOnWorker turns into UpdateSegmentsInfo (deltalogs,
+// manifest, Flushed, positions). Afterwards the segment is Flushed with
+// IsImporting cleared and is indistinguishable from an L0 the WAL
+// materialized -- which is exactly why the retire cannot tell them apart and
+// needs the recorded set below.
+//
+// The job's vchannels are fixed at creation, so this is a purely
 // datacoord-local read; it is deliberately the same predicate the drain's
 // import conjunct applies (hasActiveImportOnAnyVChannel), so the two cannot
 // disagree about which imports are still in flight.
+//
+// Latent gap worth knowing: checkImportingJob decides "all tasks done" over
+// WithRequestSource() only (import_checker.go), so an ImportTaskV2 whose
+// Source is ImportTaskSourceV2_L0Compaction is ignored by that check. Nothing
+// sets that source today, so a Completed job really has no task still
+// writing; were it ever set, this job-state predicate would release while an
+// L0 was still in flight. The recorded set (fencedLevelZeroIDs) does not
+// depend on it, which is the second reason the retire cannot rest on this
+// predicate alone.
 func importMayPublishLevelZero(ctx context.Context, importMeta ImportMeta, vchannels []string) bool {
 	if importMeta == nil || len(vchannels) == 0 {
 		return false
@@ -253,6 +269,24 @@ func (m *shardSplitManager) rewriteRound(
 		return m.persistRewriteRound(ctx, task, result, pending, stillDispatched, nil, arrived)
 	}
 
+	// The L0 set the fence declared final, recorded once per source BEFORE any
+	// plan of this task is built. Every plan re-reads the source's L0s at
+	// plan-build time, so a plan built after the record carries at least the
+	// recorded set -- which is what turns "the plan folded it" into a proof the
+	// retire may act on. Nothing is dispatched until the record is durable: a
+	// plan built first could be built against a set the record does not cover,
+	// and the record would then prove something that did not happen.
+	recorded, ok := m.recordFencedLevelZeroSegments(ctx, task)
+	if !ok {
+		logger.RatedWarn(ctx, 30, "cannot record the shard split's fenced L0 set, retrying next round",
+			mlog.Int("pending", totalPendingRewrites(pending)))
+		if retired == 0 && arrived == 0 && len(result.completed) == 0 {
+			return result
+		}
+		return m.persistRewriteRound(ctx, task, result, pending, stillDispatched, nil, arrived)
+	}
+	task = recorded
+
 	// Every plan that ran carried the source's L0s and folded them into the
 	// outputs it wrote; once no data is left on the source to fold them, they
 	// hold nothing that is not already applied, and they are all that keeps the
@@ -302,6 +336,73 @@ func (m *shardSplitManager) rewriteRound(
 	return m.persistRewriteRound(ctx, task, result, pending, stillDispatched, dispatchedNow, arrived)
 }
 
+// recordFencedLevelZeroSegments records, once per source, the source's L0 set
+// as it stands now -- called only once the fence conjunct has cleared, so
+// "now" is the moment the design calls the set final. It returns the task as
+// recorded and whether every source has a record; false means a catalog write
+// failed and the round must neither retire nor dispatch.
+//
+// Written once and never again. A second snapshot would capture an L0 that
+// appeared after the first, which is precisely the L0 nothing folded, and
+// would hand the retire a proof of something that did not happen. The record
+// is a message rather than a repeated field so "recorded, and there were no
+// L0s" is distinguishable from "not recorded yet".
+func (m *shardSplitManager) recordFencedLevelZeroSegments(
+	ctx context.Context,
+	task *datapb.SplitShardTask,
+) (*datapb.SplitShardTask, bool) {
+	missing := false
+	for _, source := range task.GetSources() {
+		if source.GetFencedLevelZero() == nil {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return task, true
+	}
+	recorded, err := m.store.modify(ctx, m.catalog, task.GetTaskId(), func(t *datapb.SplitShardTask) bool {
+		changed := false
+		for _, source := range t.GetSources() {
+			if source.GetFencedLevelZero() != nil {
+				continue
+			}
+			ids := m.sourceLevelZeroIDs(source.GetVchannel())
+			source.FencedLevelZero = &datapb.SplitShardFencedLevelZero{SegmentIds: ids}
+			changed = true
+			m.taskLogger(t).Info(ctx, "recorded the shard split's fenced L0 set",
+				mlog.String("vchannel", source.GetVchannel()), mlog.Int64s("segmentIDs", ids))
+		}
+		return changed
+	})
+	if err != nil {
+		return task, false
+	}
+	// A concurrent writer may have raced the modify; only a record for every
+	// source is a usable proof.
+	for _, source := range recorded.GetSources() {
+		if source.GetFencedLevelZero() == nil {
+			return recorded, false
+		}
+	}
+	return recorded, true
+}
+
+// fencedLevelZeroIDs splits a source's live L0s into the ones the fence
+// declared final -- the only ones the retire may drop -- and the ones that
+// appeared afterwards, which nothing folded.
+func fencedLevelZeroIDs(live []int64, source *datapb.SplitShardTaskSource) (provable, unprovable []int64) {
+	fenced := typeutil.NewSet(source.GetFencedLevelZero().GetSegmentIds()...)
+	for _, id := range live {
+		if fenced.Contain(id) {
+			provable = append(provable, id)
+		} else {
+			unprovable = append(unprovable, id)
+		}
+	}
+	return provable, unprovable
+}
+
 // retireSourceLevelZeroSegments drops the L0 segments of every source that
 // holds no data left to fold them.
 //
@@ -338,6 +439,27 @@ func (m *shardSplitManager) rewriteRound(
 // the retire wait for the drain while the drain waits for the retire. The
 // dispatch is deliberately NOT held -- a plan carries the source's L0s and
 // folds them, so rewriting on is safe; only discarding them is not.
+//
+// The import guard says WHEN the retire may run; the recorded set
+// (recordFencedLevelZeroSegments) says WHICH L0s it may ever drop, and the two
+// are independent. The guard alone is not enough: the import ordering is sound
+// -- a job reaches Completed strictly after every L0 it produced is in meta,
+// Flushed and visible -- so the guard releases exactly when that L0 has
+// landed, and a live scan would then drop it. It cannot be recognised at that
+// point either: an L0 import's StartPosition is taken from the imported data's
+// own delete timestamps (import_task_import.go passes
+// importStats.GetDeltaTimestampFrom), so it can sit below T_switch, and the
+// segment is by then Flushed with IsImporting cleared. Hence the record.
+//
+// An L0 outside the record is never dropped and never folded, so it keeps
+// liveSegmentBlockReason true and the split stalls in Redistributing where it
+// can be seen. There is no cheap way to fold it instead: a rewrite plan takes
+// exactly one data segment as its input (preCompact), and by this point the
+// source has none left to pair it with; re-publishing the same deltalog
+// objects under a new L0 on each target would alias one binlog path from two
+// segments, which the garbage collector assumes is singly owned; and copying
+// the deltalogs per target is a data-moving job, i.e. the new task type we are
+// not adding. A loud stall is the correct trade against losing deletes.
 func (m *shardSplitManager) retireSourceLevelZeroSegments(
 	ctx context.Context,
 	task *datapb.SplitShardTask,
@@ -362,10 +484,17 @@ func (m *shardSplitManager) retireSourceLevelZeroSegments(
 				mlog.String("level", blocking.GetLevel().String()))
 			continue
 		}
-		ids := m.sourceLevelZeroIDs(vchannel)
-		if len(ids) == 0 {
+		provable, unprovable := fencedLevelZeroIDs(m.sourceLevelZeroIDs(vchannel), source)
+		if len(unprovable) > 0 {
+			logger.RatedWarn(ctx, 30, "shard split holding L0 segments that appeared after the fence declared the set final; nothing folded them, so they are never dropped and the split cannot drain",
+				mlog.String("vchannel", vchannel),
+				mlog.Int64s("heldSegmentIDs", unprovable),
+				mlog.Int64s("fencedSegmentIDs", source.GetFencedLevelZero().GetSegmentIds()))
+		}
+		if len(provable) == 0 {
 			continue
 		}
+		ids := provable
 		if err := m.meta.RetireLevelZeroSegments(ctx, ids); err != nil {
 			// Nothing is lost: the drain still refuses while they live, and
 			// the next round tries again.

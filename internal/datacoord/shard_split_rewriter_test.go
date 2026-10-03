@@ -272,6 +272,15 @@ func (c *rewriteCase) round(batchSize int) rewriteRoundResult {
 	return c.manager.rewriteRound(context.Background(), c.task(), c.dispatcher, batchSize, c.rewriter.importGuard)
 }
 
+// recordFenced takes the fenced-L0 record the first post-gate round takes, so
+// a test can exercise the rounds after it without the record's own write in
+// the way.
+func (c *rewriteCase) recordFenced(t *testing.T) {
+	t.Helper()
+	_, ok := c.manager.recordFencedLevelZeroSegments(context.Background(), c.task())
+	require.True(t, ok)
+}
+
 func (c *rewriteCase) task() *datapb.SplitShardTask {
 	return mustTask(c.t, c.manager, hashTaskID)
 }
@@ -741,11 +750,18 @@ func TestRewriteWithNothingLeftWritesNothing(t *testing.T) {
 	m := newHashRewriteMeta(t, nil)
 	setSourceSegment(m, 103, commonpb.SegmentState_Growing, datapb.SegmentLevel_L1)
 	c := newRewriteCase(t, m, newHashTask(nil))
+
+	// The first round past the fence writes the fenced-L0 record, once.
+	c.recordFenced(t)
 	before := c.task()
 
 	res := c.round(10)
 	assert.Empty(t, res.dispatched)
 	assert.Same(t, before, c.task(), "an idle round does not rewrite the record")
+
+	res = c.round(10)
+	assert.Empty(t, res.dispatched)
+	assert.Same(t, before, c.task(), "and the fenced-L0 record is not written a second time")
 }
 
 // A round whose task has moved on (the manager adopted it meanwhile) writes
@@ -767,6 +783,11 @@ func TestRewriteRoundPersistence(t *testing.T) {
 
 	t.Run("a failed write is retried by the next round", func(t *testing.T) {
 		c := newRewriteCase(t, newHashRewriteMeta(t, []int64{101}), newHashTask(nil))
+		// The fenced-L0 record is already taken, so it is the round's own
+		// write-back that fails here, not the record's. (A failed record is
+		// its own case: nothing is dispatched at all --
+		// TestRewriteRetiresOnlyTheL0sTheFenceDeclaredFinal.)
+		c.recordFenced(t)
 		failing := mockey.Mock((*shardSplitTasks).modify).Return(nil, errors.New("catalog down")).Build()
 		res := c.round(10)
 		failing.UnPatch()
@@ -1226,4 +1247,145 @@ func TestHashSplitRewriterReadsDataCoordImportMeta(t *testing.T) {
 		"no import meta wired is no import")
 	assert.False(t, importMayPublishLevelZero(context.Background(), importMeta, nil),
 		"no vchannel to judge by is no import")
+}
+
+// The guard above is necessary but not sufficient, and the remaining hole is
+// semantic rather than a race: the import ordering is sound (an import job
+// reaches Completed strictly after every L0 it produced is in meta, Flushed
+// and visible), so the guard releases exactly when the import's L0 has landed
+// -- and the retire's very next act used to be to drop it. sourceLevelZeroIDs
+// takes every L0 on the channel whatever its provenance, and isRewriteInput
+// excludes L0, so an imported L0 is never a plan input. If the source's L1s
+// were already rewritten when it lands -- the likely ordering, since the
+// rewrite usually finishes long before a slow import -- no plan runs after it
+// and nothing ever folds it.
+//
+// There is no sound way to recognise such an L0 at retire time. Its
+// StartPosition comes from the imported data's own delete timestamps
+// (import_task_import.go reads importStats.GetDeltaTimestampFrom for an L0
+// import), so it can sit below T_switch; and once the import commits it is
+// Flushed with IsImporting cleared, indistinguishable from a WAL L0. So the
+// provable set is recorded instead, once, when the fence conjunct first
+// clears, before any plan is built.
+func TestRewriteRetiresOnlyTheL0sTheFenceDeclaredFinal(t *testing.T) {
+	t.Run("the set is recorded when the fence clears, before any dispatch", func(t *testing.T) {
+		m := newHashRewriteMeta(t, []int64{101})
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		setSourceSegment(m, 202, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
+		c := newRewriteCase(t, m, newHashTask([]int64{101}))
+
+		c.round(10)
+		assert.Nil(t, c.task().GetSources()[0].GetFencedLevelZero(),
+			"nothing is recorded below the fence gate, and nothing is dispatched either")
+		assert.Empty(t, c.dispatcher.dispatched)
+
+		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+		c.round(10)
+		fenced := c.task().GetSources()[0].GetFencedLevelZero()
+		require.NotNil(t, fenced)
+		assert.ElementsMatch(t, []int64{201, 202}, fenced.GetSegmentIds())
+		assert.Contains(t, c.dispatcher.dispatched, int64(101),
+			"the record is written before the dispatch, in the same round")
+	})
+
+	t.Run("an L0 that appears after the record is never retired", func(t *testing.T) {
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+
+		// Round one: the fence has cleared, the recorded set is {201}, and it
+		// is retired because every plan of this task carried it. Rounds are
+		// driven directly, not through the manager tick, so the task does not
+		// move on to Adopting mid-test.
+		c.round(10)
+		require.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+
+		// An import publishes an L0 afterwards. It is outside the record, so
+		// nothing proves a plan folded it: it stays live. This assertion is
+		// the data loss -- before the record existed, the retire dropped it.
+		setSourceSegment(m, 301, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c.round(10)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(301),
+			"an unfolded L0 must never be dropped")
+		assert.ElementsMatch(t, []int64{201}, c.task().GetSources()[0].GetFencedLevelZero().GetSegmentIds(),
+			"the record is written once; a second snapshot would capture the unfolded L0")
+
+		// And the stall is loud: the live L0 keeps the drain blocked, so the
+		// task cannot adopt and sits in Redistributing where it can be seen.
+		assert.NotEmpty(t, c.manager.coordinator.splitDrainBlockReason(context.Background(), c.task()))
+		c.tick()
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(301))
+	})
+
+	t.Run("a source with no L0 at the fence records an empty set, not an unset one", func(t *testing.T) {
+		m := newHashRewriteMeta(t, nil)
+		c := newRewriteCase(t, m, newHashTask(nil))
+
+		c.round(10)
+		fenced := c.task().GetSources()[0].GetFencedLevelZero()
+		require.NotNil(t, fenced, "presence is what stops a second snapshot")
+		assert.Empty(t, fenced.GetSegmentIds())
+
+		// The same L0-after-the-fact case, on a source that never had one.
+		setSourceSegment(m, 301, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c.round(10)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(301))
+		assert.Empty(t, c.task().GetSources()[0].GetFencedLevelZero().GetSegmentIds())
+	})
+
+	t.Run("the record survives a restart, so the retire set does not grow", func(t *testing.T) {
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+		c.round(10)
+		require.ElementsMatch(t, []int64{201}, c.task().GetSources()[0].GetFencedLevelZero().GetSegmentIds())
+
+		// A fresh store loaded from the catalog, as a restart does.
+		reloaded := newShardSplitTasks()
+		require.NoError(t, reloaded.load(context.Background(), c.manager.catalog))
+		task, ok := reloaded.get(hashTaskID)
+		require.True(t, ok)
+		require.NotNil(t, task.GetSources()[0].GetFencedLevelZero())
+		assert.ElementsMatch(t, []int64{201}, task.GetSources()[0].GetFencedLevelZero().GetSegmentIds())
+	})
+
+	t.Run("nothing is dispatched until the record is written", func(t *testing.T) {
+		// A plan built before the record exists could be built against an L0
+		// set the record does not cover, and then the record would be a proof
+		// of something that did not happen. A failed write retries next round.
+		m := newHashRewriteMeta(t, []int64{101})
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask([]int64{101}))
+
+		failing := mockey.Mock((*shardSplitTasks).modify).Return(nil, errors.New("etcd down")).Build()
+		res := c.round(10)
+		failing.UnPatch()
+		assert.Empty(t, res.dispatched, "no plan may be built before the record is durable")
+		assert.Empty(t, c.dispatcher.dispatched)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+
+		res = c.round(10)
+		assert.ElementsMatch(t, []int64{101}, res.dispatched)
+		require.NotNil(t, c.task().GetSources()[0].GetFencedLevelZero())
+	})
+
+	t.Run("an L0 inside the record is still held while an import is in flight", func(t *testing.T) {
+		// The two guards are independent: the record says WHICH L0s may ever
+		// be retired, the import guard says WHEN. Both must hold.
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+		importMeta, setState := importMetaWithOneJob(t, hashSrcVChannel, internalpb.ImportJobState_Importing)
+		c.rewriter.importGuard = newHashSplitRewriter(c.manager, nil, importMeta).importMayPublishL0
+
+		c.round(10)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+		require.NotNil(t, c.task().GetSources()[0].GetFencedLevelZero(),
+			"the record is taken at the fence, whatever the import is doing")
+		setState(internalpb.ImportJobState_Completed)
+		c.round(10)
+		assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+	})
 }
