@@ -1263,3 +1263,77 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
 }
+
+func (s *CompactionPlanHandlerSuite) newScheduleTask(planID int64, kind datapb.CompactionType, channel string) CompactionTask {
+	proto := &datapb.CompactionTask{
+		PlanID: planID, Type: kind, State: datapb.CompactionTaskState_pipelining,
+		Channel: channel, PartitionID: 10, NodeID: 102, InputSegments: []int64{planID * 10},
+	}
+	if kind == datapb.CompactionType_Level0DeleteCompaction {
+		return newL0CompactionTask(proto, nil, s.mockMeta)
+	}
+	return newMixCompactionTask(proto, nil, s.mockMeta, newMockVersionManager())
+}
+
+// The rewrite plans of one shard split all run on its source channel, each
+// with its own input: one schedule pass admits all of them, bounded only by
+// the split's in-flight batch and the global slots.
+func (s *CompactionPlanHandlerSuite) TestSchedule_ShardSplitRewritesOfOneSourceRunTogether() {
+	s.SetupTest()
+	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
+	for _, planID := range []int64{1, 2, 3} {
+		s.NoError(s.handler.submitTask(s.newScheduleTask(planID, datapb.CompactionType_HashSplitCompaction, "src")))
+	}
+	got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
+	s.ElementsMatch([]int64{1, 2, 3}, got)
+}
+
+// A rewrite never runs next to any other compaction on its channel. The split
+// freeze and the preemption at the fence keep other compactions off the
+// source; the scheduler holds the rule as well, in both directions.
+func (s *CompactionPlanHandlerSuite) TestSchedule_ShardSplitRewriteNeverRunsNextToAnotherCompaction() {
+	for _, other := range []datapb.CompactionType{
+		datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_BumpSchemaVersionCompaction,
+		datapb.CompactionType_Level0DeleteCompaction,
+		datapb.CompactionType_ClusteringCompaction,
+	} {
+		s.Run("executing "+other.String()+" holds a queued rewrite", func() {
+			s.SetupTest()
+			s.handler.executingTasks[1] = s.newScheduleTask(1, other, "src")
+			s.NoError(s.handler.submitTask(s.newScheduleTask(2, datapb.CompactionType_HashSplitCompaction, "src")))
+			s.Empty(s.handler.schedule())
+			s.Equal(1, s.handler.queueTasks.Len())
+		})
+		if other == datapb.CompactionType_ClusteringCompaction {
+			continue
+		}
+		s.Run("executing rewrite holds a queued "+other.String(), func() {
+			s.SetupTest()
+			s.handler.executingTasks[1] = s.newScheduleTask(1, datapb.CompactionType_HashSplitCompaction, "src")
+			s.NoError(s.handler.submitTask(s.newScheduleTask(2, other, "src")))
+			s.Empty(s.handler.schedule())
+			s.Equal(1, s.handler.queueTasks.Len())
+		})
+	}
+
+	s.Run("in one pass, the rewrite goes first and the mix waits", func() {
+		s.SetupTest()
+		s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
+		s.NoError(s.handler.submitTask(s.newScheduleTask(1, datapb.CompactionType_MixCompaction, "src")))
+		s.NoError(s.handler.submitTask(s.newScheduleTask(2, datapb.CompactionType_HashSplitCompaction, "src")))
+		got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
+		s.Equal([]int64{2}, got)
+	})
+
+	s.Run("other channels are untouched", func() {
+		s.SetupTest()
+		s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
+		s.handler.executingTasks[1] = s.newScheduleTask(1, datapb.CompactionType_HashSplitCompaction, "src")
+		s.NoError(s.handler.submitTask(s.newScheduleTask(2, datapb.CompactionType_MixCompaction, "other")))
+		s.NoError(s.handler.submitTask(s.newScheduleTask(3, datapb.CompactionType_MixCompaction, "other")))
+		got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
+		s.ElementsMatch([]int64{2, 3}, got)
+	})
+}
