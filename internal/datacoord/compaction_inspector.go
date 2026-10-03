@@ -95,6 +95,11 @@ type compactionInspector struct {
 	// wired. Such a channel takes no compaction but the split's own
 	// (frozenBySplit).
 	isChannelSplitting func(channel string) bool
+	// isChannelSplitTarget reports whether such a split names the channel as
+	// a target and none names it as its source; nil when no split manager is
+	// wired. The sort of a rewrite output is let through there
+	// (sortsRewriteOutputsOnTarget).
+	isChannelSplitTarget func(channel string) bool
 	// compactionEnabled is dataCoord.enableCompaction as read when the
 	// inspector is built (the switch is not refreshable). The schedule loop
 	// runs either way, for the rewrite of a shard split already in the WAL;
@@ -242,8 +247,9 @@ func (c *compactionInspector) schedule() []CompactionTask {
 	// otherChannels those running anything else. The split's freeze and its
 	// preemption at the fence keep other compactions off the source already;
 	// the scheduler holds the rule too. Rewrites of one source run together:
-	// each has its own input, and their outputs land on the targets, which
-	// nothing else compacts during the split.
+	// each has its own input, and their outputs land on the targets, where
+	// nothing else runs during the split but the sort of an output already
+	// committed, a segment no rewrite touches again.
 	splitChannels := typeutil.NewSet[string]()
 	otherChannels := typeutil.NewSet[string]()
 	markChannel := func(t CompactionTask) {
