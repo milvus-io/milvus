@@ -440,37 +440,27 @@ func (m *BM25Stats) SerializeToWriter(w io.Writer) error {
 }
 
 func (m *BM25Stats) Deserialize(bs []byte) error {
-	buffer := bytes.NewBuffer(bs)
+	if len(bs) < 20 {
+		// Match EOF at a header field boundary and truncation within a field.
+		if len(bs) == 0 || len(bs) == 4 || len(bs) == 12 {
+			return io.EOF
+		}
+		return io.ErrUnexpectedEOF
+	}
+
 	dim := (len(bs) - 20) / 8
-	var numRow, tokenNum int64
-	var version int32
-	if err := binary.Read(buffer, common.Endian, &version); err != nil {
-		return err
+	if dim > 0 && len(m.rowsWithToken) == 0 {
+		m.rowsWithToken = make(map[uint32]int32, dim)
 	}
-
-	if err := binary.Read(buffer, common.Endian, &numRow); err != nil {
-		return err
-	}
-
-	if err := binary.Read(buffer, common.Endian, &tokenNum); err != nil {
-		return err
-	}
-
-	var key uint32
-	var value int32
 	for i := 0; i < dim; i++ {
-		if err := binary.Read(buffer, common.Endian, &key); err != nil {
-			return err
-		}
-
-		if err := binary.Read(buffer, common.Endian, &value); err != nil {
-			return err
-		}
+		off := 20 + i*8
+		key := common.Endian.Uint32(bs[off : off+4])
+		value := int32(common.Endian.Uint32(bs[off+4 : off+8]))
 		m.rowsWithToken[key] += value
 	}
 
-	m.numRow += numRow
-	m.numToken += tokenNum
+	m.numRow += int64(common.Endian.Uint64(bs[4:12]))
+	m.numToken += int64(common.Endian.Uint64(bs[12:20]))
 	return nil
 }
 
@@ -517,38 +507,44 @@ func (m *BM25Stats) MemSize() int64 {
 // DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.
 // Unlike Deserialize([]byte), this does not require knowing the total size upfront.
 func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
-	var version int32
-	if err := binary.Read(r, common.Endian, &version); err != nil {
+	var header [20]byte
+	if n, err := io.ReadFull(r, header[:]); err != nil {
+		// Preserve EOF at the boundaries between header fields.
+		if err == io.ErrUnexpectedEOF && (n == 4 || n == 12) {
+			return io.EOF
+		}
 		return err
 	}
 
-	var numRow, tokenNum int64
-	if err := binary.Read(r, common.Endian, &numRow); err != nil {
-		return err
-	}
-	if err := binary.Read(r, common.Endian, &tokenNum); err != nil {
-		return err
-	}
+	m.numRow += int64(common.Endian.Uint64(header[4:12]))
+	m.numToken += int64(common.Endian.Uint64(header[12:20]))
 
-	m.numRow += numRow
-	m.numToken += tokenNum
-
-	var key uint32
-	var value int32
+	buf := make([]byte, 4*1024)
+	remaining := 0
 	for {
-		if err := binary.Read(r, common.Endian, &key); err != nil {
+		n, err := r.Read(buf[remaining:])
+		n += remaining
+		end := n - n%8
+		for off := 0; off < end; off += 8 {
+			key := common.Endian.Uint32(buf[off : off+4])
+			value := int32(common.Endian.Uint32(buf[off+4 : off+8]))
+			m.rowsWithToken[key] += value
+		}
+		// Carry an incomplete record into the next read.
+		remaining = copy(buf, buf[end:n])
+		if err != nil {
 			if err == io.EOF {
-				break
+				if remaining == 4 {
+					return io.EOF // The key was read, but its value is missing.
+				}
+				if remaining != 0 {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
 			}
 			return err
 		}
-		if err := binary.Read(r, common.Endian, &value); err != nil {
-			return err
-		}
-		m.rowsWithToken[key] += value
 	}
-
-	return nil
 }
 
 // DeserializeStats deserializes @blobs as []*PrimaryKeyStats
