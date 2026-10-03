@@ -245,7 +245,16 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			// target then means new partitions never enter it (their sync times
 			// out) and the retired split source is never released -- so it keeps
 			// answering reads with the partition set it had at the fence.
-			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+			//
+			// Marking the channel dirty is not enough on its own either:
+			// GetDataDistribution returns before it ever reads the delta when the
+			// request's LastUpdateTs is not behind the node's distribution modify
+			// timestamp. Every other producer of a leader-view change goes through
+			// markLeaderViewUpdated, which bumps both, so the adoption does too --
+			// otherwise the mark sits in the tracker until some unrelated change on
+			// this node happens to bump the timestamp, which on a node holding only
+			// this collection may be never.
+			node.markLeaderViewUpdated(channel.GetChannelName())
 			nodeIDStr := fmt.Sprint(node.GetNodeID())
 			metrics.QueryNodeSplitChildAdoptedTotal.WithLabelValues(nodeIDStr).Inc()
 			// the child is no longer an un-adopted fronted child.
