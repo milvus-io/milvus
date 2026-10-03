@@ -764,9 +764,19 @@ func (s *Server) stopCompaction() {
 	}
 }
 
+// startCompaction starts the compaction inspector's schedule loop whatever
+// dataCoord.enableCompaction says: a shard split already in the WAL needs its
+// rewrite run on every cluster. With the switch off -- it is not refreshable,
+// and is read once here and when the inspector is built -- the policy-driven
+// triggers do not start and the loop admits only those rewrites.
 func (s *Server) startCompaction() {
 	if s.compactionInspector != nil {
 		s.compactionInspector.start()
+	}
+
+	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		mlog.Info(s.ctx, "dataCoord.enableCompaction is off, no compaction is triggered by policy")
+		return
 	}
 
 	if s.compactionTrigger != nil {
@@ -779,9 +789,7 @@ func (s *Server) startCompaction() {
 }
 
 func (s *Server) startServerLoop() {
-	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		s.startCompaction()
-	}
+	s.startCompaction()
 
 	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
