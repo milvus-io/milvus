@@ -98,6 +98,10 @@ range is represented as a double when it is finite and representable. When
 Milvus serializes tags again, it preserves each numeric kind, including
 emitting an integral double with a decimal point.
 
+Array tags must contain only strings or only numbers; mixing the two is
+rejected on write. Numeric arrays use int64 when every element is an int64;
+otherwise all elements are promoted to double. Empty arrays are allowed.
+
 String tags match only string fields. Integer and double tags may match either
 numeric field family when conversion preserves the value exactly; the same
 rules apply element-wise to array tags. An incompatible, overflowing, or lossy
@@ -222,6 +226,11 @@ failure denies the request. Policy and principal-tag freshness are checked on
 use, and expired principal entries reload immediately. A periodic scanner
 reclaims expired entries that are not accessed again.
 
+Each request uses one locally coherent, immutable policy/tag snapshot; upsert
+shares it between USING and CHECK. A policy change during tag loading retries
+snapshot acquisition. Later invalidations do not revise authorization already
+captured by that request.
+
 RLS messages are eligible for generic CDC replication and replay the same
 idempotent ACK callbacks on a secondary. Dedicated RLS CDC compatibility and
 recovery validation remains follow-up work.
@@ -243,6 +252,9 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
 | `proxy.rls.maxPrincipalCacheBytes` | Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per collection or materialized by one non-paginated principal list. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
+
+RLS-bearing HybridSearch subplans share the existing request-wide
+`proxy.maxMembershipFilterPlanSize` serialized-plan budget.
 
 ## Compatibility And Rollout
 

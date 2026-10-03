@@ -120,6 +120,19 @@ func TestSetRLSPrincipalTagsRequestFromProto(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, rlsutil.NewStringTagValue("acme"), req.GetTags()["tenant"])
 
+	for _, tags := range []string{`{"groups":["sales",1]}`, `{"groups":[1.0,"sales"]}`} {
+		_, err := setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
+			PrincipalName: "alice", Tags: tags,
+		})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Contains(t, err.Error(), "array cannot mix strings and numbers")
+	}
+	req, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
+		PrincipalName: "alice", Tags: `{"groups":[1,2.5]}`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []rlsutil.TagValue{rlsutil.NewDoubleTagValue(1), rlsutil.NewDoubleTagValue(2.5)}, req.GetTags()["groups"].ArrayValues())
+
 	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
 		Tags:          `{"tenant":true}`,

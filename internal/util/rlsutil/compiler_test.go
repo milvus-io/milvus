@@ -17,11 +17,14 @@
 package rlsutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -96,7 +99,7 @@ func TestInstantiateNotAndArrayTags(t *testing.T) {
 		{name: "not equality match", expr: "not (age == $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(18)}, expected: truthFalse},
 		{name: "not equality mismatch", expr: "not (age == $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(19)}, expected: truthTrue},
 		{name: "not in list", expr: "not (age in [17, 19])", expected: truthTrue},
-		{name: "array any", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewDoubleTagValue(2), NewInt64TagValue(4)})}, expected: truthTrue},
+		{name: "array any with exact numeric conversion", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewDoubleTagValue(2), NewInt64TagValue(4)})}, expected: truthTrue},
 		{name: "not array any", expr: "not array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewInt64TagValue(4), NewInt64TagValue(5)})}, expected: truthTrue},
 		{name: "missing tag under not stays false", expr: "not (age == $current_principal_tags['value'])", expected: truthFalse},
 		{name: "scalar tag cannot fill array", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(2)}, expected: truthFalse},
@@ -120,6 +123,51 @@ func TestInstantiateNotAndArrayTags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	}}})
+	require.NoError(t, err)
+
+	elements := make([]TagValue, 1024)
+	for i := range elements {
+		elements[i] = NewInt64TagValue(int64(i))
+	}
+	arrayTag := NewArrayTagValue(elements)
+	arrayBytes, ok := tagValueSize(arrayTag)
+	require.True(t, ok)
+	policyCount := int(maxRLSPrincipalMetadataBytes/arrayBytes) + 1
+	policies := make([]*RowPolicy, policyCount)
+	for i := range policies {
+		policies[i] = &RowPolicy{
+			PolicyName: fmt.Sprintf("policy-%d", i),
+			PolicyType: PolicyTypePermissive,
+			Actions:    []PolicyAction{PolicyActionInsert},
+			CheckExpr:  "array_contains_any(scores, $current_principal_tags['groups'])",
+		}
+	}
+
+	compiled, err := CompileCheckExpression(policies[:1], PolicyActionInsert, helper, 4096)
+	require.NoError(t, err)
+	_, err = compiled.Instantiate("alice", map[string]TagValue{"groups": arrayTag})
+	require.NoError(t, err)
+
+	compiled, err = CompileCheckExpression(policies, PolicyActionInsert, helper, 4096)
+	require.NoError(t, err)
+	_, err = compiled.Instantiate("alice", map[string]TagValue{"groups": arrayTag})
+	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+}
+
+func TestNestedNotIsRejected(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64,
+	}}})
+	require.NoError(t, err)
+	expr, err := planparserv2.ParseExpr(helper, "not (not (age == 18))", nil)
+	require.NoError(t, err)
+	require.ErrorIs(t, ValidateParsedExpression(expr, nil), merr.ErrParameterInvalid)
 }
 
 func TestNotPreservesUnknownForNull(t *testing.T) {

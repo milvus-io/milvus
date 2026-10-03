@@ -32,14 +32,18 @@ import (
 )
 
 type testStorageFieldData struct {
-	data      any
-	dataType  schemapb.DataType
-	validData []bool
+	data        any
+	dataType    schemapb.DataType
+	elementType schemapb.DataType
+	validData   []bool
 }
 
 func (f *testStorageFieldData) GetDataRows() any               { return f.data }
 func (f *testStorageFieldData) GetDataType() schemapb.DataType { return f.dataType }
-func (f *testStorageFieldData) GetValidData() []bool           { return f.validData }
+func (f *testStorageFieldData) GetElementType() schemapb.DataType {
+	return f.elementType
+}
+func (f *testStorageFieldData) GetValidData() []bool { return f.validData }
 
 func validateRows(ctx context.Context, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, expr string, operation string, exprKind string) error {
 	expr = strings.TrimSpace(expr)
@@ -207,7 +211,7 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 }
 
 func TestFieldReaderNullableScalarCursor(t *testing.T) {
-	column := &planpb.ColumnInfo{FieldId: 101}
+	column := &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_VarChar}
 	for _, storage := range []struct {
 		name   string
 		values []string
@@ -263,7 +267,7 @@ func TestArrayMatcherSkipsNullElements(t *testing.T) {
 		},
 		{
 			name:     "int",
-			dataType: schemapb.DataType_Int64,
+			dataType: schemapb.DataType_Int32,
 			array: &schemapb.ScalarField{ValidData: []bool{false, true}, Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{0, 7}},
 			}},
@@ -338,6 +342,146 @@ func TestArrayMatcherSkipsNullElements(t *testing.T) {
 	_, err = matcher.matches(tests[0].array, rows)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Len(t, rows.arrayElementLayouts, 1)
+
+	for _, op := range []planpb.JSONContainsExpr_JSONOp{
+		planpb.JSONContainsExpr_ContainsAll,
+		planpb.JSONContainsExpr_ContainsAny,
+	} {
+		literals, err := newLiteralMatcher(tests[0].dataType, nil)
+		require.NoError(t, err)
+		matcher := &arrayLiteralMatcher{literalMatcher: literals, op: op}
+		_, err = matcher.matches(tests[0].array, &rowData{})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+}
+
+func TestNegatedPredicateRejectsMismatchedRuntimeTypes(t *testing.T) {
+	t.Run("scalar", func(t *testing.T) {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64,
+		}}})
+		require.NoError(t, err)
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "age", Type: schemapb.DataType_Bool,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true}}},
+			}},
+		}}
+		err = validateRows(context.Background(), fields, helper, 1, "not (age == 7)", "insert", "check")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("array element", func(t *testing.T) {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		}}})
+		require.NoError(t, err)
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "values", Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_VarChar,
+					Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x"}}},
+					}},
+				}},
+			}},
+		}}
+		err = validateRows(context.Background(), fields, helper, 1, "not array_contains(values, 7)", "insert", "check")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("array declared element type", func(t *testing.T) {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int8,
+		}}})
+		require.NoError(t, err)
+		expr, err := planparserv2.ParseExpr(helper, "not array_contains(values, 8)", nil)
+		require.NoError(t, err)
+		row := &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{7}}}}
+
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "values", Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int32,
+					Data:        []*schemapb.ScalarField{row},
+				}},
+			}},
+		}}
+		err = ValidateRowsByPredicate(context.Background(), fields, 1, expr, "insert", "check")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		storageFields := map[int64]StorageFieldData{
+			100: &testStorageFieldData{
+				data:        []*schemapb.ScalarField{row},
+				dataType:    schemapb.DataType_Array,
+				elementType: schemapb.DataType_Int32,
+			},
+		}
+		err = ValidateInsertDataByPredicate(context.Background(), storageFields, 1, expr, "import", "check")
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	t.Run("comparison literal", func(t *testing.T) {
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "age", Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+			}},
+		}}
+		for _, value := range []*planpb.GenericValue{planparserv2.NewString("not-an-int"), planparserv2.NewFloat(1.5)} {
+			predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64},
+				Op:         planpb.OpType_NotEqual,
+				Value:      value,
+			}}}
+			err := ValidateRowsByPredicate(context.Background(), fields, 1, predicate, "insert", "check")
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		}
+	})
+
+	t.Run("term literal", func(t *testing.T) {
+		predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+			Op: planpb.UnaryExpr_Not,
+			Child: &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64},
+				Values:     []*planpb.GenericValue{planparserv2.NewFloat(1.5)},
+			}}},
+		}}}
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "age", Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+			}},
+		}}
+		err := ValidateRowsByPredicate(context.Background(), fields, 1, predicate, "insert", "check")
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("array literal", func(t *testing.T) {
+		predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+			Op: planpb.UnaryExpr_Not,
+			Child: &planpb.Expr{Expr: &planpb.Expr_JsonContainsExpr{JsonContainsExpr: &planpb.JSONContainsExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+				Op:         planpb.JSONContainsExpr_Contains,
+				Elements:   []*planpb.GenericValue{planparserv2.NewFloat(1.5)},
+			}}},
+		}}}
+		fields := []*schemapb.FieldData{{
+			FieldId: 100, FieldName: "values", Type: schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int64,
+					Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+					}},
+				}},
+			}},
+		}}
+		err := ValidateRowsByPredicate(context.Background(), fields, 1, predicate, "insert", "check")
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
 }
 
 func TestArrayContainsOperationsSkipNullElements(t *testing.T) {
@@ -355,6 +499,7 @@ func TestArrayContainsOperationsSkipNullElements(t *testing.T) {
 		expected truthValue
 	}{
 		{expr: "array_contains(values, 0)", expected: truthFalse},
+		{expr: "not array_contains(values, 0)", expected: truthTrue},
 		{expr: "array_contains(values, 7)", expected: truthTrue},
 		{expr: "array_contains_any(values, [0, 8])", expected: truthFalse},
 		{expr: "array_contains_any(values, [0, 7])", expected: truthTrue},
@@ -592,7 +737,7 @@ func TestValidateInsertDataByPredicateNarrowIntegers(t *testing.T) {
 	}
 	rows := newInsertRowData(compact, []int64{101})
 	for row, expected := range []any{int8(7), nil, int8(8)} {
-		actual, err := rows.value(&planpb.ColumnInfo{FieldId: 101}, row)
+		actual, err := rows.value(&planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int8}, row)
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	}

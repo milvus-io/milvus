@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
@@ -615,10 +616,10 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.legacyGroupByWire = errGroupByField == nil && errGroupByFields != nil && t.request.GetSearchAggregation() == nil
 
 	var err error
-	var membershipFilterPlanSize int64
+	var filterPlanSize int64
 	// Every hybrid sub-request is part of one client request. Share the parser's
 	// pre-materialization occurrence/decoded-memory budget across all of them;
-	// the serialized-plan gate below already shares membershipFilterPlanSize.
+	// the serialized-plan gate below also shares one filterPlanSize budget.
 	membershipPreflightBudget := planparserv2.NewMembershipPreflightBudget()
 	t.rerankMeta, err = selectHybridRerankMeta(t.request, t.schema)
 	if err != nil {
@@ -825,7 +826,8 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
-		internalSubReq.SerializedExprPlan, membershipFilterPlanSize, err = MarshalPlanWithMembershipFilterSizeLimit(plan, membershipFilterPlanSize)
+		accountRLSPlan := t.rlsPredicate != nil && !rewriter.IsAlwaysTrueExpr(t.rlsPredicate)
+		internalSubReq.SerializedExprPlan, filterPlanSize, err = marshalPlanWithFilterSizeLimit(plan, filterPlanSize, accountRLSPlan)
 		if err != nil {
 			return err
 		}

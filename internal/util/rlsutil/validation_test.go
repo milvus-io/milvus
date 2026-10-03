@@ -98,6 +98,14 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.Equal(t, NewDoubleTagValue(-math.MaxFloat64), tags["k"])
 	})
 
+	t.Run("absolute principal tags transport bytes", func(t *testing.T) {
+		_, err := TagsFromJSONWithLimit(
+			strings.Repeat(" ", int(maxRLSPrincipalMetadataBytes)+1),
+			paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt(),
+		)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
 	t.Run("distinct tag key semantic count", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key, "1")
 		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key)
@@ -231,27 +239,37 @@ func TestValidatePayloadBounds(t *testing.T) {
 			"s": NewStringTagValue("abc"),
 			"i": NewInt64TagValue(1),
 			"d": NewDoubleTagValue(1.5),
-			"a": NewArrayTagValue([]TagValue{NewStringTagValue(""), NewInt64TagValue(1)}),
+			"a": NewArrayTagValue([]TagValue{NewStringTagValue(""), NewStringTagValue("")}),
 		}
 		size, err := PrincipalTagsSize("alice", tags)
 		require.NoError(t, err)
-		require.Equal(t, int64(len("alice")+len("s")+len("abc")+len("i")+8+len("d")+8+
-			len("a"))+2*tagArrayElementSize+8, size)
+		require.Equal(t, int64(len("alice")+len("s")+len("abc")+len("i")+len("d")+
+			len("a"))+6*tagValueRetainedSize, size)
 
 		_, err = PrincipalTagsSize("alice", map[string]TagValue{"unsupported": {Kind: TagValueKindUnknown}})
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 	})
 
+	t.Run("principal tag metadata bytes", func(t *testing.T) {
+		require.NoError(t, ValidatePrincipalTagsRecordSize("alice", map[string]TagValue{
+			"tenant": NewStringTagValue("acme"),
+		}))
+		err := ValidatePrincipalTagsRecordSize("alice", map[string]TagValue{
+			"tenant": NewStringTagValue(strings.Repeat("x", int(maxRLSPrincipalMetadataBytes))),
+		})
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
 	t.Run("JSON tag payload", func(t *testing.T) {
-		tags, err := TagsFromJSON(`{"tenant":"acme","level":3,"score":0.75,"groups":["sales",3,3.0]}`)
+		tags, err := TagsFromJSON(`{"tenant":"acme","level":3,"score":0.75,"groups":["sales","ops"]}`)
 		require.NoError(t, err)
 		require.Equal(t, NewStringTagValue("acme"), tags["tenant"])
 		require.Equal(t, NewInt64TagValue(3), tags["level"])
 		require.Equal(t, NewDoubleTagValue(0.75), tags["score"])
-		require.Equal(t, NewArrayTagValue([]TagValue{NewStringTagValue("sales"), NewInt64TagValue(3), NewDoubleTagValue(3)}), tags["groups"])
+		require.Equal(t, NewArrayTagValue([]TagValue{NewStringTagValue("sales"), NewStringTagValue("ops")}), tags["groups"])
 		payload, err := TagsToJSON(tags)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"tenant":"acme","level":3,"score":0.75,"groups":["sales",3,3.0]}`, payload)
+		require.JSONEq(t, `{"tenant":"acme","level":3,"score":0.75,"groups":["sales","ops"]}`, payload)
 		for _, value := range []TagValue{
 			NewDoubleTagValue(3),
 			NewDoubleTagValue(9223372036854774784),
@@ -278,6 +296,11 @@ func TestValidatePayloadBounds(t *testing.T) {
 		returned := arrayTag.ArrayValues()
 		returned[0] = NewStringTagValue("also-mutated")
 		require.Equal(t, []TagValue{NewStringTagValue("original")}, arrayTag.ArrayValues())
+
+		numbers := []TagValue{NewInt64TagValue(1), NewDoubleTagValue(2)}
+		arrayTag = NewArrayTagValue(numbers)
+		require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, arrayTag.ArrayValues())
+		require.Equal(t, NewInt64TagValue(1), numbers[0])
 	})
 
 	t.Run("bounded JSON tag payload", func(t *testing.T) {
@@ -304,4 +327,54 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.ErrorIs(t, ValidateRequestTarget(oversized, "collection"), merr.ErrParameterTooLarge)
 		require.ErrorIs(t, ValidateRequestTarget("database", oversized), merr.ErrParameterTooLarge)
 	})
+}
+
+func TestArrayTagElementTypes(t *testing.T) {
+	paramtable.Init()
+	for _, test := range []struct {
+		name    string
+		payload string
+		values  []TagValue
+		valid   bool
+	}{
+		{name: "empty", payload: `[]`, valid: true},
+		{name: "strings", payload: `["sales","ops"]`, values: []TagValue{NewStringTagValue("sales"), NewStringTagValue("ops")}, valid: true},
+		{name: "integers", payload: `[1,2]`, values: []TagValue{NewInt64TagValue(1), NewInt64TagValue(2)}, valid: true},
+		{name: "doubles", payload: `[1.0,2e0]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, valid: true},
+		{name: "string then integer", payload: `["sales",1]`, values: []TagValue{NewStringTagValue("sales"), NewInt64TagValue(1)}},
+		{name: "integer then string", payload: `[1,"sales"]`, values: []TagValue{NewInt64TagValue(1), NewStringTagValue("sales")}},
+		{name: "string then double", payload: `["sales",1.0]`, values: []TagValue{NewStringTagValue("sales"), NewDoubleTagValue(1)}},
+		{name: "double then string", payload: `[1.0,"sales"]`, values: []TagValue{NewDoubleTagValue(1), NewStringTagValue("sales")}},
+		{name: "integer then double", payload: `[1,2.0]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, valid: true},
+		{name: "double then integer", payload: `[1.0,2]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, valid: true},
+		{name: "exponent promotes integers", payload: `[1,2e0]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, valid: true},
+		{name: "fractional number promotes integers", payload: `[1,2.5]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2.5)}, valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tags := map[string]TagValue{"value": NewArrayTagValue(test.values)}
+			for _, maxTags := range []int{0, 1} {
+				decoded, err := TagsFromJSONWithLimit(`{"value":`+test.payload+`}`, maxTags)
+				if test.valid {
+					require.NoError(t, err)
+					require.Equal(t, tags, decoded)
+				} else {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.Nil(t, decoded)
+				}
+			}
+
+			validationErr := ValidateTags(tags)
+			encoded, encodeErr := TagsToJSON(tags)
+			if !test.valid {
+				require.ErrorIs(t, validationErr, merr.ErrParameterInvalid)
+				require.ErrorIs(t, encodeErr, merr.ErrServiceInternal)
+				return
+			}
+			require.NoError(t, validationErr)
+			require.NoError(t, encodeErr)
+			roundTrip, err := TagsFromJSON(encoded)
+			require.NoError(t, err)
+			require.Equal(t, tags, roundTrip)
+		})
+	}
 }

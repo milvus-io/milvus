@@ -46,6 +46,9 @@ func ValidateParsedExpression(expr *planpb.Expr, allowedTemplateVariables map[st
 		if node.UnaryExpr.GetOp() != planpb.UnaryExpr_Not {
 			return merr.WrapErrParameterInvalidMsg("unsupported RLS unary operator %s", node.UnaryExpr.GetOp().String())
 		}
+		if _, nested := node.UnaryExpr.GetChild().GetExpr().(*planpb.Expr_UnaryExpr); nested {
+			return merr.WrapErrParameterInvalidMsg("nested RLS not expressions are not supported")
+		}
 		return ValidateParsedExpression(node.UnaryExpr.GetChild(), allowedTemplateVariables)
 	case *planpb.Expr_BinaryExpr:
 		return merr.WrapErrParameterInvalidMsg("compound RLS expressions are not supported for RLS policy validation")

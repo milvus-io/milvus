@@ -49,7 +49,7 @@ type TagValue struct {
 	arrayValue []TagValue
 }
 
-const tagArrayElementSize = int64(unsafe.Sizeof(TagValue{}))
+const tagValueRetainedSize = int64(unsafe.Sizeof(TagValue{}))
 
 func NewStringTagValue(value string) TagValue {
 	return TagValue{Kind: TagValueKindString, StringValue: value}
@@ -63,9 +63,22 @@ func NewDoubleTagValue(value float64) TagValue {
 	return TagValue{Kind: TagValueKindDouble, DoubleValue: value}
 }
 
+// NewArrayTagValue copies elements and promotes numeric arrays to double when
+// any element is a double. String/number mixtures remain invalid for validation.
 func NewArrayTagValue(values []TagValue) TagValue {
 	cloned := make([]TagValue, len(values))
-	copy(cloned, values)
+	hasDouble := false
+	for i, value := range values {
+		cloned[i] = value
+		hasDouble = hasDouble || value.Kind == TagValueKindDouble
+	}
+	if hasDouble {
+		for i, value := range cloned {
+			if value.Kind == TagValueKindInt64 {
+				cloned[i] = NewDoubleTagValue(float64(value.Int64Value))
+			}
+		}
+	}
 	return TagValue{
 		Kind:       TagValueKindArray,
 		arrayValue: cloned,
@@ -80,8 +93,9 @@ func (value TagValue) ArrayValues() []TagValue {
 	return append([]TagValue(nil), value.arrayValue...)
 }
 
-// PrincipalTagsSize returns the bytes charged to the principal cache. Array
-// values include their element storage so empty strings cannot bypass the cap.
+// PrincipalTagsSize returns the bytes charged to the principal cache. Values
+// include their TagValue storage, and arrays include their backing elements, so
+// scalar representation growth and empty strings cannot bypass the cap.
 func PrincipalTagsSize(principalName string, tags map[string]TagValue) (int64, error) {
 	size := int64(len(principalName))
 	for key, value := range tags {
@@ -96,24 +110,25 @@ func PrincipalTagsSize(principalName string, tags map[string]TagValue) (int64, e
 }
 
 func tagValueSize(value TagValue) (int64, bool) {
+	size := tagValueRetainedSize
 	switch value.Kind {
 	case TagValueKindString:
-		return int64(len(value.StringValue)), true
+		if int64(len(value.StringValue)) > math.MaxInt64-size {
+			return 0, false
+		}
+		return size + int64(len(value.StringValue)), true
 	case TagValueKindInt64, TagValueKindDouble:
-		return 8, true
+		return size, true
 	case TagValueKindArray:
 		if value.arrayValue == nil {
 			return 0, false
 		}
-		if int64(len(value.arrayValue)) > math.MaxInt64/tagArrayElementSize {
-			return 0, false
-		}
-		// Account for the slice backing storage so arrays of empty strings still
-		// consume the principal-cache byte budget.
-		size := int64(len(value.arrayValue)) * tagArrayElementSize
 		for _, element := range value.arrayValue {
+			if element.Kind == TagValueKindArray {
+				return 0, false
+			}
 			elementSize, ok := tagValueSize(element)
-			if !ok || element.Kind == TagValueKindArray || elementSize > math.MaxInt64-size {
+			if !ok || elementSize > math.MaxInt64-size {
 				return 0, false
 			}
 			size += elementSize
@@ -243,6 +258,10 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 			if err != nil {
 				return TagValue{}, err
 			}
+			if len(elements) > 0 && element.Kind != elements[0].Kind &&
+				(element.Kind == TagValueKindString || elements[0].Kind == TagValueKindString) {
+				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q array cannot mix strings and numbers", key)
+			}
 			if maxArrayElements > 0 {
 				if err := validateTagValue(key, element); err != nil {
 					return TagValue{}, err
@@ -308,6 +327,9 @@ func tagValueToJSON(value TagValue) (any, bool) {
 		}
 		values := make([]any, len(value.arrayValue))
 		for i, element := range value.arrayValue {
+			if element.Kind != value.arrayValue[0].Kind {
+				return nil, false
+			}
 			var ok bool
 			values[i], ok = tagValueToJSON(element)
 			if !ok || element.Kind == TagValueKindArray {

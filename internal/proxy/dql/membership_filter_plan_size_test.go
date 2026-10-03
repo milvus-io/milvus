@@ -303,6 +303,37 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		assert.Equal(t, int32(1102), merr.Code(err))
 	})
 
+	t.Run("hybrid RLS plans share the serialized plan budget", func(t *testing.T) {
+		predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "pk == 1", nil)
+		require.NoError(t, err)
+		task := &SearchTask{
+			ctx:            ctx,
+			collectionName: schema.GetName(),
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID: 1,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: schema.GetName(),
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+				SubReqs: []*milvuspb.SubSearchRequest{{
+					Nq:           1,
+					SearchParams: bloomPlanSizeSearchParams(),
+				}},
+			},
+			schema:       schema,
+			tr:           timerecord.NewTimeRecorder("rls-plan-size-hybrid-search"),
+			rlsPredicate: predicate,
+			rlsResolved:  true,
+		}
+
+		err = task.initAdvancedSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Equal(t, int32(1102), merr.Code(err))
+	})
+
 	t.Run("hybrid sub-requests share parser preflight budget", func(t *testing.T) {
 		// Make the body large enough that one serialized plan (body plus proto
 		// overhead) fits below two body lengths. The first sub-request must pass;

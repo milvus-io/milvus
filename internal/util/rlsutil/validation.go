@@ -30,6 +30,10 @@ const (
 	maxSupportedPolicyActions       = 8
 	maxJSONEscapeBytesPerByte int64 = int64(len(`\u0000`))
 	maxJSONNumberLength             = len(`-1.7976931348623157e+308`)
+	// maxRLSPrincipalMetadataBytes leaves headroom for one unchunked WAL
+	// message and one metastore record while bounding JSON decoding and plan
+	// template expansion.
+	maxRLSPrincipalMetadataBytes int64 = 1 << 20
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -208,11 +212,29 @@ func ValidatePrincipalName(principalName string) error {
 }
 
 func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
-	maxPayloadBytes := maxPrincipalTagsJSONLength(maxTags)
+	maxPayloadBytes := min(maxPrincipalTagsJSONLength(maxTags), maxRLSPrincipalMetadataBytes)
 	if int64(len(payload)) > maxPayloadBytes {
 		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
 			"RLS principal tags JSON exceeds transport max length %d",
 			maxPayloadBytes,
+		))
+	}
+	return nil
+}
+
+// ValidatePrincipalTagsRecordSize bounds the complete canonical principal
+// record after incremental tag updates have been merged.
+func ValidatePrincipalTagsRecordSize(principalName string, tags map[string]TagValue) error {
+	payload, err := TagsToJSON(tags)
+	if err != nil {
+		return err
+	}
+	payloadBytes := int64(len(payload))
+	if payloadBytes > maxRLSPrincipalMetadataBytes ||
+		int64(len(principalName)) > maxRLSPrincipalMetadataBytes-payloadBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal name and tags exceed max length %d",
+			maxRLSPrincipalMetadataBytes,
 		))
 	}
 	return nil
@@ -326,6 +348,9 @@ func validateTagValue(key string, value TagValue) error {
 		for _, element := range value.arrayValue {
 			if element.Kind == TagValueKindArray {
 				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q does not support nested arrays", key)
+			}
+			if element.Kind != value.arrayValue[0].Kind {
+				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q array elements must have the same type", key)
 			}
 			if err := validateTagValue(key, element); err != nil {
 				return err
