@@ -72,12 +72,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for both the
-	// aggregate serialized size of membership-filter-bearing plans and the
-	// aggregate estimated decoded size of Roaring filters. The two totals are
-	// checked independently. It is deliberately below the default 256 MiB proxy
-	// gRPC client send limit so placeholders and the rest of the internal request
-	// retain ample headroom.
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for the
+	// aggregate serialized size of membership-filter-bearing plans and
+	// RLS-bearing HybridSearch plans, and for the aggregate estimated decoded
+	// size of Roaring filters. The serialized and decoded totals are checked
+	// independently. It is deliberately below the default 256 MiB proxy gRPC
+	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -2834,11 +2834,11 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The request-wide membership-filter budget in bytes. It independently limits both the aggregate " +
-			"serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded " +
-			"size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy " +
+		Doc: "The request-wide large-filter budget in bytes. It independently limits the aggregate " +
+			"serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, " +
+			"and the aggregate estimated decoded size of Roaring filters. The proxy " +
 			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
-			"filters share both totals. Must be positive; invalid values fall back to 128 MiB.",
+			"filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -3342,7 +3342,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -3353,7 +3353,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -3375,7 +3375,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "67108864",
 		PanicIfEmpty: true,
-		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.",
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("67108864"),
 	}

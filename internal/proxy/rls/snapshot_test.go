@@ -21,6 +21,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1281,8 +1282,10 @@ func TestManagerPrincipalCacheLimits(t *testing.T) {
 
 	t.Run("bytes", func(t *testing.T) {
 		params := paramtable.Get()
+		bobSize, err := rlsutil.PrincipalTagsSize("bob", map[string]rlsutil.TagValue{"k": rlsutil.NewStringTagValue("1")})
+		require.NoError(t, err)
 		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "10"))
-		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "10"))
+		require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, strconv.FormatInt(bobSize+int64(len("empty")), 10)))
 		t.Cleanup(func() {
 			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
 			require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
@@ -1299,6 +1302,7 @@ func TestManagerPrincipalCacheLimits(t *testing.T) {
 		aliceTags, err := m.ensurePrincipalTags(context.Background(), 100, "alice")
 		require.NoError(t, err)
 		require.Equal(t, rlsutil.NewStringTagValue("1234"), aliceTags["k"])
+		require.NotNil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
 		bobTags, err := m.ensurePrincipalTags(context.Background(), 100, "bob")
 		require.NoError(t, err)
 		require.Equal(t, rlsutil.NewStringTagValue("1"), bobTags["k"])
@@ -1307,7 +1311,7 @@ func TestManagerPrincipalCacheLimits(t *testing.T) {
 		state.mu.RLock()
 		require.NotContains(t, state.principalTags, "alice")
 		require.Contains(t, state.principalTags, "bob")
-		require.Equal(t, int64(len("bob")+len("k")+len("1")), state.principalCacheBytes)
+		require.Equal(t, bobSize, state.principalCacheBytes)
 		state.mu.RUnlock()
 		emptyTags, err := m.ensurePrincipalTags(context.Background(), 100, "empty")
 		require.NoError(t, err)
@@ -1323,7 +1327,7 @@ func TestManagerPrincipalCacheLimits(t *testing.T) {
 		require.False(t, state.principalTags["empty"].missing)
 		require.Equal(t, 2, state.positivePrincipalCacheOrder.Len())
 		require.Zero(t, state.negativePrincipalCacheOrder.Len())
-		require.Equal(t, int64(len("bob")+len("k")+len("1")+len("empty")), state.principalCacheBytes)
+		require.Equal(t, bobSize+int64(len("empty")), state.principalCacheBytes)
 		state.mu.RUnlock()
 
 		m.invalidatePrincipalTags(100, "bob", 0)

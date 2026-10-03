@@ -30,6 +30,13 @@ const (
 	maxSupportedPolicyActions       = 8
 	maxJSONEscapeBytesPerByte int64 = int64(len(`\u0000`))
 	maxJSONNumberLength             = len(`-1.7976931348623157e+308`)
+	// maxRLSPrincipalMetadataBytes leaves headroom for one unchunked WAL
+	// message and one metastore record while bounding JSON decoding and plan
+	// template expansion.
+	maxRLSPrincipalMetadataBytes int64 = 1 << 20
+	// One array must fit the existing materialized-tag budget even before
+	// string payloads. This structural ceiling is not a refreshable quota.
+	maxRLSArrayTagElements = int(maxRLSPrincipalMetadataBytes/tagValueRetainedSize) - 1
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -208,7 +215,10 @@ func ValidatePrincipalName(principalName string) error {
 }
 
 func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
-	maxPayloadBytes := maxPrincipalTagsJSONLength(maxTags)
+	maxPayloadBytes := maxRLSPrincipalMetadataBytes
+	if maxTags > 0 {
+		maxPayloadBytes = min(maxPrincipalTagsJSONLength(maxTags), maxPayloadBytes)
+	}
 	if int64(len(payload)) > maxPayloadBytes {
 		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
 			"RLS principal tags JSON exceeds transport max length %d",
@@ -218,16 +228,40 @@ func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
 	return nil
 }
 
+// ValidatePrincipalTagsRecordSize bounds the complete canonical principal
+// record after incremental tag updates have been merged.
+func ValidatePrincipalTagsRecordSize(principalName string, tags map[string]TagValue) error {
+	payload, err := TagsToJSON(tags)
+	if err != nil {
+		return err
+	}
+	payloadBytes := int64(len(payload))
+	if payloadBytes > maxRLSPrincipalMetadataBytes ||
+		int64(len(principalName)) > maxRLSPrincipalMetadataBytes-payloadBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal name and tags exceed max length %d",
+			maxRLSPrincipalMetadataBytes,
+		))
+	}
+	return nil
+}
+
 func maxPrincipalTagsJSONLength(maxTags int) int64 {
 	maxTagKeyLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt())
 	maxTagValueLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt())
+	maxArrayElements := int64(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt())
 	if maxTagKeyLength > math.MaxInt64/maxJSONEscapeBytesPerByte ||
 		maxTagValueLength > (math.MaxInt64-2)/maxJSONEscapeBytesPerByte {
 		return math.MaxInt64
 	}
 
 	maxKeyBytes := maxTagKeyLength * maxJSONEscapeBytesPerByte
-	maxValueBytes := max(maxTagValueLength*maxJSONEscapeBytesPerByte+2, int64(maxJSONNumberLength))
+	maxScalarBytes := max(maxTagValueLength*maxJSONEscapeBytesPerByte+2, int64(maxJSONNumberLength))
+	if maxScalarBytes == math.MaxInt64 || maxArrayElements > (math.MaxInt64-2)/(maxScalarBytes+1) {
+		return math.MaxInt64
+	}
+	// Array elements use the scalar bound plus one conservative comma each.
+	maxValueBytes := max(maxScalarBytes, 2+maxArrayElements*(maxScalarBytes+1))
 	// Two key quotes, one colon, and one conservative comma per member.
 	if maxKeyBytes > math.MaxInt64-maxValueBytes-4 {
 		return math.MaxInt64
@@ -290,20 +324,46 @@ func ValidateTags(tags map[string]TagValue) error {
 		if err := ValidateTagKeyWithLimit(key); err != nil {
 			return err
 		}
-		switch value.Kind {
-		case TagValueKindString:
-			maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
-			if len(value.StringValue) > maxTagValueLength {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
-			}
-		case TagValueKindInt64:
-		case TagValueKindDouble:
-			if math.IsNaN(value.DoubleValue) || math.IsInf(value.DoubleValue, 0) {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has a non-finite double value", key)
-			}
-		default:
-			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has unsupported value type", key)
+		if err := validateTagValue(key, value); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func validateTagValue(key string, value TagValue) error {
+	switch value.Kind {
+	case TagValueKindString:
+		maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+		if len(value.StringValue) > maxTagValueLength {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+		}
+	case TagValueKindInt64:
+	case TagValueKindDouble:
+		if math.IsNaN(value.DoubleValue) || math.IsInf(value.DoubleValue, 0) {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has a non-finite double value", key)
+		}
+	case TagValueKindArray:
+		if value.arrayValue == nil {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
+		}
+		maxElements := min(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt(), maxRLSArrayTagElements)
+		if len(value.arrayValue) > maxElements {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxElements)
+		}
+		for _, element := range value.arrayValue {
+			if element.Kind == TagValueKindArray {
+				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q does not support nested arrays", key)
+			}
+			if element.Kind != value.arrayValue[0].Kind {
+				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q array elements must have the same type", key)
+			}
+			if err := validateTagValue(key, element); err != nil {
+				return err
+			}
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has unsupported value type", key)
 	}
 	return nil
 }

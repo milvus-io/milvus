@@ -68,13 +68,19 @@ func WrapPlanCreationError(err error, context string) error {
 // one client blob create independent blob fields in the compiled plan, and
 // rejecting here avoids allocating the amplified serialized buffer.
 func MarshalPlanWithMembershipFilterSizeLimit(plan *planpb.PlanNode, accumulatedSize int64) ([]byte, int64, error) {
+	return marshalPlanWithFilterSizeLimit(plan, accumulatedSize, false)
+}
+
+// marshalPlanWithFilterSizeLimit also lets HybridSearch account RLS-bearing
+// subplans against the same serialized-plan resource budget.
+func marshalPlanWithFilterSizeLimit(plan *planpb.PlanNode, accumulatedSize int64, accountAdditionalFilters bool) ([]byte, int64, error) {
 	nextSize := accumulatedSize
-	if planparserv2.PlanContainsMembershipFilter(plan) {
+	if accountAdditionalFilters || planparserv2.PlanContainsMembershipFilter(plan) {
 		planSize := int64(proto.Size(plan))
 		maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64()
 		if accumulatedSize > maxSize || planSize > maxSize-accumulatedSize {
 			return nil, accumulatedSize, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"aggregate membership-filter plan size exceeds proxy.maxMembershipFilterPlanSize: %d + %d > %d bytes",
+				"aggregate filter plan size exceeds proxy.maxMembershipFilterPlanSize: %d + %d > %d bytes",
 				accumulatedSize, planSize, maxSize))
 		}
 		nextSize += planSize

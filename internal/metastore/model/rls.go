@@ -102,17 +102,6 @@ func CloneRLSPolicy(policy *RLSPolicy) *RLSPolicy {
 	}
 }
 
-func CloneRLSPolicies(policies []*RLSPolicy) []*RLSPolicy {
-	if policies == nil {
-		return nil
-	}
-	cloned := make([]*RLSPolicy, len(policies))
-	for i, policy := range policies {
-		cloned[i] = CloneRLSPolicy(policy)
-	}
-	return cloned
-}
-
 func CloneRLSPolicyMap(policies map[string]*RLSPolicy) map[string]*RLSPolicy {
 	if policies == nil {
 		return nil
