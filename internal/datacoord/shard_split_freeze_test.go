@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -313,4 +314,149 @@ func TestFrozenQueuedCompactionsLeaveThePendingGaugeBalanced(t *testing.T) {
 		}
 		assert.Equal(t, before, pending(), "preempted=%v", preempted)
 	}
+}
+
+// The split's own rewrite runs on the frozen source by construction: it is the
+// redistribution, so the freeze and the preemption both spare it.
+func TestShardSplitRewriteIsExemptFromTheFreeze(t *testing.T) {
+	inspector, mockMeta := newFreezeTestInspector(t)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 })
+	rewrite := &datapb.CompactionTask{
+		TriggerID: 1, PlanID: 7, Channel: splitMgrV0, Type: datapb.CompactionType_HashSplitCompaction,
+		InputSegments: []int64{700},
+	}
+	assert.False(t, inspector.frozenBySplit(rewrite))
+
+	mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, []int64{700}).Return(true, true).Once()
+	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	require.NoError(t, inspector.enqueueCompaction(rewrite))
+	_, isMix := inspector.getCompactionTask(7).(*mixCompactionTask)
+	assert.True(t, isMix, "a rewrite runs the mix task's lifecycle")
+
+	inspector.preemptTasksByChannel(splitMgrV0)
+	assert.NotNil(t, inspector.getCompactionTask(7), "the preemption spares the split's own rewrite")
+}
+
+// A target of a split in flight is told from its source: the freeze exempts
+// the sort of a rewrite output on a target only. A vchannel that is both -- a
+// target of one split and the source of a later one -- is a source.
+func TestIsVChannelSplitTarget(t *testing.T) {
+	manager, _ := newSplitTestManager(t, &fakeSplitCoordinator{})
+	ctx := context.Background()
+	task := fencedTask(datapb.SplitShardTaskState_SplitShardTaskRedistributing)
+	require.NoError(t, manager.store.create(ctx, manager.catalog, task))
+
+	assert.False(t, manager.IsVChannelSplitTarget(splitMgrV0), "the source is no target")
+	assert.True(t, manager.IsVChannelSplitTarget(splitMgrV1))
+	assert.True(t, manager.IsVChannelSplitTarget(splitMgrV2))
+	assert.False(t, manager.IsVChannelSplitTarget(splitMgrV3), "a channel no split names")
+
+	cascade := &datapb.SplitShardTask{
+		TaskId: 101, CollectionId: splitMgrCollection, State: datapb.SplitShardTaskState_SplitShardTaskPreparing,
+		Sources: []*datapb.SplitShardTaskSource{{Vchannel: splitMgrV1}},
+		Targets: []*datapb.SplitShardTaskTarget{{Vchannel: splitMgrV3}, {Vchannel: splitMgrV4}},
+	}
+	require.NoError(t, manager.store.create(ctx, manager.catalog, cascade))
+	assert.False(t, manager.IsVChannelSplitTarget(splitMgrV1), "the source of a later split is a source")
+	assert.True(t, manager.IsVChannelSplitTarget(splitMgrV2))
+
+	manager.finishTask(cascade, "")
+	manager.finishTask(task, "")
+	for _, vchannel := range []string{splitMgrV1, splitMgrV2, splitMgrV3, splitMgrV4} {
+		assert.False(t, manager.IsVChannelSplitTarget(vchannel), vchannel)
+	}
+}
+
+// The sort of a rewrite output on a target runs during the window: the output
+// replaces nothing a child delegator holds, since no target WAL ever carried
+// its rows. A target-flushed segment stays frozen -- the child consuming the
+// target WAL tells the source's copy of it by segment id, and a sort changes
+// the id -- and so does any sort on the source.
+func TestSortOfARewriteOutputOnATargetIsExemptFromTheFreeze(t *testing.T) {
+	inspector, mockMeta := newFreezeTestInspector(t)
+	splitting := func(channel string) bool {
+		return channel == splitMgrV0 || channel == splitMgrV1 || channel == splitMgrV2
+	}
+	inspector.setChannelSplittingChecker(splitting)
+	inspector.setChannelSplitTargetChecker(func(channel string) bool {
+		return channel == splitMgrV1 || channel == splitMgrV2
+	})
+
+	segments := map[int64]*SegmentInfo{
+		// A rewrite output.
+		10: {SegmentInfo: &datapb.SegmentInfo{ID: 10, CreatedByCompaction: true}},
+		// Flushed from a target WAL: invisible until sorted.
+		11: {SegmentInfo: &datapb.SegmentInfo{ID: 11, IsInvisible: true}},
+		// A compaction's invisible staging output (clustering).
+		12: {SegmentInfo: &datapb.SegmentInfo{ID: 12, CreatedByCompaction: true, IsInvisible: true}},
+		13: {SegmentInfo: &datapb.SegmentInfo{ID: 13, CreatedByCompaction: true}},
+	}
+	mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) *SegmentInfo { return segments[id] }).Maybe()
+	sortOn := func(channel string, inputs ...int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{Channel: channel, Type: datapb.CompactionType_SortCompaction, InputSegments: inputs}
+	}
+
+	assert.False(t, inspector.frozenBySplit(sortOn(splitMgrV1, 10)), "a rewrite output sorts on its target")
+	assert.False(t, inspector.frozenBySplit(sortOn(splitMgrV2, 10, 13)))
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 11)), "a target-flushed segment stays frozen")
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 10, 11)))
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 12)), "an invisible staging output is no rewrite output")
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 10, 99)), "a missing input is not a rewrite output")
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1)))
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV0, 10)), "nothing but the rewrite compacts the source")
+	assert.True(t, inspector.frozenBySplit(&datapb.CompactionTask{
+		Channel: splitMgrV1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10},
+	}), "only a sort is exempt")
+
+	// Without the target predicate wired, nothing on a splitting channel is.
+	inspector.setChannelSplitTargetChecker(nil)
+	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 10)))
+}
+
+// A rewrite commit that takes the chunked catalog path and is torn between
+// chunks leaves an output published while its input is still Flushed; the
+// recovery view then serves the input and hides the output. Sorting that output
+// would give it a child the view no longer ties to the input, and the rows of
+// that half would be served twice. So the exemption holds only once every
+// parent of every input is Dropped (or already gone from meta).
+func TestSortOfATornRewriteOutputStaysFrozen(t *testing.T) {
+	inspector, mockMeta := newFreezeTestInspector(t)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 || channel == splitMgrV1 })
+	inspector.setChannelSplitTargetChecker(func(channel string) bool { return channel == splitMgrV1 })
+
+	const (
+		liveInput    = int64(100)
+		droppedInput = int64(101)
+		goneInput    = int64(102)
+	)
+	parents := map[int64]*SegmentInfo{
+		liveInput:    {SegmentInfo: &datapb.SegmentInfo{ID: liveInput, State: commonpb.SegmentState_Flushed}},
+		droppedInput: {SegmentInfo: &datapb.SegmentInfo{ID: droppedInput, State: commonpb.SegmentState_Dropped}},
+	}
+	outputs := map[int64]*SegmentInfo{
+		// Published by a torn commit: its input is still Flushed.
+		20: {SegmentInfo: &datapb.SegmentInfo{ID: 20, CreatedByCompaction: true, CompactionFrom: []int64{liveInput}}},
+		// Published by a whole commit: its input is Dropped.
+		21: {SegmentInfo: &datapb.SegmentInfo{ID: 21, CreatedByCompaction: true, CompactionFrom: []int64{droppedInput}}},
+		// Its input is already garbage-collected out of meta.
+		22: {SegmentInfo: &datapb.SegmentInfo{ID: 22, CreatedByCompaction: true, CompactionFrom: []int64{goneInput}}},
+	}
+	mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) *SegmentInfo { return outputs[id] }).Maybe()
+	mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) *SegmentInfo { return parents[id] }).Maybe()
+	sortOn := func(inputs ...int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{Channel: splitMgrV1, Type: datapb.CompactionType_SortCompaction, InputSegments: inputs}
+	}
+
+	assert.True(t, inspector.frozenBySplit(sortOn(20)), "a torn commit's output stays frozen while its input is live")
+	assert.True(t, inspector.frozenBySplit(sortOn(21, 20)), "one torn input freezes the whole sort")
+	assert.False(t, inspector.frozenBySplit(sortOn(21)), "a whole commit's output sorts")
+	assert.False(t, inspector.frozenBySplit(sortOn(22)), "a parent gone from meta was dropped")
+
+	// Once the re-run commit drops the input, the output sorts.
+	parents[liveInput] = &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: liveInput, State: commonpb.SegmentState_Dropped}}
+	assert.False(t, inspector.frozenBySplit(sortOn(20)))
 }
