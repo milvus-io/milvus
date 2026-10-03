@@ -1324,6 +1324,13 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return {std::move(column), std::move(view)};
     }
 
+    // Hot-loop column accessor: borrowed pointer straight out of the frozen
+    // published state, no shared_ptr copies and no skip-metrics construction.
+    const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const override {
+        return Column(field_id);
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {

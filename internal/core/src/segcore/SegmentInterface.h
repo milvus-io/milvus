@@ -120,6 +120,17 @@ class SegmentReadSnapshot {
     virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
                       FieldSkipMetricsView>
     GetDataScanResources(FieldId field_id) const = 0;
+
+    // Column-only accessor for the per-chunk hot loop. Returns a borrowed
+    // column pointer owned by the published state; callers must not retain it
+    // past the request. Default implementation routes through
+    // GetDataScanResources so test snapshots that only override the pair
+    // accessor keep working; sealed snapshots override this with a zero
+    // ref-count lookup.
+    virtual const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const {
+        return GetDataScanResources(field_id).first.get();
+    }
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
