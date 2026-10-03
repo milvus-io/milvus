@@ -534,6 +534,15 @@ func (m *shardSplitManager) IsVChannelSplitting(vchannel string) bool {
 	return m.hasActiveTaskOnVChannel(vchannel)
 }
 
+// IsVChannelSplitTarget reports whether a split task that is not Done or
+// Aborted names the vchannel as one of its targets and none names it as its
+// source. The compaction freeze lets the sort of a rewrite output through on
+// such a channel only.
+func (m *shardSplitManager) IsVChannelSplitTarget(vchannel string) bool {
+	source, target := m.store.activeSplitRoles(vchannel)
+	return target && !source
+}
+
 // setCompactionPreempter wires the compaction inspector in. Until it is, a
 // split takes no compaction away from anyone.
 func (m *shardSplitManager) setCompactionPreempter(preempter compactionPreempter) {
