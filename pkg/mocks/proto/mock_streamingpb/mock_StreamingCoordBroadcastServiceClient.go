@@ -173,6 +173,80 @@ func (_c *MockStreamingCoordBroadcastServiceClient_Broadcast_Call) RunAndReturn(
 	return _c
 }
 
+// WaitVChannelsAcked provides a mock function with given fields: ctx, in, opts
+func (_m *MockStreamingCoordBroadcastServiceClient) WaitVChannelsAcked(ctx context.Context, in *streamingpb.WaitVChannelsAckedRequest, opts ...grpc.CallOption) (*streamingpb.WaitVChannelsAckedResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitVChannelsAcked")
+	}
+
+	var r0 *streamingpb.WaitVChannelsAckedResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.WaitVChannelsAckedRequest, ...grpc.CallOption) (*streamingpb.WaitVChannelsAckedResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.WaitVChannelsAckedRequest, ...grpc.CallOption) *streamingpb.WaitVChannelsAckedResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.WaitVChannelsAckedResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.WaitVChannelsAckedRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitVChannelsAcked'
+type MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call struct {
+	*mock.Call
+}
+
+// WaitVChannelsAcked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *streamingpb.WaitVChannelsAckedRequest
+//   - opts ...grpc.CallOption
+func (_e *MockStreamingCoordBroadcastServiceClient_Expecter) WaitVChannelsAcked(ctx interface{}, in interface{}, opts ...interface{}) *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call {
+	return &MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call{Call: _e.mock.On("WaitVChannelsAcked",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call) Run(run func(ctx context.Context, in *streamingpb.WaitVChannelsAckedRequest, opts ...grpc.CallOption)) *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*streamingpb.WaitVChannelsAckedRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call) Return(_a0 *streamingpb.WaitVChannelsAckedResponse, _a1 error) *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call) RunAndReturn(run func(context.Context, *streamingpb.WaitVChannelsAckedRequest, ...grpc.CallOption) (*streamingpb.WaitVChannelsAckedResponse, error)) *MockStreamingCoordBroadcastServiceClient_WaitVChannelsAcked_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockStreamingCoordBroadcastServiceClient creates a new instance of MockStreamingCoordBroadcastServiceClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockStreamingCoordBroadcastServiceClient(t interface {
