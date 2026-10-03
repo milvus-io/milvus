@@ -68,6 +68,12 @@ type GcOption struct {
 	// wired by the server from ImportMeta so the orphan scan never deletes an
 	// active job's import_v3/{job_id}/ prefix. nil disables the import_v3 scan.
 	importJobAlive func(ctx context.Context, jobID int64) bool
+
+	// isChannelSplitting reports whether a shard split that is not Done names
+	// the channel. The dropped segments of such a channel are kept until the
+	// split is Done: the split's source and targets are read through a segment
+	// set that must stay stable for the whole window. Nil disables the check.
+	isChannelSplitting func(channel string) bool
 }
 
 type DataViewGarbageCollector interface {
@@ -1116,6 +1122,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		log := mlog.With(mlog.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
+		if gc.option.isChannelSplitting != nil && gc.option.isChannelSplitting(segInsertChannel) {
+			log.Info(ctx, "skip GC segment since its channel is splitting", mlog.String("channel", segInsertChannel))
+			continue
+		}
 		if loadedSegments.Contain(segmentID) {
 			log.Info(ctx, "skip GC segment since it is loaded", mlog.Int64("segmentID", segmentID))
 			continue
