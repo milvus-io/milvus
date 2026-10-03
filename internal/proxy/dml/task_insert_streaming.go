@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -55,6 +56,9 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	fence := newSplitFence()
 	idempotency := it.idempotentInsertDecoration()
 	pending := newPendingRows(int(it.insertMsg.NumRows), fence)
+	if idempotency.enabled() {
+		pending = newKeyedPendingRows(int(it.insertMsg.NumRows), fence)
+	}
 	var mergeErr, packErr error
 	attempt := 0
 	// prepareFailed ends the request on a failure met before the first append,
@@ -81,6 +85,40 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			mlog.FieldTaskID(it.ID()),
 			mlog.Bool("is_parition_key", it.partitionKeys != nil),
 			mlog.Int("attempt", attempt))
+
+		// Once rows may be re-routed by a fence, a window's answer must match
+		// where they went (see pendingRows.settleAnswered).
+		if route.split() || len(route.fenced) > 0 || len(fence.fenced) > 0 {
+			pending.checkPlacementFrom()
+		}
+
+		// A keyed insert asks every fenced vchannel's idempotency window before
+		// it places a row anywhere else (see split_fence_idempotency.go).
+		if idempotency.enabled() {
+			probeMergeErr, err := it.probeFencedWindows(ctx, route, fence, pending, idempotency, ez)
+			if probeMergeErr != nil && mergeErr == nil {
+				mergeErr = probeMergeErr
+			}
+			if err != nil {
+				mlog.Warn(ctx, "ask the idempotency windows of fenced vchannels failed", mlog.Err(err))
+				var answerErr *probeAnswerError
+				if errors.As(err, &answerErr) {
+					// The probe wrote nothing: a failure a refresh can cure
+					// backs off and refreshes even on the first attempt.
+					return fence.retryProbeAnswer(ctx, it.GetMetaCache(), collID, answerErr)
+				}
+				return prepareFailed(err)
+			}
+			if pending.done() {
+				return false, nil
+			}
+		}
+		// An idempotent auto-id insert keeps every row it still has to place on
+		// the owner of its offset's residue under the routing it writes against.
+		if err := it.repinPendingAutoIDs(route, pending); err != nil {
+			mlog.Warn(ctx, "re-pin the auto ids of the pending rows failed", mlog.Err(err))
+			return prepareFailed(err)
+		}
 
 		// start to repack insert data
 		var msgs []message.MutableMessage

@@ -56,6 +56,11 @@ func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 		log.Warn(ctx, "stabilize idempotent autoID assignment failed", mlog.Err(err))
 		return err
 	}
+	// Execute keeps the pinning true for the rows it has yet to place when the
+	// routing changes under it -- a collection of one shard included, which a
+	// split turns into two.
+	it.stableAutoIDPrimary = primaryFieldSchema
+	it.stableAutoIDRouteKey = autoIDRouteKey(route)
 	return nil
 }
 
