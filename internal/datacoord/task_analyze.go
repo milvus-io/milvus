@@ -211,7 +211,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 						mlog.Float64("raw data size", totalSegmentsRawDataSize),
 						mlog.Int64("num clusters", numClusters),
 						mlog.Int64("minimum num clusters required", Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()))
-					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, ""); err != nil {
+					if err := at.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "data size too small to cluster"); err != nil {
 						// State is left untouched, so the scheduler re-enqueues the task and retries.
 						log.Warn(context.TODO(), "failed to persist the finished state of the analyze task", mlog.Err(err))
 					}

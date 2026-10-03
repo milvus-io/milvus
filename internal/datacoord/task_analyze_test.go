@@ -290,8 +290,15 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	// data too small → skip → mark as finished
 	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
-	// Persisting Finished is what lets the GC recycle the task's analyze stats files.
-	s.Equal(indexpb.JobState_JobStateFinished, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+	// ... and, crucially, the state must be persisted into analyzeMeta with the
+	// skip reason. The original bug used SetState (in-memory only), leaving the
+	// persisted task at Init so the parent clustering task could never observe
+	// completion and hung in `analyzing`. Assert the persisted reason here so a
+	// regression back to SetState is caught.
+	persisted := s.mt.analyzeMeta.GetTask(s.taskID)
+	s.Require().NotNil(persisted)
+	s.Equal(indexpb.JobState_JobStateFinished, persisted.GetState())
+	s.Equal("data size too small to cluster", persisted.GetFailReason())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
