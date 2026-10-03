@@ -77,14 +77,24 @@ func TestReloadFromKV(t *testing.T) {
 
 		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{
 			{
-				SegmentID: 1,
-				IndexID:   1,
+				CollectionID:        1,
+				SegmentID:           1,
+				IndexID:             1,
+				IndexState:          commonpb.IndexState_Finished,
+				IndexFileKeys:       []string{"file"},
+				IndexSerializedSize: 1024,
 			},
 		}, nil)
 
 		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
+		segIdxes, ok := meta.segmentIndexes.Get(1)
+		require.True(t, ok)
+		segIdx, ok := segIdxes.Get(1)
+		require.True(t, ok)
+		expectedMemSize := uint64(1024) * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+		assert.Equal(t, expectedMemSize, segIdx.IndexMemSize)
 	})
 
 	// Reload must only count active indexes (non-deleted) in the gauge.
@@ -1533,6 +1543,14 @@ func TestMeta_FinishTask(t *testing.T) {
 	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
+		var persistedMemSize uint64
+		catalog := m.catalog.(*catalogmocks.DataCoordCatalog)
+		catalog.ExpectedCalls[0].Run(func(args mock.Arguments) {
+			segIdxes := args.Get(1).([]*model.SegmentIndex)
+			require.Len(t, segIdxes, 1)
+			require.Equal(t, buildID, segIdxes[0].BuildID)
+			persistedMemSize = segIdxes[0].IndexMemSize
+		})
 		err := m.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_Finished,
@@ -1541,6 +1559,16 @@ func TestMeta_FinishTask(t *testing.T) {
 			FailReason:     "",
 		})
 		assert.NoError(t, err)
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		require.True(t, ok)
+		expectedMemSize := uint64(1024) * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+		assert.Equal(t, expectedMemSize, segIdx.IndexMemSize)
+		assert.Equal(t, expectedMemSize, persistedMemSize)
+		storedIndexes, ok := m.segmentIndexes.Get(segID)
+		require.True(t, ok)
+		stored, ok := storedIndexes.Get(indexID)
+		require.True(t, ok)
+		assert.Equal(t, expectedMemSize, stored.IndexMemSize)
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -1569,6 +1597,20 @@ func TestMeta_FinishTask(t *testing.T) {
 			FailReason:     "",
 		})
 		assert.NoError(t, err)
+	})
+
+	t.Run("preserves reported memory size", func(t *testing.T) {
+		m := updateSegmentIndexMeta(t)
+		err := m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:        buildID,
+			State:          commonpb.IndexState_Finished,
+			SerializedSize: 1024,
+			MemSize:        3072,
+		})
+		require.NoError(t, err)
+		segIdx, ok := m.segmentBuildInfo.Get(buildID)
+		require.True(t, ok)
+		assert.Equal(t, uint64(3072), segIdx.IndexMemSize)
 	})
 }
 
