@@ -2,10 +2,10 @@ package kvfactory
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
