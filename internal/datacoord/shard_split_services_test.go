@@ -239,43 +239,6 @@ func TestCommitShardSplitLeavesLaterStatesAlone(t *testing.T) {
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, task.GetState())
 }
 
-func TestCommitShardSplitRollsAnAbortedTaskForward(t *testing.T) {
-	// The planner may abort a task on a broadcast failure it took for definite
-	// although the fence landed; the commit proves the fence, and a fenced task
-	// is forward-only. Left Aborted, its source would stay fenced forever with
-	// nothing moving its data, and CheckShardSplitDrained would still answer
-	// recorded=true for it. The task rolls forward into the window, and the
-	// abort's bookkeeping (end time, fail reason) goes with the Aborted state.
-	svr := newShardSplitTestServer(t)
-	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
-		TaskId:       200,
-		CollectionId: 100,
-		State:        datapb.SplitShardTaskState_SplitShardTaskAborted,
-		EndTime:      1234,
-		FailReason:   "the write switch was refused",
-		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
-		Targets: []*datapb.SplitShardTaskTarget{
-			{Vchannel: splitTestTarget0, Buckets: []uint64{0}},
-			{Vchannel: splitTestTarget1, Buckets: []uint64{1}},
-		},
-	}))
-
-	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(status))
-
-	task, _ := svr.shardSplitTasks.get(200)
-	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
-	assert.True(t, task.GetFenced())
-	assert.EqualValues(t, 2000, task.GetSources()[0].GetSwitchTimeTick())
-	assert.Zero(t, task.GetEndTime())
-	assert.Empty(t, task.GetFailReason())
-	persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
-	require.NoError(t, err)
-	require.Len(t, persisted, 1)
-	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, persisted[0].GetState())
-}
-
 func TestCommitShardSplitLeavesADoneTaskDone(t *testing.T) {
 	svr := newShardSplitTestServer(t)
 	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
@@ -1202,6 +1165,43 @@ func channelExists(t *testing.T, catalog metastore.DataCoordCatalog, channel str
 	exists, err := catalog.ChannelExists(context.TODO(), channel)
 	require.NoError(t, err)
 	return exists
+}
+
+func TestCommitShardSplitRollsAnAbortedTaskForward(t *testing.T) {
+	// The planner may abort a task on a broadcast failure it took for definite
+	// although the fence landed; the commit proves the fence, and a fenced task
+	// is forward-only. Left Aborted, its source would stay fenced forever with
+	// nothing moving its data, and CheckShardSplitDrained would still answer
+	// recorded=true for it. The task rolls forward into the window, and the
+	// abort's bookkeeping (end time, fail reason) goes with the Aborted state.
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskAborted,
+		EndTime:      1234,
+		FailReason:   "the write switch was refused",
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		Targets: []*datapb.SplitShardTaskTarget{
+			{Vchannel: splitTestTarget0, Buckets: []uint64{0}},
+			{Vchannel: splitTestTarget1, Buckets: []uint64{1}},
+		},
+	}))
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+	assert.True(t, task.GetFenced())
+	assert.EqualValues(t, 2000, task.GetSources()[0].GetSwitchTimeTick())
+	assert.Zero(t, task.GetEndTime())
+	assert.Empty(t, task.GetFailReason())
+	persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, persisted[0].GetState())
 }
 
 // The drain predicate and the reason a stalled split logs are one function:
