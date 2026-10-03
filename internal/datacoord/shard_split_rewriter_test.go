@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -203,13 +204,16 @@ type recordingRewriter struct {
 	manager    *shardSplitManager
 	dispatcher rewritePlanDispatcher
 	batchSize  int
-	rounds     int
-	last       rewriteRoundResult
+	// importGuard is nil unless a test wires one, which is "no import can
+	// publish" -- the shape of a datacoord with no import meta.
+	importGuard importL0Guard
+	rounds      int
+	last        rewriteRoundResult
 }
 
 func (r *recordingRewriter) redistribute(ctx context.Context, task *datapb.SplitShardTask) {
 	r.rounds++
-	r.last = r.manager.rewriteRound(ctx, task, r.dispatcher, r.batchSize)
+	r.last = r.manager.rewriteRound(ctx, task, r.dispatcher, r.batchSize, r.importGuard)
 }
 
 // rewriteCase is a split manager over a test meta, driving one Redistributing
@@ -265,7 +269,7 @@ func (c *rewriteCase) tick() rewriteRoundResult {
 
 // round runs one rewrite round directly, bypassing the manager's own gates.
 func (c *rewriteCase) round(batchSize int) rewriteRoundResult {
-	return c.manager.rewriteRound(context.Background(), c.task(), c.dispatcher, batchSize)
+	return c.manager.rewriteRound(context.Background(), c.task(), c.dispatcher, batchSize, c.rewriter.importGuard)
 }
 
 func (c *rewriteCase) task() *datapb.SplitShardTask {
@@ -756,7 +760,7 @@ func TestRewriteRoundPersistence(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		c.manager.rewriteRound(context.Background(), stale, c.dispatcher, 10)
+		c.manager.rewriteRound(context.Background(), stale, c.dispatcher, 10, nil)
 		assert.Empty(t, c.pending())
 		assert.Empty(t, c.task().GetDispatchedPlanIds())
 	})
@@ -787,7 +791,7 @@ func TestHashSplitRewriterRunsARoundThroughTheInspector(t *testing.T) {
 	c := newRewriteCase(t, m, newHashTask(nil))
 	inspector := &fakeInspector{}
 	reader := &fakePlanReader{byTrigger: map[int64][]*datapb.CompactionTask{}}
-	rewriter := newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, reader, &fakeAllocator{next: 900}))
+	rewriter := newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, reader, &fakeAllocator{next: 900}), nil)
 	c.manager.setRedistributor(rewriter)
 
 	c.manager.advanceTask(c.task())
@@ -973,7 +977,7 @@ func TestShardSplitRewriteIsScheduledWithCompactionOff(t *testing.T) {
 	scheduled := make(chan int64, 8)
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) { scheduled <- t.GetTaskID() }).Return().Maybe()
 	inspector := newCompactionInspector(m, alloc, nil, scheduler, scheduler, newMockVersionManager())
-	c.manager.setRedistributor(newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, m, alloc)))
+	c.manager.setRedistributor(newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, m, alloc), nil))
 
 	// No policy-driven compaction starts: the mocks fail on an unexpected
 	// start.
@@ -1067,4 +1071,159 @@ func TestRewriteRoundIsGatedOnTheFenceCheckpoint(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
 	})
+}
+
+// importMetaWithOneJob is an ImportMeta holding one job the caller can move
+// between states. GetJobBy applies the caller's filters, as the real meta does,
+// so a job the predicate's filter excludes really does disappear from its view
+// -- which the mock helpers in shard_split_services_test.go do not do.
+func importMetaWithOneJob(t *testing.T, vchannel string, state internalpb.ImportJobState) (ImportMeta, func(internalpb.ImportJobState)) {
+	pb := &datapb.ImportJob{JobID: 7, State: state, Vchannels: []string{vchannel}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJobBy(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, filters ...ImportJobFilter) []ImportJob {
+			job := &importJob{ImportJob: pb}
+			for _, filter := range filters {
+				if !filter(job) {
+					return nil
+				}
+			}
+			return []ImportJob{job}
+		}).Maybe()
+	return im, func(next internalpb.ImportJobState) { pb.State = next }
+}
+
+// L0-2, the import half. `importv2` takes the SegmentLevel_L0 branch for an
+// import task that has delete data and no insert data (importv2/util.go), and
+// that L0 reaches datacoord through SaveBinlogPaths{SegLevel: L0} ->
+// CreateL0Operator, which publishes it Flushed with IsImporting unset. So an
+// import already in flight when the split started can land a NEW L0 on the
+// split's family after the rewrite has stopped folding, and the retire would
+// drop it unfolded: those deletes would never reach the rows the rewrite has
+// already moved to the targets, and they would come back.
+//
+// Neither import refusal covers it. The proxy refuses an import into a
+// collection a split has touched, and refuseImportOnMovingShards refuses one
+// naming a moving or delisted shard -- both about a NEW import, judged under
+// the collection's resource keys. This is an import that was already in flight
+// when the split started, which both let through by construction and which the
+// drain is written to wait for.
+//
+// And the drain cannot be the guard: it counts the source's L0s as live
+// segments, so gating the retire on the drain would have the retire wait for
+// the drain while the drain waits for the retire.
+func TestRewriteHoldsTheL0RetireWhileAnImportCanStillPublish(t *testing.T) {
+	newCase := func(t *testing.T, vchannel string, state internalpb.ImportJobState) (*rewriteCase, func(internalpb.ImportJobState)) {
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+		importMeta, setState := importMetaWithOneJob(t, vchannel, state)
+		c.rewriter.importGuard = newHashSplitRewriter(c.manager, nil, importMeta).importMayPublishL0
+		return c, setState
+	}
+	held := func(t *testing.T, c *rewriteCase) {
+		t.Helper()
+		c.tick()
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201),
+			"the L0 must outlive an import that can still publish one of its own")
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+	}
+	released := func(t *testing.T, c *rewriteCase) {
+		t.Helper()
+		c.tick()
+		assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+		assert.True(t, c.meta.GetSegment(context.Background(), 201).GetCompacted())
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
+	}
+
+	t.Run("an import in flight on the source holds the retire until it finishes", func(t *testing.T) {
+		c, setState := newCase(t, hashSrcVChannel, internalpb.ImportJobState_Importing)
+		held(t, c)
+		setState(internalpb.ImportJobState_Completed)
+		released(t, c)
+	})
+
+	t.Run("every unfinished job state holds it", func(t *testing.T) {
+		for _, state := range []internalpb.ImportJobState{
+			internalpb.ImportJobState_Pending,
+			internalpb.ImportJobState_PreImporting,
+			internalpb.ImportJobState_Importing,
+			internalpb.ImportJobState_Sorting,
+			internalpb.ImportJobState_IndexBuilding,
+		} {
+			t.Run(state.String(), func(t *testing.T) {
+				c, _ := newCase(t, hashSrcVChannel, state)
+				held(t, c)
+			})
+		}
+	})
+
+	t.Run("an import on a target holds it too", func(t *testing.T) {
+		// A target's own import cannot add to the SOURCE's L0 set, but the
+		// guard is deliberately the whole family: nothing can name a target
+		// during the window anyway (refuseImportOnMovingShards refuses a
+		// source and a target alike), and a target did not exist before it,
+		// so the wider guard costs no liveness and needs no case analysis.
+		c, setState := newCase(t, hashTgtA, internalpb.ImportJobState_Importing)
+		held(t, c)
+		setState(internalpb.ImportJobState_Failed)
+		released(t, c)
+	})
+
+	t.Run("a finished import holds nothing", func(t *testing.T) {
+		for _, state := range []internalpb.ImportJobState{
+			internalpb.ImportJobState_Completed,
+			internalpb.ImportJobState_Failed,
+		} {
+			t.Run(state.String(), func(t *testing.T) {
+				c, _ := newCase(t, hashSrcVChannel, state)
+				released(t, c)
+			})
+		}
+	})
+
+	t.Run("an import on an unrelated vchannel holds nothing", func(t *testing.T) {
+		c, _ := newCase(t, splitMgrV3, internalpb.ImportJobState_Importing)
+		released(t, c)
+	})
+
+	t.Run("a datacoord with no import meta holds nothing", func(t *testing.T) {
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+		c.rewriter.importGuard = newHashSplitRewriter(c.manager, nil, nil).importMayPublishL0
+		released(t, c)
+	})
+
+	t.Run("the guard does not hold the dispatch, only the retire", func(t *testing.T) {
+		// A rewrite input is still rewritten while the import runs: the plan
+		// carries the source's L0s and folds them, so progress is safe. Only
+		// throwing the L0s away is not.
+		m := newHashRewriteMeta(t, []int64{101})
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask([]int64{101}))
+		importMeta, _ := importMetaWithOneJob(t, hashSrcVChannel, internalpb.ImportJobState_Importing)
+		c.rewriter.importGuard = newHashSplitRewriter(c.manager, nil, importMeta).importMayPublishL0
+
+		assert.ElementsMatch(t, []int64{101}, c.tick().dispatched)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+	})
+}
+
+// The production rewriter's guard is datacoord's own import meta, read through
+// the rewriter rather than through a new split-manager API.
+func TestHashSplitRewriterReadsDataCoordImportMeta(t *testing.T) {
+	c := newRewriteCase(t, newHashRewriteMeta(t, nil), newHashTask(nil))
+	family := []string{hashSrcVChannel, hashTgtA, hashTgtB}
+
+	importMeta, setState := importMetaWithOneJob(t, hashTgtB, internalpb.ImportJobState_Importing)
+	rewriter := newHashSplitRewriter(c.manager, nil, importMeta)
+	assert.True(t, rewriter.importMayPublishL0(context.Background(), family))
+	setState(internalpb.ImportJobState_Completed)
+	assert.False(t, rewriter.importMayPublishL0(context.Background(), family))
+
+	assert.False(t, newHashSplitRewriter(c.manager, nil, nil).importMayPublishL0(context.Background(), family),
+		"no import meta wired is no import")
+	assert.False(t, importMayPublishLevelZero(context.Background(), importMeta, nil),
+		"no vchannel to judge by is no import")
 }

@@ -437,7 +437,7 @@ func TestRewriteRoundReadsTheSplitsPlansOnce(t *testing.T) {
 	c := newRewriteCase(t, m, newHashTask(nil))
 	inspector := &fakeInspector{}
 	reader := &fakePlanReader{byTrigger: map[int64][]*datapb.CompactionTask{}}
-	rewriter := newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, reader, &fakeAllocator{next: 900}))
+	rewriter := newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, reader, &fakeAllocator{next: 900}), nil)
 
 	rewriter.redistribute(context.Background(), c.task())
 	require.Len(t, inspector.enqueued, 8)
