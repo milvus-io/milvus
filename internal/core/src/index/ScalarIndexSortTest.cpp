@@ -1,9 +1,14 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
+#include <random>
+#include <unordered_set>
+#include <utility>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,6 +24,7 @@
 #include "index/IndexFactory.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/ScalarIndexSort.h"
+#include "index/SortedInt64Lookup.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
@@ -169,6 +175,147 @@ TEST(ScalarIndexSortV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     EXPECT_FALSE(bitset[4]);
     EXPECT_TRUE(bitset[5]);
     EXPECT_EQ(load_index.Reverse_Lookup(5), data[5]);
+}
+
+namespace {
+
+std::vector<std::vector<int64_t>>
+MembershipQueries() {
+    constexpr auto min = std::numeric_limits<int64_t>::min();
+    constexpr auto max = std::numeric_limits<int64_t>::max();
+    constexpr auto threshold =
+        milvus::index::detail::kSortedInt64BatchThreshold;
+    std::vector<std::vector<int64_t>> queries{
+        {}, {min}, {max}, {0}, {17, -17}, {min, max, 0, 0}};
+    std::mt19937_64 rng(53853);
+    for (size_t n : {threshold - 1, threshold, threshold + 1, size_t{4096}}) {
+        // Duplicate hits, all misses on either side, and mixed sparse probes.
+        queries.emplace_back(n, 0);
+        queries.emplace_back(n, -1000000);
+        queries.emplace_back(n, 1000000);
+        std::vector<int64_t> mixed(n);
+        for (size_t i = 0; i < n; ++i) {
+            mixed[i] = static_cast<int64_t>(rng() % 8193) - 4096;
+        }
+        mixed[0] = min;
+        mixed[1] = max;
+        mixed[2] = 0;
+        mixed[3] = 0;
+        queries.push_back(mixed);
+        std::sort(mixed.begin(), mixed.end());
+        queries.push_back(mixed);
+        std::reverse(mixed.begin(), mixed.end());
+        queries.push_back(std::move(mixed));
+    }
+    return queries;
+}
+
+void
+CheckMembership(ScalarIndexSort<int64_t>& index,
+                const std::vector<int64_t>& rows,
+                const bool* valid) {
+    ASSERT_EQ(index.Count(), rows.size());
+    auto queries = MembershipQueries();
+    queries.push_back(rows);  // Full coverage, including repeated index values.
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        const auto original = query;
+        const auto* values = query.empty() ? nullptr : query.data();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        const std::unordered_set<int64_t> terms(query.begin(), query.end());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool hit = terms.count(rows[row]) != 0;
+            const bool is_valid = valid == nullptr || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        EXPECT_EQ(query, original);
+    }
+}
+
+std::vector<int64_t>
+MembershipRows(size_t n, size_t cardinality) {
+    std::vector<int64_t> rows(n);
+    for (size_t i = 0; i < n; ++i) {
+        rows[i] = 2 * static_cast<int64_t>(i % cardinality) -
+                  static_cast<int64_t>(cardinality);
+    }
+    rows.front() = std::numeric_limits<int64_t>::min();
+    rows.back() = std::numeric_limits<int64_t>::max();
+    std::mt19937_64 rng(53853);
+    std::shuffle(rows.begin(), rows.end(), rng);
+    return rows;
+}
+
+}  // namespace
+
+TEST(ScalarIndexSortMembershipTest, MatchesScanAcrossCardinalityAndNulls) {
+    for (size_t n : {1, 2, 63, 64, 65, 127, 128, 129, 2049}) {
+        for (size_t cardinality : {size_t{2}, size_t{32}, n}) {
+            const auto rows = MembershipRows(n, cardinality);
+            for (int null_mode : {0, 1, 2}) {
+                SCOPED_TRACE("rows=" + std::to_string(n) +
+                             " cardinality=" + std::to_string(cardinality) +
+                             " null_mode=" + std::to_string(null_mode));
+                auto valid = std::make_unique<bool[]>(n);
+                for (size_t i = 0; i < n; ++i) {
+                    valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+                }
+                const auto* validity = null_mode == 0 ? nullptr : valid.get();
+                ScalarIndexSort<int64_t> index;
+                index.Build(n, rows.data(), validity);
+                CheckMembership(index, rows, validity);
+            }
+        }
+    }
+}
+
+TEST(ScalarIndexSortMembershipTest, LargeListWithFewNonNullEntries) {
+    const auto rows = MembershipRows(4096, 32);
+    auto valid = std::make_unique<bool[]>(rows.size());
+    valid[0] = valid[rows.size() / 2] = valid[rows.size() - 1] = true;
+    ScalarIndexSort<int64_t> index;
+    index.Build(rows.size(), rows.data(), valid.get());
+    ASSERT_EQ(index.Size(), 3);
+    CheckMembership(index, rows, valid.get());
+}
+
+TEST(ScalarIndexSortMembershipTest, MatchesScanAfterLegacyAndPackedReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_membership_reload");
+    auto rows = MembershipRows(257, 32);
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 0;
+        }
+        ScalarIndexSort<int64_t> built(fixture.ctx);
+        built.Build(rows.size(), rows.data(), valid.get());
+        CheckMembership(built, rows, valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            config[ENABLE_MMAP] = mmap;
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            for (bool async : {false, true}) {
+                SCOPED_TRACE("async=" + std::to_string(async));
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                ScalarIndexSort<int64_t> loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckMembership(loaded, rows, valid.get());
+            }
+            ScalarIndexSort<int64_t> legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckMembership(legacy, rows, valid.get());
+        }
+    }
 }
 
 void
