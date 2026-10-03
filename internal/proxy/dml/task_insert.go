@@ -52,6 +52,15 @@ type InsertTask struct {
 
 	idempotencyEnabled bool
 	idempotencyKey     string
+	// stableAutoIDPrimary is the auto-id primary field of an idempotent insert
+	// whose ids are pinned to residues (see reassignAutoIDForStableIdempotency),
+	// nil for any other insert. Execute re-pins the rows it still has to place
+	// whenever the routing it writes against changes.
+	stableAutoIDPrimary *schemapb.FieldSchema
+	// stableAutoIDRouteKey identifies the routing the pending rows' ids are
+	// pinned against (autoIDRouteKey); while Execute writes against the same
+	// routing it need not re-check them.
+	stableAutoIDRouteKey string
 }
 
 // NewInsertTask constructs an insert task. It takes the host node and the

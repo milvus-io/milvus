@@ -1,7 +1,9 @@
 package dml
 
 import (
+	"fmt"
 	"math"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/routing"
@@ -218,6 +220,121 @@ func reassignAutoIDsAtOffsets(
 		cursor[owner]++
 	}
 	return nil
+}
+
+// repinPendingAutoIDs re-draws the id of every row an idempotent auto-id
+// insert still has to place whose id no longer routes to the owner of its
+// offset's residue under route.
+//
+// PreExecute pins offset i to the owner of residue i % M. When a split's
+// routing commit lands during the request, the rows the fenced source refused
+// are re-routed, and by their ids they would spread over the targets by the
+// ids' residues modulo the new modulus, not by their offsets'. A client retry
+// of the request buckets by offset under the new modulus from the start, so
+// the targets would hold, under the key, other offsets than the retry sends
+// them -- and a target's window would answer for rows the retry does not carry
+// there. Re-drawing keeps the pinning true for every row, whenever it is
+// placed. A pending row was written nowhere, so its id is free to replace; the
+// rows already placed keep theirs.
+func (it *InsertTask) repinPendingAutoIDs(route *writeRoute, pending *pendingRows) error {
+	primary := it.stableAutoIDPrimary
+	if primary == nil || pending.done() {
+		return nil
+	}
+	routeKey := autoIDRouteKey(route)
+	if routeKey == it.stableAutoIDRouteKey {
+		// The routing the ids were pinned against: no row can be misplaced.
+		return nil
+	}
+	placement := newAutoIDPlacement(route)
+	if placement.owners <= 1 {
+		it.stableAutoIDRouteKey = routeKey
+		return nil
+	}
+	rowIDs := it.insertMsg.GetRowIDs()
+	offsets := pending.sortedOffsets()
+	current := make([]int64, len(offsets))
+	for k, offset := range offsets {
+		if offset >= len(rowIDs) {
+			return merr.WrapErrServiceInternalMsg("pending row %d is out of the insert's %d row ids", offset, len(rowIDs))
+		}
+		current[k] = rowIDs[offset]
+	}
+	owners, err := autoIDCandidateOwners(current, primary.GetDataType(), placement)
+	if err != nil {
+		return err
+	}
+	misplaced := make([]int, 0)
+	for k, offset := range offsets {
+		if owners[k] != placement.ownerOf[uint64(offset)%placement.modulus] {
+			misplaced = append(misplaced, offset)
+		}
+	}
+	if len(misplaced) == 0 {
+		it.stableAutoIDRouteKey = routeKey
+		return nil
+	}
+	if it.idAllocator == nil {
+		return merr.WrapErrServiceInternalMsg("id allocator is required to re-pin idempotent auto ids")
+	}
+	// No id is recycled: a row with no response is pending although it may
+	// have landed, and its id must not reappear on another row.
+	if err := reassignAutoIDsAtOffsets(rowIDs, misplaced, nil, primary.GetDataType(), placement,
+		paramtable.Get().CommonCfg.ClusterID.GetAsUint64(), it.idAllocator.Alloc); err != nil {
+		return err
+	}
+
+	primaryFieldData, err := autoGenPrimaryFieldData(primary, rowIDs)
+	if err != nil {
+		return err
+	}
+	primaryFieldData.FieldId = primary.GetFieldID()
+	replacePrimaryFieldData(it, primary, primaryFieldData)
+
+	repinned := make([]int64, len(misplaced))
+	rowOffsets := make([]uint32, len(misplaced))
+	for k, offset := range misplaced {
+		repinned[k] = rowIDs[offset]
+		rowOffsets[k] = uint32(offset)
+	}
+	repinnedFieldData, err := autoGenPrimaryFieldData(primary, repinned)
+	if err != nil {
+		return err
+	}
+	repinnedIDs, err := parsePrimaryFieldData2IDs(repinnedFieldData)
+	if err != nil {
+		return err
+	}
+	// The result is patched in place: the idempotency decoration reads the ids
+	// of the rows it stamps from it.
+	if err := mergeInsertIDsByOffsets(it.result.GetIDs(), repinnedIDs, rowOffsets); err != nil {
+		return err
+	}
+	it.stableAutoIDRouteKey = routeKey
+	return nil
+}
+
+// autoIDRouteKey identifies the auto-id placement of route: its modulus and
+// the vchannel owning every residue. Two routes with the same key place every
+// offset on the same shard.
+func autoIDRouteKey(route *writeRoute) string {
+	var b strings.Builder
+	if !route.split() {
+		fmt.Fprintf(&b, "%d", len(route.vchannels))
+		for _, vchannel := range route.vchannels {
+			b.WriteByte('|')
+			b.WriteString(vchannel)
+		}
+		return b.String()
+	}
+	modulus := route.table.Modulus()
+	fmt.Fprintf(&b, "%d", modulus)
+	for r := uint64(0); r < modulus; r++ {
+		vchannel, _ := route.table.Lookup(r)
+		b.WriteByte('|')
+		b.WriteString(vchannel)
+	}
+	return b.String()
 }
 
 func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, placement *autoIDPlacement) error {
