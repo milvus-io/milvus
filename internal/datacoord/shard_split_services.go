@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -48,8 +50,10 @@ import (
 // first fence, which a redelivery reports again -- and a redelivery reporting
 // another one is logged, not applied. The
 // state only ever moves forward: Preparing/Fencing advance to Redistributing,
-// and a task already Adopting or beyond is left where it is, because a
+// and a task already Adopting or Done is left where it is, because a
 // redelivered callback must not drag a split back into a window it has left.
+// An Aborted task -- which a fenced split can only be through a bug -- is
+// logged at Error and rolled forward to Redistributing: the fence has landed.
 //
 // Errors are System: the blame for a catalog write failure, a checkpoint write
 // failure or a malformed callback never lies with the request's content, and the
@@ -239,11 +243,16 @@ func (s *Server) mergeCommittedShardSplit(ctx context.Context, req *datapb.Commi
 		// definite, but the fence landed after all: the commit is the proof.
 		// A fenced task is forward-only, and leaving it Aborted would keep
 		// its source fenced with nothing ever moving its data or adopting its
-		// targets, so writes to that shard would be refused forever.
+		// targets, so writes to that shard would be refused forever. The
+		// split manager's abort bookkeeping (end time, fail reason) is
+		// cleared with the state so the task reads as the live one it is.
 		mlog.Error(ctx, "a fenced shard split commit arrived for an aborted task, rolling it forward",
 			mlog.Int64("collectionID", req.GetCollectionId()),
-			mlog.Int64("splitTaskID", req.GetSplitTaskId()))
+			mlog.Int64("splitTaskID", req.GetSplitTaskId()),
+			mlog.String("abortReason", task.GetFailReason()))
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+		task.EndTime = 0
+		task.FailReason = ""
 	}
 	return task
 }
@@ -354,17 +363,28 @@ func (s *Server) seedSplitTargetCheckpoints(ctx context.Context, req *datapb.Com
 // CheckShardSplitDrained reports whether the split's sources still hold
 // anything the targets have not taken.
 //
-// Three conjuncts, per source, all of them datacoord-local:
+// Three conjuncts, per source, all of them datacoord-local, and all of them
+// named rather than merely counted (splitDrainBlockReason): the manager logs
+// the one a split is waiting on, and the gate the adoption callback asks is
+// this very predicate, so the two can never disagree about what "drained"
+// means. They are checked in this order:
 //
-//   - no segment left on the source vchannel in a non-Dropped state --- data a
-//     reader could still be routed to;
 //   - the source's channel checkpoint has reached its own T_switch. The fence
-//     only appends a message; the streamingnode seals and reports the sealed
+//     only appends a message; the streamingnode seals and publishes the sealed
 //     segments asynchronously afterwards, so below T_switch an empty segment
 //     scan proves nothing and those segments would land on a retired shard as
 //     orphans. A source with no checkpoint at all is not drained, and neither is
 //     one whose T_switch is still zero --- that is a source whose fence has not
-//     been recorded, i.e. one that may still be accepting writes;
+//     been recorded, i.e. one that may still be accepting writes. It is read
+//     BEFORE the segments are scanned: a checkpoint at or past T_switch proves
+//     every segment the source wrote before its fence is registered here, and
+//     scanning first could miss one registered between the scan and a
+//     checkpoint that then passes;
+//   - no segment left on the source vchannel in a non-Dropped state --- data a
+//     reader could still be routed to. This is also where "every rewrite is
+//     committed" and "the source's L0s are retired" are read: a rewrite that
+//     has not committed leaves its input Flushed, and an unretired L0 is a
+//     non-Dropped L0 segment of the source;
 //   - no unfinished import job names the source. A job still in
 //     Pending/PreImporting has registered no segment in meta, so the scan
 //     cannot see it, and it could allocate onto the retired shard after the
@@ -412,30 +432,110 @@ func (s *Server) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckSh
 	}, nil
 }
 
+// splitSourcesDrained is the drain predicate CheckShardSplitDrained answers
+// with, and the one the split manager moves a task to Adopting on and issues
+// the adoption after.
 func (s *Server) splitSourcesDrained(ctx context.Context, task *datapb.SplitShardTask) bool {
+	return s.splitDrainBlockReason(ctx, task) == ""
+}
+
+// splitDrainBlockReason names the first drain conjunct the task's sources do
+// not satisfy yet, in the order splitSourcesDrained checks them, or "" once
+// they are drained. The predicate IS this function: splitSourcesDrained, the
+// split manager's stall logs and every caller of either are defined by it and
+// its two halves (liveSegmentBlockReason, fenceFlushBlockReason), so there is
+// one drain predicate and one set of reason strings, and nothing that logs why
+// a split is waiting can disagree with what CheckShardSplitDrained answers.
+func (s *Server) splitDrainBlockReason(ctx context.Context, task *datapb.SplitShardTask) string {
+	// The checkpoints are read BEFORE the segments are scanned. A checkpoint
+	// at or past T_switch proves every segment the source wrote before its
+	// fence is already registered here; scanning first could miss one
+	// registered between the scan and a checkpoint that then passes.
+	if reason := s.fenceFlushBlockReason(task); reason != "" {
+		return reason
+	}
+	for _, source := range task.GetSources() {
+		if reason := s.liveSegmentBlockReason(source.GetVchannel()); reason != "" {
+			return reason
+		}
+	}
+	if s.hasActiveImportOnAnyVChannel(ctx, splitSourceVChannels(task)) {
+		return "an import is still in progress on a source"
+	}
+	return ""
+}
+
+// fenceFlushBlockReason names the first source whose fence has not been
+// recorded or whose channel checkpoint has not reached it, or "" once every
+// source is past its own T_switch.
+//
+// A zero T_switch is a source whose fence has not been recorded, i.e. one that
+// may still be accepting writes: there is no tick to have caught up to, and
+// comparing the checkpoint against zero would pass vacuously and collapse the
+// predicate to the empty segment scan it exists to close. A source with no
+// checkpoint at all has not caught up either.
+//
+// It is the drain without the segment scan and the import check, split out
+// because a redistribution must start only once every source is past its
+// T_switch (design doc §6.3 step 2.1): from then on every segment the fence
+// sealed, and the source's complete final L0 set, are in datacoord's meta.
+//
+// # What makes cp >= T_switch mean that
+//
+// Not the old argument. Before #53595 the flusher closed the source's data
+// sync service at the fence, so the source's own vchannel checkpoint froze at
+// T_switch and reaching it meant "this vchannel's messages up to T_switch are
+// flushed". There is no flusher any more. The checkpoint datacoord receives
+// under a vchannel's name is now the recovery checkpoint of its WHOLE pchannel
+// (vchannel/checkpoint_updater.go execute(), reported once per active vchannel
+// of the pchannel), and the fenced source keeps reporting it until adoption
+// drops its module -- so it does not freeze, it keeps advancing.
+//
+// What carries the proof instead is the handle-release rule the recovery
+// checkpoint obeys: the global point only passes a tick once every handle at
+// that tick is released, an Insert handle is held until its growing segment is
+// published to datacoord (segment/lifecycle_writer.go PersistGrowingSegment,
+// "publication must precede Insert completion") and a Delete handle until its
+// L0 output is registered with datacoord (l0materializer's WALMaterializer,
+// "holds Delete handles until L0 output is registered"). So cp(source) >=
+// T_switch says: every Insert and every Delete on that pchannel at or below
+// T_switch is in datacoord's meta. That is strictly STRONGER than the old
+// per-vchannel statement, and it is what makes the segment scan above
+// conclusive rather than merely empty -- including for the last L0 of the
+// source, which the fence itself cuts (SplitShard is an L0 boundary).
+//
+// It also costs a liveness coupling the old mechanism did not have, which is
+// why the reason string names the pchannel: the point is pchannel-wide, so a
+// DIFFERENT collection's vchannel on the same pchannel that cannot persist --
+// L0 materialization failing, datacoord unreachable, a poisoned handle --
+// holds our split's checkpoint back with it. This conjunct is checked before
+// the segment scan (a checkpoint past T_switch is what makes that scan
+// conclusive), so when it blocks, what holds the point back is either the
+// source's own writes not yet persisted or a neighbour of its pchannel, and
+// the two are not distinguishable from datacoord. The pchannel is named so an
+// operator knows where else to look.
+//
+// There is no second safety net: meta.UpdateChannelCheckpoints clamps an
+// incoming position to GetMinGrowingSegmentCheckpoint, but that clamp applies
+// only to TEXT collections -- and a collection with a TEXT field is refused a
+// split outright (splitRefusalReason), so it never clamps a split source.
+func (s *Server) fenceFlushBlockReason(task *datapb.SplitShardTask) string {
 	for _, source := range task.GetSources() {
 		vchannel := source.GetVchannel()
 		if source.GetSwitchTimeTick() == 0 {
-			// The fence has not been recorded for this source, so there is no
-			// tick to have caught up to and conjunct (b) below would compare
-			// against zero and pass vacuously --- collapsing the predicate to
-			// the empty scan it exists to close. A source that still accepts
-			// writes is never drained.
-			return false
+			return fmt.Sprintf("source %s fence not recorded yet (switch time tick is zero)", vchannel)
 		}
-		// The checkpoint is read BEFORE the segments are scanned. A checkpoint
-		// at or past T_switch proves every segment the source wrote before its
-		// fence is already registered here; scanning first could miss one
-		// registered between the scan and a checkpoint that then passes.
 		cp := s.meta.GetChannelCheckpoint(vchannel)
-		if cp == nil || cp.GetTimestamp() < source.GetSwitchTimeTick() {
-			return false
+		if cp == nil {
+			return fmt.Sprintf("source %s has no channel checkpoint yet", vchannel)
 		}
-		if s.hasLiveSegmentOnVChannel(vchannel) {
-			return false
+		if cp.GetTimestamp() < source.GetSwitchTimeTick() {
+			return fmt.Sprintf(
+				"source %s checkpoint %d has not reached its switch time tick %d; that checkpoint is the recovery checkpoint of pchannel %s, which any vchannel of it can hold back",
+				vchannel, cp.GetTimestamp(), source.GetSwitchTimeTick(), funcutil.ToPhysicalChannel(vchannel))
 		}
 	}
-	return !s.hasActiveImportOnAnyVChannel(ctx, splitSourceVChannels(task))
+	return ""
 }
 
 // splitSourceFenceRecorded is the shard split's
@@ -460,15 +560,22 @@ func (s *Server) splitSourceFenceRecorded(_ context.Context, vchannel string) (b
 	return ok, nil
 }
 
-// hasLiveSegmentOnVChannel reports whether the channel still carries a segment
-// in a non-Dropped state, i.e. data a reader could still be routed to.
-func (s *Server) hasLiveSegmentOnVChannel(vchannel string) bool {
+// liveSegmentBlockReason names the first segment still on vchannel in a
+// non-Dropped state -- data a reader could still be routed to -- by id, level
+// and state, so a stall log says exactly what is still there. "" once none is
+// left.
+//
+// A Growing segment counts, and since #53595 it is published to datacoord with
+// its binlogs before the Insert that filled it completes, so there is no
+// longer a window in which the source holds L1 data datacoord cannot see.
+func (s *Server) liveSegmentBlockReason(vchannel string) string {
 	for _, segment := range s.meta.GetRealSegmentsForChannel(vchannel) {
 		if segment.GetState() != commonpb.SegmentState_Dropped {
-			return true
+			return fmt.Sprintf("source %s still has a live segment %d (level %s, state %s)",
+				vchannel, segment.GetID(), segment.GetLevel(), segment.GetState())
 		}
 	}
-	return false
+	return ""
 }
 
 // hasActiveImportOnAnyVChannel reports whether an unfinished import job targets
