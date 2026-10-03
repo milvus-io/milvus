@@ -996,3 +996,75 @@ func TestShardSplitRewriteIsScheduledWithCompactionOff(t *testing.T) {
 	}
 }
 
+// L0-2, re-derived on the post-#53595 producer. The old argument was "the
+// flusher closed the source's data sync service at the fence, so no more L0
+// appears". The flusher is gone; the argument is now:
+//
+//  1. SplitShard is an explicit L0 boundary (l0materializer.isL0FlushMessage),
+//     so the batch the fence ends materializes every Delete at a tick below
+//     T_switch;
+//  2. the materializer releases a Delete handle only after its L0 output is
+//     registered with DataCoord (l0materializer/wal.go), and the pchannel's
+//     global recovery checkpoint cannot pass a message whose handle is held;
+//  3. so cp(source) >= T_switch implies the source's whole pre-fence L0 set is
+//     in meta -- and the fence refuses every later Delete on the source, so
+//     nothing can add to it.
+//
+// Only (3) is observable from DataCoord, and it is exactly the gate
+// fenceFlushBlockReason applies. These cases pin the two consequences the
+// rewrite rests on: nothing is dispatched and no L0 is retired below the gate,
+// and the post-#53595 segment states the gate now admits are handled.
+func TestRewriteRoundIsGatedOnTheFenceCheckpoint(t *testing.T) {
+	t.Run("no dispatch and no L0 retire below the gate", func(t *testing.T) {
+		m := newHashRewriteMeta(t, []int64{101})
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
+		c := newRewriteCase(t, m, newHashTask([]int64{101}))
+		require.NotEmpty(t, c.manager.coordinator.fenceFlushBlockReason(c.task()))
+
+		res := c.round(10)
+		assert.Empty(t, res.dispatched, "a plan built below the gate could miss a source L0")
+		assert.Empty(t, c.dispatcher.dispatched)
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+
+		// The gate opens, and the same round does both.
+		m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick}
+		require.Empty(t, c.manager.coordinator.fenceFlushBlockReason(c.task()))
+		assert.ElementsMatch(t, []int64{101}, c.round(10).dispatched)
+	})
+
+	t.Run("a growing segment published with its binlogs holds the L0 retire", func(t *testing.T) {
+		// Post-#53595 a growing L1 is registered in DataCoord before its
+		// Insert completes (lifecycle_writer.PersistGrowingSegment), so the
+		// source can carry real, durable rows in Growing state. It has folded
+		// no L0, and it is not a rewrite input (Flushed only), so only the
+		// drain's own scan keeps the L0s alive for it.
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 103, commonpb.SegmentState_Growing, datapb.SegmentLevel_L1)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+
+		assert.Empty(t, c.manager.rewriteInputIDs(hashSrcVChannel), "a growing segment is no rewrite input")
+		require.NotNil(t, c.manager.unfoldedSourceData(hashSrcVChannel))
+		assert.EqualValues(t, 103, c.manager.unfoldedSourceData(hashSrcVChannel).GetID())
+		c.tick()
+		assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+	})
+
+	t.Run("an L1 the commit published Dropped because it was empty holds nothing", func(t *testing.T) {
+		// Post-#53595 CommitL1Segment publishes an empty L1 as Dropped, with
+		// no manifest and no DataView entry. It is not a rewrite input, it does
+		// not hold the L0 retire, and it does not hold the drain.
+		m := newHashRewriteMeta(t, nil)
+		setSourceSegment(m, 104, commonpb.SegmentState_Dropped, datapb.SegmentLevel_L1)
+		setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+		c := newRewriteCase(t, m, newHashTask(nil))
+
+		assert.Empty(t, c.manager.rewriteInputIDs(hashSrcVChannel))
+		assert.Nil(t, c.manager.unfoldedSourceData(hashSrcVChannel))
+		c.tick()
+		assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
+	})
+}
