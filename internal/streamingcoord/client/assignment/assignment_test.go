@@ -378,21 +378,59 @@ func TestWatcher_GetLatestReplicateConfiguration(t *testing.T) {
 		assert.NoError(t, <-errCh)
 	})
 
-	t.Run("blocks_when_version_set_but_config_nil", func(t *testing.T) {
+	t.Run("returns_nil_when_version_set_but_config_nil", func(t *testing.T) {
+		// A cluster that has never been given a replicate configuration reports a
+		// nil config in its assignment. That is an answer, not a missing update:
+		// the call must return promptly with a nil helper instead of blocking
+		// until the deadline.
 		w := newWatcher()
 
-		// Update with valid version but nil config
 		w.Update(types.VersionedStreamingNodeAssignments{
 			Version:               typeutil.VersionInt64Pair{Global: 1, Local: 1},
 			Assignments:           map[int64]types.StreamingNodeAssignment{},
 			ReplicateConfigHelper: nil,
 		})
 
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err := w.GetLatestReplicateConfiguration(ctx)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		config, err := w.GetLatestReplicateConfiguration(ctx)
+		assert.NoError(t, err)
+		assert.Nil(t, config)
+		// The nil helper stays usable for the read accessors.
+		assert.Nil(t, config.GetReplicateConfiguration())
+		assert.Nil(t, config.GetCluster("any"))
+	})
+
+	t.Run("blocks_until_first_assignment_arrives", func(t *testing.T) {
+		// With no assignment received at all the call still blocks: that is a
+		// genuine "not known yet", unlike a received-but-nil configuration.
+		w := newWatcher()
+
+		resultCh := make(chan error, 1)
+		go func() {
+			_, err := w.GetLatestReplicateConfiguration(context.Background())
+			resultCh <- err
+		}()
+
+		select {
+		case <-resultCh:
+			t.Fatal("GetLatestReplicateConfiguration should block before the first assignment")
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		w.Update(types.VersionedStreamingNodeAssignments{
+			Version:               typeutil.VersionInt64Pair{Global: 1, Local: 1},
+			Assignments:           map[int64]types.StreamingNodeAssignment{},
+			ReplicateConfigHelper: nil,
+		})
+
+		select {
+		case err := <-resultCh:
+			assert.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("GetLatestReplicateConfiguration should have returned")
+		}
 	})
 
 	t.Run("returns_error_on_context_cancel", func(t *testing.T) {
