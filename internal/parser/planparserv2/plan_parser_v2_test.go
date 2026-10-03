@@ -1758,6 +1758,33 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 }
 
+// TestExpr_ArithTypeMismatchNamesField asserts that modulo/bitwise type
+// mismatch errors name the offending field and its actual data type, instead
+// of a generic message the caller has to guess the field from.
+func TestExpr_ArithTypeMismatchNamesField(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	cases := []struct {
+		exprStr    string
+		wantSubstr string
+	}{
+		{`FloatField % 10 == 1`, "field 'FloatField' is Float"},
+		{`(FloatField & 1) == 1`, "field 'FloatField' is Float"},
+		{`(DoubleField | 2) == 3`, "field 'DoubleField' is Double"},
+		{`(FloatField ^ 4) == 0`, "field 'FloatField' is Float"},
+		{`(FloatField << 1) == 0`, "field 'FloatField' is Float"},
+		{`(DoubleField >> 1) == 0`, "field 'DoubleField' is Double"},
+		{`~FloatField == 0`, "field 'FloatField' is Float"},
+	}
+	for _, c := range cases {
+		_, err := ParseExpr(helper, c.exprStr, nil)
+		require.Error(t, err, c.exprStr)
+		assert.Contains(t, err.Error(), c.wantSubstr, c.exprStr)
+	}
+}
+
 // TestExpr_BitwiseArith asserts the generated plan structure for bitwise
 // operators, not merely that the expression parses. A bitwise op over a field
 // must fuse into a BinaryArithOpEvalRangeExpr carrying the matching ArithOpType,
