@@ -84,13 +84,11 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 		return s.handleForcePromote(ctx, config)
 	}
 
-	// Connection tokens are redacted whenever the configuration is read, so a
-	// caller that read it back cannot resend them. Take the stored ones before
-	// anything compares or validates this configuration.
-	config, err := s.fillRedactedConnectionTokens(ctx, config)
-	if err != nil {
-		return nil, err
-	}
+	// The connection tokens redacted on read are filled in by
+	// validateReplicateConfiguration, from the same configuration snapshot it
+	// validates against. Do not fill them here: this is outside the cluster
+	// resource key, and a token taken from a snapshot older than the one the
+	// validation sees would escape the connection-parameter consistency check.
 
 	// check if the configuration is same.
 	// so even if current cluster is not primary, we can still make a idempotent success result.
@@ -132,22 +130,6 @@ func (s *assignmentServiceImpl) UpdateReplicateConfiguration(ctx context.Context
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
 
-// fillRedactedConnectionTokens replaces the redacted connection tokens of an
-// incoming configuration with the ones already stored for the same clusters.
-// Without it a configuration that was read back can never be written again: the
-// read redacts the tokens and the validator rejects the change.
-func (s *assignmentServiceImpl) fillRedactedConnectionTokens(ctx context.Context, config *commonpb.ReplicateConfiguration) (*commonpb.ReplicateConfiguration, error) {
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	latestAssignment, err := balancer.GetLatestChannelAssignment()
-	if err != nil {
-		return nil, err
-	}
-	return replicateutil.FillRedactedConnectionTokens(config, latestAssignment.ReplicateConfiguration), nil
-}
-
 // waitUntilPrimaryChangeOrConfigurationSame waits until the primary changes or the configuration is same.
 func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	b, err := balance.GetWithContext(ctx)
@@ -155,7 +137,10 @@ func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx co
 		return err
 	}
 	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
-		if proto.Equal(config, param.ReplicateConfiguration) {
+		// Fill against the snapshot being compared, so a configuration whose
+		// tokens were redacted on read still matches once CDC has applied it.
+		filled := replicateutil.FillRedactedConnectionTokens(config, param.ReplicateConfiguration)
+		if proto.Equal(filled, param.ReplicateConfiguration) {
 			return errAssignmentDone
 		}
 		return nil
@@ -178,6 +163,14 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+
+	// Connection tokens are redacted whenever the configuration is read, so a
+	// caller that read it back cannot resend them. Take the stored ones from
+	// this snapshot, the one everything below compares and validates against:
+	// filling from an older snapshot would let a cluster that has since been
+	// removed be re-added with its former token under a new uri, which the
+	// consistency check no longer covers once the cluster is gone.
+	config = replicateutil.FillRedactedConnectionTokens(config, latestAssignment.ReplicateConfiguration)
 
 	// double check if the configuration is same after resource key is acquired.
 	if proto.Equal(config, latestAssignment.ReplicateConfiguration) {
