@@ -23,8 +23,8 @@ package packed
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 
-LoonFFIResult loon_milvus_table_create_manifest_from_segment_manifests(
-    const char* base_path,
+LoonFFIResult loon_milvus_table_append_source_manifests(
+    LoonTransactionHandle transaction,
     char** source_manifest_paths,
     const int64_t* source_row_counts,
     size_t num_source_manifests,
@@ -32,8 +32,7 @@ LoonFFIResult loon_milvus_table_create_manifest_from_segment_manifests(
     size_t num_target_columns,
     const char* external_source,
     const LoonProperties* properties,
-    int has_external_primary_key,
-    char** out_manifest_path);
+    int has_external_primary_key);
 */
 import "C"
 
@@ -229,6 +228,21 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) (string, error) {
+	return createMilvusTableManifest(context.Background(), basePath, columns, fragments, storageConfig, extfs, nil)
+}
+
+// createMilvusTableManifest stages all target-owned artifacts before importing
+// the source. Source bloom-filter stats therefore win duplicate keys, matching
+// rebuild-then-carry, while source text/JSON stats are never imported.
+func createMilvusTableManifest(
+	ctx context.Context,
+	basePath string,
+	columns []string,
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	updates *ManifestUpdates,
+) (string, error) {
 	if len(fragments) == 0 {
 		return "", merr.WrapErrServiceInternalMsg("fragments cannot be empty")
 	}
@@ -241,6 +255,31 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	for _, fragment := range fragments {
 		if fragment.RowCount <= 0 {
 			return "", merr.WrapErrServiceInternalMsg("milvus-table source fragment %s has non-positive row count %d", fragment.FilePath, fragment.RowCount)
+		}
+	}
+	if updates != nil {
+		// Loon validates added groups against the transaction's read snapshot,
+		// which is empty here, not against other groups staged in this bundle.
+		// Preserve the column-ownership and row-alignment checks that previously
+		// ran when Function output was appended to an already-built manifest.
+		seen := make(map[string]struct{}, len(columns))
+		for _, column := range columns {
+			seen[column] = struct{}{}
+		}
+		for _, group := range updates.ColumnGroups {
+			for _, column := range group.Columns {
+				if _, exists := seen[column]; exists {
+					return "", merr.WrapErrDataIntegrityMsg("duplicate refresh column %s", column)
+				}
+				seen[column] = struct{}{}
+			}
+			var rows int64
+			for _, file := range group.Files {
+				rows += file.EndIndex - file.StartIndex
+			}
+			if rows != fragments[0].RowCount {
+				return "", merr.WrapErrDataIntegrityMsg("retained columns %v have %d rows, expected %d", group.Columns, rows, fragments[0].RowCount)
+			}
 		}
 	}
 
@@ -294,13 +333,27 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cColumnsPtr = &cColumns[0]
 	}
 
-	var outManifestPath *C.char
+	// Start from an empty snapshot in the SAME segment namespace. Delta-log
+	// updates append, even with OVERWRITE; opening the old version would retain
+	// its stale deletes. Version allocation still advances past existing files.
+	var handle C.LoonTransactionHandle
+	if err := HandleLoonFFIResult(C.loon_transaction_begin(cBasePath, cProperties,
+		C.int64_t(ManifestEarliest), C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
+		getRetryLimit(), &handle)); err != nil {
+		return "", merr.WrapErrStorage(err, "begin milvus-table manifest")
+	}
+	defer C.loon_transaction_destroy(handle)
+	if updates != nil {
+		if err := applyManifestUpdates(handle, updates, nil); err != nil {
+			return "", err
+		}
+	}
 	hasExternalPrimaryKey := C.int(0)
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
 	}
-	result := C.loon_milvus_table_create_manifest_from_segment_manifests(
-		cBasePath,
+	result := C.loon_milvus_table_append_source_manifests(
+		handle,
 		cPathsPtr,
 		cRowCountsPtr,
 		C.size_t(len(cPaths)),
@@ -309,17 +362,18 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
-		&outManifestPath,
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-	if outManifestPath == nil {
-		return "", merr.WrapErrServiceInternalMsg("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	manifestPath := C.GoString(outManifestPath)
-	C.loon_free_cstr(outManifestPath)
-	return manifestPath, nil
+	var committedVersion C.int64_t
+	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &committedVersion)); err != nil {
+		return "", merr.WrapErrStorage(err, "commit milvus-table manifest")
+	}
+	return MarshalManifestPath(basePath, int64(committedVersion)), nil
 }
 
 // createColumnGroups creates storage-owned column groups, including all file properties.
@@ -530,6 +584,156 @@ func ManifestHasColumns(
 		}
 	}
 	return len(required) == 0, nil
+}
+
+// readManifestColumnGroupEntries copies selected column-group metadata into
+// Go-owned descriptors. Unlike Fragment, ColumnGroupEntry preserves all file
+// properties (including file_size and footer_size), so the native manifest can
+// be released here without losing metadata needed by Parquet/Vortex readers.
+func readManifestColumnGroupEntries(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]ColumnGroupEntry, error) {
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "read source manifest column groups")
+	}
+	if manifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("source manifest %s is nil", manifestPath)
+	}
+	defer C.loon_manifest_destroy(manifest)
+	groups, err := columnGroupEntriesFromC(&manifest.column_groups)
+	if err != nil {
+		// The shared decoder also handles writer output. At this boundary its
+		// shape errors describe corrupt persisted metadata, not a writer failure.
+		return nil, merr.WrapErrDataIntegrity(err, "decode column groups from manifest %s", manifestPath)
+	}
+
+	required := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		required[column] = struct{}{}
+	}
+	missing := make(map[string]struct{}, len(required))
+	for column := range required {
+		missing[column] = struct{}{}
+	}
+
+	var selected []ColumnGroupEntry
+	for index, group := range groups {
+		matched := false
+		hasUnexpectedColumn := false
+		for _, column := range group.Columns {
+			if _, ok := required[column]; ok {
+				matched = true
+				delete(missing, column)
+				continue
+			}
+			hasUnexpectedColumn = true
+		}
+		if !matched {
+			continue
+		}
+		if hasUnexpectedColumn {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"manifest %s mixes requested columns with unrelated columns in column group %d",
+				manifestPath,
+				index,
+			)
+		}
+		if len(group.Files) == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest %s column group %d has no files", manifestPath, index)
+		}
+		if group.Format == "" {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest %s column group %d has files but no format", manifestPath, index)
+		}
+		selected = append(selected, group)
+	}
+
+	if len(missing) > 0 {
+		missingColumns := make([]string, 0, len(missing))
+		for column := range missing {
+			missingColumns = append(missingColumns, column)
+		}
+		sort.Strings(missingColumns)
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s is missing columns %v",
+			manifestPath,
+			missingColumns,
+		)
+	}
+	return selected, nil
+}
+
+// MilvusTableRefreshResult contains the only manifest committed by a delete-only
+// refresh and its scheduling metadata. An error always returns an empty result.
+type MilvusTableRefreshResult struct {
+	ManifestPath  string
+	TextStatsLogs map[int64]*datapb.TextIndexStats
+	JSONKeyStats  map[int64]*datapb.JsonKeyStats
+}
+
+// RefreshMilvusTableManifest rebuilds source columns, the complete new delete
+// set, and retained target-local artifacts in one transaction. Callers must prove
+// that L1 rows/order and Function definitions are unchanged. deltaLogs contains
+// L0 overlays in real-PK mode, or ALL translated deletes in virtual-PK mode;
+// only real-PK mode additionally imports deletes from the source manifests.
+func RefreshMilvusTableManifest(
+	ctx context.Context,
+	oldManifestPath string,
+	columns []string,
+	fragments []Fragment,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	outputColumns []string,
+	deltaLogs []DeltaLogEntry,
+) (MilvusTableRefreshResult, error) {
+	basePath, _, err := UnmarshalManifestPath(oldManifestPath)
+	if err != nil {
+		return MilvusTableRefreshResult{}, merr.WrapErrDataIntegrity(err, "parse refresh manifest path")
+	}
+	if err := ctx.Err(); err != nil {
+		return MilvusTableRefreshResult{}, err
+	}
+	updates := &ManifestUpdates{DeltaLogs: deltaLogs}
+	if len(outputColumns) > 0 {
+		updates.ColumnGroups, err = readManifestColumnGroupEntries(oldManifestPath, storageConfig, outputColumns)
+		if err != nil {
+			return MilvusTableRefreshResult{}, err
+		}
+	}
+	stats, err := GetManifestStats(oldManifestPath, storageConfig)
+	if err != nil {
+		return MilvusTableRefreshResult{}, merr.Wrap(err, "read retained manifest stats")
+	}
+	keys := make([]string, 0, len(stats))
+	for key := range stats {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		stat := stats[key]
+		updates.Stats = append(updates.Stats, StatEntry{Key: key, Files: stat.Paths, Metadata: stat.Metadata})
+	}
+
+	// The source importer only replaces bloom-filter stats. All text/JSON entries
+	// in the final transaction are exactly the retained entries above, so their
+	// placeholders can be resolved before committing, without a fallible reread
+	// of the newly written manifest. Never copy the old SegmentInfo placeholders:
+	// they may already be missing even though the manifest contains usable stats.
+	textStats, jsonStats := resolveManifestStatsPlaceholders(oldManifestPath, stats)
+	manifestPath, err := createMilvusTableManifest(ctx, basePath, columns, fragments, storageConfig, extfs, updates)
+	if err != nil {
+		return MilvusTableRefreshResult{}, err
+	}
+	// TODO: Reconcile concurrent stats updates in a follow-up. OVERWRITE uses the
+	// dispatched snapshot; propagate BaseManifest to DataCoord, reject stale
+	// refresh results, and retry on version drift before publishing this result.
+	return MilvusTableRefreshResult{
+		ManifestPath:  manifestPath,
+		TextStatsLogs: textStats,
+		JSONKeyStats:  jsonStats,
+	}, nil
 }
 
 // ResolveManifestSingleWriterFormat returns the single-policy writer format
