@@ -1758,6 +1758,32 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 }
 
+// TestExpr_ArithTypeMismatchErrors asserts that modulo / bitwise type-mismatch
+// errors name the offending field and its declared type, so a caller does not
+// have to guess which field broke the expression.
+func TestExpr_ArithTypeMismatchErrors(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	cases := []struct {
+		expr      string
+		wantMsg   string
+		wantField string
+		wantType  string
+	}{
+		{`(FloatField & 4) == 4`, "bitwise operations can only apply on integer types", "FloatField", "FLOAT"},
+		{`(DoubleField | 2) == 3`, "bitwise operations can only apply on integer types", "DoubleField", "DOUBLE"},
+		{`(FloatField << 1) == 0`, "bitwise operations can only apply on integer types", "FloatField", "FLOAT"},
+		{`~DoubleField == 0`, "bitwise operations can only apply on integer types", "DoubleField", "DOUBLE"},
+		{`FloatField % 2 == 0`, "modulo can only apply on integer types", "FloatField", "FLOAT"},
+		{`DoubleField % 2 == 0`, "modulo can only apply on integer types", "DoubleField", "DOUBLE"},
+	}
+	for _, c := range cases {
+		_, err := ParseExpr(helper, c.expr, nil)
+		require.Error(t, err, c.expr)
+		assert.Contains(t, err.Error(), c.wantMsg, c.expr)
+		assert.Contains(t, err.Error(), fmt.Sprintf("but field '%s' is %s", c.wantField, c.wantType), c.expr)
+	}
+}
+
 // TestExpr_BitwiseArith asserts the generated plan structure for bitwise
 // operators, not merely that the expression parses. A bitwise op over a field
 // must fuse into a BinaryArithOpEvalRangeExpr carrying the matching ArithOpType,
