@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="legacy-architecture-title legacy-architecture-desc">
+<title id="legacy-architecture-title">Legacy scalar: assemble logical entries</title>
+<desc id="legacy-architecture-desc">Legacy objects reconstruct a single BinarySet, then numeric Sort restores heap state or writes a file before mapping it.</desc>
+<defs>
+<marker id="legacy-architecture-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="legacy-architecture-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="legacy-architecture-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Legacy scalar: assemble logical entries</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Numeric Sort example: separate stored objects A_0 and A_1 reconstruct entry A.</text>
+<path d="M 360 248 L 456 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<path d="M 776 248 L 872 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<path d="M 1032 320 L 1032 420" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<path d="M 872 476 L 776 476" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<path d="M 456 492 L 360 492" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<path d="M 920 564 L 920 600 Q 920 608 912 608 L 208 608 Q 200 608 200 600 L 200 564" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-architecture-arrow)"/>
+<g data-node="Legacy objects"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Legacy objects</text>
+<text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">A_0 / A_1 / SLICE_META</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Each object has format headers</text>
+</g>
+<g data-node="MemFileManagerImpl"><rect x="456" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">MemFileManagerImpl</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reuse inspected file metadata</text>
+<text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Validate slice counts and sizes</text>
+</g>
+<g data-node="LegacyIndexLoader"><rect x="872" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
+<text x="892" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LegacyIndexLoader</text>
+<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Budget / read / decode / place</text>
+<text x="892" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Offset placement into one entry</text>
+</g>
+<g data-node="Sort query state"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Sort query state</text>
+<text x="60" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Heap or read-only mapping</text>
+<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Restore offsets and validity</text>
+</g>
+<g data-node="LocalFileIOPool"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
+<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Legacy mmap: write assembled data</text>
+<text x="476" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Close before read-only mapping</text>
+</g>
+<g data-node="One BinarySet"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">One BinarySet</text>
+<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Preallocated final entry buffers</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">No extra copy of every slice</text>
+</g>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reads can finish out of order; each result fills its assigned offset in the entry.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Other scalar consumers reuse their existing parser; Tantivy/RTree use shared disk staging.</text>
+</g></svg>

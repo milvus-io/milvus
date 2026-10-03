@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="slice-concurrency-title slice-concurrency-desc">
+<title id="slice-concurrency-title">A slow first slice does not stop later reads</title>
+<desc id="slice-concurrency-desc">With two available task slots, a 40 MiB file is read in 16, 16 and 8 MiB slices; slice 1 finishes writing and releases its slot for slice 2 while slice 0 is still reading.</desc>
+<defs>
+<marker id="slice-concurrency-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="slice-concurrency-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="slice-concurrency-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A">A slow first slice does not stop later reads</text>
+<text x="40" y="88" font-size="16" fill="#566A80">40 MiB file; two shared task slots available and enough byte budget. Time flows downward.</text>
+<line x1="256" y1="176" x2="256" y2="604" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="640" y1="176" x2="640" y2="604" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="1024" y1="176" x2="1024" y2="604" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<g fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#slice-concurrency-arrow)">
+<path d="M 256 208 L 640 208"/>
+<path d="M 256 240 L 640 240"/>
+<path d="M 640 272 L 256 272" stroke-dasharray="4 4"/>
+<path d="M 256 304 L 1024 304"/>
+<path d="M 1024 336 L 256 336" stroke-dasharray="4 4"/>
+<path d="M 256 400 L 640 400" stroke="#397985" marker-end="url(#slice-concurrency-accent)"/>
+<path d="M 640 432 L 256 432" stroke-dasharray="4 4"/>
+<path d="M 256 464 L 1024 464"/>
+<path d="M 1024 496 L 256 496" stroke-dasharray="4 4"/>
+<path d="M 640 528 L 256 528" stroke-dasharray="4 4"/>
+<path d="M 256 560 L 1024 560"/>
+<path d="M 1024 592 L 256 592" stroke-dasharray="4 4"/>
+</g>
+<g data-node="Async worker">
+<rect x="152" y="112" width="208" height="64" rx="8" fill="#EFF7F5" stroke="#397985"/>
+<text x="256" y="138" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Async worker</text>
+<text x="256" y="160" font-size="12" fill="#566A80" text-anchor="middle">dispatch and resume tasks</text>
+</g>
+<g data-node="Storage backend">
+<rect x="536" y="112" width="208" height="64" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="640" y="138" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Storage backend</text>
+<text x="640" y="160" font-size="12" fill="#566A80" text-anchor="middle">overlapping remote reads</text>
+</g>
+<g data-node="LocalFileIOPool">
+<rect x="920" y="112" width="208" height="64" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="1024" y="138" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">LocalFileIOPool</text>
+<text x="1024" y="160" font-size="12" fill="#566A80" text-anchor="middle">writes at specified offsets</text>
+</g>
+<g fill="#FCFDFE">
+<rect x="368" y="180" width="160" height="20"/>
+<rect x="368" y="212" width="160" height="20"/>
+<rect x="368" y="244" width="160" height="20"/>
+<rect x="368" y="276" width="160" height="20"/>
+<rect x="752" y="308" width="160" height="20"/>
+<rect x="368" y="372" width="160" height="20"/>
+<rect x="368" y="404" width="160" height="20"/>
+<rect x="368" y="436" width="160" height="20"/>
+<rect x="752" y="468" width="160" height="20"/>
+<rect x="368" y="500" width="160" height="20"/>
+<rect x="368" y="532" width="160" height="20"/>
+<rect x="752" y="564" width="160" height="20"/>
+</g>
+<g font-size="16" fill="#566A80" text-anchor="middle">
+<text x="448" y="196">READ 0: 16 MiB</text>
+<text x="448" y="228">READ 1: 16 MiB</text>
+<text x="448" y="260">SLICE 1 READY</text>
+<text x="448" y="292">WRITE @16 MiB</text>
+<text x="832" y="324">WRITE 1 DONE</text>
+<text x="448" y="388" fill="#397985">READ 2: 8 MiB</text>
+<text x="448" y="420">SLICE 2 READY</text>
+<text x="448" y="452">WRITE @32 MiB</text>
+<text x="832" y="484">WRITE 2 DONE</text>
+<text x="448" y="516">SLICE 0 READY</text>
+<text x="448" y="548">WRITE @0 MiB</text>
+<text x="832" y="580">WRITE 0 DONE</text>
+</g>
+<rect x="76" y="344" width="360" height="28" rx="4" fill="#EFF7F5"/>
+<text x="256" y="363" font-size="14" fill="#25364A" text-anchor="middle">Release slice 1 budget; start slice 2</text>
+<text x="680" y="363" font-size="14" fill="#566A80">Slice 0 is still reading</text>
+<text x="40" y="628" font-size="16" fill="#25364A">All slices written: close the file, then deserialize the index on an async worker.</text>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80">Each task keeps its byte budget and slot until its write finishes. A waiting coroutine releases its worker.</text>
+<text x="40" y="700" font-size="16" fill="#566A80">Two available slots illustrate shared-budget limits; the per-load maximum remains eight tasks and 128 MiB.</text>
+</g></svg>
