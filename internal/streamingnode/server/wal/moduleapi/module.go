@@ -36,6 +36,15 @@ type VChannelWritePathRecoveryState struct {
 	PartitionIDs   []int64
 	Schema         *schemapb.CollectionSchema
 	SchemaTimeTick uint64
+	// SplitFenceTimeTick is T_switch when this vchannel is a shard split source
+	// that has been fenced, and zero otherwise. A fenced source stays NORMAL --
+	// it keeps observing DDL and draining its own data until adoption drops it
+	// -- so this field, not the vchannel state, is what rebuilds the write
+	// path's DoAppend gate after a restart.
+	SplitFenceTimeTick uint64
+	// SplitFenceTaskID is the split task that placed the fence, carried beside
+	// it so a re-sent fence can be told from a concurrent task's.
+	SplitFenceTaskID int64
 }
 
 type SegmentWritePathRecoveryState struct {

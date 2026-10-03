@@ -25,3 +25,14 @@ func RetiresVChannel(header *message.AlterCollectionMessageHeader, updates *mess
 	}
 	return !slices.Contains(updates.GetVirtualChannelNames(), vchannel)
 }
+
+// IsShardSplitRouting reports whether an AlterCollection carries a shard split
+// routing commit, from the HEADER alone.
+//
+// It exists so a caller can decide whether to decode the body at all:
+// RetiresVChannel needs the post-image's vchannel list, and decoding every
+// AlterCollection body to find out that it is not a routing commit would put a
+// decode (and a possible decrypt) on a path that never needed one.
+func IsShardSplitRouting(header *message.AlterCollectionMessageHeader) bool {
+	return slices.Contains(header.GetUpdateMask().GetPaths(), message.FieldMaskCollectionShardSplitRouting)
+}
