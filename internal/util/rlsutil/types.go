@@ -85,14 +85,6 @@ func NewArrayTagValue(values []TagValue) TagValue {
 	}
 }
 
-// ArrayValues returns a caller-owned copy of an array tag's elements.
-func (value TagValue) ArrayValues() []TagValue {
-	if value.arrayValue == nil {
-		return nil
-	}
-	return append([]TagValue(nil), value.arrayValue...)
-}
-
 // PrincipalTagsSize returns the bytes charged to the principal cache. Values
 // include their TagValue storage, and arrays include their backing elements, so
 // scalar representation growth and empty strings cannot bypass the cap.
@@ -146,15 +138,17 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 // TagsFromJSONWithLimit bounds the raw payload, object members, and array
 // elements while decoding untrusted requests.
 func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
-	if maxTags > 0 {
-		if err := validatePrincipalTagsJSONTransportSize(payload, maxTags); err != nil {
-			return nil, err
-		}
-	}
 	return tagsFromJSON(payload, maxTags)
 }
 
 func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
+	if err := validatePrincipalTagsJSONTransportSize(payload, maxTags); err != nil {
+		return nil, err
+	}
+	maxArrayElements := maxRLSArrayTagElements
+	if maxTags > 0 {
+		maxArrayElements = min(maxArrayElements, paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt())
+	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
 	token, err := decoder.Token()
@@ -188,11 +182,7 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 			}
 		}
 
-		maxArrayElements := 0
-		if maxTags > 0 {
-			maxArrayElements = paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt()
-		}
-		tagValue, err := decodeTagValue(decoder, key, maxArrayElements, true)
+		tagValue, err := decodeTagValue(decoder, key, maxArrayElements, true, maxTags > 0)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +207,7 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 	return tags, nil
 }
 
-func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, allowArray bool) (TagValue, error) {
+func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, allowArray, enforceWriteLimits bool) (TagValue, error) {
 	value, err := decoder.Token()
 	if err != nil {
 		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
@@ -254,7 +244,7 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 			if maxArrayElements > 0 && len(elements) >= maxArrayElements {
 				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
 			}
-			element, err := decodeTagValue(decoder, key, maxArrayElements, false)
+			element, err := decodeTagValue(decoder, key, maxArrayElements, false, enforceWriteLimits)
 			if err != nil {
 				return TagValue{}, err
 			}
@@ -262,7 +252,7 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 				(element.Kind == TagValueKindString || elements[0].Kind == TagValueKindString) {
 				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q array cannot mix strings and numbers", key)
 			}
-			if maxArrayElements > 0 {
+			if enforceWriteLimits {
 				if err := validateTagValue(key, element); err != nil {
 					return TagValue{}, err
 				}

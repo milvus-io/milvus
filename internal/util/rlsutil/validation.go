@@ -34,6 +34,9 @@ const (
 	// message and one metastore record while bounding JSON decoding and plan
 	// template expansion.
 	maxRLSPrincipalMetadataBytes int64 = 1 << 20
+	// One array must fit the existing materialized-tag budget even before
+	// string payloads. This structural ceiling is not a refreshable quota.
+	maxRLSArrayTagElements = int(maxRLSPrincipalMetadataBytes/tagValueRetainedSize) - 1
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -212,7 +215,10 @@ func ValidatePrincipalName(principalName string) error {
 }
 
 func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
-	maxPayloadBytes := min(maxPrincipalTagsJSONLength(maxTags), maxRLSPrincipalMetadataBytes)
+	maxPayloadBytes := maxRLSPrincipalMetadataBytes
+	if maxTags > 0 {
+		maxPayloadBytes = min(maxPrincipalTagsJSONLength(maxTags), maxPayloadBytes)
+	}
 	if int64(len(payload)) > maxPayloadBytes {
 		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
 			"RLS principal tags JSON exceeds transport max length %d",
@@ -341,7 +347,7 @@ func validateTagValue(key string, value TagValue) error {
 		if value.arrayValue == nil {
 			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
 		}
-		maxElements := paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt()
+		maxElements := min(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt(), maxRLSArrayTagElements)
 		if len(value.arrayValue) > maxElements {
 			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxElements)
 		}

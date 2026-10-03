@@ -160,6 +160,22 @@ func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
 }
 
+func TestArrayTagTemplateNormalizationPreservesSnapshot(t *testing.T) {
+	tag := NewArrayTagValue([]TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)})
+	value, ok := rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Int64}, true, tag)
+	require.True(t, ok)
+	require.True(t, value.GetArrayVal().GetSameType())
+	require.Len(t, value.GetArrayVal().GetArray(), 2)
+	require.Equal(t, planparserv2.NewInt(1), value.GetArrayVal().GetArray()[0])
+	require.Equal(t, planparserv2.NewInt(2), value.GetArrayVal().GetArray()[1])
+	require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, tag.arrayValue)
+
+	value, ok = rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Double}, true, tag)
+	require.True(t, ok)
+	require.Equal(t, planparserv2.NewFloat(1), value.GetArrayVal().GetArray()[0])
+	require.Equal(t, planparserv2.NewFloat(2), value.GetArrayVal().GetArray()[1])
+}
+
 func TestNestedNotIsRejected(t *testing.T) {
 	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
 		FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64,

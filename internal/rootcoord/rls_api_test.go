@@ -131,7 +131,9 @@ func TestSetRLSPrincipalTagsRequestFromProto(t *testing.T) {
 		PrincipalName: "alice", Tags: `{"groups":[1,2.5]}`,
 	})
 	require.NoError(t, err)
-	require.Equal(t, []rlsutil.TagValue{rlsutil.NewDoubleTagValue(1), rlsutil.NewDoubleTagValue(2.5)}, req.GetTags()["groups"].ArrayValues())
+	encoded, err := rlsutil.TagsToJSON(req.GetTags())
+	require.NoError(t, err)
+	require.Equal(t, `{"groups":[1.0,2.5]}`, encoded)
 
 	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",

@@ -18,6 +18,7 @@ package rlsutil
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -293,13 +294,11 @@ func TestValidatePayloadBounds(t *testing.T) {
 		source := []TagValue{NewStringTagValue("original")}
 		arrayTag := NewArrayTagValue(source)
 		source[0] = NewStringTagValue("mutated")
-		returned := arrayTag.ArrayValues()
-		returned[0] = NewStringTagValue("also-mutated")
-		require.Equal(t, []TagValue{NewStringTagValue("original")}, arrayTag.ArrayValues())
+		require.Equal(t, []TagValue{NewStringTagValue("original")}, arrayTag.arrayValue)
 
 		numbers := []TagValue{NewInt64TagValue(1), NewDoubleTagValue(2)}
 		arrayTag = NewArrayTagValue(numbers)
-		require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, arrayTag.ArrayValues())
+		require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, arrayTag.arrayValue)
 		require.Equal(t, NewInt64TagValue(1), numbers[0])
 	})
 
@@ -377,4 +376,47 @@ func TestArrayTagElementTypes(t *testing.T) {
 			require.Equal(t, tags, roundTrip)
 		})
 	}
+}
+
+func TestStoredArrayTagStructuralBounds(t *testing.T) {
+	paramtable.Init()
+	limit := &paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements
+	previous := limit.SwapTempValue("1")
+	defer limit.SwapTempValue(previous)
+
+	// Refreshable admission limits must not make existing metadata unreadable.
+	stored, err := TagsFromJSON(`{"groups":[1,2]}`)
+	require.NoError(t, err)
+	require.Len(t, stored["groups"].arrayValue, 2)
+	_, err = TagsFromJSONWithLimit(`{"groups":[1,2]}`, 1)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	stringLimit := &paramtable.Get().ProxyCfg.RLSMaxTagValueLength
+	previousStringLimit := stringLimit.SwapTempValue("1")
+	defer stringLimit.SwapTempValue(previousStringLimit)
+	stored, err = TagsFromJSON(`{"groups":["existing"]}`)
+	require.NoError(t, err)
+	require.Equal(t, "existing", stored["groups"].arrayValue[0].StringValue)
+	_, err = TagsFromJSONWithLimit(`{"groups":["existing"]}`, 1)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	// Fixed bounds still apply before a compact JSON array expands in memory.
+	limit.SwapTempValue(strconv.Itoa(maxRLSArrayTagElements + 1))
+	payload := `{"groups":[` + strings.Repeat("0,", maxRLSArrayTagElements-1) + `0]}`
+	_, err = TagsFromJSON(payload)
+	require.NoError(t, err)
+	payload = `{"groups":[` + strings.Repeat("0,", maxRLSArrayTagElements) + `0]}`
+	_, err = TagsFromJSON(payload)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	_, err = TagsFromJSONWithLimit(payload, 1)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	tooMany := make([]TagValue, maxRLSArrayTagElements+1)
+	for i := range tooMany {
+		tooMany[i] = NewInt64TagValue(0)
+	}
+	require.ErrorIs(t, ValidateTags(map[string]TagValue{"groups": NewArrayTagValue(tooMany)}), merr.ErrParameterInvalid)
+
+	_, err = TagsFromJSON(`{}` + strings.Repeat(" ", int(maxRLSPrincipalMetadataBytes)-2))
+	require.NoError(t, err)
+	_, err = TagsFromJSON(`{}` + strings.Repeat(" ", int(maxRLSPrincipalMetadataBytes)-1))
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }

@@ -256,6 +256,14 @@ recovery validation remains follow-up work.
 RLS-bearing HybridSearch subplans share the existing request-wide
 `proxy.maxMembershipFilterPlanSize` serialized-plan budget.
 
+Fixed safety bounds take precedence over the configurable tag quotas: raw tag
+JSON, including whitespace, must fit within 1 MiB, and a principal name plus
+its complete canonical tag JSON must also fit within 1 MiB after incremental
+updates. Stored-record decoding retains the fixed byte and array-structure
+bounds without reapplying lowered creation quotas. An array's element storage
+and the aggregate materialized template values for one predicate each have a
+1 MiB budget; string payloads also count toward template materialization.
+
 ## Compatibility And Rollout
 
 There is no previously released RLS metadata to migrate. RLS may be enabled

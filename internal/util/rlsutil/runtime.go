@@ -468,7 +468,7 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 	// A policy is a single predicate, so validation guarantees at most one tag
 	// variable. Validate and charge it before allocating or cloning an expression.
 	var normalizedVariable string
-	var normalizedTagValue TagValue
+	var normalizedTagValue *planpb.GenericValue
 	var sourceTagValue TagValue
 	materializedBytes := int64(0)
 	if e.needsPrincipal {
@@ -498,7 +498,7 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 	}
 	if normalizedVariable != "" {
 		var ok bool
-		normalizedTagValue, ok = normalizeRLSTagValue(
+		normalizedTagValue, ok = rlsTagValueToGenericValue(
 			e.tagVariableDataTypes[normalizedVariable],
 			e.tagVariableArrays[normalizedVariable],
 			sourceTagValue,
@@ -513,7 +513,7 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 		values[funcutil.RLSPrincipalTemplateName] = planparserv2.NewString(principalName)
 	}
 	if normalizedVariable != "" {
-		values[normalizedVariable] = rlsTagValueToGenericValue(normalizedTagValue)
+		values[normalizedVariable] = normalizedTagValue
 	}
 
 	expr := proto.Clone(e.expr).(*planpb.Expr)
@@ -523,32 +523,43 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 	return expr, nil
 }
 
-func rlsTagValueToGenericValue(value TagValue) *planpb.GenericValue {
-	switch value.Kind {
-	case TagValueKindString:
-		return planparserv2.NewString(value.StringValue)
-	case TagValueKindInt64:
-		return planparserv2.NewInt(value.Int64Value)
-	case TagValueKindDouble:
-		return planparserv2.NewFloat(value.DoubleValue)
-	case TagValueKindArray:
-		if value.arrayValue == nil {
-			return nil
+// rlsTagValueToGenericValue normalizes directly into the final template value.
+// The immutable tag snapshot is never copied into an intermediate TagValue slice.
+func rlsTagValueToGenericValue(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (*planpb.GenericValue, bool) {
+	if len(dataTypes) == 0 {
+		return nil, false
+	}
+	if expectsArray {
+		if value.Kind != TagValueKindArray || value.arrayValue == nil {
+			return nil, false
 		}
 		elements := make([]*planpb.GenericValue, len(value.arrayValue))
 		for i, element := range value.arrayValue {
-			elements[i] = rlsTagValueToGenericValue(element)
-			if elements[i] == nil || element.Kind == TagValueKindArray {
-				return nil
+			var ok bool
+			elements[i], ok = rlsTagValueToGenericValue(dataTypes, false, element)
+			if !ok {
+				return nil, false
 			}
 		}
 		return &planpb.GenericValue{
 			Val: &planpb.GenericValue_ArrayVal{
 				ArrayVal: &planpb.Array{Array: elements, SameType: true},
 			},
-		}
+		}, true
+	}
+	normalized, ok := normalizeRLSScalarTagValue(dataTypes, value)
+	if !ok {
+		return nil, false
+	}
+	switch normalized.Kind {
+	case TagValueKindString:
+		return planparserv2.NewString(normalized.StringValue), true
+	case TagValueKindInt64:
+		return planparserv2.NewInt(normalized.Int64Value), true
+	case TagValueKindDouble:
+		return planparserv2.NewFloat(normalized.DoubleValue), true
 	default:
-		return nil
+		return nil, false
 	}
 }
 
@@ -562,31 +573,6 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 		return columnInfo.GetElementType()
 	}
 	return dataType
-}
-
-// normalizeRLSTagValue chooses a representation that can be safely consumed by
-// every occurrence of a tag variable in an expression. Numeric conversions are
-// allowed only when they preserve the value exactly; otherwise the policy is
-// treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (TagValue, bool) {
-	if len(dataTypes) == 0 {
-		return TagValue{}, false
-	}
-	if expectsArray {
-		if value.Kind != TagValueKindArray || value.arrayValue == nil {
-			return TagValue{}, false
-		}
-		elements := make([]TagValue, len(value.arrayValue))
-		for i, element := range value.arrayValue {
-			var ok bool
-			elements[i], ok = normalizeRLSScalarTagValue(dataTypes, element)
-			if !ok {
-				return TagValue{}, false
-			}
-		}
-		return TagValue{Kind: TagValueKindArray, arrayValue: elements}, true
-	}
-	return normalizeRLSScalarTagValue(dataTypes, value)
 }
 
 func normalizedRLSTagValueSize(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (int64, bool) {
@@ -615,6 +601,8 @@ func normalizedRLSTagValueSize(dataTypes []schemapb.DataType, expectsArray bool,
 	return size, true
 }
 
+// Numeric conversions must preserve the value exactly; incompatible or lossy
+// bindings make the entire policy non-matching, even under NOT.
 func normalizeRLSScalarTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
 	if value.Kind == TagValueKindArray {
 		return TagValue{}, false
