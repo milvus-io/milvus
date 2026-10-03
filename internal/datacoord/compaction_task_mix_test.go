@@ -71,6 +71,42 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 	s.ElementsMatch([]int64{200, 201}, segIDs)
 }
 
+// A shard split rewrite plan carries the targets and the modulus their
+// residues are taken against; the datanode routes every row by both.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitRouting() {
+	targets := []*datapb.SplitShardTaskTarget{
+		{Vchannel: "t0", Buckets: []uint64{0}},
+		{Vchannel: "t1", Buckets: []uint64{1}},
+	}
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:            200,
+		Level:         datapb.SegmentLevel_L1,
+		InsertChannel: "src",
+		State:         commonpb.SegmentState_Flushed,
+	}}).Once()
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          "src",
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: targets,
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Equal(datapb.CompactionType_HashSplitCompaction, plan.GetType())
+	s.Equal("src", plan.GetChannel(), "the plan runs on the source, where its input lives")
+	s.Len(plan.GetHashSplitTargets(), 2)
+	s.EqualValues(2, plan.GetHashSplitModulus())
+}
+
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {
 	channel := "Ch-1"
 	binLogs := []*datapb.FieldBinlog{getFieldBinlogIDs(101, 3)}
