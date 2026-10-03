@@ -1435,36 +1435,82 @@ children read their full views.
         that sort through (§8.2) -- by the periodic sort trigger, which is
         capped per collection per tick, so a large batch is indexed over
         several ticks.
-   6. **Source L0 retire.** In a redistribution round, the split manager
-      retires a source's L0 segments (marks them `Dropped`) only once **both**
-      of these hold:
-      - no non-`Dropped` non-L0 data remains on that source
-        (`unfoldedSourceData`): every input has then folded them. A published
-        `Growing` or `Sealed` segment counts as such data, so the retire waits
-        for it;
-      - no import job that is neither `Completed` nor `Failed` names any
-        vchannel of the split's family
-        (`importMayPublishLevelZero`, the same predicate the drain's import
-        conjunct applies). An import task that carries delete data and no
-        insert data is written at level `L0`
-        (`internal/datanode/importv2/util.go`) and reaches DataCoord as
-        `SaveBinlogPaths{SegLevel: L0}` → `CreateL0Operator`, stored `Flushed`
-        with `IsImporting` unset -- afterwards indistinguishable from an L0
-        the WAL materialized. An import already in flight when the split
-        started passes both import refusals (§8.10) by construction, so it can
-        still publish a **new** L0 on the family after the rewrite has stopped
-        folding; that L0 has folded nothing, and retiring the set while it can
-        appear would discard deletes that never reached the rows the rewrite
-        has already moved to the targets. The guard is the family, not just
-        the source, because the job names a family vchannel and nothing else
-        can name a target during the window anyway. It cannot be the drain
-        predicate instead: the drain counts the source's L0s as live
-        segments, so gating the retire on the drain would have the retire wait
-        for the drain while the drain waits for the retire. The **dispatch** is
-        deliberately not held -- a plan carries the source's L0s and folds
-        them, so rewriting on is safe; only discarding them is not.
+   6. **Source L0 retire.** Two separate questions, answered by two
+      independent mechanisms: **when** the retire may run, and **which** L0s
+      it may ever drop.
 
-      They are never retired earlier, and the retirement is its
+      **When** -- both of these must hold:
+      - no non-`Dropped` non-L0 data remains on that source
+        (`unfoldedSourceData`): every input has then folded the L0s. A
+        published `Growing` or `Sealed` segment counts as such data, so the
+        retire waits for it;
+      - no import job that is neither `Completed` nor `Failed` names any
+        vchannel of the split's family (`importMayPublishLevelZero`, the same
+        predicate the drain's import conjunct applies). The guard is the
+        family, not just the source, because the job names a family vchannel
+        and nothing else can name a target during the window anyway. It cannot
+        be the drain predicate instead: the drain counts the source's L0s as
+        live segments, so gating the retire on the drain would have the retire
+        wait for the drain while the drain waits for the retire. The
+        **dispatch** is deliberately not held -- a plan carries the source's
+        L0s and folds them, so rewriting on is safe; only discarding them is
+        not.
+
+      **Which** -- only the L0s the fence declared final. The set is
+      snapshotted **once** per source, the first time the fence conjunct of
+      step 3 clears for it, and persisted on the task record
+      (`recordFencedLevelZeroSegments` →
+      `SplitShardTaskSource.fenced_level_zero`, a wrapper message rather than
+      a bare list so that *recorded, and the source had no L0* is
+      distinguishable from *not recorded yet*; a second snapshot would capture
+      the very L0 nothing folded). **Nothing of the task is dispatched until
+      that record is durable**, because a plan built first could be built
+      against a set the record does not cover, and the record would then prove
+      something that did not happen. A failed write just retries next round,
+      and since nothing was dispatched a later snapshot is still sound. The
+      retire then drops `live ∩ recorded` and nothing else; anything live and
+      unrecorded stays live, with a rated `Warn` naming the held ids and the
+      recorded set.
+
+      *Why the record is a proof.* Every plan re-reads the source's L0s at
+      plan-**build** time (step 2.3), so a plan built after the record carries
+      at least the recorded set, and the retire only runs once every input has
+      been rewritten by such a plan. The partition scoping does not weaken it:
+      a plan carries the L0s of its input's partition (or `AllPartitions`), an
+      L0 of partition P is folded by every plan of P, and all of P's inputs
+      must be gone before the retire runs. An L0 of a partition that never had
+      an input is dropped unfolded, but its deletes can only target rows that
+      are not on the source and are older than anything written to a target
+      after the fence.
+
+      *Why the import guard alone was not enough, and why nothing cheaper
+      works.* The import ordering is sound -- a job reaches `Completed`
+      strictly after every L0 it produced is in DataCoord's meta, `Flushed`
+      and visible, and a `Failed` job's segments were never visible and never
+      can be -- so the guard releases **exactly** when such an L0 has landed,
+      and a live scan would drop it on the next round. It cannot be recognised
+      at that point either: an L0 import's `StartPosition` comes from the
+      imported data's own delete timestamps, so a user's file can carry
+      timestamps **below** `T_switch` and no fence-tick comparison can
+      discriminate; and provenance does not survive the commit (the segment is
+      `Flushed` with `IsImporting` cleared, and the only residue is a
+      `LastExpireTime` sentinel that nothing documents as provenance and that
+      the expire rewrite can overwrite). Hence a recorded set rather than a
+      test at retire time.
+
+      *Why such an L0 is not folded instead.* There is no cheap way to: a
+      rewrite plan takes **exactly one data segment** as its input
+      (`preCompact` refuses otherwise) and by this point the source has none
+      left to pair it with; re-publishing the same deltalog objects as an L0
+      per target would alias one binlog path from two segments, which the
+      garbage collector assumes is singly owned; and copying the deltalogs per
+      target is a data-moving job, i.e. a new task type. So the implemented
+      behaviour is a **loud stall**: the held L0 keeps
+      `liveSegmentBlockReason` true, the drain never holds, and the split sits
+      in `Redistributing` with that Warn instead of silently dropping deletes.
+      It has no operator exit (§11).
+
+      L0s are never retired earlier than this, and the retirement is its
       own write after the last commit: a crash in between leaves the deletes
       applied twice, harmlessly, and the next round retires them.
    7. **Delete checkpoint.** While its task is not Done or Aborted, a split
@@ -1511,8 +1557,10 @@ children read their full views.
 
       That is strictly stronger than the pre-#53595 argument, which rested on
       the flusher closing the source's data sync service at the fence. What it
-      does **not** cover is the second L0 producer, a delete-only import task;
-      step 2.6's second conjunct is what covers that. Steps 1, 2 and 4 are
+      does **not** cover is the second L0 producer, a delete-only import task,
+      which bypasses the WAL entirely: that is why the retire has both an
+      import guard and a recorded set, and why an L0 outside the set stalls
+      the split rather than being dropped (step 2.6). Steps 1, 2 and 4 are
       traced by reading the WAL code, not by fault injection (§12).
    10. The drain predicate below is unchanged. Rewrite satisfies it through 4
        and 6: a rewritten input and a retired L0 are `Dropped`.
@@ -1570,7 +1618,10 @@ children read their full views.
    registered no segment yet and is invisible to the segment scan (§8.10).
 
    A source L0 segment is a non-`Dropped` segment like any other, so it holds
-   the drain until the split manager retires it (step 2.6).
+   the drain until the split manager retires it (step 2.6) -- and an L0 the
+   fence did not declare final is never retired, so it holds the drain for
+   good. The first time this conjunct clears for a source is also when that
+   final set is recorded (step 2.6).
 
    **Flush, truncate and snapshot during the window.** A fenced source's
    checkpoint no longer freezes, so **none of the exceptions the pre-#53595
@@ -2357,11 +2408,16 @@ fence landed on.
     - **A delete-bearing import can produce a source L0.** Both refusals judge
       a *new* import against the collection's current shards, so an import
       that already existed when the split started passes them, and an import
-      task with delete data and no insert data is written at level `L0`. The
-      rewrite's L0 retire therefore has its own conjunct: while such a job is
-      in flight on any vchannel of the family, the source's L0s are not
-      retired (§6.3 step 2.6). It costs nothing in liveness, since the drain
-      is waiting for that import anyway.
+      task with delete data and no insert data is written at level `L0` --
+      which reaches DataCoord through the `QueryImport` reply, not through
+      `SaveBinlogPaths`, and is afterwards indistinguishable from an L0 the
+      WAL materialized. The rewrite's L0 retire therefore has two defences
+      (§6.3 step 2.6): it does not run while such a job is in flight on any
+      vchannel of the family, which costs nothing in liveness because the
+      drain is waiting for that import anyway; and it may only ever drop the
+      L0 set the fence declared final and recorded, so an L0 that arrives
+      afterwards is held, nothing folds it, and the split stalls instead of
+      losing its deletes.
 11. **Collection-keyed messages addressed to a vchannel this pchannel does not hold.** The
     registration map is keyed by collection id, and the fence frees the source's
     slot. A replica can therefore reach a pchannel that no longer holds its
@@ -2631,6 +2687,16 @@ unless it says so.
   its input. An input larger than the maximum segment size does not fail:
   once the one id is spent, the DataNode keeps writing the current segment, so
   the plan produces one oversized output per target (§6.3 step 2.2).
+- **An L0 the fence did not declare final stalls the split, and there is no
+  operator exit.** Only an import in flight when the split fenced can produce
+  one (§8.10). Nothing folds it, the retire may not drop it, so it holds
+  `liveSegmentBlockReason` and the task stays in `Redistributing` for good,
+  with a rated Warn naming the held ids as the only signal. Past the fence a
+  split cannot abort, so there is **no supported way out**: an operator can
+  only abandon the task by hand or deal with the segment manually, and neither
+  is a procedure anyone has written down. This needs a runbook line -- and
+  preferably a metric or alert on the Warn -- before the feature is enabled
+  anywhere real (§6.3 step 2.6, follow-ups below).
 - **The drain is coupled to the source's pchannel neighbours, and nothing
   meters it.** The checkpoint conjunct reads the pchannel's global recovery
   point, so another collection's vchannel on the same pchannel that cannot
@@ -2796,16 +2862,31 @@ Other follow-ups:
   point of view, so a stale publisher could still be accepted onto a shard
   nobody serves. The drain makes the ordering safe in theory; it has not been
   exercised under a real fence.
-- **A delete-bearing import that straddles a split** is handled, on the
-  retire guard, and the rule is worth repeating because it is the one place
-  the two subsystems meet: *while an import job that is neither `Completed`
-  nor `Failed` names any vchannel of the split's family, the source's L0
-  segments are not retired* (§6.3 step 2.6, §8.10). It cannot be expressed in
-  the drain predicate instead -- that would deadlock, since the drain counts
-  those very L0s -- and the dispatch is deliberately not held. What remains
-  open is the cheaper alternative nobody took: refusing to *start* a split on
-  a channel with an import in flight, which would close the case at the
-  trigger instead of in the rewrite.
+- **A delete-bearing import that straddles a split** is handled on the retire
+  guard, in two independent halves, and the rule is worth repeating because it
+  is the one place the two subsystems meet (§6.3 step 2.6, §8.10):
+  *the retire does not run while an import job that is neither `Completed` nor
+  `Failed` names any vchannel of the family* (when), and *it may only ever
+  drop the L0 set the fence declared final, snapshotted once when the fence
+  conjunct first cleared and persisted on the task record* (which). Neither
+  can be expressed in the drain predicate -- that would deadlock, since the
+  drain counts those very L0s -- and the dispatch is held only until the
+  record is durable.
+
+  Three things remain open:
+  - **the stall has no operator exit.** Once an L0 cannot be proven folded,
+    the only ways out are aborting the split (which the state machine does not
+    allow past the fence) or handling the segment by hand. **This needs a
+    runbook line before the feature is enabled anywhere real**, and ideally a
+    metric or an alert on the Warn, which today is the only signal;
+  - **folding such an L0 is not implemented**, and none of the cheap shapes
+    works (one data segment per plan; aliasing deltalog objects across targets
+    against the GC's single-ownership assumption; copying deltalogs per target
+    is a data-moving job). Doing it properly is a new task type;
+  - **the cheaper prevention nobody took**: refusing to *start* a split on a
+    channel with an import in flight would close the case at the trigger
+    instead of in the rewrite, at the price of a split that cannot be planned
+    while a long import runs.
 - **Nothing calls `IntoPoisoned()` on a source replica.** Upstream gives a
   local consumer a first-class way to say "this message's local work failed"
   (`OwnedImmutableMessage.IntoPoisoned`), and the broadcast ack never fires
@@ -2889,7 +2970,8 @@ Wire changes:
   and the DataCoord split RPCs, whose
   `CheckShardSplitDrainedResponse` carries `recorded` (3), `source_vchannels`
   (4) and `target_vchannels` (5). Streaming code 19 is reserved. The split
-  task record (`datapb.SplitShardTask`, with `pending_segments` (3) on its
+  task record (`datapb.SplitShardTask`, with `pending_segments` (3) and
+  `fenced_level_zero` (4, carrying the new `SplitShardFencedLevelZero`) on its
   source, `end_time` (9), `fail_reason` (10), `dispatched_plan_ids` (11)),
   `CompactionType.HashSplitCompaction` (13), and the rewrite's
   `hash_split_targets` / `hash_split_modulus` on the compaction task and plan
@@ -2897,6 +2979,12 @@ Wire changes:
   (15) and `ChannelTarget.split_target_channels` (7). A QueryCoord without the
   latter loses the signal across its restart, and a QueryNode recovers a
   split source's children only from the former (§6.2, recovery).
+  `SplitShardTaskSource.fenced_level_zero` is worth one note for whoever
+  rebases these layers: the message is declared by the write-switch layer and
+  the field is taken by the rewrite layer, 4 was free on both the write-switch
+  and the orchestration line when it was taken (1 `vchannel`,
+  2 `switch_time_tick`, 3 `pending_segments`), and if either of them claims 4
+  first that is the one number to resolve.
 - `etcd_meta.proto`'s `shard_infos` moved from a local `CollectionShardInfo`
   to `schemapb.CollectionShardInfo`, whose field 1 is the same
   `last_truncate_time_tick` varint, so persisted bytes stay compatible.
@@ -2978,7 +3066,9 @@ which writes to `/files`, and which the stack does not touch but whose
 pre-existence was argued from the diff rather than from a baseline run.
 
 The rewrite layer's new behaviour is pinned by tests written
-RED first, including the L0-2 gate and the import conjunct; the fence's
+RED first, including the L0-2 gate, the import guard and the fence-declared L0
+record (each of the last two was watched failing on the data loss it prevents
+before the fix existed); the fence's
 pending-partition-drop hole (§7) was found by audit and fixed with a test that
 was confirmed to fail without the fix.
 
@@ -3002,6 +3092,11 @@ was confirmed to fail without the fix.
   fence and the adoption, a poisoned source replica, a secondary's append
   gate under load, a pchannel handover mid-window, and the pchannel-neighbour
   drain stall are all unexercised.
+- **No import has been run across a split.** The ordering proof behind the
+  retire's two guards (§6.3 step 2.6) is a read of the import path, and the
+  stall it produces -- an L0 outside the recorded set -- has only been
+  constructed in unit tests, never by a real import landing on a fenced
+  source.
 - **The mocks are hand-edited, not regenerated.** `make generate-mockery`
   cannot run on the toolchain used (the vendored mockery refuses
   `pkg/proto/streamingpb/extends.go`), so a drift check in CI is the first
