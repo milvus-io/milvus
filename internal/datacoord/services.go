@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -1920,6 +1921,16 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
 		info.CreatedAt = existing.CreatedAt
 		oldSchema = existing.Schema
+		// A shard split and its adoption change the vchannel list while the
+		// collection lives, and rootcoord announces the new list only through
+		// this broadcast; every datacoord reader of the cached list -- the
+		// split trigger, flush, import, force merge -- takes it from here.
+		if !slices.Equal(info.VChannelNames, existing.VChannelNames) {
+			mlog.Info(ctx, "the altered collection changes its vchannels",
+				mlog.FieldCollectionID(req.GetCollectionID()),
+				mlog.Strings("oldVChannels", existing.VChannelNames),
+				mlog.Strings("newVChannels", info.VChannelNames))
+		}
 		// A vchannel the collection stops listing without being dropped -- a
 		// shard split's retired source -- stops reporting its checkpoint, so
 		// its gauge would otherwise stay frozen at the retire forever.
