@@ -47,7 +47,11 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
-		acker, err = ackManager.AllocateForAppend(ctx, msg.BarrierTimeTick())
+		if msg.MessageType().IsFreshTimeTick() {
+			acker, err = ackManager.AllocateFreshForAppend(ctx)
+		} else {
+			acker, err = ackManager.AllocateForAppend(ctx, msg.BarrierTimeTick())
+		}
 		if err != nil {
 			return nil, merr.Wrap(err, "allocate timestamp failed")
 		}
