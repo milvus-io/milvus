@@ -122,6 +122,7 @@ type ComponentParam struct {
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	QueryViewCfg   queryViewConfig
 	FunctionCfg    functionConfig
 	CredentialCfg  credentialConfig
 
@@ -177,6 +178,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -8973,6 +8975,47 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
+type queryViewConfig struct {
+	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
+	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
+	LeaseDuration                      ParamItem `refreshable:"false"`
+}
+
+func (p *queryViewConfig) init(base *BaseTable) {
+	p.IDFLazyLoadSealedStats = ParamItem{
+		Key:          "queryView.idfOracle.lazyLoadSealedStats",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "false",
+		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
+	}
+	p.IDFLazyLoadSealedStats.Init(base.mgr)
+
+	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
+		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "4",
+		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
+		Formatter: func(v string) string {
+			if getAsFloat(v) <= 0 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
+
+	p.LeaseDuration = ParamItem{
+		Key:          "queryView.leaseDuration",
+		Version:      "3.1.0",
+		DefaultValue: "60s",
+		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
+		Export:       true,
+	}
+	p.LeaseDuration.Init(base.mgr)
+}
+
 type streamingConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkSN ParamItem `refreshable:"true"`
@@ -9042,7 +9085,8 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// summary store retention
-	SummaryMaxBytesPerPChannel ParamItem `refreshable:"true"`
+	SummaryMaxBytesPerPChannel   ParamItem `refreshable:"true"`
+	SummaryCacheBytesPerPChannel ParamItem `refreshable:"false"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
@@ -9495,6 +9539,15 @@ materialization frontiers.`,
 		Export:       false,
 	}
 	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+
+	p.SummaryCacheBytesPerPChannel = ParamItem{
+		Key:          "streaming.summary.cacheBytesPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "64MB",
+		Doc:          "Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.SummaryCacheBytesPerPChannel.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

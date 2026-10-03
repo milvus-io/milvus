@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -41,6 +42,7 @@ func newVChannelView(
 ) *VChannelView {
 	return &VChannelView{
 		meta:                          meta,
+		persistedSegmentDataVersion:   qviews.FromProtoDataVersion(meta.GetSegmentDataVersionSummary()),
 		persistedMetaTimeTick:         persistedMetaTimeTick,
 		persistedMaterializedTimeTick: meta.GetTransformMaterializedTimeTick(),
 		dirty:                         dirty,
@@ -79,7 +81,8 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 
 // VChannelView tracks the metadata and durability state of a vchannel.
 type VChannelView struct {
-	mu sync.Mutex
+	persistedSegmentDataVersion qviews.DataVersion
+	mu                          sync.Mutex
 
 	meta                             *streamingpb.VChannelMeta
 	pendingDrops                     []pendingDrop
@@ -185,6 +188,9 @@ func (info *VChannelView) MarkSnapshotPersisted(snapshot *streamingpb.VChannelMe
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
+	if version := qviews.FromProtoDataVersion(snapshot.GetSegmentDataVersionSummary()); version.GT(info.persistedSegmentDataVersion) {
+		info.persistedSegmentDataVersion = version
+	}
 	if materialized := snapshot.GetTransformMaterializedTimeTick(); materialized > info.persistedMaterializedTimeTick {
 		info.persistedMaterializedTimeTick = materialized
 	}
@@ -677,4 +683,27 @@ func partitionTombstonedCleanupReady(meta *streamingpb.PartitionInfoOfVChannel, 
 	return meta.GetState() == streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED &&
 		checkpointTimeTick > 0 &&
 		physicalTimeTick > checkpointTimeTick
+}
+
+func (info *VChannelView) SegmentDataVersionSummary() qviews.DataVersion {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return qviews.FromProtoDataVersion(info.meta.GetSegmentDataVersionSummary())
+}
+
+func (info *VChannelView) AdvanceSegmentDataVersionSummary(version qviews.DataVersion) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if !version.GT(qviews.FromProtoDataVersion(info.meta.GetSegmentDataVersionSummary())) {
+		return false
+	}
+	info.meta.SegmentDataVersionSummary = version.IntoProto()
+	info.dirty = true
+	return true
+}
+
+func (info *VChannelView) SegmentDataVersionSummaryPersisted(version qviews.DataVersion) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.persistedSegmentDataVersion.GTE(version)
 }

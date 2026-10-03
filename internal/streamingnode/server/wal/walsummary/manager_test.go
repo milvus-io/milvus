@@ -702,7 +702,9 @@ func writeIdempotencyChunk(
 	}))
 	require.NoError(t, err)
 	manager.mu.Lock()
-	recordChunk(manager.manifest, chunkIndexEntryFromFooter(footer, objectSize))
+	index := chunkIndexEntryFromFooter(footer, objectSize)
+	recordChunk(manager.manifest, index)
+	manager.chunkIndex.chunks = append(manager.chunkIndex.chunks, manager.chunkIndex.newChunk(index, nil))
 	manager.mu.Unlock()
 }
 

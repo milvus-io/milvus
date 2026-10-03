@@ -15,7 +15,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -91,6 +93,8 @@ func adaptImplsToRWWAL(
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
+	queryViewHandler    *snview.SNQueryViewHandler
+	viewResourceManager *vchannel.PChannelRecoveryManager
 	*roWALAdaptorImpl
 
 	rwWALImpls             walimpls.WALImpls
@@ -441,6 +445,9 @@ func (w *walAdaptorImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
+	if w.queryViewHandler != nil {
+		w.queryViewHandler.CloseForHandoff()
+	}
 
 	// close the recovery-owned persistence path.
 	w.Logger().Info(context.TODO(), "wal begin to close recovery storage...")

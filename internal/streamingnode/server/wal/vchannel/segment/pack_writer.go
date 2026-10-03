@@ -160,7 +160,7 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			}
 			// MustBody panics on unmarshal failure, so request is never nil
 			// here.
-			request := insert.Message.MustBody()
+			request := storage.CopyInsertRequestMetadata(insert.Message.MustBody())
 			request.ShardName = pack.VChannel
 			request.CollectionID = pack.CollectionID
 			request.PartitionID = insert.Assignment.GetPartitionId()

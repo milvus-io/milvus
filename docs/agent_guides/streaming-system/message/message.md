@@ -41,6 +41,15 @@ Messages transition through three stages:
 - [Cluster Messages](message-semantic-cluster.md) — global barriers, replication config, resource groups
 - [TimeTick Message](message-semantic-time-tick.md) — visibility barrier
 
+## Immutable Body Cache
+
+[Immutable Message Body Cache](../../../design-docs/design_docs/wal/message_body_cache.md)
+defines the read-only `Body` contract and process-wide cache reclamation.
+Immutable Body calls share decoded results through an object-local cache slot;
+typed wrappers and transaction property clones reuse that slot. Consumers copy
+the metadata they need to modify. Mutable/broadcast bodies retain independent
+decoding. Function-output materialization remains outside Body decoding.
+
 ## Adding a New Message Type
 
 New message types **MUST** be defined via `codegen/reflect_info.json` and `pkg/streaming/util/message/codegen/`. Do not manually write builder or type-conversion functions.

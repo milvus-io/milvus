@@ -11,11 +11,11 @@ checkpoint gating and startup idempotency-window restoration (§7).
 The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
-The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-implementation is retained for future wiring, including range statistics and Summary-owned
-materialization-backlog requests described in
-[L0Materializer §5](l0_materializer.md#5-read-and-materialize). TransformLog
-subscriptions (§5.5) are a separate future integration.
+The shared bounded-read contract (§5.4) is used by local SN TransformLog
+bootstrap subscriptions (§5.5). The Summary-based L0 consumer remains unwired,
+including range-statistics admission and Summary-owned materialization-backlog
+requests described in [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
+Remote/QN subscription integration remains planned.
 
 The protocol added by this feature is still under development. Intermediate
 branch versions are not compatibility targets: removed draft messages and
@@ -49,7 +49,7 @@ It exists for two reasons:
 RecoveryStorage             -> walsummary (sole record observation/storage)
 RecoveryStorage             -> vchannel (owns SegmentViews and L0Materializer)
 vchannel/l0materializer     -> walsummary read interface
-TransformLog adaptor        -> walsummary read interface (future)
+SN TransformLog adaptor     -> walsummary read interface (implemented)
 walsummary                  -> no dependency on its consumers
 ```
 
@@ -198,9 +198,10 @@ footer bytes, never a re-marshaled proto. Manifest objects use a separate
 that payload. Corruption is reported rather than converted into an empty view.
 
 The layout supports ranged reads, but the current store reads a whole chunk
-and decodes the requested sections. `ReadIdempotencySectionsOfChunk` shares that
-read across requested vchannels. True section-only object reads remain an
-optimization; an index entry alone does not make transfer cost constant.
+and decodes the requested sections. Manager reads share the resident chunk
+cache (§5.4.1); the uncached `ReadIdempotencySectionsOfChunk` Store API also
+shares one read across requested vchannels. True section-only object reads
+remain an optimization; an index entry alone does not make transfer cost constant.
 
 Retries of an immutable chunk key accept identical bytes or equivalent decoded
 records and coverage. If encodings differ but content is equivalent, the store
@@ -430,13 +431,16 @@ older manifest that still references retired objects.
 
 L0Materializer's GC position advances only after its corresponding VChannel
 metadata is durable. L0 materialization and Summary persistence remain
-independent. Before future subscriptions are enabled, the integration must also
-supply the minimum historical start point required by retained QueryViews,
+independent. Subscription integration must also supply the minimum historical
+start point required by retained QueryViews,
 DataViews, and protected local replays. The effective release position is the
 minimum of those requirements and the durable materialization/cleanup position;
 subscription delivery cursors are not retention acknowledgements. Unknown
 requirements during recovery keep history pinned until they are reconstructed.
 Summary accepts storage retention constraints, not QueryView-specific types.
+The SN integration supplies retained-segment replay floors via
+`VChannelRecoveryModule.refreshQueryRetentionLocked` and `SetQueryRetention`;
+remote/QN view retention remains separate integration work.
 
 The read contract also requires a durable fast-forward boundary (§5.4).
 Reference removal and that boundary must be published consistently, so restart
@@ -514,9 +518,9 @@ history required by every consumer.
 
 ### 5.4 Transform Read Contract
 
-This is the shared storage contract required by L0Materializer now and the
-future TransformLog adaptor. Exact Go interface names remain an implementation
-choice; the semantic result is:
+This is the shared storage contract implemented by `TransformReader`, used by
+the local SN TransformLog adaptor and available to the retained Summary L0
+consumer. The semantic result is:
 
 ```text
 ReadTransform(vchannel, after, through, row/byte limit)
@@ -550,7 +554,8 @@ The contract is:
    skip, not proof that retired history was empty. Persist the per-VChannel
    `transform_fast_forward_time_tick` with reference removal, even when the
    last chunk is removed. L0 rejects any fast-forward beyond its materialized
-   cursor. Future subscription adaptors must expose the skip to their caller.
+   cursor. The SN adaptor rejects a skip with `ErrTransformLogStartPointTruncated`;
+   future remote consumers must explicitly reconcile or reject it.
 6. Missing or corrupt referenced objects fail the read; an absent VChannel
    section means an empty interval only within known complete retained coverage.
 7. Pin a read's required objects against local deletion. Pins have bounded read
@@ -568,26 +573,157 @@ A change token is captured consistently with progress. Notifications wake
 consumers to recheck state, avoiding a missed update between reading and waiting;
 they do not carry record ownership or subscription delivery guarantees. The
 revised materializer re-evaluates admission after observation, L1 completion,
-and Summary backlog requests. Notifications alone do not force L0 output. Future subscriptions use progress notifications to follow
-the tail without adding another WAL observer.
+and Summary backlog requests. Notifications alone do not force L0 output. Local
+subscriptions use progress notifications to follow the tail without adding
+another WAL observer.
 
-Summary owns any decoded cache and shared object-fetch coordination. Cache
-memory must be bounded independently of total retained history. PChannel
-objects can contain many VChannels; reuse reads where possible instead of
-fetching the same object for each subscriber. Section indexes do not imply
-section-only I/O: the current Store downloads the whole chunk (§2.5).
+For unbounded TransformLog subscriptions, distinguish **readable coverage** from
+**notification scope**. `ReadableThrough` remains the complete PChannel prefix;
+`Changed` still notifies ordinary readers and bounded replays of every coverage
+advance. An active `WatchTransform(vchannel)` additionally makes each read return
+`TransformChanged`, captured under the same lock as that read's coverage and
+retention floor. The unbounded adaptor waits on this scoped token. Other
+VChannels' ordinary messages can extend readable coverage without waking it.
 
-### 5.5 Future TransformLog Adaptor
+Scoped notifications follow query Transform MVCC semantics, using the shared
+message classification in `messageutil` rather than the presence of a stored
+Delete payload. Delete, CreateCollection, transaction commit (including an
+insert-only assembled transaction), CommitImport, Flush/ManualFlush, relevant
+DDL and schema changes notify their VChannel. Plain Inserts, property-only
+AlterCollection and ordinary TimeTick confirmations do not. PChannel-wide
+FlushAll/AlterWAL and RecoveryBarrier notify every active scope. GC wakes scopes
+whose history is retired; a terminal failure wakes every scope. Cluster broadcast
+copies are recognized by `IsPChannelLevel()` even when their VChannel property
+contains the physical/control channel name; empty-VChannel barriers remain
+supported. This scope test agrees with QueryMVCC and VChannel dispatch.
+These signals do not implement the deferred DDL visibility effects.
 
-[TransformLog](transform_log.md) wraps §5.4 to provide local and remote
-subscriptions. It has no ObserveMessage, independent storage, or L0 execution.
-Entry/SyncUp delivery, resume cursors, stream backpressure, and QueryView
-consumer integration are outside this PR. The storage interfaces must not
-require those components to exist for L0 materialization to run.
+Each active VChannel owns one reference-counted notifier shared by subscriptions.
+The last subscription release removes it. Tokens are allocated only on reads and
+cleared on notification, coalescing messages until a reader captures another
+token. This adds O(active VChannels) notification metadata and no worker
+goroutines. Ordinary scoped notification is an O(1) lookup rather than a scan of
+all subscriptions; global barriers retain their necessary fan-out. Existing
+subscription goroutines and their bounded delivery buffers remain unchanged.
+Consumers without the optional watch capability retain global notifications.
 
-Before enabling subscriptions, wire the additional history retention constraints
-in §4 and preserve the [WAL-view handoff](streamingnode_vchannel_wal_view.md).
-L0 completion alone is insufficient to release history required by those readers.
+Scope registration precedes the first read. Subsequent reads capture both state
+and the replacement token atomically, so a change during I/O or before waiting
+cannot be lost. Watchers do not pin objects or acknowledge GC; the existing
+QueryView retention contract still protects future reads.
+
+Summary owns the complete resident chunk index and shared object cache described
+below. Section indexes do not imply section-only I/O: a cold read still downloads
+the whole chunk (§2.5).
+
+### 5.4.1 Resident Index And Chunk Cache
+
+The runtime index mirrors the retained chunks of the in-memory manifest in
+generation/TimeTick order. Each leaf contains the immutable chunk metadata,
+including VChannel section indexes, and an optional cached object buffer.
+Restore creates all index leaves without loading retained payloads. Reads use
+binary search to capture only intersecting leaves under the Manager lock.
+The manifest remains the persistence representation; cache residency, LRU order
+and in-flight loads are never serialized. The on-storage manifest may lag the
+in-memory index until the existing publisher completes.
+
+All VChannels, subscriptions and idempotency reads share a leaf's encoded object
+buffer. Section decoding produces caller-owned records. Keeping encoded bytes
+avoids another permanent decoded representation and provides an explicit buffer
+budget; it does not eliminate per-page section decoding.
+
+Decoded transform sections are sorted in their private slice and their selected
+records are transferred directly to the delivery batch. Pending/sealed records
+are shared with the writer and are cloned only when selected for delivery.
+Encoding immutable sealed insert/idempotency records borrows their fields for
+synchronous marshaling; it does not create another decoded copy first.
+Sections and the footer are encoded into the chunk buffer's available capacity
+with `MarshalAppend`, without a separate encoded section buffer. Size is computed
+immediately before encoding and reused only while the message remains immutable.
+Buffer length is committed only after successful encoding. Growth may still move
+the chunk buffer; section offsets, lengths and the checksum over the actual footer
+bytes retain the same storage format.
+
+There are two cache admission paths:
+
+- **Read:** a cache miss loads and validates the object against the captured
+  manifest index, then admits its bytes. Concurrent readers of the same leaf
+  share the load and its result, including when the object is too large to retain.
+- **Write:** a successful upload admits the actual stored bytes, including the
+  pre-existing encoding accepted by an equivalent-content retry. Out-of-order
+  upload completions have cache leaves owned by their pending chunks; only the
+  continuous completed prefix joins the readable durable index. These buffers
+  already participate in the same cache budget, so blocked publication does not
+  accumulate an additional unbounded encoded backlog.
+
+`streaming.summary.cacheBytesPerPChannel` (version 3.1.0, default 64 MiB, applied
+when a WAL opens) limits resident encoded-buffer capacity per PChannel. Zero
+disables residency. LRU access ordering is shared by read and write admissions;
+eviction drops only the payload, retaining the complete index for future loads.
+An object larger than the budget bypasses residency without evicting the whole
+working set. No subscriber cursor pins the cache, and no cache worker/timer or
+per-VChannel goroutine is introduced. Slow consumers fall back to object reads.
+
+This is a cache-buffer budget, not a total-process memory limit. Metadata,
+pending/sealed source records, delivery batches, section decoding and buffers
+still referenced by active reads require additional memory. Cold downloads are
+limited to four concurrent loads per PChannel; waiting callers can cancel.
+An evicted buffer stays valid for readers that already acquired it. Total node
+residency scales with its number of PChannels; node-wide budgeting and scan-
+resistant admission remain future tuning work.
+
+A canceled loader cannot fail unrelated subscribers with its cancellation:
+remaining waiters retry loading with their own contexts. Other load errors are
+returned without caching them. No detached loader survives its calling read.
+I/O never holds the Manager or cache lock. Cache insertion and membership changes
+preserve the existing pending/sealed/durable snapshot boundary.
+
+GC removes the leaf with its manifest reference and discards its resident buffer.
+An in-flight old snapshot can finish under the existing read pin, but cannot
+reinsert a retired leaf into the cache. Every new read still checks terminal
+errors and FastForwardTimeTick; cache contents never resurrect retired history
+or participate in LastAcked, checkpoint, or retention authorization.
+
+Before loading a leaf, Transform reads additionally filter its VChannel's actual
+Delete interval against `(after,target]`. A section ending at/before the cursor
+or starting after the target requires no payload read; complete Summary coverage
+still proves empty intervals. Batch limits count Delete primary keys and logical
+serialized Entry bytes (currently 4096 keys / 4 MiB in Stream), not object I/O.
+Whole Entries/transactions remain indivisible, including a first oversized Entry.
+Once a batch has exhausted either budget, do not load another object merely to
+discover that its first Entry cannot fit. Multi-page reads reuse resident chunks.
+
+Validation must count actual chunk reads for empty ranges, page boundaries,
+same/cross-VChannel sharing and write admission; also cover eviction, disabled
+and oversized caches, concurrent cancellation/failure, out-of-order upload,
+equivalent write retries, GC during loading and restart without payload preload.
+
+### 5.5 TransformLog Adaptor
+
+[TransformLog](transform_log.md) wraps §5.4 without ObserveMessage, independent
+storage, or L0 execution. The local `walsummary.Stream` is wired into SN growing
+resource preparation. It reads bounded batches, waits for coverage through the
+captured end TimeTick and reports SyncUp only after that complete interval has
+been delivered. The GrowingRuntime caller rejects truncated history and applies
+the returned Delete entries before readiness. Later events use the VChannel
+live event path.
+
+SyncUp has two consumer-facing roles: extending Transform MVCC through intervals
+without Delete payloads, and supplying catch-up evidence for view preparation.
+For unbounded subscriptions it is emitted after delivering through the current
+read's sampled ReadableThrough, not an arbitrary frozen target from an earlier
+page. Ordered Delete application can continue advancing MVCC while a subscriber
+is still catching up. Consumers must finish applying the delivered prefix before
+using SyncUp for MVCC or readiness, and compare against their required boundary
+if the write-side MVCC is ahead of Summary. See
+[SyncUp semantics](transform_log.md#3-entry-and-syncup-semantics) for the full
+contract and [delivery conditions](transform_log.md#4-catch-up-and-live-delivery).
+
+Remote transport, QN continuous subscriptions and their view retention are
+planned consumers. Their protocol must not be treated as enabled merely because
+the local SN adaptor exists. The current WAL L0 materializer remains independent
+of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
+for local snapshot, live-event and retention ownership.
 
 ## 6. Recovery And Term Takeover
 
@@ -758,7 +894,7 @@ only to the upper bound. L0 resolves uncertain admission by bounded async reads.
 Summary backlog similarly resolves a partial section's oldest remaining Delete
 with a bounded read in its existing worker. Object I/O never enters Observe.
 
-Count-budget wiring remains absent (§3.4). Future subscription retention and
+Count-budget wiring remains absent (§3.4). Remote/QN subscription retention and
 cross-owner GC fencing remain separate follow-up work.
 
 ## 8. Object Listing And Recovery Cost
