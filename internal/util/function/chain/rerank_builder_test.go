@@ -2355,6 +2355,17 @@ func (s *RerankBuilderTestSuite) TestGetInputFieldNamesFromFuncScore_EmptyFuncti
 }
 
 // =============================================================================
+
+func (s *RerankBuilderTestSuite) TestGetInputFieldNamesFromFuncScore_MultipleFunctions() {
+	funcScore := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{
+			{Type: schemapb.FunctionType_Rerank}, // boost, no input fields
+			{Type: schemapb.FunctionType_Rerank, InputFieldNames: []string{"jd"}},
+		},
+	}
+	names := GetInputFieldNamesFromFuncScore(funcScore)
+	s.Equal([]string{"jd"}, names)
+}
 // GetInputFieldIDsFromSchema Tests
 // =============================================================================
 

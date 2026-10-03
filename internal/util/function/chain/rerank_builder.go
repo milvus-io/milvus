@@ -748,8 +748,21 @@ func GetInputFieldNamesFromFuncScore(funcScore *schemapb.FunctionScore) []string
 	if funcScore == nil || len(funcScore.Functions) == 0 {
 		return nil
 	}
-	funcSchema := funcScore.Functions[0]
-	return funcSchema.GetInputFieldNames()
+	seen := make(map[string]struct{})
+	var names []string
+	for _, f := range funcScore.Functions {
+		for _, name := range f.GetInputFieldNames() {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return names
 }
 
 // GetInputFieldIDsFromSchema resolves input field IDs from the collection schema using the function score's input field names.
