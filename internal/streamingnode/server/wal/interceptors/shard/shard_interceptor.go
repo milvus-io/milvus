@@ -261,9 +261,9 @@ func (impl *shardInterceptor) passNameGate(ctx context.Context, msg message.Muta
 func rejectUnwritableVChannel(vchannel string, collectionID int64, err error) error {
 	if errors.Is(err, shards.ErrVChannelFenced) {
 		// the vchannel is fenced by shard split. The intended client reaction
-		// is to refresh the routing table and write to the new shards; the
-		// proxy side of that is not implemented on this branch. T_switch is
-		// not carried here: a DML client would refresh routing, never read it.
+		// is to refresh the routing table and write to the new shards, which
+		// the proxy does per row (shard-split-write-path). T_switch is not
+		// carried here: a DML client would refresh routing, never read it.
 		return status.NewShardFenced(vchannel, 0, 0)
 	}
 	// This pchannel has never held the vchannel, so no routing refresh sends the
