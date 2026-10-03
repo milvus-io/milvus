@@ -27,9 +27,20 @@ import (
 )
 
 func (c *Client) UseDatabase(ctx context.Context, option UseDatabaseOption) error {
+	c.lifecycleMut.Lock()
+	defer c.lifecycleMut.Unlock()
+
 	dbName := option.DbName()
+	previousDB := c.getCurrentDB()
 	c.usingDatabase(dbName)
-	return c.connectInternal(ctx)
+	if err := c.connectInternal(ctx); err != nil {
+		c.usingDatabase(previousDB)
+		return err
+	}
+	if c.collCache != nil {
+		c.collCache.Reset()
+	}
+	return nil
 }
 
 func (c *Client) ListDatabase(ctx context.Context, option ListDatabaseOption, callOptions ...grpc.CallOption) (databaseNames []string, err error) {
