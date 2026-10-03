@@ -197,13 +197,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 
-		var metricMutation *segMetricMutation
-		_, metricMutation, err = t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), t.result)
+		_, err = t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), t.result)
 		if err != nil {
 			mlog.Warn(context.TODO(), "CompleteCompactionMutation for clustering compaction task failed", mlog.Err(err))
 			return
 		}
-		metricMutation.commit()
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setTmpSegments(resultSegmentIDs))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))

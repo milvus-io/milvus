@@ -912,7 +912,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	segInsertChannel := segment.GetInsertChannel()
 	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
 	// We do this because collection meta drop relies on all segment being GCed.
-	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
+	if gc.meta.metaStore.ChannelExists(context.Background(), segInsertChannel) &&
 		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
 		// segment gc shall only happen when channel cp is after segment dml cp.
 		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
@@ -1345,7 +1345,7 @@ func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
 	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
 	if err != nil {
-		mlog.Warn(ctx, "list channel cp fail during GC", mlog.Err(err))
+		mlog.Warn(ctx, "recycleChannelCPMeta: failed to list channel checkpoints", mlog.Err(err))
 		return
 	}
 
@@ -1378,7 +1378,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			defer cancel()
 			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
 			if err == nil && !has {
-				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+				collectionID2GcStatus[collectionID] = gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
 			} else {
 				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
 				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",

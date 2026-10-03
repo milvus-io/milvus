@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -73,12 +74,12 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	idAllocator := RandomIncrementIDAllocator()
 
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, metacache.NewMetaStore(nil))
 
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 
 	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler, func(collectionID ...int64) {})

@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -379,10 +380,8 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 	)
 	return &meta{
 		ctx:          ctx,
-		catalog:      catalog,
-		collections:  nil,
+		metaStore:    metacache.NewMetaStore(catalog),
 		segments:     nil,
-		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -530,11 +529,11 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	})
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
+	store := metacache.NewMetaStore(catalog)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:       ctx,
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -542,7 +541,6 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 			keyLock:          lock.NewKeyLock[UniqueID](),
 		},
-		channelCPs:   nil,
 		chunkManager: nil,
 	}
 
@@ -641,8 +639,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
 
+		store := metacache.NewMetaStore(nil)
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			metaStore: store,
+			segments:  NewSegmentsInfo(store),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -702,8 +702,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		)
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
+		store := metacache.NewMetaStore(nil)
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			metaStore: store,
+			segments:  NewSegmentsInfo(store),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -755,8 +757,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, collID, partID, segID, buildID).Return(nil)
+		store := metacache.NewMetaStore(nil)
 		meta := &meta{
-			segments: NewSegmentsInfo(),
+			metaStore: store,
+			segments:  NewSegmentsInfo(store),
 			indexMeta: &indexMeta{
 				catalog:          catalog,
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -861,11 +865,11 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 	})
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
+	store := metacache.NewMetaStore(catalog)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:       ctx,
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			catalog:        catalog,
 			segmentIndexes: segIndexes,
@@ -1060,8 +1064,10 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_TreatsMatchingV1CollectionID
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -1112,8 +1118,10 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_OnlyWalksLegacyPrefix(t *tes
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -1175,8 +1183,10 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_IgnoresV1MetadataUnderSepara
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -1225,8 +1235,10 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		indexID = UniqueID(400)
 	)
 	newMeta := func(t *testing.T) *meta {
+		store := metacache.NewMetaStore(nil)
 		m := &meta{
-			segments: NewSegmentsInfo(),
+			metaStore: store,
+			segments:  NewSegmentsInfo(store),
 			indexMeta: &indexMeta{
 				catalog:          catalogmocks.NewDataCoordCatalog(t),
 				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -1446,11 +1458,6 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil).Maybe()
 
-	channelCPs := newChannelCps()
-	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
-		Timestamp: 1000,
-	}
-
 	segments := map[UniqueID]*SegmentInfo{
 		segID: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -1634,8 +1641,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
+	store := metacache.NewMetaStore(catalog)
+	store.PutCollection(&collectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Name:        "",
@@ -1701,8 +1708,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segIndexes.Insert(segID+1, segIdx1)
 	m := &meta{
 		catalog:      catalog,
-		channelCPs:   channelCPs,
-		segments:     NewSegmentsInfo(),
+		metaStore:    store,
+		segments:     NewSegmentsInfo(store),
 		snapshotMeta: &snapshotMeta{},
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -1727,9 +1734,10 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				},
 			},
 		},
-
-		collections: collections,
 	}
+	m.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+		"dmlChannel": {Timestamp: 1000},
+	})
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
 		SegmentID:           segID,
@@ -2076,17 +2084,25 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
+	store := metacache.NewMetaStore(catalog)
 
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
+		ctx:         context.Background(),
+		catalog:     catalog,
+		metaStore:   store,
+		channelSync: newChannelSync(),
 	}
 
-	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
+	store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
 		"cluster-id-rootcoord-dm_1_123v0": nil,
 		"cluster-id-rootcoord-dm_0_124v0": nil,
-	}
+		// A vchannel whose name does not parse to a collection ID. The GC must
+		// skip it rather than GC it -- see the "it will lead meta leak in this
+		// case" guard in recycleChannelCPMeta. Without this entry that branch
+		// has no coverage anywhere.
+		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
+	})
 
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
@@ -2096,16 +2112,15 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	t.Run("list channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		assert.Equal(t, 4, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Unset()
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
-		"cluster-id-rootcoord-dm_0_123v0":                   nil,
-		"cluster-id-rootcoord-dm_1_123v0":                   nil,
-		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
-		"cluster-id-rootcoord-dm_0_124v0":                   nil,
-	}, nil).Times(3)
+	// The persisted checkpoints mirror the store, so drops are visible to
+	// the next GC round.
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).
+		RunAndReturn(func(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
+			return store.GetChannelCheckpoints(), nil
+		}).Times(3)
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
@@ -2114,20 +2129,24 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 
 	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
 		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		assert.Equal(t, 4, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
 	t.Run("drop channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		assert.Equal(t, 4, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+		// 124's checkpoint is GC'd; 123's survives (collection still there) and
+		// so does the unparseable one, which must never be GC'd.
+		assert.Equal(t, 2, len(m.metaStore.GetChannelCheckpoints()))
+		_, stillThere := m.metaStore.GetChannelCheckpoints()["cluster-id-rootcoord-dm_0_invalidedCollectionIDv0"]
+		assert.True(t, stillThere, "an unparseable vchannel must be skipped, not GC'd")
 	})
 }
 
@@ -2631,10 +2650,11 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 			catalog := catalogmocks.NewDataCoordCatalog(t)
 			catalog.EXPECT().ChannelExists(mock.Anything, channelName).Return(false).Once()
 
+			store := metacache.NewMetaStore(catalog)
 			meta := &meta{
-				catalog:    catalog,
-				segments:   NewSegmentsInfo(),
-				channelCPs: newChannelCps(),
+				catalog:   catalog,
+				metaStore: store,
+				segments:  NewSegmentsInfo(store),
 				indexMeta: &indexMeta{
 					indexes: test.indexes,
 				},
@@ -2692,10 +2712,8 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	meta := &meta{
 		catalog:      catalog,
 		snapshotMeta: smMeta,
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(catalog),
 	}
 
 	// Create garbage collector
@@ -2730,8 +2748,8 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 		},
 	}
 
-	meta.segments.segments[1001] = droppedSegment1
-	meta.segments.segments[1002] = droppedSegment2
+	meta.segments.SetSegment(1001, droppedSegment1)
+	meta.segments.SetSegment(1002, droppedSegment2)
 
 	// Setup mocks
 	mock1 := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
@@ -3313,10 +3331,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 		catalog:      catalog,
 		snapshotMeta: smMeta,
 		indexMeta:    idxMeta,
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	// Create garbage collector
@@ -3436,12 +3452,10 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1001: segment,
-			},
-		},
-		channelCPs: newChannelCps(),
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			1001: segment,
+		}),
+		metaStore: metacache.NewMetaStore(nil),
 	}
 
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
@@ -3513,12 +3527,10 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_V3Orphan(t *testing.T) {
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1001: registered,
-			},
-		},
-		channelCPs: newChannelCps(),
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			1001: registered,
+		}),
+		metaStore: metacache.NewMetaStore(nil),
 	}
 
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
@@ -3595,10 +3607,8 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	meta := &meta{
 		catalog:      catalog,
 		snapshotMeta: nil, // nil snapshot meta
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(catalog),
 	}
 
 	// Create garbage collector
@@ -3623,7 +3633,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 		},
 	}
 
-	meta.segments.segments[1003] = droppedSegment
+	meta.segments.SetSegment(1003, droppedSegment)
 
 	// Setup mocks
 	mockGetSnapshotMeta := mockey.Mock(meta.GetSnapshotMeta).Return(nil).Build()
@@ -3684,10 +3694,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_SnapshotReference(t *testing
 		catalog:      catalog,
 		snapshotMeta: smMeta,
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	// Create garbage collector
@@ -3779,10 +3787,8 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 	meta := &meta{
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1001: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1001: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	// Create storage manager
@@ -3925,10 +3931,8 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 	meta := &meta{
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1002: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1002: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	// Create storage manager
@@ -4004,10 +4008,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded(t *
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1001: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1001: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
@@ -4077,10 +4079,8 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(
 	meta := &meta{
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1001: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1001: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
@@ -4156,10 +4156,8 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(
 	meta := &meta{
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1002: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1002: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
@@ -4219,10 +4217,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV0_SegIdxNil_SnapshotProtection
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: smMeta,
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
@@ -4295,10 +4291,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SegmentNil_SnapshotProtection
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{
@@ -4376,10 +4370,8 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 	meta := &meta{
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1002: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1002: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
@@ -4448,9 +4440,9 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_GlobalFormatPrefixOnce(t *
 	}
 
 	meta := &meta{
-		catalog:    &datacoord.Catalog{},
-		segments:   &SegmentsInfo{segments: segments},
-		channelCPs: newChannelCps(),
+		catalog:   &datacoord.Catalog{},
+		segments:  newSegmentsInfoWithSegments(segments),
+		metaStore: metacache.NewMetaStore(nil),
 	}
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
 	gc := newGarbageCollector(meta, &ServerHandler{}, GcOption{cli: cli})
@@ -4532,10 +4524,8 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	m := &meta{
 		catalog:      catalog,
 		snapshotMeta: smMeta,
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(catalog),
 	}
 
 	basePath := path.Join(cli.RootPath(), "insert_log/100/10/2001")
@@ -4575,8 +4565,8 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 		},
 	}
 
-	m.segments.segments[2001] = v3Segment
-	m.segments.segments[2002] = v1Segment
+	m.segments.SetSegment(2001, v3Segment)
+	m.segments.SetSegment(2002, v1Segment)
 
 	gc := newGarbageCollector(m, &ServerHandler{}, GcOption{
 		cli:              cli,
@@ -4944,10 +4934,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-v3-orphan"))
 
 	m := &meta{
-		segments: &SegmentsInfo{
-			segments: make(map[int64]*SegmentInfo),
-		},
-		channelCPs:   newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+		metaStore:    metacache.NewMetaStore(nil),
 		snapshotMeta: &snapshotMeta{},
 	}
 
@@ -4962,7 +4950,7 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
 			ManifestPath:   packed.MarshalManifestPath(rootPath+"/insert_log/1/10/500", 1),
 		},
 	}
-	m.segments.segments[500] = v3Segment
+	m.segments.SetSegment(500, v3Segment)
 
 	gc := newGarbageCollector(m, &ServerHandler{}, GcOption{
 		cli:              cli,
@@ -5069,10 +5057,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats(t *testing.T
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{1003: segment},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{1003: segment}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
@@ -5126,10 +5112,8 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats_SegmentNil(t
 		catalog:      &datacoord.Catalog{},
 		snapshotMeta: &snapshotMeta{},
 		indexMeta:    &indexMeta{},
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{},
-		},
-		channelCPs: newChannelCps(),
+		segments:     newSegmentsInfoWithSegments(map[int64]*SegmentInfo{}),
+		metaStore:    metacache.NewMetaStore(nil),
 	}
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
@@ -5179,8 +5163,8 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 	setupGCTest := func(t *testing.T, sm *snapshotMeta, broker *broker2.MockBroker) *garbageCollector {
 		m := &meta{
 			snapshotMeta: sm,
-			segments:     &SegmentsInfo{segments: make(map[int64]*SegmentInfo)},
-			channelCPs:   newChannelCps(),
+			segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
+			metaStore:    metacache.NewMetaStore(nil),
 		}
 		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
 		return gc
@@ -5321,8 +5305,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
 
 		m := &meta{
-			catalog:    catalog,
-			channelCPs: newChannelCps(),
+			catalog:   catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 		}
 
 		gc := newGarbageCollector(m, newMockHandler(), GcOption{})
@@ -5346,8 +5330,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
 
 		m := &meta{
-			catalog:    catalog,
-			channelCPs: newChannelCps(),
+			catalog:   catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 		}
 
 		gc := newGarbageCollector(m, newMockHandler(), GcOption{

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type UtilTestSuite struct {
@@ -69,6 +70,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliable() {
 			InsertChannel: "test",
 		},
 	}).Maybe()
+	mockTargetManager.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet(2)).Maybe()
 	mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 
 	suite.setNodeAvailable(1, 2)
@@ -91,6 +93,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet(2)).Maybe()
 		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=1 not available
 		suite.setNodeAvailable(2)
@@ -113,6 +116,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet(2)).Maybe()
 		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		// leader nodeID=2 not available
 		suite.setNodeAvailable(1)
@@ -135,6 +139,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet(1)).Maybe()
 		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		suite.setNodeAvailable(1, 2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
@@ -155,6 +160,7 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				InsertChannel: "test",
 			},
 		}).Maybe()
+		mockTargetManager.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet(1)).Maybe()
 		mockTargetManager.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
 		suite.setNodeAvailable(1, 2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
@@ -191,15 +197,10 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 				CatchingUpStreamingData: false, // already caught up
 			},
 		}
-		// Use mockey to mock TargetManager.GetSealedSegmentsByChannel
+		// Readiness is measured against the target's segment IDs.
 		targetMgr := &meta.TargetManager{}
-		mockGetSealedSegments := mockey.Mock(mockey.GetMethod(targetMgr, "GetSealedSegmentsByChannel")).
-			Return(map[int64]*datapb.SegmentInfo{
-				2: {
-					ID:            2,
-					InsertChannel: "test",
-				},
-			}).Build()
+		mockGetSealedSegments := mockey.Mock(mockey.GetMethod(targetMgr, "GetSealedSegmentIDsByChannel")).
+			Return(typeutil.NewUniqueSet(2)).Build()
 		defer mockGetSealedSegments.UnPatch()
 
 		suite.setNodeAvailable(1, 2)
