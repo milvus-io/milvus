@@ -2248,6 +2248,33 @@ message SplitShardTaskSource {
   // a commit is redelivered. It drives the redistribution rounds and lets a
   // restart resume where they left off.
   repeated int64 pending_segments = 3;
+  // The source's L0 segment set as it stood the first time the fence conjunct
+  // cleared for this source, recorded before any rewrite plan of this task is
+  // built. It is the ONLY set the rewrite may retire.
+  //
+  // A message rather than a bare repeated field so its presence is
+  // distinguishable from an empty set: "recorded, and the source had no L0"
+  // must not read as "not recorded yet", or an L0 arriving later would be
+  // captured by a second snapshot and retired unfolded.
+  SplitShardFencedLevelZero fenced_level_zero = 4;
+}
+
+// SplitShardFencedLevelZero is the L0 set a split's fence declared final for
+// one source: the L0s every rewrite plan of the task is guaranteed to carry
+// and fold, and therefore the only ones its commit may retire.
+//
+// Every plan re-reads the source's L0s at plan-build time, so a plan built
+// after this set was recorded carries at least it. The record is written
+// before the first dispatch, which is what turns "the plan folded it" from an
+// assumption into a proof.
+//
+// An L0 that appears afterwards is outside the set and is never retired. Only
+// an import can produce one -- the fence refuses every later Delete on the
+// source, and an import bypasses the WAL -- and nothing folds it, so it stays
+// live, the drain stays blocked, and the split stalls where it can be seen
+// instead of silently dropping deletes.
+message SplitShardFencedLevelZero {
+  repeated int64 segment_ids = 1;
 }
 
 // SplitShardTask is the persisted state of a shard split task: what the
