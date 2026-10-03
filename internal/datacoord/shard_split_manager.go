@@ -82,6 +82,12 @@ type splitCoordinator interface {
 	// fenceFlushBlockReason names the source whose fence is not recorded or
 	// whose checkpoint is short of it, "" once the redistribution may start.
 	fenceFlushBlockReason(task *datapb.SplitShardTask) string
+	// issueShardSplitAdoption broadcasts a drained task's adoption under the
+	// collection's resource keys (Server.issueShardSplitAdoption).
+	issueShardSplitAdoption(ctx context.Context, task *datapb.SplitShardTask) error
+	// splitSourceServed reports whether this cluster's QueryCoord still serves
+	// the source.
+	splitSourceServed(ctx context.Context, collectionID int64, source string) (bool, error)
 }
 
 // splitRedistributor moves a fenced split's source data into its targets. The

@@ -49,6 +49,8 @@ func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
 		m.advanceFencing(task)
 	case datapb.SplitShardTaskState_SplitShardTaskRedistributing:
 		m.advanceRedistributing(task)
+	case datapb.SplitShardTaskState_SplitShardTaskAdopting:
+		m.advanceAdopting(task)
 	}
 }
 
