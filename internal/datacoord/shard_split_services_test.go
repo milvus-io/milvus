@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -236,6 +237,41 @@ func TestCommitShardSplitLeavesLaterStatesAlone(t *testing.T) {
 
 	task, _ := svr.shardSplitTasks.get(200)
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, task.GetState())
+}
+
+func TestCommitShardSplitRollsAnAbortedTaskForward(t *testing.T) {
+	// An abort is refused once a fence may be in the WAL, so an Aborted record
+	// meeting its fence's commit is a bug. The fence has landed all the same:
+	// the source is closed to writes, and only the split carries its rows on.
+	// The task rolls forward into the window rather than staying Aborted.
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskAborted,
+		EndTime:      1234,
+		FailReason:   "the write switch was refused",
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		Targets: []*datapb.SplitShardTaskTarget{
+			{Vchannel: splitTestTarget0, Buckets: []uint64{0}},
+			{Vchannel: splitTestTarget1, Buckets: []uint64{1}},
+		},
+	}))
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+	assert.True(t, task.GetFenced())
+	assert.Equal(t, uint64(2000), task.GetSources()[0].GetSwitchTimeTick())
+	assert.Zero(t, task.GetEndTime())
+	assert.Empty(t, task.GetFailReason())
+	persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, persisted[0].GetState())
 }
 
 func TestCommitShardSplitSeedsOnlyUnseededTargets(t *testing.T) {
@@ -1123,4 +1159,104 @@ func channelExists(t *testing.T, catalog metastore.DataCoordCatalog, channel str
 	exists, err := catalog.ChannelExists(context.TODO(), channel)
 	require.NoError(t, err)
 	return exists
+// The drain predicate and the reason a stalled split logs are one function:
+// each conjunct names itself, and the predicate holds exactly when no reason
+// is left.
+func TestSplitDrainBlockReasonNamesEachConjunct(t *testing.T) {
+	ctx := context.Background()
+	task := func(svr *Server) *datapb.SplitShardTask {
+		task, ok := svr.shardSplitTasks.get(200)
+		require.True(t, ok)
+		return task
+	}
+
+	svr := drainedTestServer(t)
+	svr.importMeta = activeImportMeta(t, splitTestSource)
+	putSourceSegment(svr, commonpb.SegmentState_Flushed)
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "still has a live segment 9001")
+	assert.False(t, svr.splitSourcesDrained(ctx, task(svr)))
+
+	putSourceSegment(svr, commonpb.SegmentState_Dropped)
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "has no channel checkpoint yet")
+	assert.Equal(t, svr.fenceFlushBlockReason(task(svr)), svr.splitDrainBlockReason(ctx, task(svr)))
+
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 1999)}))
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "checkpoint 1999 has not reached its switch time tick 2000")
+
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 2000)}))
+	assert.Empty(t, svr.fenceFlushBlockReason(task(svr)))
+	assert.Equal(t, "an import is still in progress on a source", svr.splitDrainBlockReason(ctx, task(svr)))
+
+	svr.importMeta = idleImportMeta(t)
+	assert.Empty(t, svr.splitDrainBlockReason(ctx, task(svr)))
+	assert.True(t, svr.splitSourcesDrained(ctx, task(svr)))
+
+	unfenced := &datapb.SplitShardTask{Sources: []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}}}
+	assert.Contains(t, svr.fenceFlushBlockReason(unfenced), "fence not recorded yet")
+	assert.False(t, svr.splitSourcesDrained(ctx, unfenced))
+}
+
+// Post-#53595 the checkpoint reported under a vchannel's name is the recovery
+// checkpoint of its whole pchannel, so a neighbour vchannel of that pchannel
+// can hold a split's drain back. The segment scan runs first, so when the
+// checkpoint is the conjunct that blocks, the source itself has nothing left
+// in meta -- the reason must therefore name the pchannel, which is the only
+// place an operator can look next. There is no cross-check from datacoord: the
+// min-growing-segment clamp in UpdateChannelCheckpoints applies to TEXT
+// collections only, and a TEXT collection is refused a split outright.
+func TestFenceFlushBlockReasonNamesThePChannelThatCanHoldItBack(t *testing.T) {
+	ctx := context.Background()
+	svr := drainedTestServer(t)
+	svr.importMeta = idleImportMeta(t)
+	putSourceSegment(svr, commonpb.SegmentState_Dropped)
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 1500)}))
+
+	task, ok := svr.shardSplitTasks.get(200)
+	require.True(t, ok)
+	reason := svr.splitDrainBlockReason(ctx, task)
+	assert.Contains(t, reason, funcutil.ToPhysicalChannel(splitTestSource))
+	assert.Contains(t, reason, "any vchannel of it can hold back")
+	assert.Empty(t, svr.liveSegmentBlockReason(splitTestSource),
+		"the segment scan must be the conjunct that passed, so the stall is not the source's own L1")
+}
+
+// A Growing segment of the source blocks the drain by name. Since #53595 a
+// growing segment is published to datacoord with its binlogs before the Insert
+// that filled it completes, so this conjunct also closes the window in which
+// the source held L1 data datacoord could not see.
+func TestLiveSegmentBlockReasonNamesAGrowingSourceSegment(t *testing.T) {
+	ctx := context.Background()
+	svr := drainedTestServer(t)
+	svr.importMeta = idleImportMeta(t)
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 9999)}))
+	task, ok := svr.shardSplitTasks.get(200)
+	require.True(t, ok)
+
+	for _, state := range []commonpb.SegmentState{
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Flushed,
+	} {
+		putSourceSegment(svr, state)
+		reason := svr.splitDrainBlockReason(ctx, task)
+		assert.Contains(t, reason, "still has a live segment 9001", state.String())
+		assert.Contains(t, reason, state.String())
+		assert.False(t, svr.splitSourcesDrained(ctx, task), state.String())
+	}
+
+	// An unretired L0 of the source is the same conjunct: it is a non-Dropped
+	// segment of the channel, so "the source's L0s are retired" needs no
+	// separate check.
+	svr.meta.segments.SetSegment(9002, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 9002, CollectionID: 100, InsertChannel: splitTestSource,
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
+	}})
+	putSourceSegment(svr, commonpb.SegmentState_Dropped)
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task), "live segment 9002 (level L0")
+
+	svr.meta.segments.SetSegment(9002, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 9002, CollectionID: 100, InsertChannel: splitTestSource,
+		State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L0,
+	}})
+	assert.True(t, svr.splitSourcesDrained(ctx, task))
 }
