@@ -20,6 +20,8 @@ package rerank
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -437,6 +439,40 @@ func (s *RerankModelSuite) TestCallVoyageAI() {
 		scores, err := provder.Rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
 		s.Equal([]float32{0.0, 0.1, 0.2}, scores)
+	}
+}
+
+func (s *RerankModelSuite) TestVoyageAISendsTruncation() {
+	repStr := `{"object": "list", "data": [{"object": "rerank", "index": 0, "relevance_score": 0.0}]}`
+	for _, tc := range []struct {
+		value    string
+		expected bool
+	}{
+		{"false", false},
+		{"true", true},
+	} {
+		var body map[string]any
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, _ := io.ReadAll(r.Body)
+			body = map[string]any{}
+			_ = json.Unmarshal(data, &body)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(repStr))
+		}))
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "voyageai"},
+			{Key: models.ModelNameParamKey, Value: "voyageai-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.TruncationParamKey, Value: tc.value},
+		}
+		provider, err := newVoyageaiProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.NoError(err)
+		_, err = provider.Rerank(context.Background(), "mytest", []string{"t1"})
+		s.NoError(err)
+		ts.Close()
+		v, ok := body[models.TruncationParamKey]
+		s.True(ok, "truncation must be present in the request body")
+		s.Equal(tc.expected, v)
 	}
 }
 
