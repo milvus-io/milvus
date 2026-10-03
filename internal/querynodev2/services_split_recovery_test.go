@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // splitRecoveryCoord is a coordinator that describes the collection as not
@@ -409,4 +410,101 @@ func (suite *ServiceSuite) TestWatchOfASplitSourceRecoversItsNamedTargets() {
 		return errors.Is(err, merr.ErrServiceUnavailable) && strings.Contains(err.Error(), "still being spawned")
 	}, 5*time.Second, 10*time.Millisecond)
 	suite.Empty(source.SplitChildVChannels())
+}
+
+// After #53595 the target's L0 binlogs are produced by the streamingnode L0
+// materializer, which gives an L0 segment a StartPosition carrying only a
+// timestamp -- no MsgID, no WAL name -- because the segment is materialized from
+// a WAL summary and has no physical WAL position of its own
+// (l0materializer/materializer.go, and datacoord's UpdateStartPosition keeps
+// such a position instead of dropping it). The same change retires an EMPTY L1
+// segment as Flushed+Dropped instead of publishing it as a zero-row flushed
+// one, which is exactly what a residue class that took no writes during the
+// window produces.
+//
+// Neither may reach the child spawn as a seek: the only position the spawn
+// requires to be seekable is the target CHANNEL's checkpoint
+// (waitSplitTargetRecovery), and a segment position is used by timestamp alone.
+// This pins both: the timestamp-only L0 position survives into the child's L0
+// load untouched, and the retired empty segment is excluded, not loaded.
+func (suite *ServiceSuite) TestSpawnSplitChildTakesTimestampOnlyL0AndRetiredEmptySegments() {
+	ctx := context.Background()
+	const (
+		target  = "by-dev-rootcoord-dml_2_111v3"
+		l0ID    = int64(4002)
+		emptyID = int64(4003) // an empty L1 segment, retired as Flushed+Dropped
+	)
+	mc := suite.splitRecoveryCoord()
+	mc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *datapb.GetSegmentInfoRequest, _ ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+			suite.ElementsMatch([]int64{l0ID}, req.GetSegmentIDs())
+			return &datapb.GetSegmentInfoResponse{Status: merr.Success(), Infos: []*datapb.SegmentInfo{
+				{
+					ID: l0ID, CollectionID: suite.collectionID, PartitionID: suite.partitionIDs[0],
+					InsertChannel: target, Level: datapb.SegmentLevel_L0,
+					// what l0materializer builds: channel + timestamp only.
+					StartPosition: &msgpb.MsgPosition{ChannelName: target, Timestamp: 99},
+				},
+			}}, nil
+		}).Once()
+
+	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+
+	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
+		func(_ *QueryNode, _ int64, vchannel string) (*datapb.VchannelInfo, error) {
+			info := suite.splitTargetRecovery(vchannel)
+			info.LevelZeroSegmentIds = []int64{l0ID}
+			// datacoord reports a Dropped segment under dropped_segmentIds; an
+			// empty one retired at flush never shows up as unflushed.
+			info.DroppedSegmentIds = []int64{emptyID}
+			return info, nil
+		}).Build()
+	defer recovery.UnPatch()
+
+	var l0Positions []*msgpb.MsgPosition
+	growingLoaded := 0
+	loadL0 := mockey.Mock(loadL0Segments).To(func(_ context.Context, _ delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
+		for _, ch := range req.GetInfos() {
+			for _, id := range ch.GetLevelZeroSegmentIds() {
+				l0Positions = append(l0Positions, req.GetSegmentInfos()[id].GetStartPosition())
+			}
+		}
+		return nil
+	}).Build()
+	defer loadL0.UnPatch()
+	loadGrowing := mockey.Mock(loadGrowingSegments).To(func(_ context.Context, _ delegator.ShardDelegator, req *querypb.WatchDmChannelsRequest) error {
+		for _, ch := range req.GetInfos() {
+			growingLoaded += len(ch.GetUnflushedSegmentIds())
+		}
+		return nil
+	}).Build()
+	defer loadGrowing.UnPatch()
+	forward := mockey.Mock(mockey.GetMethod(source, "ForwardKnownDeletesToParent")).To(func(ctx context.Context) error {
+		return nil
+	}).Build()
+	defer forward.UnPatch()
+	defer suite.node.delegators.GetAndRemove(target)
+
+	child, err := suite.node.SpawnSplitChild(ctx, delegator.SpawnChildParams{
+		CollectionID:   suite.collectionID,
+		SourceVChannel: suite.vchannel,
+		TargetVChannel: target,
+		Parent:         source,
+	})
+	suite.Require().NoError(err, "a timestamp-only L0 position must not fail the spawn")
+	suite.Require().NotNil(child)
+
+	suite.Require().Len(l0Positions, 1, "the target's L0 segment was not loaded into the child")
+	suite.Equal(uint64(99), l0Positions[0].GetTimestamp())
+	suite.Empty(l0Positions[0].GetMsgID(), "the L0 position must reach the child as the materializer wrote it")
+	suite.Empty(l0Positions[0].GetWALName())
+	suite.Zero(growingLoaded, "a retired empty segment must not be loaded as growing")
+
+	// Both the L0 and the retired empty segment are excluded, so the child's
+	// pipeline never re-creates them from the WAL records behind the checkpoint.
+	suite.False(child.VerifyExcludedSegments(emptyID, typeutil.MaxTimestamp),
+		"the target's retired empty segment is not excluded on the child")
 }
