@@ -68,11 +68,23 @@ version is kept) rather than regressed: after an L0 compaction advanced the
 Manifest, a replay that has not yet observed the new manifest must not roll the
 snapshot back.
 
-TODO: The current branch deliberately does not persist or publish
-`transform_start_after_timetick`. A safe monotonic frontier depends on a
-StreamingNode-owned shard Flush barrier that is outside this PR. The required
-producer protocol is described in
-[Transform Start-After TimeTick](transform_start_after_timetick.md).
+TODO: The current branch does not produce a meaningful
+`transform_start_after_timetick`. The planned DataCoord producer initializes it
+from each VChannel's CreateCollection TimeTick, then calculates `F = min(K, S, G)`:
+the accepted channel checkpoint, coverage of the new snapshot's Segment data
+versions, and the earliest safe start of registered but unpublished data across
+all partitions. Growing/Flushing data constrains F without becoming DataView
+members. The producer must supply these inputs consistently; the Manager must
+not infer completeness from an unsynchronized SegmentMeta scan.
+
+F is nondecreasing and persisted with each immutable snapshot. Old versions
+restore their stored F rather than recomputing it from newer SegmentMeta. An
+F-only change advances compact_version; Manifest or membership updates may keep
+F unchanged. Existing checkpoint reporting and Growing registration supply the
+initial completeness contract; a shard-wide Flush order or new watermark RPC
+is not required. See [Transform Start-After TimeTick](transform_start_after_timetick.md)
+for the proof, atomic publication requirements, Import constraints, and
+TransformLog retention obligations. This producer remains unimplemented.
 
 ## Lifecycle
 
@@ -387,5 +399,7 @@ split, temporary flush snapshots, SegmentMeta-derived delete-frontier
 projection, event-driven repair, Balancer snapshots, Segment reference queries,
 or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
-of SegmentMeta rather than an event-accumulated log. The delete frontier remains
-a TODO until the StreamingNode shard barrier is implemented.
+of SegmentMeta rather than an event-accumulated log. The planned frontier
+producer extends this projection with a checkpoint-bounded, consistent coverage
+calculation; it does not restore the removed unsynchronized SegmentMeta-only
+frontier calculation. See [Transform Start-After TimeTick](transform_start_after_timetick.md).

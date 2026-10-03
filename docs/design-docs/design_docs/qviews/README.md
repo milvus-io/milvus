@@ -65,8 +65,8 @@ For node-side Phase 1 planning and Phase 2 execution, see
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** `RequeryOnView` returns Unimplemented. Proxy orchestration and
-  QN execution are wired in this qv branch. The shared buffer's historical start
-  and retention requirements are described in
+  QN execution are wired in this qv branch. The checkpoint-bounded `min(K, S, G)`
+  frontier and shared buffer retention requirements are described in
   [Transform Start Frontier](transform_start_after_timetick.md).
   TransformLog subscriptions accept Summary's retained lower bound; this
   compatibility behavior alone does not prove that earlier Deletes were applied.
@@ -183,12 +183,15 @@ Key observations:
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected (a projection reporting zero preserves the stored version).
-- TODO: A future StreamingNode refactor will add the safe, monotonic shard
-  `transform_start_after_timetick` protocol described in
-  [Transform Start-After TimeTick](transform_start_after_timetick.md). The
-  field is already present on the wire (`DataViewOfShard`, `QueryViewMeta`)
-  for QueryView consumer compatibility, but the current branch does not
-  advance or persist a meaningful frontier.
+- TODO: DataCoord will produce the shard `transform_start_after_timetick` as
+  `min(K, S, G)`: the reported channel checkpoint, published Segment coverage,
+  and unpublished Segment constraints across all partitions. Growing data
+  constrains the cursor without entering DataView membership; independent
+  Flush ordering is preserved. See
+  [Transform Start-After TimeTick](transform_start_after_timetick.md) for the
+  completeness proof and TransformLog-only recovery contract. The field is
+  already present on the wire (`DataViewOfShard`, `QueryViewMeta`), but the
+  current branch does not produce a meaningful frontier.
 
 ### 5.4 Constraints
 
