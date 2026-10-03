@@ -244,6 +244,18 @@ func (c *ZillizClient) setMeta(ctx context.Context) context.Context {
 	return ctx
 }
 
+// checkResponseStatus returns the failure the model service reported in the
+// response body. Every model service response carries its own Status next to
+// the payload, so a nil gRPC error alone does not mean the call succeeded: a
+// non-zero code is a failure even when the RPC itself returned normally. A
+// missing Status is treated as success, as before.
+func checkResponseStatus(status *modelservicepb.Status) error {
+	if status.GetCode() != 0 {
+		return merr.WrapErrFunctionFailedMsg("model service returned error, code: %d, msg: %s", status.GetCode(), status.GetMsg())
+	}
+	return nil
+}
+
 func (c *ZillizClient) Embedding(ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 	stub := modelservicepb.NewTextEmbeddingServiceClient(c.conn)
 	req := &modelservicepb.TextEmbeddingRequest{
@@ -254,6 +266,9 @@ func (c *ZillizClient) Embedding(ctx context.Context, texts []string, params map
 	defer cancel()
 	res, err := stub.Embedding(callCtx, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkResponseStatus(res.GetStatus()); err != nil {
 		return nil, err
 	}
 	embds := make([][]float32, 0, len(res.GetResults()))
@@ -284,6 +299,9 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 	if err != nil {
 		return nil, err
 	}
+	if err := checkResponseStatus(res.GetStatus()); err != nil {
+		return nil, err
+	}
 	return res.Scores, nil
 }
 
@@ -298,6 +316,9 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 	defer cancel()
 	res, err := stub.Highlight(callCtx, req)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkResponseStatus(res.GetStatus()); err != nil {
 		return nil, nil, err
 	}
 	highlights := make([][]string, 0, len(res.GetResults()))
