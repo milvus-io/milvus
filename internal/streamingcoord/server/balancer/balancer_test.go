@@ -442,7 +442,7 @@ func TestBalancerFreezeNodeInOtherResourceGroup(t *testing.T) {
 	assert.Empty(t, resp.FreezeNodeIds)
 }
 
-func TestBalancerWaitUntilSchemaDropReady(t *testing.T) {
+func TestBalancerWaitUntilVersionFeatureReadySchemaDrop(t *testing.T) {
 	paramtable.Init()
 	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("schema-drop-ready-%d", time.Now().UnixNano()))
 	oldMetaSubPath := paramtable.Get().EtcdCfg.MetaSubPath.SwapTempValue("meta")
@@ -501,13 +501,13 @@ func TestBalancerWaitUntilSchemaDropReady(t *testing.T) {
 	defer resource.Resource().ETCD().Delete(context.Background(), legacyProxyKey)
 
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	err = b.WaitUntilSchemaDropReady(cancelCtx)
+	err = b.WaitUntilVersionFeatureReady(cancelCtx, balancer.VersionFeatureSchemaDrop)
 	cancel()
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	waitDone := make(chan error, 1)
 	go func() {
-		waitDone <- b.WaitUntilSchemaDropReady(context.Background())
+		waitDone <- b.WaitUntilVersionFeatureReady(context.Background(), balancer.VersionFeatureSchemaDrop)
 	}()
 	select {
 	case err := <-waitDone:
@@ -527,7 +527,7 @@ func TestBalancerWaitUntilSchemaDropReady(t *testing.T) {
 	assertSavedStreamingVersion(t, savedVersions, channel.StreamingVersion300)
 }
 
-func TestBalancerWaitUntilSchemaDropReadySkipsAfterPersistedVersion(t *testing.T) {
+func TestBalancerWaitUntilVersionFeatureReadySchemaDropSkipsAfterPersistedVersion(t *testing.T) {
 	paramtable.Init()
 	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("schema-drop-ready-skip-%d", time.Now().UnixNano()))
 	oldMetaSubPath := paramtable.Get().EtcdCfg.MetaSubPath.SwapTempValue("meta")
@@ -576,7 +576,7 @@ func TestBalancerWaitUntilSchemaDropReadySkipsAfterPersistedVersion(t *testing.T
 
 	waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	assert.NoError(t, b.WaitUntilSchemaDropReady(waitCtx))
+	assert.NoError(t, b.WaitUntilVersionFeatureReady(waitCtx, balancer.VersionFeatureSchemaDrop))
 }
 
 func TestBalancer_WithRecoveryLag(t *testing.T) {

@@ -710,17 +710,17 @@ func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(
 	return _c
 }
 
-// WaitUntilSchemaDropReady provides a mock function with given fields: ctx
-func (_m *MockBalancer) WaitUntilSchemaDropReady(ctx context.Context) error {
-	ret := _m.Called(ctx)
+// WaitUntilVersionFeatureReady provides a mock function with given fields: ctx, feature
+func (_m *MockBalancer) WaitUntilVersionFeatureReady(ctx context.Context, feature balancer.VersionFeature) error {
+	ret := _m.Called(ctx, feature)
 
 	if len(ret) == 0 {
-		panic("no return value specified for WaitUntilSchemaDropReady")
+		panic("no return value specified for WaitUntilVersionFeatureReady")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, balancer.VersionFeature) error); ok {
+		r0 = rf(ctx, feature)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -728,76 +728,31 @@ func (_m *MockBalancer) WaitUntilSchemaDropReady(ctx context.Context) error {
 	return r0
 }
 
-// MockBalancer_WaitUntilSchemaDropReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitUntilSchemaDropReady'
-type MockBalancer_WaitUntilSchemaDropReady_Call struct {
+// MockBalancer_WaitUntilVersionFeatureReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitUntilVersionFeatureReady'
+type MockBalancer_WaitUntilVersionFeatureReady_Call struct {
 	*mock.Call
 }
 
-// WaitUntilSchemaDropReady is a helper method to define mock.On call
+// WaitUntilVersionFeatureReady is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockBalancer_Expecter) WaitUntilSchemaDropReady(ctx interface{}) *MockBalancer_WaitUntilSchemaDropReady_Call {
-	return &MockBalancer_WaitUntilSchemaDropReady_Call{Call: _e.mock.On("WaitUntilSchemaDropReady", ctx)}
+//   - feature balancer.VersionFeature
+func (_e *MockBalancer_Expecter) WaitUntilVersionFeatureReady(ctx interface{}, feature interface{}) *MockBalancer_WaitUntilVersionFeatureReady_Call {
+	return &MockBalancer_WaitUntilVersionFeatureReady_Call{Call: _e.mock.On("WaitUntilVersionFeatureReady", ctx, feature)}
 }
 
-func (_c *MockBalancer_WaitUntilSchemaDropReady_Call) Run(run func(ctx context.Context)) *MockBalancer_WaitUntilSchemaDropReady_Call {
+func (_c *MockBalancer_WaitUntilVersionFeatureReady_Call) Run(run func(ctx context.Context, feature balancer.VersionFeature)) *MockBalancer_WaitUntilVersionFeatureReady_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(balancer.VersionFeature))
 	})
 	return _c
 }
 
-func (_c *MockBalancer_WaitUntilSchemaDropReady_Call) Return(_a0 error) *MockBalancer_WaitUntilSchemaDropReady_Call {
+func (_c *MockBalancer_WaitUntilVersionFeatureReady_Call) Return(_a0 error) *MockBalancer_WaitUntilVersionFeatureReady_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockBalancer_WaitUntilSchemaDropReady_Call) RunAndReturn(run func(context.Context) error) *MockBalancer_WaitUntilSchemaDropReady_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// WaitUntilWALbasedDDLReady provides a mock function with given fields: ctx
-func (_m *MockBalancer) WaitUntilWALbasedDDLReady(ctx context.Context) error {
-	ret := _m.Called(ctx)
-
-	if len(ret) == 0 {
-		panic("no return value specified for WaitUntilWALbasedDDLReady")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
-		r0 = rf(ctx)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockBalancer_WaitUntilWALbasedDDLReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitUntilWALbasedDDLReady'
-type MockBalancer_WaitUntilWALbasedDDLReady_Call struct {
-	*mock.Call
-}
-
-// WaitUntilWALbasedDDLReady is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockBalancer_Expecter) WaitUntilWALbasedDDLReady(ctx interface{}) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
-	return &MockBalancer_WaitUntilWALbasedDDLReady_Call{Call: _e.mock.On("WaitUntilWALbasedDDLReady", ctx)}
-}
-
-func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) Run(run func(ctx context.Context)) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) Return(_a0 error) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) RunAndReturn(run func(context.Context) error) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
+func (_c *MockBalancer_WaitUntilVersionFeatureReady_Call) RunAndReturn(run func(context.Context, balancer.VersionFeature) error) *MockBalancer_WaitUntilVersionFeatureReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

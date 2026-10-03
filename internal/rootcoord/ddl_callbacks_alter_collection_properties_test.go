@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -668,8 +669,8 @@ func TestDDLCallbacksAlterCollectionPropertiesDisableDynamicFieldWaitsForSchemaD
 
 	barrierErr := errors.New("proxy version barrier")
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureSchemaDrop).Return(barrierErr).Once()
 	b.EXPECT().Close().Return().Maybe()
 	balance.ResetBalancer()
 	balance.Register(b)
@@ -680,7 +681,7 @@ func TestDDLCallbacksAlterCollectionPropertiesDisableDynamicFieldWaitsForSchemaD
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "false"}},
 	})
 	require.Error(t, merr.CheckRPCCall(resp, err))
-	require.Contains(t, resp.GetDetail(), "failed to wait until schema drop ready")
+	require.Contains(t, resp.GetDetail(), "failed to wait until schema-drop is ready")
 	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }

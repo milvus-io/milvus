@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -185,13 +186,17 @@ func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string
 	return broadcaster, nil
 }
 
-func waitUntilSchemaDropReady(ctx context.Context) error {
-	balancer, err := balance.GetWithContext(ctx)
+// waitUntilVersionFeatureReady waits until the balancer reports the version-gated
+// feature as ready. The gate is a one-time upgrade barrier per cluster: it blocks until
+// every node that must understand the feature is new enough, then persists a marker, so
+// later calls return immediately (see balancer.WaitUntilVersionFeatureReady).
+func waitUntilVersionFeatureReady(ctx context.Context, feature balancer.VersionFeature) error {
+	b, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
-	if err := balancer.WaitUntilSchemaDropReady(ctx); err != nil {
-		return errors.Wrap(err, "failed to wait until schema drop ready")
+	if err := b.WaitUntilVersionFeatureReady(ctx, feature); err != nil {
+		return errors.Wrapf(err, "failed to wait until %s is ready", feature)
 	}
 	return nil
 }
