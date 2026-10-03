@@ -400,6 +400,93 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 	s.Equal(testLabel, view[0].GetGroupLabel())
 }
 
+func (s *ClusteringCompactionPolicySuite) TestCheckAllL2SegmentsContains() {
+	ctx := context.Background()
+	label := &CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+
+	makeSegment := func(id int64, state commonpb.SegmentState, level datapb.SegmentLevel, compacting bool) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            id,
+				CollectionID:  label.CollectionID,
+				PartitionID:   label.PartitionID,
+				InsertChannel: label.Channel,
+				State:         state,
+				Level:         level,
+			},
+			isCompacting: compacting,
+		}
+	}
+
+	// s.Run does not re-run SetupTest, so reset segments meta per sub test to keep them independent.
+	reset := func() {
+		s.meta.segments = NewSegmentsInfo()
+	}
+
+	s.Run("no matching compacting l2 segment", func() {
+		reset()
+		s.meta.segments.SetSegment(1, makeSegment(1, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, false))
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("matching compacting l2 segment blocks", func() {
+		reset()
+		s.meta.segments.SetSegment(2, makeSegment(2, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, true))
+		s.False(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("segment from another collection is ignored", func() {
+		reset()
+		segment := makeSegment(3, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, true)
+		segment.CollectionID = label.CollectionID + 1
+		s.meta.segments.SetSegment(segment.GetID(), segment)
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("segment from another partition is ignored", func() {
+		reset()
+		segment := makeSegment(4, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, true)
+		segment.PartitionID = label.PartitionID + 1
+		s.meta.segments.SetSegment(segment.GetID(), segment)
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("segment from another channel is ignored", func() {
+		reset()
+		segment := makeSegment(5, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, true)
+		segment.InsertChannel = label.Channel + "-other"
+		s.meta.segments.SetSegment(segment.GetID(), segment)
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("compacting l1 segment is ignored", func() {
+		reset()
+		s.meta.segments.SetSegment(6, makeSegment(6, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L1, true))
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("unhealthy segment is ignored", func() {
+		reset()
+		s.meta.segments.SetSegment(7, makeSegment(7, commonpb.SegmentState_Dropped, datapb.SegmentLevel_L2, true))
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+
+	s.Run("compacting set after insertion is still detected", func() {
+		reset()
+		segment := makeSegment(8, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L2, false)
+		s.meta.segments.SetSegment(segment.GetID(), segment)
+		s.meta.SetSegmentsCompacting(ctx, []UniqueID{segment.GetID()}, true)
+		s.False(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+
+		s.meta.SetSegmentsCompacting(ctx, []UniqueID{segment.GetID()}, false)
+		s.True(s.clusteringCompactionPolicy.checkAllL2SegmentsContains(ctx, label.CollectionID, label.PartitionID, label.Channel))
+	})
+}
+
 func (s *ClusteringCompactionPolicySuite) TestGetExpectedSegmentSize() {
 }
 
