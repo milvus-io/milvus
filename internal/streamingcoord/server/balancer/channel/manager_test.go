@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1089,4 +1090,52 @@ func newChannelID(name string) ChannelID {
 	return ChannelID{
 		Name: name,
 	}
+}
+
+// The watch callback runs outside the manager lock, and the discover server marshals the streaming version it
+// receives into the gRPC response there. MarkStreamingVersion must not mutate the object a watcher is still reading.
+func TestChannelManagerMarkStreamingVersionWhileWatching(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
+		Version: 1,
+	}, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+
+	ctx := context.Background()
+	m, err := RecoverChannelManager(ctx, "test-channel")
+	require.NoError(t, err)
+
+	const rounds = 200
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			_, err := m.applyAssignments(func(param WatchChannelAssignmentsCallbackParam) error {
+				_, err := proto.Marshal(param.StreamingVersion)
+				return err
+			})
+			assert.NoError(t, err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < rounds; i++ {
+			assert.NoError(t, m.MarkStreamingVersion(ctx, int64(i+2)))
+		}
+	}()
+	wg.Wait()
+	assert.True(t, m.IsStreamingVersionAtLeast(rounds+1))
 }
