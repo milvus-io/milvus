@@ -445,6 +445,24 @@ func (t *statsTable) Minus(stats bm25Stats) {
 	}
 }
 
+// MergeExclusive and MinusExclusive are Merge and Minus for callers holding the oracle write lock,
+// which keeps every other reader and writer of current out, so the shard locks are skipped.
+func (t *statsTable) MergeExclusive(stats bm25Stats) {
+	for fieldID, s := range stats {
+		if s != nil {
+			t.field(fieldID).MergeUnlocked(s)
+		}
+	}
+}
+
+func (t *statsTable) MinusExclusive(stats bm25Stats) {
+	for fieldID, s := range stats {
+		if s != nil {
+			t.field(fieldID).MinusUnlocked(s)
+		}
+	}
+}
+
 func (t *statsTable) GetStats(fieldID int64) (*storage.ConcurrentBM25Stats, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -584,7 +602,7 @@ func (o *idfOracle) activateSealedStatsLocked(segStats *sealedBm25Stats, stats b
 	if segStats.activate.Load() {
 		return false
 	}
-	o.current.Merge(stats)
+	o.current.MergeExclusive(stats)
 	segStats.activate.Store(true)
 	segStats.version++
 	return true
@@ -619,7 +637,7 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 		bm25Stats: clonedStats,
 		activate:  true,
 	}
-	o.current.Merge(clonedStats)
+	o.current.MergeExclusive(clonedStats)
 	o.Unlock()
 	o.syncResource()
 }
@@ -797,7 +815,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			segStats.diskSize += result.diskSize
 			switch {
 			case wasActive:
-				o.current.Merge(installedStats)
+				o.current.MergeExclusive(installedStats)
 			case activateIfReadable:
 				// Inactive entries have not contributed any field to current, so activation must merge the full segment.
 				if existingStats == nil {
@@ -972,7 +990,7 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
 
 	old.Merge(stats)
 	if old.activate {
-		o.current.Merge(stats)
+		o.current.MergeExclusive(stats)
 		o.checkMemoryResource()
 	}
 	o.Unlock()
@@ -1317,7 +1335,7 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		// drop growing segment bm25 stats
 		if stats.droppedVersion != 0 && stats.droppedVersion <= snapshot.targetVersion {
 			if stats.activate {
-				o.current.Minus(stats.bm25Stats)
+				o.current.MinusExclusive(stats.bm25Stats)
 			}
 			delete(o.growing, segmentID)
 		}
@@ -1432,10 +1450,16 @@ func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][
 		return nil, 0, err
 	}
 
+	// Preloads merge into current under the read lock only before the first target is synced, and the
+	// target version changes only under the write lock. Past that point every writer holds the write
+	// lock, so the shard locks can be skipped on this per-search path.
+	buildIDF := stats.BuildIDFUnlocked
+	if o.targetVersion.Load() == 0 {
+		buildIDF = stats.BuildIDF
+	}
 	idfBytes := make([][]byte, len(tfs.GetContents()))
 	for i, tf := range tfs.GetContents() {
-		idf := stats.BuildIDF(tf)
-		idfBytes[i] = idf
+		idfBytes[i] = buildIDF(tf)
 	}
 	return idfBytes, stats.GetAvgdl(), nil
 }

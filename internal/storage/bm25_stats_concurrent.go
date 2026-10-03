@@ -37,6 +37,10 @@ const (
 // each guarded by its own lock, so concurrent merges of different stats proceed in parallel.
 // Every token lives in exactly one shard, so it takes the same memory as a single BM25Stats.
 // A reader running concurrently with a merge may observe that merge partially applied.
+//
+// The shard locks cost an atomic update per token, which matters on hot paths that are already
+// serialized by the caller. The Unlocked methods skip them: MergeUnlocked and MinusUnlocked need
+// the caller to hold c exclusively, and BuildIDFUnlocked needs that no write runs concurrently.
 type ConcurrentBM25Stats struct {
 	shards    [concurrentBM25StatsShards]bm25StatsShard
 	numRow    atomic.Int64
@@ -84,6 +88,26 @@ func (c *ConcurrentBM25Stats) Minus(stats *BM25Stats) {
 	c.apply(stats.rowsWithToken, -1)
 	c.numRow.Add(-stats.numRow)
 	c.numToken.Add(-stats.numToken)
+}
+
+// MergeUnlocked adds stats into c. The caller must hold c exclusively.
+func (c *ConcurrentBM25Stats) MergeUnlocked(stats *BM25Stats) {
+	c.applyUnlocked(stats.rowsWithToken, 1)
+	c.numRow.Add(stats.numRow)
+	c.numToken.Add(stats.numToken)
+}
+
+// MinusUnlocked subtracts stats from c. The caller must hold c exclusively.
+func (c *ConcurrentBM25Stats) MinusUnlocked(stats *BM25Stats) {
+	c.applyUnlocked(stats.rowsWithToken, -1)
+	c.numRow.Add(-stats.numRow)
+	c.numToken.Add(-stats.numToken)
+}
+
+func (c *ConcurrentBM25Stats) applyUnlocked(rows map[uint32]int32, sign int32) {
+	for token, count := range rows {
+		c.shards[shardOf(token)].rowsWithToken[token] += sign * count
+	}
 }
 
 func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
@@ -157,7 +181,7 @@ func (c *ConcurrentBM25Stats) NumToken() int64 {
 	return c.numToken.Load()
 }
 
-// BuildIDF has the same result as BM25Stats.BuildIDF on the same data.
+// BuildIDF has the same result as BM25Stats.BuildIDF on the same data. Safe for concurrent use.
 func (c *ConcurrentBM25Stats) BuildIDF(tf []byte) (idf []byte) {
 	numRow := c.numRow.Load()
 	numElements := typeutil.SparseFloatRowElementCount(tf)
@@ -169,6 +193,21 @@ func (c *ConcurrentBM25Stats) BuildIDF(tf []byte) (idf []byte) {
 		shard.RLock()
 		nq := shard.rowsWithToken[key]
 		shard.RUnlock()
+		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, numRow, nq))
+	}
+	return
+}
+
+// BuildIDFUnlocked is BuildIDF for callers that guarantee no write runs concurrently.
+// It is a separate loop on purpose: a lock switch inside the loop made it about twice as slow.
+func (c *ConcurrentBM25Stats) BuildIDFUnlocked(tf []byte) (idf []byte) {
+	numRow := c.numRow.Load()
+	numElements := typeutil.SparseFloatRowElementCount(tf)
+	idf = make([]byte, len(tf))
+	for idx := 0; idx < numElements; idx++ {
+		key := typeutil.SparseFloatRowIndexAt(tf, idx)
+		value := typeutil.SparseFloatRowValueAt(tf, idx)
+		nq := c.shards[shardOf(key)].rowsWithToken[key]
 		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, numRow, nq))
 	}
 	return

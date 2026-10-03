@@ -103,6 +103,30 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 	}
 }
 
+func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
+	// below and above the split threshold of the locked path
+	for _, rows := range []int{20, 2000} {
+		r := rand.New(rand.NewSource(int64(rows)))
+		expected := NewBM25Stats()
+		c := NewConcurrentBM25Stats()
+		for i := 0; i < 16; i++ {
+			s := randomBM25Stats(r, rows, 20000)
+			expected.Merge(s)
+			c.MergeUnlocked(s)
+			if i%4 == 0 {
+				expected.Minus(s)
+				c.MinusUnlocked(s)
+			}
+		}
+		assert.Equal(t, expected.NumRow(), c.NumRow())
+		assert.Equal(t, expected.NumToken(), c.NumToken())
+		assert.Equal(t, expected.rowsWithToken, c.Snapshot().rowsWithToken)
+		tf := allTokensTF(20000)
+		assert.Equal(t, expected.BuildIDF(tf), c.BuildIDFUnlocked(tf))
+		assert.Equal(t, c.BuildIDF(tf), c.BuildIDFUnlocked(tf))
+	}
+}
+
 func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	r := rand.New(rand.NewSource(5))
 	expected := NewBM25Stats()

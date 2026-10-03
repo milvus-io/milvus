@@ -353,3 +353,46 @@ func TestSyncDistributionFetchFailureChangesNothing(t *testing.T) {
 	assert.False(t, brokenStats.activate.Load())
 	assertCurrentField(t, o, 102, active.stats[102])
 }
+
+// After the first target, BuildIDF reads current without the shard locks while UpdateGrowing writes it
+// without them too; the oracle lock must keep them apart (run with -race).
+func TestBuildIDFConcurrentWithGrowingUpdates(t *testing.T) {
+	r := rand.New(rand.NewSource(9))
+	o := newSyncTestOracle(t, 102)
+	o.targetVersion.Store(1)
+	o.RegisterGrowing(1, bm25Stats{102: randomSyncTestStats(r, 5)})
+
+	updates := make([]bm25Stats, 64)
+	expected := storage.NewBM25Stats()
+	expected.Merge(o.growing[1].bm25Stats[102])
+	for i := range updates {
+		updates[i] = bm25Stats{102: randomSyncTestStats(r, 3)}
+		expected.Merge(updates[i][102])
+	}
+
+	tf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1, 2: 1, 3: 1})
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _, err := o.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: syncTestVocab})
+					assert.NoError(t, err)
+				}
+			}
+		}()
+	}
+	for _, u := range updates {
+		o.UpdateGrowing(1, u)
+	}
+	close(stop)
+	readers.Wait()
+
+	assertCurrentField(t, o, 102, expected)
+}
