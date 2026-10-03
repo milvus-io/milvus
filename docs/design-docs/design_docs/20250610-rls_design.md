@@ -100,7 +100,8 @@ emitting an integral double with a decimal point.
 
 Array tags must contain only strings or only numbers; mixing the two is
 rejected on write. Numeric arrays use int64 when every element is an int64;
-otherwise all elements are promoted to double. Empty arrays are allowed.
+otherwise all elements are promoted to double. Promotion that cannot preserve
+an int64 element exactly is rejected on write. Empty arrays are allowed.
 
 String tags match only string fields. Integer and double tags may match either
 numeric field family when conversion preserves the value exactly; the same

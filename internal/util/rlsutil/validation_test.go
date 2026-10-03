@@ -28,6 +28,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func newArrayTagValueForTest(t testing.TB, values []TagValue) TagValue {
+	t.Helper()
+	value, err := NewArrayTagValue(values)
+	require.NoError(t, err)
+	return value
+}
+
 func TestValidatePayloadBounds(t *testing.T) {
 	paramtable.Init()
 
@@ -227,11 +234,11 @@ func TestValidatePayloadBounds(t *testing.T) {
 			"string": NewStringTagValue("value"),
 			"int":    NewInt64TagValue(3),
 			"double": NewDoubleTagValue(0.75),
-			"array":  NewArrayTagValue([]TagValue{NewStringTagValue("one"), NewStringTagValue("two")}),
+			"array":  newArrayTagValueForTest(t, []TagValue{NewStringTagValue("one"), NewStringTagValue("two")}),
 		}))
 		require.ErrorIs(t, ValidateTags(map[string]TagValue{"double": NewDoubleTagValue(math.NaN())}), merr.ErrParameterInvalid)
 		require.ErrorIs(t, ValidateTags(map[string]TagValue{"double": NewDoubleTagValue(math.Inf(1))}), merr.ErrParameterInvalid)
-		require.ErrorIs(t, ValidateTags(map[string]TagValue{"array": NewArrayTagValue([]TagValue{NewDoubleTagValue(math.NaN())})}), merr.ErrParameterInvalid)
+		require.ErrorIs(t, ValidateTags(map[string]TagValue{"array": newArrayTagValueForTest(t, []TagValue{NewDoubleTagValue(math.NaN())})}), merr.ErrParameterInvalid)
 		require.ErrorIs(t, ValidateTags(map[string]TagValue{"array": {Kind: TagValueKindArray}}), merr.ErrParameterInvalid)
 	})
 
@@ -240,7 +247,7 @@ func TestValidatePayloadBounds(t *testing.T) {
 			"s": NewStringTagValue("abc"),
 			"i": NewInt64TagValue(1),
 			"d": NewDoubleTagValue(1.5),
-			"a": NewArrayTagValue([]TagValue{NewStringTagValue(""), NewStringTagValue("")}),
+			"a": newArrayTagValueForTest(t, []TagValue{NewStringTagValue(""), NewStringTagValue("")}),
 		}
 		size, err := PrincipalTagsSize("alice", tags)
 		require.NoError(t, err)
@@ -267,7 +274,7 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.Equal(t, NewStringTagValue("acme"), tags["tenant"])
 		require.Equal(t, NewInt64TagValue(3), tags["level"])
 		require.Equal(t, NewDoubleTagValue(0.75), tags["score"])
-		require.Equal(t, NewArrayTagValue([]TagValue{NewStringTagValue("sales"), NewStringTagValue("ops")}), tags["groups"])
+		require.Equal(t, newArrayTagValueForTest(t, []TagValue{NewStringTagValue("sales"), NewStringTagValue("ops")}), tags["groups"])
 		payload, err := TagsToJSON(tags)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"tenant":"acme","level":3,"score":0.75,"groups":["sales","ops"]}`, payload)
@@ -292,12 +299,12 @@ func TestValidatePayloadBounds(t *testing.T) {
 		}
 
 		source := []TagValue{NewStringTagValue("original")}
-		arrayTag := NewArrayTagValue(source)
+		arrayTag := newArrayTagValueForTest(t, source)
 		source[0] = NewStringTagValue("mutated")
 		require.Equal(t, []TagValue{NewStringTagValue("original")}, arrayTag.arrayValue)
 
 		numbers := []TagValue{NewInt64TagValue(1), NewDoubleTagValue(2)}
-		arrayTag = NewArrayTagValue(numbers)
+		arrayTag = newArrayTagValueForTest(t, numbers)
 		require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, arrayTag.arrayValue)
 		require.Equal(t, NewInt64TagValue(1), numbers[0])
 	})
@@ -350,7 +357,7 @@ func TestArrayTagElementTypes(t *testing.T) {
 		{name: "fractional number promotes integers", payload: `[1,2.5]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2.5)}, valid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tags := map[string]TagValue{"value": NewArrayTagValue(test.values)}
+			tags := map[string]TagValue{"value": newArrayTagValueForTest(t, test.values)}
 			for _, maxTags := range []int{0, 1} {
 				decoded, err := TagsFromJSONWithLimit(`{"value":`+test.payload+`}`, maxTags)
 				if test.valid {
@@ -374,6 +381,76 @@ func TestArrayTagElementTypes(t *testing.T) {
 			roundTrip, err := TagsFromJSON(encoded)
 			require.NoError(t, err)
 			require.Equal(t, tags, roundTrip)
+		})
+	}
+}
+
+func TestArrayTagNumericPromotionPrecision(t *testing.T) {
+	paramtable.Init()
+	for _, test := range []struct {
+		integer int64
+		exact   bool
+	}{
+		{integer: 1<<53 - 1, exact: true},
+		{integer: 1 << 53, exact: true},
+		{integer: 1<<53 + 1},
+		{integer: 1<<53 + 2, exact: true},
+		{integer: -(1<<53 + 1)},
+		{integer: -(1<<53 + 2), exact: true},
+		{integer: math.MaxInt64},
+		{integer: math.MaxInt64 - 1023, exact: true},
+		{integer: math.MinInt64, exact: true},
+		{integer: math.MinInt64 + 1},
+	} {
+		t.Run(strconv.FormatInt(test.integer, 10), func(t *testing.T) {
+			integer := NewInt64TagValue(test.integer)
+			// Pure integer arrays never require promotion.
+			array, err := NewArrayTagValue([]TagValue{integer})
+			require.NoError(t, err)
+			require.Equal(t, []TagValue{integer}, array.arrayValue)
+			payload, err := TagsToJSON(map[string]TagValue{"value": array})
+			require.NoError(t, err)
+			roundTrip, err := TagsFromJSON(payload)
+			require.NoError(t, err)
+			require.Equal(t, array, roundTrip["value"])
+
+			for _, doubleFirst := range []bool{false, true} {
+				values := []TagValue{integer, NewDoubleTagValue(1)}
+				tokens := []string{strconv.FormatInt(test.integer, 10), "1.0"}
+				if doubleFirst {
+					values[0], values[1] = values[1], values[0]
+					tokens[0], tokens[1] = tokens[1], tokens[0]
+				}
+				array, err := NewArrayTagValue(values)
+				if test.exact {
+					require.NoError(t, err)
+					for i, source := range values {
+						require.Equal(t, TagValueKindDouble, array.arrayValue[i].Kind)
+						if source.Kind == TagValueKindInt64 {
+							require.Equal(t, test.integer, int64(array.arrayValue[i].DoubleValue))
+						}
+					}
+				} else {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.Equal(t, TagValue{}, array)
+				}
+				// Neither successful nor failed promotion changes caller-owned input.
+				if doubleFirst {
+					require.Equal(t, integer, values[1])
+				} else {
+					require.Equal(t, integer, values[0])
+				}
+				for _, maxTags := range []int{0, 1} {
+					decoded, err := TagsFromJSONWithLimit(`{"value":[`+strings.Join(tokens, ",")+`]}`, maxTags)
+					if test.exact {
+						require.NoError(t, err)
+						require.Equal(t, array, decoded["value"])
+					} else {
+						require.ErrorIs(t, err, merr.ErrParameterInvalid)
+						require.Nil(t, decoded)
+					}
+				}
+			}
 		})
 	}
 }
@@ -413,7 +490,7 @@ func TestStoredArrayTagStructuralBounds(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = NewInt64TagValue(0)
 	}
-	require.ErrorIs(t, ValidateTags(map[string]TagValue{"groups": NewArrayTagValue(tooMany)}), merr.ErrParameterInvalid)
+	require.ErrorIs(t, ValidateTags(map[string]TagValue{"groups": newArrayTagValueForTest(t, tooMany)}), merr.ErrParameterInvalid)
 
 	_, err = TagsFromJSON(`{}` + strings.Repeat(" ", int(maxRLSPrincipalMetadataBytes)-2))
 	require.NoError(t, err)

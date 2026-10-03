@@ -64,8 +64,9 @@ func NewDoubleTagValue(value float64) TagValue {
 }
 
 // NewArrayTagValue copies elements and promotes numeric arrays to double when
-// any element is a double. String/number mixtures remain invalid for validation.
-func NewArrayTagValue(values []TagValue) TagValue {
+// any element is a double, rejecting integer promotion that loses precision.
+// String/number mixtures remain invalid for validation.
+func NewArrayTagValue(values []TagValue) (TagValue, error) {
 	cloned := make([]TagValue, len(values))
 	hasDouble := false
 	for i, value := range values {
@@ -75,14 +76,18 @@ func NewArrayTagValue(values []TagValue) TagValue {
 	if hasDouble {
 		for i, value := range cloned {
 			if value.Kind == TagValueKindInt64 {
-				cloned[i] = NewDoubleTagValue(float64(value.Int64Value))
+				promoted := float64(value.Int64Value)
+				if !isExactInt64(promoted) || int64(promoted) != value.Int64Value {
+					return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array element %d cannot be promoted from int64 to double without losing precision", i)
+				}
+				cloned[i] = NewDoubleTagValue(promoted)
 			}
 		}
 	}
 	return TagValue{
 		Kind:       TagValueKindArray,
 		arrayValue: cloned,
-	}
+	}, nil
 }
 
 // PrincipalTagsSize returns the bytes charged to the principal cache. Values
@@ -266,7 +271,11 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 		if closing != json.Delim(']') {
 			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
 		}
-		return NewArrayTagValue(elements), nil
+		array, err := NewArrayTagValue(elements)
+		if err != nil {
+			return TagValue{}, merr.Wrapf(err, "RLS principal tag %q", key)
+		}
+		return array, nil
 	default:
 		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, double, or one-dimensional array of those types", key)
 	}

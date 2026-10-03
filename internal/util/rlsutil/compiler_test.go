@@ -99,11 +99,11 @@ func TestInstantiateNotAndArrayTags(t *testing.T) {
 		{name: "not equality match", expr: "not (age == $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(18)}, expected: truthFalse},
 		{name: "not equality mismatch", expr: "not (age == $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(19)}, expected: truthTrue},
 		{name: "not in list", expr: "not (age in [17, 19])", expected: truthTrue},
-		{name: "array any with exact numeric conversion", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewDoubleTagValue(2), NewInt64TagValue(4)})}, expected: truthTrue},
-		{name: "not array any", expr: "not array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewInt64TagValue(4), NewInt64TagValue(5)})}, expected: truthTrue},
+		{name: "array any with exact numeric conversion", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": newArrayTagValueForTest(t, []TagValue{NewDoubleTagValue(2), NewInt64TagValue(4)})}, expected: truthTrue},
+		{name: "not array any", expr: "not array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": newArrayTagValueForTest(t, []TagValue{NewInt64TagValue(4), NewInt64TagValue(5)})}, expected: truthTrue},
 		{name: "missing tag under not stays false", expr: "not (age == $current_principal_tags['value'])", expected: truthFalse},
 		{name: "scalar tag cannot fill array", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewInt64TagValue(2)}, expected: truthFalse},
-		{name: "lossy array element stays false", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": NewArrayTagValue([]TagValue{NewDoubleTagValue(2.5)})}, expected: truthFalse},
+		{name: "lossy array element stays false", expr: "array_contains_any(scores, $current_principal_tags['value'])", tags: map[string]TagValue{"value": newArrayTagValueForTest(t, []TagValue{NewDoubleTagValue(2.5)})}, expected: truthFalse},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			compiled, err := CompileCheckExpression([]*RowPolicy{{
@@ -135,7 +135,7 @@ func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
 	for i := range elements {
 		elements[i] = NewInt64TagValue(int64(i))
 	}
-	arrayTag := NewArrayTagValue(elements)
+	arrayTag := newArrayTagValueForTest(t, elements)
 	arrayBytes, ok := tagValueSize(arrayTag)
 	require.True(t, ok)
 	policyCount := int(maxRLSPrincipalMetadataBytes/arrayBytes) + 1
@@ -161,7 +161,7 @@ func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
 }
 
 func TestArrayTagTemplateNormalizationPreservesSnapshot(t *testing.T) {
-	tag := NewArrayTagValue([]TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)})
+	tag := newArrayTagValueForTest(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)})
 	value, ok := rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Int64}, true, tag)
 	require.True(t, ok)
 	require.True(t, value.GetArrayVal().GetSameType())
