@@ -254,6 +254,7 @@ struct StrictGroupPhase2Stats {
 struct StrictGroupPhase2Context {
     milvus::OpContext* op_ctx;
     const segcore::SegmentInternalInterface& segment;
+    const segcore::SegmentReadSnapshot* snapshot{nullptr};
     FieldId group_by_field_id;
     SearchResult* search_result;
     bool eligible;
@@ -553,7 +554,8 @@ TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
             context->group_by_field_id,
             context->search_result->total_data_cnt_,
             groups,
-            context->search_result->GetVectorSearchBaseFilter());
+            context->search_result->GetVectorSearchBaseFilter(),
+            context->snapshot);
         stats.membership_build_us =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - start)
@@ -686,16 +688,19 @@ TrySingleFieldStrictGroup(
     std::vector<CompositeGroupKey>& groups,
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
-    std::vector<size_t>& prefix) {
+    std::vector<size_t>& prefix,
+    const segcore::SegmentReadSnapshot* snapshot) {
     auto getter = GetDataGetter<T>(op_ctx,
                                    segment,
                                    info.group_by_field_ids_.front(),
                                    std::nullopt,
                                    std::nullopt,
-                                   false);
+                                   false,
+                                   snapshot);
     StrictGroupPhase2Context context{
         op_ctx,
         segment,
+        snapshot,
         info.group_by_field_ids_.front(),
         result,
         query::CanUseStrictGroupSearch(info, iterators.size()),
@@ -735,7 +740,8 @@ TryStrictGroupFilteredSearch(
     std::vector<CompositeGroupKey>& groups,
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
-    std::vector<size_t>& prefix) {
+    std::vector<size_t>& prefix,
+    const segcore::SegmentReadSnapshot* snapshot) {
     Defer clear_search_provider([&] {
         if (result != nullptr) {
             result->ClearVectorSearchProvider();
@@ -756,7 +762,8 @@ TryStrictGroupFilteredSearch(
                                                    groups,
                                                    offsets,
                                                    distances,
-                                                   prefix);
+                                                   prefix,
+                                                   snapshot);
         case DataType::INT8:
             return TrySingleFieldStrictGroup<int8_t>(op_ctx,
                                                      iterators,
@@ -766,7 +773,8 @@ TryStrictGroupFilteredSearch(
                                                      groups,
                                                      offsets,
                                                      distances,
-                                                     prefix);
+                                                     prefix,
+                                                     snapshot);
         case DataType::INT16:
             return TrySingleFieldStrictGroup<int16_t>(op_ctx,
                                                       iterators,
@@ -776,7 +784,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::INT32:
             return TrySingleFieldStrictGroup<int32_t>(op_ctx,
                                                       iterators,
@@ -786,7 +795,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::INT64:
             return TrySingleFieldStrictGroup<int64_t>(op_ctx,
                                                       iterators,
@@ -796,7 +806,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::TIMESTAMPTZ:
             return TrySingleFieldStrictGroup<int64_t>(op_ctx,
                                                       iterators,
@@ -806,7 +817,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::VARCHAR:
             return TrySingleFieldStrictGroup<std::string>(op_ctx,
                                                           iterators,
@@ -816,7 +828,8 @@ TryStrictGroupFilteredSearch(
                                                           groups,
                                                           offsets,
                                                           distances,
-                                                          prefix);
+                                                          prefix,
+                                                          snapshot);
         default:
             return false;
     }

@@ -1092,6 +1092,13 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return it == state_->runtime->fields.end() ? nullptr : it->second;
     }
 
+    // Hot-loop column accessor: borrowed pointer straight out of the frozen
+    // published state, no shared_ptr copies and no skip-metrics construction.
+    const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const override {
+        return Column(field_id);
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {
