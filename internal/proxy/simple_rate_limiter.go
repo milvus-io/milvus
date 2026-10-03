@@ -41,8 +41,9 @@ import (
 
 // SimpleLimiter is implemented based on Limiter interface
 type SimpleLimiter struct {
-	quotaStatesMu sync.RWMutex
-	rateLimiter   *rlinternal.RateLimiterTree
+	// setRatesMu serializes controller updates without blocking request checks.
+	setRatesMu  sync.Mutex
+	rateLimiter *rlinternal.RateLimiterTree
 
 	// for alloc
 	allocWaitInterval time.Duration
@@ -71,9 +72,6 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	if n <= 0 {
 		return nil
 	}
-
-	m.quotaStatesMu.RLock()
-	defer m.quotaStatesMu.RUnlock()
 
 	// 1. check global(cluster) level rate limits
 	clusterRateLimiters := m.rateLimiter.GetRootLimiters()
@@ -159,8 +157,6 @@ func isNotCollectionLevelLimitRequest(rt internalpb.RateType) bool {
 
 // GetQuotaStates returns quota states.
 func (m *SimpleLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
-	m.quotaStatesMu.RLock()
-	defer m.quotaStatesMu.RUnlock()
 	type stateReasonKey struct {
 		ErrorCode commonpb.ErrorCode
 		Reason    string
@@ -190,23 +186,28 @@ func (m *SimpleLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 
 // SetRates sets quota states for SimpleLimiter.
 func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
-	m.quotaStatesMu.Lock()
-	defer m.quotaStatesMu.Unlock()
+	m.setRatesMu.Lock()
+	defer m.setRatesMu.Unlock()
 
-	// Reset the limiter rates due to potential changes in configurations.
+	// Apply configuration defaults together with the requested rates. Publishing
+	// defaults first could temporarily clear an existing quota denial while Check
+	// runs concurrently with this update.
 	var (
 		clusterConfigs    = getDefaultLimiterConfig(internalpb.RateScope_Cluster)
 		databaseConfigs   = getDefaultLimiterConfig(internalpb.RateScope_Database)
 		collectionConfigs = getDefaultLimiterConfig(internalpb.RateScope_Collection)
 		partitionConfigs  = getDefaultLimiterConfig(internalpb.RateScope_Partition)
 	)
-	initLimiter("cluster", m.rateLimiter.GetRootLimiters(), clusterConfigs)
+	initLimiter(m.rateLimiter.GetRootLimiters(), clusterConfigs, rootLimiter.GetLimiter())
 	m.rateLimiter.GetRootLimiters().GetChildren().Range(func(dbID int64, dbLimiter *rlinternal.RateLimiterNode) bool {
-		initLimiter(fmt.Sprintf("db-%d", dbID), dbLimiter, databaseConfigs)
+		dbRequest := rootLimiter.GetChildren()[dbID]
+		initLimiter(dbLimiter, databaseConfigs, dbRequest.GetLimiter())
 		dbLimiter.GetChildren().Range(func(collectionID int64, collLimiter *rlinternal.RateLimiterNode) bool {
-			initLimiter(fmt.Sprintf("collection-%d", collectionID), collLimiter, collectionConfigs)
+			collectionRequest := dbRequest.GetChildren()[collectionID]
+			initLimiter(collLimiter, collectionConfigs, collectionRequest.GetLimiter())
 			collLimiter.GetChildren().Range(func(partitionID int64, partitionLimiter *rlinternal.RateLimiterNode) bool {
-				initLimiter(fmt.Sprintf("partition-%d", partitionID), partitionLimiter, partitionConfigs)
+				partitionRequest := collectionRequest.GetChildren()[partitionID]
+				initLimiter(partitionLimiter, partitionConfigs, partitionRequest.GetLimiter())
 				return true
 			})
 			return true
@@ -222,27 +223,22 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 	return nil
 }
 
-func initLimiter(source string, rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[internalpb.RateType]*paramtable.ParamItem) {
+func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[internalpb.RateType]*paramtable.ParamItem, requested *proxypb.Limiter) {
 	for rt, p := range rateLimiterConfigs {
 		newLimit := ratelimitutil.Limit(p.GetAsFloat())
-		burst := p.GetAsFloat() // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
+		for _, rate := range requested.GetRates() {
+			if rate.GetRt() == rt {
+				newLimit = ratelimitutil.Limit(rate.GetR())
+			}
+		}
+		burst := float64(newLimit) // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
 		old, ok := rln.GetLimiters().Get(rt)
-		updated := false
 		if ok {
 			if old.Limit() != newLimit {
 				old.SetLimit(newLimit)
-				updated = true
 			}
 		} else {
 			rln.GetLimiters().Insert(rt, ratelimitutil.NewLimiter(newLimit, burst))
-			updated = true
-		}
-		if updated {
-			mlog.Debug(context.TODO(), "RateLimiter register for rateType",
-				mlog.String("source", source),
-				mlog.String("rateType", internalpb.RateType_name[(int32(rt))]),
-				mlog.String("rateLimit", newLimit.String()),
-				mlog.String("burst", fmt.Sprintf("%v", burst)))
 		}
 	}
 }
@@ -253,28 +249,28 @@ func initLimiter(source string, rln *rlinternal.RateLimiterNode, rateLimiterConf
 func newClusterLimiter() *rlinternal.RateLimiterNode {
 	clusterRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 	clusterLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Cluster)
-	initLimiter(internalpb.RateScope_Cluster.String(), clusterRateLimiters, clusterLimiterConfigs)
+	initLimiter(clusterRateLimiters, clusterLimiterConfigs, nil)
 	return clusterRateLimiters
 }
 
 func newDatabaseLimiter() *rlinternal.RateLimiterNode {
 	dbRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Database)
 	databaseLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Database)
-	initLimiter(internalpb.RateScope_Database.String(), dbRateLimiters, databaseLimiterConfigs)
+	initLimiter(dbRateLimiters, databaseLimiterConfigs, nil)
 	return dbRateLimiters
 }
 
 func newCollectionLimiters() *rlinternal.RateLimiterNode {
 	collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Collection)
 	collectionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Collection)
-	initLimiter(internalpb.RateScope_Collection.String(), collectionRateLimiters, collectionLimiterConfigs)
+	initLimiter(collectionRateLimiters, collectionLimiterConfigs, nil)
 	return collectionRateLimiters
 }
 
 func newPartitionLimiters() *rlinternal.RateLimiterNode {
 	partRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Partition)
 	partitionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Partition)
-	initLimiter(internalpb.RateScope_Partition.String(), partRateLimiters, partitionLimiterConfigs)
+	initLimiter(partRateLimiters, partitionLimiterConfigs, nil)
 	return partRateLimiters
 }
 
