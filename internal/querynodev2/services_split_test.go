@@ -362,12 +362,21 @@ func TestAdoptingASplitChildMakesItVisibleToQuerycoord(t *testing.T) {
 	node.delegators.Insert("v1", child)
 
 	require.False(t, node.distDeltaTracker.isChannelDirty("v1"))
+	modifyTsBefore := node.getDistributionModifyTS()
 
 	status, err := node.WatchDmChannels(context.Background(), adoptionRequest("v1"))
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	assert.True(t, node.distDeltaTracker.isChannelDirty("v1"),
 		"an adopted child must enter the next delta report, or querycoord never sees it")
+	// The dirty mark alone is unreachable: GetDataDistribution answers "nothing
+	// changed" and never reads the delta while the request's LastUpdateTs is not
+	// behind this timestamp.
+	assert.Greater(t, node.getDistributionModifyTS(), modifyTsBefore,
+		"the adoption must bump the distribution modify timestamp, or the next report short-circuits before the mark")
+	assert.True(t, hasDataDistributionChange(
+		&querypb.GetDataDistributionRequest{LastUpdateTs: modifyTsBefore}, node.getDistributionModifyTS()),
+		"a querycoord holding the pre-adoption timestamp must be told the distribution changed")
 }
 
 func TestReWatchingAnAlreadyAdoptedChannelChangesNothing(t *testing.T) {
