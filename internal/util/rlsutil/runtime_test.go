@@ -436,8 +436,29 @@ func TestNegatedPredicateRejectsMismatchedRuntimeTypes(t *testing.T) {
 				Op:         planpb.OpType_NotEqual,
 				Value:      value,
 			}}}
-			err := ValidateRowsByPredicate(context.Background(), fields, 1, predicate, "insert", "check")
-			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			// Batch preparation must visit comparisons under NOT and on both
+			// sides of combined policies, including short-circuited branches.
+			predicates := []*planpb.Expr{
+				predicate,
+				{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+					Op: planpb.UnaryExpr_Not, Child: predicate,
+				}}},
+				{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+					Op: planpb.BinaryExpr_LogicalOr, Left: predicate, Right: alwaysTruePredicate(),
+				}}},
+				{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+					Op: planpb.BinaryExpr_LogicalOr, Left: alwaysTruePredicate(), Right: predicate,
+				}}},
+			}
+			storageFields := map[int64]StorageFieldData{
+				100: &testStorageFieldData{data: []int64{7}, dataType: schemapb.DataType_Int64},
+			}
+			for _, expr := range predicates {
+				err := ValidateRowsByPredicate(context.Background(), fields, 1, expr, "insert", "check")
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				err = ValidateInsertDataByPredicate(context.Background(), storageFields, 1, expr, "import", "check")
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
 		}
 	})
 

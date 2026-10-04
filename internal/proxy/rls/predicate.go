@@ -190,10 +190,16 @@ func (m *manager) resolvePredicateSnapshot(ctx context.Context, collectionID Uni
 			}
 			return predicateSnapshot{}, compileErr
 		}
+		if !needsTags {
+			state.mu.RUnlock()
+			m.mu.RUnlock()
+			return snapshot, nil
+		}
+
 		entry := state.principalTags[principalName]
 		ttl := paramtable.Get().ProxyCfg.RLSMetaRefreshInterval.GetAsDuration(time.Second)
-		tagsReady := !needsTags || principalTagsEntryFresh(entry, ttl, time.Now())
-		if needsTags && tagsReady {
+		tagsReady := principalTagsEntryFresh(entry, ttl, time.Now())
+		if tagsReady {
 			snapshot.tags = entry.tags
 		}
 		state.mu.RUnlock()

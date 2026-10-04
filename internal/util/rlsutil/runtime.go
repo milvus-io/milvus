@@ -881,6 +881,12 @@ func validateRowDataByPredicate(ctx context.Context, rowData *rowData, reference
 	if err := rowData.validateRowCount(referencedFieldIDs, rowNum); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateComparisonLiterals(parsedExpr); err != nil {
+		return merr.Wrapf(err, "invalid RLS %s expression for %s", exprKind, operation)
+	}
 
 	for rowIdx := 0; rowIdx < rowNum; rowIdx++ {
 		clear(rowData.arrayElementLayouts)
@@ -1551,13 +1557,30 @@ func evalBinaryExpr(expr *planpb.BinaryExpr, rowData *rowData, rowIdx int) (trut
 	}
 }
 
+// Comparison literals are immutable across rows. Check them once per batch,
+// including branches that row evaluation may short-circuit, so malformed
+// predicates fail closed without repeating type validation in the row loop.
+func validateComparisonLiterals(expr *planpb.Expr) error {
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		return validateComparisonLiterals(node.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		if err := validateComparisonLiterals(node.BinaryExpr.GetLeft()); err != nil {
+			return err
+		}
+		return validateComparisonLiterals(node.BinaryExpr.GetRight())
+	case *planpb.Expr_UnaryRangeExpr:
+		dataType := node.UnaryRangeExpr.GetColumnInfo().GetDataType()
+		if !canonicalScalarLiteral(dataType, node.UnaryRangeExpr.GetValue()) {
+			return merr.WrapErrDataIntegrityMsg("RLS comparison value does not match field type %s", dataType.String())
+		}
+	}
+	return nil
+}
+
 func evalUnaryRangeExpr(expr *planpb.UnaryRangeExpr, rowData *rowData, rowIdx int) (truthValue, error) {
 	if expr.GetOp() != planpb.OpType_Equal && expr.GetOp() != planpb.OpType_NotEqual {
 		return truthUnknown, merr.WrapErrServiceInternalMsg("unsupported RLS comparison operator %s", expr.GetOp().String())
-	}
-	dataType := expr.GetColumnInfo().GetDataType()
-	if !canonicalScalarLiteral(dataType, expr.GetValue()) {
-		return truthUnknown, merr.WrapErrDataIntegrityMsg("RLS comparison value does not match field type %s", dataType.String())
 	}
 	rowValue, err := rowData.value(expr.GetColumnInfo(), rowIdx)
 	if err != nil {
