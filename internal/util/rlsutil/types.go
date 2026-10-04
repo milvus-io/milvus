@@ -141,7 +141,8 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 }
 
 // TagsFromJSONWithLimit bounds the raw payload, object members, and array
-// elements while decoding untrusted requests.
+// elements while decoding untrusted requests. Call ValidateTags afterwards to
+// apply write-time key/value semantics and quotas at the admission boundary.
 func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
 	return tagsFromJSON(payload, maxTags)
 }
@@ -151,8 +152,10 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 		return nil, err
 	}
 	maxArrayElements := maxRLSArrayTagElements
+	maxTagKeyLength := 0
 	if maxTags > 0 {
 		maxArrayElements = min(maxArrayElements, paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt())
+		maxTagKeyLength = paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
 	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
@@ -181,20 +184,14 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
 		}
 		if maxTags > 0 {
-			maxTagKeyLength := paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
 			if len(key) > maxTagKeyLength {
 				return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxTagKeyLength)
 			}
 		}
 
-		tagValue, err := decodeTagValue(decoder, key, maxArrayElements, true, maxTags > 0)
+		tagValue, err := decodeTagValue(decoder, key, maxArrayElements, true)
 		if err != nil {
 			return nil, err
-		}
-		if maxTags > 0 {
-			if err := validateTagValue(key, tagValue); err != nil {
-				return nil, err
-			}
 		}
 		tags[key] = tagValue
 	}
@@ -212,7 +209,7 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 	return tags, nil
 }
 
-func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, allowArray, enforceWriteLimits bool) (TagValue, error) {
+func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, allowArray bool) (TagValue, error) {
 	value, err := decoder.Token()
 	if err != nil {
 		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
@@ -249,18 +246,13 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 			if maxArrayElements > 0 && len(elements) >= maxArrayElements {
 				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
 			}
-			element, err := decodeTagValue(decoder, key, maxArrayElements, false, enforceWriteLimits)
+			element, err := decodeTagValue(decoder, key, maxArrayElements, false)
 			if err != nil {
 				return TagValue{}, err
 			}
 			if len(elements) > 0 && element.Kind != elements[0].Kind &&
 				(element.Kind == TagValueKindString || elements[0].Kind == TagValueKindString) {
 				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q array cannot mix strings and numbers", key)
-			}
-			if enforceWriteLimits {
-				if err := validateTagValue(key, element); err != nil {
-					return TagValue{}, err
-				}
 			}
 			elements = append(elements, element)
 		}

@@ -735,6 +735,57 @@ func TestValidateRowsStopsOnCanceledContext(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestFieldReaderBindsBatchTypes(t *testing.T) {
+	for _, test := range []struct {
+		dataType schemapb.DataType
+		data     any
+		want     any
+	}{
+		{schemapb.DataType_Bool, []bool{true}, true},
+		{schemapb.DataType_Int8, []int8{7}, int8(7)},
+		{schemapb.DataType_Int16, []int16{300}, int16(300)},
+		{schemapb.DataType_Int32, []int32{70000}, int32(70000)},
+		{schemapb.DataType_Int64, []int64{1 << 40}, int64(1 << 40)},
+		{schemapb.DataType_Float, []float32{1.5}, float32(1.5)},
+		{schemapb.DataType_Double, []float64{2.5}, float64(2.5)},
+		{schemapb.DataType_VarChar, []string{"sales"}, "sales"},
+		{schemapb.DataType_Text, []string{"text"}, "text"},
+		{schemapb.DataType_Timestamptz, []int64{123}, int64(123)},
+		{schemapb.DataType_Array, []*schemapb.ScalarField{nil}, nil},
+	} {
+		t.Run(test.dataType.String(), func(t *testing.T) {
+			reader := newFieldReader("field", test.dataType, nil, test.data)
+			require.True(t, reader.typeValid)
+			require.True(t, reader.shapeValid)
+			require.Equal(t, 1, reader.rowCount)
+			require.Equal(t, test.want, reader.valueAt(0))
+		})
+	}
+}
+
+func TestBatchPreparationRejectsMismatchedStorageEvenForNullRows(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64}
+	expr := &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+		ColumnInfo: column, Values: []*planpb.GenericValue{planparserv2.NewInt(7)},
+	}}}
+	data := map[int64]StorageFieldData{
+		100: &testStorageFieldData{data: []string{}, dataType: schemapb.DataType_Int64, validData: []bool{false}},
+	}
+	require.ErrorIs(t, ValidateInsertDataByPredicate(context.Background(), data, 1, expr, "import", "check"), merr.ErrServiceInternal)
+
+	data[100] = &testStorageFieldData{data: []int64{7}, dataType: schemapb.DataType_Int64}
+	require.NoError(t, ValidateInsertDataByPredicate(context.Background(), data, 1, expr, "import", "check"))
+	// Reusing a field ID does not exempt another leaf from declared-type checks.
+	mismatched := &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Double},
+		Values:     []*planpb.GenericValue{planparserv2.NewFloat(7)},
+	}}}
+	combined := &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+		Op: planpb.BinaryExpr_LogicalOr, Left: expr, Right: mismatched,
+	}}}
+	require.ErrorIs(t, ValidateInsertDataByPredicate(context.Background(), data, 1, combined, "import", "check"), merr.ErrServiceInternal)
+}
+
 func TestValidateInsertDataByPredicateNarrowIntegers(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "tiny", DataType: schemapb.DataType_Int8},

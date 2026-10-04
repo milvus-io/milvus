@@ -320,23 +320,28 @@ func ValidateTags(tags map[string]TagValue) error {
 	if len(tags) > paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt() {
 		return merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
 	}
+	maxKeyLength := paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
+	maxValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+	maxArrayElements := min(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt(), maxRLSArrayTagElements)
 	for key, value := range tags {
-		if err := ValidateTagKeyWithLimit(key); err != nil {
+		if err := ValidateTagKey(key); err != nil {
 			return err
 		}
-		if err := validateTagValue(key, value); err != nil {
+		if len(key) > maxKeyLength {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxKeyLength)
+		}
+		if err := validateTagValue(key, value, maxValueLength, maxArrayElements); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateTagValue(key string, value TagValue) error {
+func validateTagValue(key string, value TagValue, maxValueLength, maxArrayElements int) error {
 	switch value.Kind {
 	case TagValueKindString:
-		maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
-		if len(value.StringValue) > maxTagValueLength {
-			return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+		if len(value.StringValue) > maxValueLength {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxValueLength)
 		}
 	case TagValueKindInt64:
 	case TagValueKindDouble:
@@ -347,9 +352,8 @@ func validateTagValue(key string, value TagValue) error {
 		if value.arrayValue == nil {
 			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
 		}
-		maxElements := min(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt(), maxRLSArrayTagElements)
-		if len(value.arrayValue) > maxElements {
-			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxElements)
+		if len(value.arrayValue) > maxArrayElements {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
 		}
 		for _, element := range value.arrayValue {
 			if element.Kind == TagValueKindArray {
@@ -358,7 +362,7 @@ func validateTagValue(key string, value TagValue) error {
 			if element.Kind != value.arrayValue[0].Kind {
 				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q array elements must have the same type", key)
 			}
-			if err := validateTagValue(key, element); err != nil {
+			if err := validateTagValue(key, element, maxValueLength, maxArrayElements); err != nil {
 				return err
 			}
 		}

@@ -89,8 +89,9 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.Equal(t, TagValueKindDouble, tags["k"].Kind)
 		_, err = TagsFromJSONWithLimit(`{"kk":"x"}`, 1)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-		_, err = TagsFromJSONWithLimit(`{"k":"xx"}`, 1)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		tags, err = TagsFromJSONWithLimit(`{"k":"xx"}`, 1)
+		require.NoError(t, err)
+		require.ErrorIs(t, ValidateTags(tags), merr.ErrParameterInvalid)
 
 		storedTags, err := TagsFromJSON(`{"kk":"xx"}`)
 		require.NoError(t, err)
@@ -473,8 +474,9 @@ func TestStoredArrayTagStructuralBounds(t *testing.T) {
 	stored, err = TagsFromJSON(`{"groups":["existing"]}`)
 	require.NoError(t, err)
 	require.Equal(t, "existing", stored["groups"].arrayValue[0].StringValue)
-	_, err = TagsFromJSONWithLimit(`{"groups":["existing"]}`, 1)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	decoded, err := TagsFromJSONWithLimit(`{"groups":["existing"]}`, 1)
+	require.NoError(t, err)
+	require.ErrorIs(t, ValidateTags(decoded), merr.ErrParameterInvalid)
 
 	// Fixed bounds still apply before a compact JSON array expands in memory.
 	limit.SwapTempValue(strconv.Itoa(maxRLSArrayTagElements + 1))
