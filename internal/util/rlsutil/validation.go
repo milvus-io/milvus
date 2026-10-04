@@ -36,7 +36,10 @@ const (
 	maxRLSPrincipalMetadataBytes int64 = 1 << 20
 	// One array must fit the existing materialized-tag budget even before
 	// string payloads. This structural ceiling is not a refreshable quota.
-	maxRLSArrayTagElements = int(maxRLSPrincipalMetadataBytes/tagValueRetainedSize) - 1
+	maxRLSArrayTagElements = int(maxRLSPrincipalMetadataBytes/rlsTemplateValueSize) - 1
+	// Template expansion still materializes individual protobuf values. Keep
+	// its existing conservative charge independent of compact cache storage.
+	rlsTemplateValueSize int64 = 64
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -352,16 +355,11 @@ func validateTagValue(key string, value TagValue, maxValueLength, maxArrayElemen
 		if value.arrayValue == nil {
 			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
 		}
-		if len(value.arrayValue) > maxArrayElements {
+		if value.arrayValue.len() > maxArrayElements {
 			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
 		}
-		for _, element := range value.arrayValue {
-			if element.Kind == TagValueKindArray {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q does not support nested arrays", key)
-			}
-			if element.Kind != value.arrayValue[0].Kind {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q array elements must have the same type", key)
-			}
+		for i := 0; i < value.arrayValue.len(); i++ {
+			element := value.arrayValue.at(i)
 			if err := validateTagValue(key, element, maxValueLength, maxArrayElements); err != nil {
 				return err
 			}

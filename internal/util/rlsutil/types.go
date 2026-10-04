@@ -46,10 +46,37 @@ type TagValue struct {
 	DoubleValue float64
 	// arrayValue is immutable after construction so TagValue remains safely
 	// shallow-copyable across metadata snapshots and caches.
-	arrayValue []TagValue
+	arrayValue *tagArray
 }
 
 const tagValueRetainedSize = int64(unsafe.Sizeof(TagValue{}))
+
+// Exactly one typed slice is populated. Empty arrays have kind Unknown.
+type tagArray struct {
+	kind     TagValueKind
+	strings  []string
+	integers []int64
+	doubles  []float64
+}
+
+const tagArrayRetainedSize = int64(unsafe.Sizeof(tagArray{}))
+
+func (a *tagArray) len() int {
+	return len(a.strings) + len(a.integers) + len(a.doubles)
+}
+
+func (a *tagArray) at(i int) TagValue {
+	switch a.kind {
+	case TagValueKindString:
+		return NewStringTagValue(a.strings[i])
+	case TagValueKindInt64:
+		return NewInt64TagValue(a.integers[i])
+	case TagValueKindDouble:
+		return NewDoubleTagValue(a.doubles[i])
+	default:
+		return TagValue{}
+	}
+}
 
 func NewStringTagValue(value string) TagValue {
 	return TagValue{Kind: TagValueKindString, StringValue: value}
@@ -65,28 +92,49 @@ func NewDoubleTagValue(value float64) TagValue {
 
 // NewArrayTagValue copies elements and promotes numeric arrays to double when
 // any element is a double, rejecting integer promotion that loses precision.
-// String/number mixtures remain invalid for validation.
+// String/number mixtures and non-scalar elements are rejected.
 func NewArrayTagValue(values []TagValue) (TagValue, error) {
-	cloned := make([]TagValue, len(values))
-	hasDouble := false
-	for i, value := range values {
-		cloned[i] = value
-		hasDouble = hasDouble || value.Kind == TagValueKindDouble
+	array := &tagArray{}
+	for _, value := range values {
+		if value.Kind != TagValueKindString && value.Kind != TagValueKindInt64 && value.Kind != TagValueKindDouble {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array requires scalar string or numeric elements")
+		}
+		if array.kind != TagValueKindUnknown && array.kind != value.Kind &&
+			(array.kind == TagValueKindString || value.Kind == TagValueKindString) {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array cannot mix strings and numbers")
+		}
+		if array.kind == TagValueKindUnknown || value.Kind == TagValueKindDouble {
+			array.kind = value.Kind
+		}
 	}
-	if hasDouble {
-		for i, value := range cloned {
+	switch array.kind {
+	case TagValueKindString:
+		array.strings = make([]string, len(values))
+		for i, value := range values {
+			array.strings[i] = value.StringValue
+		}
+	case TagValueKindInt64:
+		array.integers = make([]int64, len(values))
+		for i, value := range values {
+			array.integers[i] = value.Int64Value
+		}
+	case TagValueKindDouble:
+		array.doubles = make([]float64, len(values))
+		for i, value := range values {
 			if value.Kind == TagValueKindInt64 {
 				promoted := float64(value.Int64Value)
 				if !isExactInt64(promoted) || int64(promoted) != value.Int64Value {
 					return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array element %d cannot be promoted from int64 to double without losing precision", i)
 				}
-				cloned[i] = NewDoubleTagValue(promoted)
+				array.doubles[i] = promoted
+			} else {
+				array.doubles[i] = value.DoubleValue
 			}
 		}
 	}
 	return TagValue{
 		Kind:       TagValueKindArray,
-		arrayValue: cloned,
+		arrayValue: array,
 	}, nil
 }
 
@@ -120,15 +168,14 @@ func tagValueSize(value TagValue) (int64, bool) {
 		if value.arrayValue == nil {
 			return 0, false
 		}
-		for _, element := range value.arrayValue {
-			if element.Kind == TagValueKindArray {
+		array := value.arrayValue
+		size += tagArrayRetainedSize + int64(cap(array.strings))*int64(unsafe.Sizeof("")) +
+			int64(cap(array.integers)+cap(array.doubles))*8
+		for _, element := range array.strings {
+			if int64(len(element)) > math.MaxInt64-size {
 				return 0, false
 			}
-			elementSize, ok := tagValueSize(element)
-			if !ok || elementSize > math.MaxInt64-size {
-				return 0, false
-			}
-			size += elementSize
+			size += int64(len(element))
 		}
 		return size, true
 	default:
@@ -316,11 +363,9 @@ func tagValueToJSON(value TagValue) (any, bool) {
 		if value.arrayValue == nil {
 			return nil, false
 		}
-		values := make([]any, len(value.arrayValue))
-		for i, element := range value.arrayValue {
-			if element.Kind != value.arrayValue[0].Kind {
-				return nil, false
-			}
+		values := make([]any, value.arrayValue.len())
+		for i := range values {
+			element := value.arrayValue.at(i)
 			var ok bool
 			values[i], ok = tagValueToJSON(element)
 			if !ok || element.Kind == TagValueKindArray {

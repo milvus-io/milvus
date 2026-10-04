@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -253,7 +254,7 @@ func TestValidatePayloadBounds(t *testing.T) {
 		size, err := PrincipalTagsSize("alice", tags)
 		require.NoError(t, err)
 		require.Equal(t, int64(len("alice")+len("s")+len("abc")+len("i")+len("d")+
-			len("a"))+6*tagValueRetainedSize, size)
+			len("a"))+4*tagValueRetainedSize+tagArrayRetainedSize+2*int64(unsafe.Sizeof("")), size)
 
 		_, err = PrincipalTagsSize("alice", map[string]TagValue{"unsupported": {Kind: TagValueKindUnknown}})
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -302,11 +303,11 @@ func TestValidatePayloadBounds(t *testing.T) {
 		source := []TagValue{NewStringTagValue("original")}
 		arrayTag := newArrayTagValueForTest(t, source)
 		source[0] = NewStringTagValue("mutated")
-		require.Equal(t, []TagValue{NewStringTagValue("original")}, arrayTag.arrayValue)
+		require.Equal(t, []string{"original"}, arrayTag.arrayValue.strings)
 
 		numbers := []TagValue{NewInt64TagValue(1), NewDoubleTagValue(2)}
 		arrayTag = newArrayTagValueForTest(t, numbers)
-		require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, arrayTag.arrayValue)
+		require.Equal(t, []float64{1, 2}, arrayTag.arrayValue.doubles)
 		require.Equal(t, NewInt64TagValue(1), numbers[0])
 	})
 
@@ -336,6 +337,38 @@ func TestValidatePayloadBounds(t *testing.T) {
 	})
 }
 
+func TestCompactArrayTagRetainedSize(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		value        TagValue
+		elementBytes int64
+	}{
+		{"integer", NewInt64TagValue(7), 8},
+		{"double", NewDoubleTagValue(1.5), 8},
+		{"string", NewStringTagValue("abc"), int64(unsafe.Sizeof("")) + 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := make([]TagValue, 1024)
+			for i := range values {
+				values[i] = test.value
+			}
+			array := newArrayTagValueForTest(t, values)
+			size, err := PrincipalTagsSize("alice", map[string]TagValue{"groups": array})
+			require.NoError(t, err)
+			require.Equal(t, int64(len("alicegroups"))+tagValueRetainedSize+tagArrayRetainedSize+1024*test.elementBytes, size)
+			values[0] = NewStringTagValue("changed")
+			require.Equal(t, test.value, array.arrayValue.at(0))
+			encoded, err := TagsToJSON(map[string]TagValue{"groups": array})
+			require.NoError(t, err)
+			decoded, err := TagsFromJSON(encoded)
+			require.NoError(t, err)
+			require.Equal(t, array, decoded["groups"])
+		})
+	}
+	// Compact retention must not silently increase template expansion limits.
+	require.Equal(t, 16383, maxRLSArrayTagElements)
+}
+
 func TestArrayTagElementTypes(t *testing.T) {
 	paramtable.Init()
 	for _, test := range []struct {
@@ -358,7 +391,8 @@ func TestArrayTagElementTypes(t *testing.T) {
 		{name: "fractional number promotes integers", payload: `[1,2.5]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2.5)}, valid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tags := map[string]TagValue{"value": newArrayTagValueForTest(t, test.values)}
+			array, arrayErr := NewArrayTagValue(test.values)
+			tags := map[string]TagValue{"value": array}
 			for _, maxTags := range []int{0, 1} {
 				decoded, err := TagsFromJSONWithLimit(`{"value":`+test.payload+`}`, maxTags)
 				if test.valid {
@@ -370,13 +404,13 @@ func TestArrayTagElementTypes(t *testing.T) {
 				}
 			}
 
-			validationErr := ValidateTags(tags)
-			encoded, encodeErr := TagsToJSON(tags)
 			if !test.valid {
-				require.ErrorIs(t, validationErr, merr.ErrParameterInvalid)
-				require.ErrorIs(t, encodeErr, merr.ErrServiceInternal)
+				require.ErrorIs(t, arrayErr, merr.ErrParameterInvalid)
 				return
 			}
+			require.NoError(t, arrayErr)
+			validationErr := ValidateTags(tags)
+			encoded, encodeErr := TagsToJSON(tags)
 			require.NoError(t, validationErr)
 			require.NoError(t, encodeErr)
 			roundTrip, err := TagsFromJSON(encoded)
@@ -408,7 +442,7 @@ func TestArrayTagNumericPromotionPrecision(t *testing.T) {
 			// Pure integer arrays never require promotion.
 			array, err := NewArrayTagValue([]TagValue{integer})
 			require.NoError(t, err)
-			require.Equal(t, []TagValue{integer}, array.arrayValue)
+			require.Equal(t, []int64{test.integer}, array.arrayValue.integers)
 			payload, err := TagsToJSON(map[string]TagValue{"value": array})
 			require.NoError(t, err)
 			roundTrip, err := TagsFromJSON(payload)
@@ -426,9 +460,9 @@ func TestArrayTagNumericPromotionPrecision(t *testing.T) {
 				if test.exact {
 					require.NoError(t, err)
 					for i, source := range values {
-						require.Equal(t, TagValueKindDouble, array.arrayValue[i].Kind)
+						require.Equal(t, TagValueKindDouble, array.arrayValue.kind)
 						if source.Kind == TagValueKindInt64 {
-							require.Equal(t, test.integer, int64(array.arrayValue[i].DoubleValue))
+							require.Equal(t, test.integer, int64(array.arrayValue.doubles[i]))
 						}
 					}
 				} else {
@@ -465,7 +499,7 @@ func TestStoredArrayTagStructuralBounds(t *testing.T) {
 	// Refreshable admission limits must not make existing metadata unreadable.
 	stored, err := TagsFromJSON(`{"groups":[1,2]}`)
 	require.NoError(t, err)
-	require.Len(t, stored["groups"].arrayValue, 2)
+	require.Equal(t, 2, stored["groups"].arrayValue.len())
 	_, err = TagsFromJSONWithLimit(`{"groups":[1,2]}`, 1)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	stringLimit := &paramtable.Get().ProxyCfg.RLSMaxTagValueLength
@@ -473,7 +507,7 @@ func TestStoredArrayTagStructuralBounds(t *testing.T) {
 	defer stringLimit.SwapTempValue(previousStringLimit)
 	stored, err = TagsFromJSON(`{"groups":["existing"]}`)
 	require.NoError(t, err)
-	require.Equal(t, "existing", stored["groups"].arrayValue[0].StringValue)
+	require.Equal(t, "existing", stored["groups"].arrayValue.strings[0])
 	decoded, err := TagsFromJSONWithLimit(`{"groups":["existing"]}`, 1)
 	require.NoError(t, err)
 	require.ErrorIs(t, ValidateTags(decoded), merr.ErrParameterInvalid)

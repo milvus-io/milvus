@@ -136,8 +136,9 @@ func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
 		elements[i] = NewInt64TagValue(int64(i))
 	}
 	arrayTag := newArrayTagValueForTest(t, elements)
-	arrayBytes, ok := tagValueSize(arrayTag)
+	arrayBytes, ok := normalizedRLSTagValueSize([]schemapb.DataType{schemapb.DataType_Int64}, true, arrayTag)
 	require.True(t, ok)
+	require.Equal(t, int64(1025*64), arrayBytes)
 	policyCount := int(maxRLSPrincipalMetadataBytes/arrayBytes) + 1
 	policies := make([]*RowPolicy, policyCount)
 	for i := range policies {
@@ -168,7 +169,7 @@ func TestArrayTagTemplateNormalizationPreservesSnapshot(t *testing.T) {
 	require.Len(t, value.GetArrayVal().GetArray(), 2)
 	require.Equal(t, planparserv2.NewInt(1), value.GetArrayVal().GetArray()[0])
 	require.Equal(t, planparserv2.NewInt(2), value.GetArrayVal().GetArray()[1])
-	require.Equal(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)}, tag.arrayValue)
+	require.Equal(t, []float64{1, 2}, tag.arrayValue.doubles)
 
 	value, ok = rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Double}, true, tag)
 	require.True(t, ok)

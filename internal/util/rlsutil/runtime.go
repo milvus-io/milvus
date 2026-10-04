@@ -533,8 +533,9 @@ func rlsTagValueToGenericValue(dataTypes []schemapb.DataType, expectsArray bool,
 		if value.Kind != TagValueKindArray || value.arrayValue == nil {
 			return nil, false
 		}
-		elements := make([]*planpb.GenericValue, len(value.arrayValue))
-		for i, element := range value.arrayValue {
+		elements := make([]*planpb.GenericValue, value.arrayValue.len())
+		for i := range elements {
+			element := value.arrayValue.at(i)
 			var ok bool
 			elements[i], ok = rlsTagValueToGenericValue(dataTypes, false, element)
 			if !ok {
@@ -581,18 +582,25 @@ func normalizedRLSTagValueSize(dataTypes []schemapb.DataType, expectsArray bool,
 		if !ok {
 			return 0, false
 		}
-		return tagValueSize(normalized)
+		size := rlsTemplateValueSize
+		switch normalized.Kind {
+		case TagValueKindString:
+			if int64(len(normalized.StringValue)) > math.MaxInt64-size {
+				return 0, false
+			}
+			size += int64(len(normalized.StringValue))
+		case TagValueKindInt64, TagValueKindDouble:
+		default:
+			return 0, false
+		}
+		return size, true
 	}
 	if value.Kind != TagValueKindArray || value.arrayValue == nil {
 		return 0, false
 	}
-	size := tagValueRetainedSize
-	for _, element := range value.arrayValue {
-		normalized, ok := normalizeRLSScalarTagValue(dataTypes, element)
-		if !ok {
-			return 0, false
-		}
-		elementSize, ok := tagValueSize(normalized)
+	size := rlsTemplateValueSize
+	for i := 0; i < value.arrayValue.len(); i++ {
+		elementSize, ok := normalizedRLSTagValueSize(dataTypes, false, value.arrayValue.at(i))
 		if !ok || elementSize > math.MaxInt64-size {
 			return 0, false
 		}
