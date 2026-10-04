@@ -42,15 +42,20 @@ func IPImplPure(a []float32, b []float32) float32 {
 }
 
 func CosineImplPure(a []float32, b []float32) float32 {
-	var sum, normA, normB float32
+	// Accumulate in float64: float32 accumulation of the squared norms
+	// underflows to 0 for vectors with norm below ~1e-19, which made
+	// cosine similarity of tiny-but-finite vectors NaN instead of
+	// staying scale-invariant (milvus-io/milvus#53903).
+	var sum, normA, normB float64
 
 	for i := range a {
-		sum += a[i] * b[i]
-		normA += a[i] * a[i]
-		normB += b[i] * b[i]
+		fa, fb := float64(a[i]), float64(b[i])
+		sum += fa * fb
+		normA += fa * fa
+		normB += fb * fb
 	}
 
-	return sum / float32(math.Sqrt(float64(normA)*float64(normB)))
+	return float32(sum / math.Sqrt(normA*normB))
 }
 
 var (
