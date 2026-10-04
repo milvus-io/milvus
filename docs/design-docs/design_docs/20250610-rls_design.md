@@ -170,6 +170,11 @@ batch before routing or writing it.
 
 Local checks use SQL three-valued logic consistent with Segcore filtering.
 Comparisons involving NULL produce UNKNOWN, and only a final TRUE admits a row.
+An array field that is NULL produces UNKNOWN, including under `not`.
+Array membership skips NULL elements, following the
+[element-level NULL semantics](20260709-element-level-null.md): a non-null array
+containing only NULL elements has no matching values, so negating a non-match
+produces TRUE.
 
 ## Expression Support
 

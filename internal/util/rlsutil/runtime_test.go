@@ -590,6 +590,65 @@ func TestArrayMatcherValidatesEmptyAndNonemptyTargets(t *testing.T) {
 	}
 }
 
+func TestArrayContainsDistinguishesNullElementsFromNullRows(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "values", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+	}}})
+	require.NoError(t, err)
+	for _, test := range []struct {
+		name         string
+		data         []int64
+		elementValid []bool
+		rowValid     bool
+	}{
+		{"dense all-null", []int64{0}, []bool{false}, true},
+		{"compact all-null", nil, []bool{false}, true},
+		{"empty array", nil, nil, true},
+		{"null row", nil, nil, false},
+	} {
+		for _, predicate := range []string{"array_contains(values, 0)", "array_contains_any(values, [0])", "array_contains_all(values, [0])"} {
+			for _, prefix := range []string{"", "not "} {
+				t.Run(test.name+"/"+prefix+predicate, func(t *testing.T) {
+					child := &schemapb.ScalarField{
+						ValidData: test.elementValid,
+						Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: test.data}},
+					}
+					fields := []*schemapb.FieldData{{
+						FieldId: 100, Type: schemapb.DataType_Array, ValidData: []bool{test.rowValid},
+						Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{child},
+						}}}},
+					}}
+					expr, err := planparserv2.ParseExpr(helper, prefix+predicate, nil)
+					require.NoError(t, err)
+					expected := truthUnknown
+					if test.rowValid {
+						expected = truthValueFromBool(prefix != "")
+					}
+					actual, err := evalExpr(expr, newRowData(fields, []int64{100}), 0)
+					require.NoError(t, err)
+					require.Equal(t, expected, actual)
+					storage := map[int64]*testStorageFieldData{100: {
+						data: []*schemapb.ScalarField{child}, dataType: schemapb.DataType_Array,
+						elementType: schemapb.DataType_Int64, validData: []bool{test.rowValid},
+					}}
+					for _, err := range []error{
+						ValidateRowsByPredicate(context.Background(), fields, 1, expr, "insert", "check"),
+						ValidateInsertDataByPredicate(context.Background(), storage, 1, expr, "import", "check"),
+					} {
+						if expected == truthTrue {
+							require.NoError(t, err)
+						} else {
+							require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestArrayContainsAllMatcherDoesNotLeakAcrossRows(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
 		FieldID: 100, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
