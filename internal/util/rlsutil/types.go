@@ -122,9 +122,9 @@ func NewArrayTagValue(values []TagValue) (TagValue, error) {
 		array.doubles = make([]float64, len(values))
 		for i, value := range values {
 			if value.Kind == TagValueKindInt64 {
-				promoted := float64(value.Int64Value)
-				if !isExactInt64(promoted) || int64(promoted) != value.Int64Value {
-					return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array element %d cannot be promoted from int64 to double without losing precision", i)
+				promoted, err := promoteArrayInteger(value.Int64Value, i)
+				if err != nil {
+					return TagValue{}, err
 				}
 				array.doubles[i] = promoted
 			} else {
@@ -136,6 +136,57 @@ func NewArrayTagValue(values []TagValue) (TagValue, error) {
 		Kind:       TagValueKindArray,
 		arrayValue: array,
 	}, nil
+}
+
+func promoteArrayInteger(value int64, index int) (float64, error) {
+	promoted := float64(value)
+	if !isExactInt64(promoted) || int64(promoted) != value {
+		return 0, merr.WrapErrParameterInvalidMsg("RLS principal tag array element %d cannot be promoted from int64 to double without losing precision", index)
+	}
+	return promoted, nil
+}
+
+// appendDecoded is used only before publishing the immutable array. The first
+// double promotes the accumulated integer buffer once; no wide union slice is
+// built while decoding metadata.
+func (a *tagArray) appendDecoded(value TagValue) error {
+	if a.kind == TagValueKindUnknown {
+		a.kind = value.Kind
+	}
+	if (a.kind == TagValueKindString) != (value.Kind == TagValueKindString) {
+		return merr.WrapErrParameterInvalidMsg("RLS principal tag array cannot mix strings and numbers")
+	}
+	if a.kind == TagValueKindString {
+		a.strings = append(a.strings, value.StringValue)
+		return nil
+	}
+	if a.kind == TagValueKindInt64 && value.Kind == TagValueKindDouble {
+		doubles := make([]float64, len(a.integers), max(cap(a.integers), len(a.integers)+1))
+		for i, integer := range a.integers {
+			promoted, err := promoteArrayInteger(integer, i)
+			if err != nil {
+				return err
+			}
+			doubles[i] = promoted
+		}
+		a.integers = nil
+		a.doubles = doubles
+		a.kind = TagValueKindDouble
+	}
+	if a.kind == TagValueKindDouble {
+		number := value.DoubleValue
+		if value.Kind == TagValueKindInt64 {
+			var err error
+			number, err = promoteArrayInteger(value.Int64Value, len(a.doubles))
+			if err != nil {
+				return err
+			}
+		}
+		a.doubles = append(a.doubles, number)
+	} else {
+		a.integers = append(a.integers, value.Int64Value)
+	}
+	return nil
 }
 
 // PrincipalTagsSize returns the bytes charged to the principal cache. Values
@@ -288,20 +339,18 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 		if typed != '[' || !allowArray {
 			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, double, or one-dimensional array of those types", key)
 		}
-		elements := make([]TagValue, 0)
+		array := &tagArray{}
 		for decoder.More() {
-			if maxArrayElements > 0 && len(elements) >= maxArrayElements {
+			if maxArrayElements > 0 && array.len() >= maxArrayElements {
 				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
 			}
 			element, err := decodeTagValue(decoder, key, maxArrayElements, false)
 			if err != nil {
 				return TagValue{}, err
 			}
-			if len(elements) > 0 && element.Kind != elements[0].Kind &&
-				(element.Kind == TagValueKindString || elements[0].Kind == TagValueKindString) {
-				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q array cannot mix strings and numbers", key)
+			if err := array.appendDecoded(element); err != nil {
+				return TagValue{}, merr.Wrapf(err, "RLS principal tag %q", key)
 			}
-			elements = append(elements, element)
 		}
 		closing, err := decoder.Token()
 		if err != nil {
@@ -310,11 +359,7 @@ func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, all
 		if closing != json.Delim(']') {
 			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
 		}
-		array, err := NewArrayTagValue(elements)
-		if err != nil {
-			return TagValue{}, merr.Wrapf(err, "RLS principal tag %q", key)
-		}
-		return array, nil
+		return TagValue{Kind: TagValueKindArray, arrayValue: array}, nil
 	default:
 		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, double, or one-dimensional array of those types", key)
 	}

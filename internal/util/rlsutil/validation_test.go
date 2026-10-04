@@ -337,6 +337,24 @@ func TestValidatePayloadBounds(t *testing.T) {
 	})
 }
 
+func TestDecodeArrayTagsUsesOnlyFinalTypedBuffer(t *testing.T) {
+	for _, payload := range []string{`[1,2,3.5,4,5.0]`, `[3.5,1,2,4,5.0]`} {
+		tags, err := TagsFromJSON(`{"groups":` + payload + `}`)
+		require.NoError(t, err)
+		array := tags["groups"].arrayValue
+		require.Equal(t, TagValueKindDouble, array.kind)
+		require.Nil(t, array.integers)
+		require.Nil(t, array.strings)
+		require.Len(t, array.doubles, 5)
+		require.ElementsMatch(t, []float64{1, 2, 3.5, 4, 5}, array.doubles)
+	}
+	for _, payload := range []string{`[1,9007199254740993,2.0]`, `[1.0,2,9007199254740993]`} {
+		tags, err := TagsFromJSON(`{"groups":` + payload + `}`)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Nil(t, tags)
+	}
+}
+
 func TestCompactArrayTagRetainedSize(t *testing.T) {
 	for _, test := range []struct {
 		name         string

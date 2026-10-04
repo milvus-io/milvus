@@ -1204,33 +1204,24 @@ func (m *literalMatcher) index(value any) (int, bool) {
 }
 
 func (m *arrayLiteralMatcher) matches(arrayValue *schemapb.ScalarField, rowData *rowData) (bool, error) {
-	dataLen, err := validateArrayElementDataType(arrayValue, m.dataType)
-	if err != nil {
-		return false, err
-	}
-	if _, err := rowData.arrayElementValidData(arrayValue, dataLen); err != nil {
-		return false, err
+	if len(m.values) == 0 {
+		_, err := visitScalarArrayElements(arrayValue, m.dataType, rowData, nil)
+		return err == nil && m.op != planpb.JSONContainsExpr_ContainsAny, err
 	}
 	if m.op == planpb.JSONContainsExpr_ContainsAny {
-		if len(m.values) == 0 {
-			return false, nil
-		}
-		return visitScalarArrayElements(arrayValue, rowData, func(value any) bool {
+		return visitScalarArrayElements(arrayValue, m.dataType, rowData, func(value any) bool {
 			_, ok := m.index(value)
 			return ok
 		})
 	}
 
-	if len(m.values) == 0 {
-		return true, nil
-	}
 	m.generation++
 	if m.generation == 0 {
 		clear(m.seen)
 		m.generation = 1
 	}
 	matched := 0
-	return visitScalarArrayElements(arrayValue, rowData, func(value any) bool {
+	return visitScalarArrayElements(arrayValue, m.dataType, rowData, func(value any) bool {
 		index, ok := m.index(value)
 		if !ok || m.seen[index] == m.generation {
 			return false
@@ -1676,54 +1667,35 @@ func genericNumericValue(value *planpb.GenericValue) (float64, bool) {
 	}
 }
 
-func visitScalarArrayElements(arrayValue *schemapb.ScalarField, rowData *rowData, visit func(any) bool) (bool, error) {
+// A nil visit validates the row without scanning elements, for empty targets.
+func visitScalarArrayElements(arrayValue *schemapb.ScalarField, expected schemapb.DataType, rowData *rowData, visit func(any) bool) (bool, error) {
 	switch data := arrayValue.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
-		return containsValidArrayElement(rowData, arrayValue, data.BoolData.GetData(), func(value bool) bool { return visit(value) })
+		if typeutil.IsBoolType(expected) {
+			return containsValidArrayElement(rowData, arrayValue, data.BoolData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_IntData:
-		return containsValidArrayElement(rowData, arrayValue, data.IntData.GetData(), func(value int32) bool { return visit(value) })
+		if expected == schemapb.DataType_Int8 || expected == schemapb.DataType_Int16 || expected == schemapb.DataType_Int32 {
+			return containsValidArrayElement(rowData, arrayValue, data.IntData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_LongData:
-		return containsValidArrayElement(rowData, arrayValue, data.LongData.GetData(), func(value int64) bool { return visit(value) })
+		if expected == schemapb.DataType_Int64 {
+			return containsValidArrayElement(rowData, arrayValue, data.LongData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_FloatData:
-		return containsValidArrayElement(rowData, arrayValue, data.FloatData.GetData(), func(value float32) bool { return visit(value) })
+		if expected == schemapb.DataType_Float {
+			return containsValidArrayElement(rowData, arrayValue, data.FloatData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_DoubleData:
-		return containsValidArrayElement(rowData, arrayValue, data.DoubleData.GetData(), func(value float64) bool { return visit(value) })
+		if expected == schemapb.DataType_Double {
+			return containsValidArrayElement(rowData, arrayValue, data.DoubleData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_StringData:
-		return containsValidArrayElement(rowData, arrayValue, data.StringData.GetData(), func(value string) bool { return visit(value) })
-	default:
-		return false, merr.WrapErrServiceInternalMsg("unsupported RLS array element type %T", data)
-	}
-}
-
-func validateArrayElementDataType(arrayValue *schemapb.ScalarField, expected schemapb.DataType) (int, error) {
-	var matches bool
-	var dataLen int
-	if arrayValue != nil {
-		switch data := arrayValue.GetData().(type) {
-		case *schemapb.ScalarField_BoolData:
-			matches = typeutil.IsBoolType(expected)
-			dataLen = len(data.BoolData.GetData())
-		case *schemapb.ScalarField_IntData:
-			matches = expected == schemapb.DataType_Int8 || expected == schemapb.DataType_Int16 || expected == schemapb.DataType_Int32
-			dataLen = len(data.IntData.GetData())
-		case *schemapb.ScalarField_LongData:
-			matches = expected == schemapb.DataType_Int64
-			dataLen = len(data.LongData.GetData())
-		case *schemapb.ScalarField_FloatData:
-			matches = expected == schemapb.DataType_Float
-			dataLen = len(data.FloatData.GetData())
-		case *schemapb.ScalarField_DoubleData:
-			matches = expected == schemapb.DataType_Double
-			dataLen = len(data.DoubleData.GetData())
-		case *schemapb.ScalarField_StringData:
-			matches = typeutil.IsStringType(expected)
-			dataLen = len(data.StringData.GetData())
+		if typeutil.IsStringType(expected) {
+			return containsValidArrayElement(rowData, arrayValue, data.StringData.GetData(), visit)
 		}
 	}
-	if !matches {
-		return 0, merr.WrapErrServiceInternalMsg("RLS array data does not match element type %s", expected.String())
-	}
-	return dataLen, nil
+	return false, merr.WrapErrServiceInternalMsg("RLS array data does not match element type %s", expected.String())
 }
 
 func (d *rowData) arrayElementValidData(arrayValue *schemapb.ScalarField, dataLen int) ([]bool, error) {
@@ -1751,10 +1723,13 @@ func (d *rowData) arrayElementValidData(arrayValue *schemapb.ScalarField, dataLe
 	return validData, err
 }
 
-func containsValidArrayElement[T any](rowData *rowData, arrayValue *schemapb.ScalarField, values []T, matches func(T) bool) (bool, error) {
+func containsValidArrayElement[T any](rowData *rowData, arrayValue *schemapb.ScalarField, values []T, matches func(any) bool) (bool, error) {
 	validData, err := rowData.arrayElementValidData(arrayValue, len(values))
 	if err != nil {
 		return false, err
+	}
+	if matches == nil {
+		return false, nil
 	}
 	for index, value := range values {
 		if len(validData) > 0 && !validData[index] {

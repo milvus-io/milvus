@@ -568,6 +568,28 @@ func TestArrayContainsOperationsSkipNullElements(t *testing.T) {
 	}
 }
 
+func TestArrayMatcherValidatesEmptyAndNonemptyTargets(t *testing.T) {
+	for _, op := range []planpb.JSONContainsExpr_JSONOp{planpb.JSONContainsExpr_ContainsAny, planpb.JSONContainsExpr_ContainsAll} {
+		for _, targets := range [][]*planpb.GenericValue{nil, {planparserv2.NewInt(7)}} {
+			literal, err := newLiteralMatcher(schemapb.DataType_Int64, targets)
+			require.NoError(t, err)
+			matcher := &arrayLiteralMatcher{literalMatcher: literal, op: op, seen: make([]uint32, len(literal.values))}
+			valid := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}
+			matched, err := matcher.matches(valid, &rowData{})
+			require.NoError(t, err)
+			require.Equal(t, len(targets) != 0 || op == planpb.JSONContainsExpr_ContainsAll, matched)
+			for _, invalid := range []*schemapb.ScalarField{
+				{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"7"}}}},
+				{ValidData: []bool{true, true}, Data: valid.Data},
+			} {
+				matched, err := matcher.matches(invalid, &rowData{})
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.False(t, matched)
+			}
+		}
+	}
+}
+
 func TestArrayContainsAllMatcherDoesNotLeakAcrossRows(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
 		FieldID: 100, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
