@@ -2589,25 +2589,24 @@ func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, col
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
 	}
-	seen := make(map[string]struct{}, len(policies))
+	var recovered map[string]*model.RLSPolicy
+	if policies != nil {
+		recovered = make(map[string]*model.RLSPolicy, len(policies))
+	}
 	for _, policy := range policies {
 		if policy == nil {
 			continue
 		}
-		if _, duplicate := seen[policy.PolicyName]; duplicate {
+		if _, duplicate := recovered[policy.PolicyName]; duplicate {
 			return merr.WrapErrDataIntegrityMsg("duplicate RLS policy name %q in collection %d", policy.PolicyName, collection.CollectionID)
 		}
-		seen[policy.PolicyName] = struct{}{}
+		cloned := model.CloneRLSPolicy(policy)
+		// Records are keyed by global collection ID. A cross-database rename
+		// can leave the persisted DB ID stale; the owning collection is authoritative.
+		cloned.DBID = collection.DBID
+		recovered[cloned.PolicyName] = cloned
 	}
-	collection.RLSPolicies = model.RLSPolicyMapFromSlice(policies)
-	// RLS records are keyed by the globally unique collection ID, so their
-	// persisted DB ID may be stale after a cross-database rename. Recover the
-	// authoritative DB identity from the owning collection.
-	for _, policy := range collection.RLSPolicies {
-		if policy != nil {
-			policy.DBID = collection.DBID
-		}
-	}
+	collection.RLSPolicies = recovered
 	return nil
 }
 

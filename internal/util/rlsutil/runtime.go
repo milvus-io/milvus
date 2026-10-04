@@ -60,11 +60,17 @@ func (kind expressionKind) expression(policy *RowPolicy) string {
 }
 
 type compiledPolicyExpression struct {
-	expr                 *planpb.Expr
-	needsPrincipal       bool
-	tagVariables         map[string]string
-	tagVariableDataTypes map[string][]schemapb.DataType
-	tagVariableArrays    map[string]bool
+	expr           *planpb.Expr
+	needsPrincipal bool
+	tagBinding     *policyTagBinding
+}
+
+// Validated policy predicates contain at most one tag variable.
+type policyTagBinding struct {
+	key          string
+	variable     string
+	dataTypes    []schemapb.DataType
+	expectsArray bool
 }
 
 func compiledExpressionNeedsTags(e *CompiledExpression) bool {
@@ -75,7 +81,7 @@ func compiledExpressionNeedsTags(e *CompiledExpression) bool {
 	}
 	for _, policies := range [...][]*compiledPolicyExpression{e.permissive, e.restrictive} {
 		for _, policy := range policies {
-			if len(policy.tagVariables) > 0 {
+			if policy.tagBinding != nil {
 				return true
 			}
 		}
@@ -88,7 +94,7 @@ func (e *CompiledExpression) NeedsTags() bool {
 }
 
 func (e *compiledPolicyExpression) isStatic() bool {
-	return e != nil && !e.needsPrincipal && len(e.tagVariables) == 0
+	return e != nil && !e.needsPrincipal && e.tagBinding == nil
 }
 
 func (e *CompiledExpression) isStatic() bool {
@@ -314,25 +320,15 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 			return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS using expression")
 		}
 	}
-	var tagVariableDataTypes map[string][]schemapb.DataType
-	var tagVariableArrays map[string]bool
-	if len(template.tagVariables) > 0 {
-		tagVariableDataTypes = make(map[string][]schemapb.DataType, len(template.tagVariables))
-		tagVariableArrays = make(map[string]bool, len(template.tagVariables))
-		for _, variable := range template.tagVariables {
-			dataTypes := make([]schemapb.DataType, 0, 1)
-			expectsArray := false
-			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes, &expectsArray)
-			tagVariableDataTypes[variable] = dataTypes
-			tagVariableArrays[variable] = expectsArray
-		}
+	var binding *policyTagBinding
+	for key, variable := range template.tagVariables {
+		binding = &policyTagBinding{key: key, variable: variable}
+		collectRLSTemplateDataTypes(parsedExpr, variable, &binding.dataTypes, &binding.expectsArray)
 	}
 	return &compiledPolicyExpression{
-		expr:                 parsedExpr,
-		needsPrincipal:       template.needsPrincipal,
-		tagVariables:         template.tagVariables,
-		tagVariableDataTypes: tagVariableDataTypes,
-		tagVariableArrays:    tagVariableArrays,
+		expr:           parsedExpr,
+		needsPrincipal: template.needsPrincipal,
+		tagBinding:     binding,
 	}, nil
 }
 
@@ -467,24 +463,22 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 
 	// A policy is a single predicate, so validation guarantees at most one tag
 	// variable. Validate and charge it before allocating or cloning an expression.
-	var normalizedVariable string
-	var normalizedTagValue *planpb.GenericValue
 	var sourceTagValue TagValue
+	binding := e.tagBinding
 	materializedBytes := int64(0)
 	if e.needsPrincipal {
 		materializedBytes = int64(len(principalName))
 	}
-	for tagKey, variable := range e.tagVariables {
-		tagValue, ok := principalTags[tagKey]
+	if binding != nil {
+		tagValue, ok := principalTags[binding.key]
 		if !ok {
 			return nil, nil
 		}
-		valueBytes, ok := normalizedRLSTagValueSize(e.tagVariableDataTypes[variable], e.tagVariableArrays[variable], tagValue)
+		valueBytes, ok := normalizedRLSTagValueSize(binding.dataTypes, binding.expectsArray, tagValue)
 		if !ok {
 			return nil, nil
 		}
 		materializedBytes += valueBytes
-		normalizedVariable = variable
 		sourceTagValue = tagValue
 	}
 	if remainingTemplateBytes != nil {
@@ -496,57 +490,57 @@ func (e *compiledPolicyExpression) instantiate(principalName string, principalTa
 		}
 		*remainingTemplateBytes -= materializedBytes
 	}
-	if normalizedVariable != "" {
-		var ok bool
-		normalizedTagValue, ok = rlsTagValueToGenericValue(
-			e.tagVariableDataTypes[normalizedVariable],
-			e.tagVariableArrays[normalizedVariable],
-			sourceTagValue,
-		)
+	expr := proto.Clone(e.expr).(*planpb.Expr)
+	if binding != nil && binding.expectsArray {
+		// Validation admits one contains_any/all predicate, optionally under NOT.
+		// Values are already type-checked and budgeted above. Fill its final slice
+		// directly instead of copying and rescanning a generic array template.
+		leaf := expr
+		if unary := leaf.GetUnaryExpr(); unary != nil {
+			leaf = unary.GetChild()
+		}
+		elements, ok := rlsArrayTagElements(binding.dataTypes, sourceTagValue.arrayValue)
 		if !ok {
 			return nil, merr.WrapErrServiceInternalMsg("RLS principal tag changed while instantiating policy")
 		}
+		leaf.GetJsonContainsExpr().Elements = elements
+		leaf.GetJsonContainsExpr().ElementsSameType = true
+		return expr, nil
 	}
 
-	values := make(map[string]*planpb.GenericValue, len(e.tagVariables)+1)
+	values := make(map[string]*planpb.GenericValue, 1)
 	if e.needsPrincipal {
 		values[funcutil.RLSPrincipalTemplateName] = planparserv2.NewString(principalName)
 	}
-	if normalizedVariable != "" {
-		values[normalizedVariable] = normalizedTagValue
+	if binding != nil {
+		value, ok := rlsTagValueToGenericValue(binding.dataTypes, sourceTagValue)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("RLS principal tag changed while instantiating policy")
+		}
+		values[binding.variable] = value
 	}
 
-	expr := proto.Clone(e.expr).(*planpb.Expr)
 	if err := planparserv2.FillExpressionValue(expr, values); err != nil {
 		return nil, err
 	}
 	return expr, nil
 }
 
-// rlsTagValueToGenericValue normalizes directly into the final template value.
-// The immutable tag snapshot is never copied into an intermediate TagValue slice.
-func rlsTagValueToGenericValue(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (*planpb.GenericValue, bool) {
-	if len(dataTypes) == 0 {
-		return nil, false
-	}
-	if expectsArray {
-		if value.Kind != TagValueKindArray || value.arrayValue == nil {
+func rlsArrayTagElements(dataTypes []schemapb.DataType, array *tagArray) ([]*planpb.GenericValue, bool) {
+	elements := make([]*planpb.GenericValue, array.len())
+	for i := range elements {
+		var ok bool
+		elements[i], ok = rlsTagValueToGenericValue(dataTypes, array.at(i))
+		if !ok {
 			return nil, false
 		}
-		elements := make([]*planpb.GenericValue, value.arrayValue.len())
-		for i := range elements {
-			element := value.arrayValue.at(i)
-			var ok bool
-			elements[i], ok = rlsTagValueToGenericValue(dataTypes, false, element)
-			if !ok {
-				return nil, false
-			}
-		}
-		return &planpb.GenericValue{
-			Val: &planpb.GenericValue_ArrayVal{
-				ArrayVal: &planpb.Array{Array: elements, SameType: true},
-			},
-		}, true
+	}
+	return elements, true
+}
+
+func rlsTagValueToGenericValue(dataTypes []schemapb.DataType, value TagValue) (*planpb.GenericValue, bool) {
+	if len(dataTypes) == 0 {
+		return nil, false
 	}
 	normalized, ok := normalizeRLSScalarTagValue(dataTypes, value)
 	if !ok {

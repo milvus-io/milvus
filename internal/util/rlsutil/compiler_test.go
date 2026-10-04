@@ -21,9 +21,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -63,9 +65,11 @@ func TestCompilePolicyExprCachesTagVariableTypes(t *testing.T) {
 			require.Len(t, compiled.permissive, 1)
 
 			policy := compiled.permissive[0]
-			variable := policy.tagVariables["value"]
-			require.Equal(t, []schemapb.DataType{test.expected}, policy.tagVariableDataTypes[variable])
-			require.Equal(t, test.expectsArray, policy.tagVariableArrays[variable])
+			require.NotNil(t, policy.tagBinding)
+			require.Equal(t, "value", policy.tagBinding.key)
+			require.NotEmpty(t, policy.tagBinding.variable)
+			require.Equal(t, []schemapb.DataType{test.expected}, policy.tagBinding.dataTypes)
+			require.Equal(t, test.expectsArray, policy.tagBinding.expectsArray)
 		})
 	}
 }
@@ -163,18 +167,63 @@ func TestInstantiateArrayTagsHasAggregateBudget(t *testing.T) {
 
 func TestArrayTagTemplateNormalizationPreservesSnapshot(t *testing.T) {
 	tag := newArrayTagValueForTest(t, []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2)})
-	value, ok := rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Int64}, true, tag)
+	values, ok := rlsArrayTagElements([]schemapb.DataType{schemapb.DataType_Int64}, tag.arrayValue)
 	require.True(t, ok)
-	require.True(t, value.GetArrayVal().GetSameType())
-	require.Len(t, value.GetArrayVal().GetArray(), 2)
-	require.Equal(t, planparserv2.NewInt(1), value.GetArrayVal().GetArray()[0])
-	require.Equal(t, planparserv2.NewInt(2), value.GetArrayVal().GetArray()[1])
+	require.Len(t, values, 2)
+	require.Equal(t, planparserv2.NewInt(1), values[0])
+	require.Equal(t, planparserv2.NewInt(2), values[1])
 	require.Equal(t, []float64{1, 2}, tag.arrayValue.doubles)
 
-	value, ok = rlsTagValueToGenericValue([]schemapb.DataType{schemapb.DataType_Double}, true, tag)
+	values, ok = rlsArrayTagElements([]schemapb.DataType{schemapb.DataType_Double}, tag.arrayValue)
 	require.True(t, ok)
-	require.Equal(t, planparserv2.NewFloat(1), value.GetArrayVal().GetArray()[0])
-	require.Equal(t, planparserv2.NewFloat(2), value.GetArrayVal().GetArray()[1])
+	require.Equal(t, planparserv2.NewFloat(1), values[0])
+	require.Equal(t, planparserv2.NewFloat(2), values[1])
+}
+
+func TestArrayTagDirectFillMatchesTemplateFill(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		dataType schemapb.DataType
+		payload  string
+		values   []*planpb.GenericValue
+	}{
+		{"integer", schemapb.DataType_Int64, `[1.0,2.0]`, []*planpb.GenericValue{planparserv2.NewInt(1), planparserv2.NewInt(2)}},
+		{"float", schemapb.DataType_Float, `[1,2]`, []*planpb.GenericValue{planparserv2.NewFloat(1), planparserv2.NewFloat(2)}},
+		{"double", schemapb.DataType_Double, `[1,2.5]`, []*planpb.GenericValue{planparserv2.NewFloat(1), planparserv2.NewFloat(2.5)}},
+		{"string", schemapb.DataType_VarChar, `["sales","ops"]`, []*planpb.GenericValue{planparserv2.NewString("sales"), planparserv2.NewString("ops")}},
+	} {
+		for _, op := range []string{"array_contains_any", "array_contains_all", "not array_contains_any", "not array_contains_all"} {
+			for _, empty := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/empty=%v", test.name, op, empty), func(t *testing.T) {
+					helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+						FieldID: 101, Name: "values", DataType: schemapb.DataType_Array, ElementType: test.dataType,
+					}}})
+					require.NoError(t, err)
+					compiled, err := CompileCheckExpression([]*RowPolicy{{
+						PolicyName: "check", PolicyType: PolicyTypePermissive, Actions: []PolicyAction{PolicyActionInsert},
+						CheckExpr: op + "(values, $current_principal_tags['groups'])",
+					}}, PolicyActionInsert, helper, 4096)
+					require.NoError(t, err)
+					policy := compiled.permissive[0]
+					payload, values := test.payload, test.values
+					if empty {
+						payload, values = `[]`, nil
+					}
+					tags, err := TagsFromJSON(`{"groups":` + payload + `}`)
+					require.NoError(t, err)
+					expected := proto.Clone(policy.expr).(*planpb.Expr)
+					require.NoError(t, planparserv2.FillExpressionValue(expected, map[string]*planpb.GenericValue{
+						policy.tagBinding.variable: {Val: &planpb.GenericValue_ArrayVal{ArrayVal: &planpb.Array{Array: values, SameType: true}}},
+					}))
+					before := proto.Clone(policy.expr)
+					actual, err := policy.instantiate("alice", tags, nil)
+					require.NoError(t, err)
+					require.True(t, proto.Equal(expected, actual))
+					require.True(t, proto.Equal(before, policy.expr), "compiled template must remain immutable")
+				})
+			}
+		}
+	}
 }
 
 func TestNestedNotIsRejected(t *testing.T) {

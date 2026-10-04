@@ -90,54 +90,6 @@ func NewDoubleTagValue(value float64) TagValue {
 	return TagValue{Kind: TagValueKindDouble, DoubleValue: value}
 }
 
-// NewArrayTagValue copies elements and promotes numeric arrays to double when
-// any element is a double, rejecting integer promotion that loses precision.
-// String/number mixtures and non-scalar elements are rejected.
-func NewArrayTagValue(values []TagValue) (TagValue, error) {
-	array := &tagArray{}
-	for _, value := range values {
-		if value.Kind != TagValueKindString && value.Kind != TagValueKindInt64 && value.Kind != TagValueKindDouble {
-			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array requires scalar string or numeric elements")
-		}
-		if array.kind != TagValueKindUnknown && array.kind != value.Kind &&
-			(array.kind == TagValueKindString || value.Kind == TagValueKindString) {
-			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag array cannot mix strings and numbers")
-		}
-		if array.kind == TagValueKindUnknown || value.Kind == TagValueKindDouble {
-			array.kind = value.Kind
-		}
-	}
-	switch array.kind {
-	case TagValueKindString:
-		array.strings = make([]string, len(values))
-		for i, value := range values {
-			array.strings[i] = value.StringValue
-		}
-	case TagValueKindInt64:
-		array.integers = make([]int64, len(values))
-		for i, value := range values {
-			array.integers[i] = value.Int64Value
-		}
-	case TagValueKindDouble:
-		array.doubles = make([]float64, len(values))
-		for i, value := range values {
-			if value.Kind == TagValueKindInt64 {
-				promoted, err := promoteArrayInteger(value.Int64Value, i)
-				if err != nil {
-					return TagValue{}, err
-				}
-				array.doubles[i] = promoted
-			} else {
-				array.doubles[i] = value.DoubleValue
-			}
-		}
-	}
-	return TagValue{
-		Kind:       TagValueKindArray,
-		arrayValue: array,
-	}, nil
-}
-
 func promoteArrayInteger(value int64, index int) (float64, error) {
 	promoted := float64(value)
 	if !isExactInt64(promoted) || int64(promoted) != value {

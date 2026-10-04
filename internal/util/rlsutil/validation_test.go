@@ -31,9 +31,19 @@ import (
 
 func newArrayTagValueForTest(t testing.TB, values []TagValue) TagValue {
 	t.Helper()
-	value, err := NewArrayTagValue(values)
+	value, err := arrayTagValueForTest(values)
 	require.NoError(t, err)
 	return value
+}
+
+func arrayTagValueForTest(values []TagValue) (TagValue, error) {
+	array := &tagArray{}
+	for _, value := range values {
+		if err := array.appendDecoded(value); err != nil {
+			return TagValue{}, err
+		}
+	}
+	return TagValue{Kind: TagValueKindArray, arrayValue: array}, nil
 }
 
 func TestValidatePayloadBounds(t *testing.T) {
@@ -363,7 +373,7 @@ func TestCompactArrayTagRetainedSize(t *testing.T) {
 	}{
 		{"integer", NewInt64TagValue(7), 8},
 		{"double", NewDoubleTagValue(1.5), 8},
-		{"string", NewStringTagValue("abc"), int64(unsafe.Sizeof("")) + 3},
+		{"string", NewStringTagValue("abc"), int64(unsafe.Sizeof(""))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			values := make([]TagValue, 1024)
@@ -373,7 +383,9 @@ func TestCompactArrayTagRetainedSize(t *testing.T) {
 			array := newArrayTagValueForTest(t, values)
 			size, err := PrincipalTagsSize("alice", map[string]TagValue{"groups": array})
 			require.NoError(t, err)
-			require.Equal(t, int64(len("alicegroups"))+tagValueRetainedSize+tagArrayRetainedSize+1024*test.elementBytes, size)
+			capacity := cap(array.arrayValue.integers) + cap(array.arrayValue.doubles) + cap(array.arrayValue.strings)
+			backingBytes := int64(capacity)*test.elementBytes + 1024*int64(len(test.value.StringValue))
+			require.Equal(t, int64(len("alicegroups"))+tagValueRetainedSize+tagArrayRetainedSize+backingBytes, size)
 			values[0] = NewStringTagValue("changed")
 			require.Equal(t, test.value, array.arrayValue.at(0))
 			encoded, err := TagsToJSON(map[string]TagValue{"groups": array})
@@ -409,7 +421,7 @@ func TestArrayTagElementTypes(t *testing.T) {
 		{name: "fractional number promotes integers", payload: `[1,2.5]`, values: []TagValue{NewDoubleTagValue(1), NewDoubleTagValue(2.5)}, valid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			array, arrayErr := NewArrayTagValue(test.values)
+			array, arrayErr := arrayTagValueForTest(test.values)
 			tags := map[string]TagValue{"value": array}
 			for _, maxTags := range []int{0, 1} {
 				decoded, err := TagsFromJSONWithLimit(`{"value":`+test.payload+`}`, maxTags)
@@ -458,7 +470,7 @@ func TestArrayTagNumericPromotionPrecision(t *testing.T) {
 		t.Run(strconv.FormatInt(test.integer, 10), func(t *testing.T) {
 			integer := NewInt64TagValue(test.integer)
 			// Pure integer arrays never require promotion.
-			array, err := NewArrayTagValue([]TagValue{integer})
+			array, err := arrayTagValueForTest([]TagValue{integer})
 			require.NoError(t, err)
 			require.Equal(t, []int64{test.integer}, array.arrayValue.integers)
 			payload, err := TagsToJSON(map[string]TagValue{"value": array})
@@ -474,7 +486,7 @@ func TestArrayTagNumericPromotionPrecision(t *testing.T) {
 					values[0], values[1] = values[1], values[0]
 					tokens[0], tokens[1] = tokens[1], tokens[0]
 				}
-				array, err := NewArrayTagValue(values)
+				array, err := arrayTagValueForTest(values)
 				if test.exact {
 					require.NoError(t, err)
 					for i, source := range values {

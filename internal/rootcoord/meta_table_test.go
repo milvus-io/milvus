@@ -271,25 +271,32 @@ func TestReloadEnabledCollectionRLSMetadataLoadsPoliciesOnly(t *testing.T) {
 		},
 	}
 
-	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{
-		{DBID: 10, CollectionID: 20, PolicyID: 100, PolicyName: "tenant"},
-	}, nil).Once()
+	stored := &model.RLSPolicy{
+		DBID: 10, CollectionID: 20, PolicyID: 100, PolicyName: "tenant",
+		Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+	}
+	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{nil, stored}, nil).Once()
 
 	require.NoError(t, meta.reloadEnabledCollectionRLSMetadata(context.Background(), collection))
 	require.Len(t, collection.RLSPolicies, 1)
 	require.Equal(t, int64(11), collection.RLSPolicies["tenant"].DBID)
+	require.Equal(t, int64(10), stored.DBID)
+	collection.RLSPolicies["tenant"].Actions[0] = rlsutil.PolicyActionInsert
+	require.Equal(t, rlsutil.PolicyActionQuery, stored.Actions[0])
 }
 
 func TestReloadRLSMetadataRejectsDuplicatePolicyNames(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := &MetaTable{catalog: catalog}
-	collection := &model.Collection{CollectionID: 20}
+	existing := &model.RLSPolicy{CollectionID: 20, PolicyID: 99, PolicyName: "existing"}
+	collection := &model.Collection{CollectionID: 20, RLSPolicies: map[string]*model.RLSPolicy{"existing": existing}}
 	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{
 		{CollectionID: 20, PolicyID: 100, PolicyName: "tenant"},
 		{CollectionID: 20, PolicyID: 101, PolicyName: "tenant"},
 	}, nil).Once()
 	require.ErrorIs(t, meta.reloadEnabledCollectionRLSMetadata(context.Background(), collection), merr.ErrDataIntegrity)
-	require.Nil(t, collection.RLSPolicies)
+	require.Len(t, collection.RLSPolicies, 1)
+	require.Same(t, existing, collection.RLSPolicies["existing"])
 }
 
 func TestReloadCollectionsRLSMetadataSkipsDisabledCollection(t *testing.T) {
