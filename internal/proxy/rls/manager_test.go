@@ -1115,6 +1115,65 @@ func TestResolvePredicateRequiresPrincipal(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestResolvePredicatesRetryPolicyChangeDuringTagLoad(t *testing.T) {
+	for _, action := range []rlsutil.PolicyAction{rlsutil.PolicyActionQuery, rlsutil.PolicyActionInsert, rlsutil.PolicyActionUpsert} {
+		for _, budget := range []string{"67108864", "1"} {
+			t.Run(action.String()+"/cache-bytes-"+budget, func(t *testing.T) {
+				oldBudget := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.SwapTempValue(budget)
+				defer paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.SwapTempValue(oldBudget)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				m := newManager()
+				policy := func(expr string) policySnapshot {
+					return policySnapshot{Policies: []*rlsutil.RowPolicy{{
+						PolicyName: "tenant", PolicyType: rlsutil.PolicyTypePermissive,
+						Actions: []rlsutil.PolicyAction{action}, UsingExpr: expr, CheckExpr: expr,
+					}}}
+				}
+				calls := 0
+				coord := &managerTestCoordClient{getRLSMetadata: func(_ context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+					calls++
+					if calls == 1 {
+						setPolicySnapshotForTest(m, 100, policy("id == $current_principal_tags['id']"))
+					}
+					return &rootcoordpb.GetRLSMetadataResponse{
+						Status: merr.Success(), CollectionId: 100,
+						Principals: []*rootcoordpb.RLSPrincipalInfo{{PrincipalName: "alice", Tags: `{"dept":"sales","id":2}`}},
+					}, nil
+				}}
+				require.NoError(t, m.init(context.Background(), coord))
+				require.True(t, setPolicySnapshotForTest(m, 100, policy("dept == $current_principal_tags['dept']")))
+				helper := newManagerTestSchemaHelper(t)
+				var predicates []*planpb.Expr
+				switch action {
+				case rlsutil.PolicyActionUpsert:
+					using, check, err := m.resolveUpsertPredicates(ctx, 100, "alice", helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{using, check}
+				case rlsutil.PolicyActionInsert:
+					expr, err := m.resolveCheckPredicate(ctx, 100, "alice", action, helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{expr}
+				default:
+					expr, err := m.resolveUsingPredicate(ctx, 100, "alice", action, helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{expr}
+				}
+				for _, expr := range predicates {
+					require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(2, "sales"), 1, expr, "test", "check"))
+					require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(1, "sales"), 1, expr, "test", "check"))
+				}
+				if budget == "1" {
+					require.Equal(t, 2, calls)
+					require.Nil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
+				} else {
+					require.Equal(t, 1, calls)
+				}
+			})
+		}
+	}
+}
+
 func TestResolveUpsertPredicatesStayOnOneSnapshot(t *testing.T) {
 	ctx := context.Background()
 	manager := newManagerWithAlice()
