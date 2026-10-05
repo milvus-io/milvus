@@ -403,8 +403,7 @@ class RegexLiteralAnalyzer {
 
 std::string
 PartialRegexMatcher::RequiredLiteral() const {
-    if (re2_->pattern().size() > kMaxProgramSize ||
-        re2_->ProgramSize() > kMaxProgramSize) {
+    if (!CanExtractLiteral()) {
         return {};
     }
     auto literal = RegexLiteralAnalyzer(
@@ -415,8 +414,7 @@ PartialRegexMatcher::RequiredLiteral() const {
 
 std::vector<std::string>
 PartialRegexMatcher::RequiredIndexLiterals() const {
-    if (re2_->pattern().size() > kMaxProgramSize ||
-        re2_->ProgramSize() > kMaxProgramSize) {
+    if (!CanExtractLiteral()) {
         return {};
     }
     auto prefix = RequiredPrefix();
@@ -452,6 +450,25 @@ PartialRegexMatcher::RequiredIndexLiterals() const {
         }
     }
     add(std::move(prefix));
+    return requirements;
+}
+
+std::vector<std::string>
+PartialRegexMatcher::PrepareIndexLiterals(const std::string& pattern) {
+    struct Entry {
+        std::string pattern;
+        std::vector<std::string> requirements;
+    };
+    static thread_local std::optional<Entry> cache;
+    if (cache.has_value() && cache->pattern == pattern) {
+        return cache->requirements;
+    }
+    // Compile before publishing: invalid regexes still throw and cannot leave
+    // a new key paired with an old result. Returned vectors are independent.
+    auto requirements = PartialRegexMatcher(pattern).RequiredIndexLiterals();
+    if (pattern.size() <= kMaxProgramSize) {
+        cache.emplace(Entry{pattern, requirements});
+    }
     return requirements;
 }
 

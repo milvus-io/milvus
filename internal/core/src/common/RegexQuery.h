@@ -111,8 +111,7 @@ struct PartialRegexMatcher {
     // without interpreting regex syntax a second time. Empty means scan.
     std::string
     RequiredPrefix() const {
-        if (re2_->pattern().size() > kMaxProgramSize ||
-            re2_->ProgramSize() > kMaxProgramSize) {
+        if (!CanExtractLiteral()) {
             return {};
         }
         // PossibleMatchRange starts an anchored search at beginning of text.
@@ -124,12 +123,6 @@ struct PartialRegexMatcher {
         const auto& pattern = re2_->pattern();
         if (pattern.find(R"(\b)") != std::string::npos ||
             pattern.find(R"(\B)") != std::string::npos) {
-            return {};
-        }
-        // A match on empty input proves there is no mandatory nonempty
-        // literal. Avoid range construction for nullable forms such as a*
-        // and foo|, using the canonical engine rather than parsing them here.
-        if (RE2::FullMatch(re2::StringPiece("", 0), *re2_)) {
             return {};
         }
         std::string lower;
@@ -159,7 +152,22 @@ struct PartialRegexMatcher {
     std::vector<std::string>
     RequiredIndexLiterals() const;
 
+    // Reuse only immutable analysis, never index-specific counts or row IDs.
+    // One bounded entry per thread avoids sharing query state across threads.
+    // Options are fixed by this class; the full pattern bytes are the key.
+    static std::vector<std::string>
+    PrepareIndexLiterals(const std::string& pattern);
+
  private:
+    bool
+    CanExtractLiteral() const {
+        // An empty-input match proves no nonempty byte string is mandatory.
+        // Reject before either structural analysis or RE2 range construction.
+        return re2_->pattern().size() <= kMaxProgramSize &&
+               re2_->ProgramSize() <= kMaxProgramSize &&
+               !RE2::FullMatch(re2::StringPiece("", 0), *re2_);
+    }
+
     static constexpr int kMaxPrefixBytes = 64;
     static constexpr int kMaxScanLiteralBytes = 4096;
     static constexpr int kMaxProgramSize = 4096;
