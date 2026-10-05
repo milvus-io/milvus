@@ -1350,7 +1350,7 @@ struct ElementWiseBitsetPolicy {
         const size_t size_b = (size / data_bits) * data_bits;
 
         // check a specific case
-        bool all_aligned = true;
+        bool all_aligned = (start_left % data_bits == 0);
         for (size_t i = 0; i < n_rights; i++) {
             if (start_rights[i] % data_bits != 0) {
                 all_aligned = false;

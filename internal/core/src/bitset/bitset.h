@@ -98,7 +98,8 @@ class BitsetView;
 template <typename PolicyT, typename ContainerT, bool IsRangeCheckEnabled>
 class Bitset;
 
-// This is the base CRTP class.
+// Shared read operations. The only public storage types are Bitset and
+// BitsetView; mutating operations are available on Bitset only.
 template <typename PolicyT, typename ImplT, bool IsRangeCheckEnabled>
 class BitsetBase {
     template <typename, bool>
@@ -110,18 +111,10 @@ class BitsetBase {
  public:
     using policy_type = PolicyT;
     using data_type = typename policy_type::data_type;
-    using proxy_type = typename policy_type::proxy_type;
     using const_proxy_type = typename policy_type::const_proxy_type;
 
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
 
-    //
-    inline data_type*
-    data() {
-        return as_derived().data_impl();
-    }
-
-    //
     inline const data_type*
     data() const {
         return as_derived().data_impl();
@@ -154,15 +147,6 @@ class BitsetBase {
     }
 
     //
-    inline proxy_type
-    operator[](const size_t bit_idx) {
-        range_checker::lt(bit_idx, this->size());
-
-        const size_t idx_v = bit_idx + this->offset();
-        return policy_type::get_proxy(this->data(), idx_v);
-    }
-
-    //
     inline bool
     operator[](const size_t bit_idx) const {
         range_checker::lt(bit_idx, this->size());
@@ -170,47 +154,6 @@ class BitsetBase {
         const size_t idx_v = bit_idx + this->offset();
         const auto proxy = policy_type::get_proxy(this->data(), idx_v);
         return proxy.operator bool();
-    }
-
-    // Set all bits to true.
-    inline void
-    set() {
-        policy_type::op_set(this->data(), this->offset(), this->size());
-    }
-
-    // Set a given bit to a given value.
-    inline void
-    set(const size_t bit_idx, const bool value = true) {
-        this->operator[](bit_idx) = value;
-    }
-
-    // Set a given range of [a, b) bits to a given value.
-    inline void
-    set(const size_t bit_idx_start,
-        const size_t size,
-        const bool value = true) {
-        range_checker::le(bit_idx_start + size, this->size());
-
-        policy_type::op_fill(
-            this->data(), this->offset() + bit_idx_start, size, value);
-    }
-
-    // Set all bits to false.
-    inline void
-    reset() {
-        policy_type::op_reset(this->data(), this->offset(), this->size());
-    }
-
-    // Set a given bit to false.
-    inline void
-    reset(const size_t bit_idx) {
-        this->operator[](bit_idx) = false;
-    }
-
-    // Set a given range of [a, b) bits to false.
-    inline void
-    reset(const size_t bit_idx_start, const size_t size) {
-        this->set(bit_idx_start, size, false);
     }
 
     // Return whether all bits are set to true.
@@ -231,259 +174,33 @@ class BitsetBase {
         return policy_type::op_none(this->data(), this->offset(), this->size());
     }
 
-    // Inplace and.
-    template <typename I, bool R>
-    inline void
-    inplace_and(const BitsetBase<PolicyT, I, R>& other, const size_t size) {
-        range_checker::le(size, this->size());
-        range_checker::le(size, other.size());
-
-        policy_type::op_and(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    // AND with other, then complement the first size bits. Bits outside that
-    // range are unchanged. This is NAND, not AND-NOT (inplace_sub).
-    template <typename I, bool R>
-    inline void
-    inplace_and_flip(const BitsetBase<PolicyT, I, R>& other,
-                     const size_t size) {
-        range_checker::le(size, this->size());
-        range_checker::le(size, other.size());
-
-        policy_type::op_and_flip(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    template <bool R>
-    inline void
-    inplace_and(const BitsetView<PolicyT, R>* const others,
-                const size_t n_others,
-                const size_t size) {
-        range_checker::le(size, this->size());
-        for (size_t i = 0; i < n_others; i++) {
-            range_checker::le(size, others[i].size());
-        }
-
-        // pick buffers
-        detail::MaybeVector<const data_type*> tmp_data(n_others);
-        detail::MaybeVector<size_t> tmp_offset(n_others);
-
-        for (size_t i = 0; i < n_others; i++) {
-            tmp_data[i] = others[i].data();
-            tmp_offset[i] = others[i].offset();
-        }
-
-        policy_type::op_and_multiple(this->data(),
-                                     tmp_data.data(),
-                                     this->offset(),
-                                     tmp_offset.data(),
-                                     n_others,
-                                     size);
-    }
-
-    template <bool R>
-    inline void
-    inplace_and(const BitsetView<PolicyT, R>* const others,
-                const size_t n_others) {
-        this->inplace_and(others, n_others, this->size());
-    }
-
-    template <typename ContainerT, bool R>
-    inline void
-    inplace_and(const Bitset<PolicyT, ContainerT, R>* const others,
-                const size_t n_others,
-                const size_t size) {
-        range_checker::le(size, this->size());
-        for (size_t i = 0; i < n_others; i++) {
-            range_checker::le(size, others[i].size());
-        }
-
-        // pick buffers
-        detail::MaybeVector<const data_type*> tmp_data(n_others);
-        detail::MaybeVector<size_t> tmp_offset(n_others);
-
-        for (size_t i = 0; i < n_others; i++) {
-            tmp_data[i] = others[i].data();
-            tmp_offset[i] = others[i].offset();
-        }
-
-        policy_type::op_and_multiple(this->data(),
-                                     tmp_data.data(),
-                                     this->offset(),
-                                     tmp_offset.data(),
-                                     n_others,
-                                     size);
-    }
-
-    template <typename ContainerT, bool R>
-    inline void
-    inplace_and(const Bitset<PolicyT, ContainerT, R>* const others,
-                const size_t n_others) {
-        this->inplace_and(others, n_others, this->size());
-    }
-
-    // Inplace and. A given bitset / bitset view is expected to have the same size.
-    template <typename I, bool R>
-    inline ImplT&
-    operator&=(const BitsetBase<PolicyT, I, R>& other) {
-        range_checker::eq(other.size(), this->size());
-
-        this->inplace_and(other, this->size());
-        return as_derived();
-    }
-
-    // Inplace or.
-    template <typename I, bool R>
-    inline void
-    inplace_or(const BitsetBase<PolicyT, I, R>& other, const size_t size) {
-        range_checker::le(size, this->size());
-        range_checker::le(size, other.size());
-
-        policy_type::op_or(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    template <bool R>
-    inline void
-    inplace_or(const BitsetView<PolicyT, R>* const others,
-               const size_t n_others,
-               const size_t size) {
-        range_checker::le(size, this->size());
-        for (size_t i = 0; i < n_others; i++) {
-            range_checker::le(size, others[i].size());
-        }
-
-        // pick buffers
-        detail::MaybeVector<const data_type*> tmp_data(n_others);
-        detail::MaybeVector<size_t> tmp_offset(n_others);
-
-        for (size_t i = 0; i < n_others; i++) {
-            tmp_data[i] = others[i].data();
-            tmp_offset[i] = others[i].offset();
-        }
-
-        policy_type::op_or_multiple(this->data(),
-                                    tmp_data.data(),
-                                    this->offset(),
-                                    tmp_offset.data(),
-                                    n_others,
-                                    size);
-    }
-
-    template <bool R>
-    inline void
-    inplace_or(const BitsetView<PolicyT, R>* const others,
-               const size_t n_others) {
-        this->inplace_or(others, n_others, this->size());
-    }
-
-    template <typename ContainerT, bool R>
-    inline void
-    inplace_or(const Bitset<PolicyT, ContainerT, R>* const others,
-               const size_t n_others,
-               const size_t size) {
-        range_checker::le(size, this->size());
-        for (size_t i = 0; i < n_others; i++) {
-            range_checker::le(size, others[i].size());
-        }
-
-        // pick buffers
-        detail::MaybeVector<const data_type*> tmp_data(n_others);
-        detail::MaybeVector<size_t> tmp_offset(n_others);
-
-        for (size_t i = 0; i < n_others; i++) {
-            tmp_data[i] = others[i].data();
-            tmp_offset[i] = others[i].offset();
-        }
-
-        policy_type::op_or_multiple(this->data(),
-                                    tmp_data.data(),
-                                    this->offset(),
-                                    tmp_offset.data(),
-                                    n_others,
-                                    size);
-    }
-
-    template <typename ContainerT, bool R>
-    inline void
-    inplace_or(const Bitset<PolicyT, ContainerT, R>* const others,
-               const size_t n_others) {
-        this->inplace_or(others, n_others, this->size());
-    }
-
-    // Inplace or. A given bitset / bitset view is expected to have the same size.
-    template <typename I, bool R>
-    inline ImplT&
-    operator|=(const BitsetBase<PolicyT, I, R>& other) {
-        range_checker::eq(other.size(), this->size());
-
-        this->inplace_or(other, this->size());
-        return as_derived();
-    }
-
-    // Revert all bits.
-    inline void
-    flip() {
-        policy_type::op_flip(this->data(), this->offset(), this->size());
-    }
-
     //
     inline BitsetView<PolicyT, IsRangeCheckEnabled>
-    operator+(const size_t offset) {
+    operator+(const size_t offset) const {
         return this->view(offset);
-    }
-
-    // Create a view of a given size from the given position.
-    inline BitsetView<PolicyT, IsRangeCheckEnabled>
-    view(const size_t offset, const size_t size) {
-        range_checker::le(offset, this->size());
-        range_checker::le(offset + size, this->size());
-
-        return BitsetView<PolicyT, IsRangeCheckEnabled>(
-            this->data(), this->offset() + offset, size);
     }
 
     // Create a const view of a given size from the given position.
     inline BitsetView<PolicyT, IsRangeCheckEnabled>
     view(const size_t offset, const size_t size) const {
         range_checker::le(offset, this->size());
-        range_checker::le(offset + size, this->size());
+        range_checker::le(size, this->size() - offset);
 
         return BitsetView<PolicyT, IsRangeCheckEnabled>(
-            const_cast<data_type*>(this->data()),
-            this->offset() + offset,
-            size);
+            this->data(), this->offset() + offset, size);
     }
 
-    // Create a view from the given position, which uses all available size.
+    // Create a const view from the given position, which uses all available size.
     inline BitsetView<PolicyT, IsRangeCheckEnabled>
-    view(const size_t offset) {
+    view(const size_t offset) const {
         range_checker::le(offset, this->size());
 
         return BitsetView<PolicyT, IsRangeCheckEnabled>(
             this->data(), this->offset() + offset, this->size() - offset);
     }
 
-    // Create a const view from the given position, which uses all available size.
-    inline const BitsetView<PolicyT, IsRangeCheckEnabled>
-    view(const size_t offset) const {
-        range_checker::le(offset, this->size());
-
-        return BitsetView<PolicyT, IsRangeCheckEnabled>(
-            const_cast<data_type*>(this->data()),
-            this->offset() + offset,
-            this->size() - offset);
-    }
-
-    // Create a view.
-    inline BitsetView<PolicyT, IsRangeCheckEnabled>
-    view() {
-        return this->view(0);
-    }
-
     // Create a const view.
-    inline const BitsetView<PolicyT, IsRangeCheckEnabled>
+    inline BitsetView<PolicyT, IsRangeCheckEnabled>
     view() const {
         return this->view(0);
     }
@@ -498,7 +215,7 @@ class BitsetBase {
     // Compare the current bitset with another bitset / bitset view.
     template <typename I, bool R>
     inline bool
-    operator==(const BitsetBase<PolicyT, I, R>& other) {
+    operator==(const BitsetBase<PolicyT, I, R>& other) const {
         if (this->size() != other.size()) {
             return false;
         }
@@ -513,50 +230,8 @@ class BitsetBase {
     // Compare the current bitset with another bitset / bitset view.
     template <typename I, bool R>
     inline bool
-    operator!=(const BitsetBase<PolicyT, I, R>& other) {
+    operator!=(const BitsetBase<PolicyT, I, R>& other) const {
         return (!(*this == other));
-    }
-
-    // Inplace xor.
-    template <typename I, bool R>
-    inline void
-    inplace_xor(const BitsetBase<PolicyT, I, R>& other, const size_t size) {
-        range_checker::le(size, this->size());
-        range_checker::le(size, other.size());
-
-        policy_type::op_xor(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    // Inplace xor. A given bitset / bitset view is expected to have the same size.
-    template <typename I, bool R>
-    inline ImplT&
-    operator^=(const BitsetBase<PolicyT, I, R>& other) {
-        range_checker::eq(other.size(), this->size());
-
-        this->inplace_xor(other, this->size());
-        return as_derived();
-    }
-
-    // Inplace sub.
-    template <typename I, bool R>
-    inline void
-    inplace_sub(const BitsetBase<PolicyT, I, R>& other, const size_t size) {
-        range_checker::le(size, this->size());
-        range_checker::le(size, other.size());
-
-        policy_type::op_sub(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    // Inplace sub. A given bitset / bitset view is expected to have the same size.
-    template <typename I, bool R>
-    inline ImplT&
-    operator-=(const BitsetBase<PolicyT, I, R>& other) {
-        range_checker::eq(other.size(), this->size());
-
-        this->inplace_sub(other, this->size());
-        return as_derived();
     }
 
     // Find the index of the first bit set to either true (default), or false.
@@ -595,25 +270,390 @@ class BitsetBase {
             this->data(), this->offset() + starting_bit_idx, nbits);
     }
 
+    // Return the starting bit offset in our container.
+    inline size_t
+    offset() const {
+        return as_derived().offset_impl();
+    }
+
+ private:
+    inline const ImplT&
+    as_derived() const {
+        return static_cast<const ImplT&>(*this);
+    }
+};
+
+namespace detail {
+// Internal CRTP implementation for owners; never inherited by BitsetView.
+// Writers accept an optional destination bit offset. The source offset is
+// selected with a read-only source view. No writable view or intermediate
+// bitmap is required to update a window of the owner.
+template <typename PolicyT, typename ImplT, bool IsRangeCheckEnabled>
+class BitsetMutatingBase
+    : public BitsetBase<PolicyT, ImplT, IsRangeCheckEnabled> {
+ public:
+    using read_base = BitsetBase<PolicyT, ImplT, IsRangeCheckEnabled>;
+    using policy_type = PolicyT;
+    using data_type = typename policy_type::data_type;
+    using proxy_type = typename policy_type::proxy_type;
+    using range_checker = RangeChecker<IsRangeCheckEnabled>;
+    using read_base::data;
+    using read_base::operator[];
+    inline data_type*
+    data() {
+        return as_derived().data_impl();
+    }
+
+    //
+    inline proxy_type
+    operator[](const size_t bit_idx) {
+        range_checker::lt(bit_idx, this->size());
+
+        const size_t idx_v = bit_idx + this->offset();
+        return policy_type::get_proxy(this->data(), idx_v);
+    }
+
+    // Set all bits to true.
+    inline void
+    set() {
+        policy_type::op_set(this->data(), this->offset(), this->size());
+    }
+
+    // Set a given bit to a given value.
+    inline void
+    set(const size_t bit_idx, const bool value = true) {
+        this->operator[](bit_idx) = value;
+    }
+
+    // Set a given range of [a, b) bits to a given value.
+    inline void
+    set(const size_t bit_idx_start,
+        const size_t size,
+        const bool value = true) {
+        check_range(bit_idx_start, size);
+
+        policy_type::op_fill(
+            this->data(), this->offset() + bit_idx_start, size, value);
+    }
+
+    // Set all bits to false.
+    inline void
+    reset() {
+        policy_type::op_reset(this->data(), this->offset(), this->size());
+    }
+
+    // Set a given bit to false.
+    inline void
+    reset(const size_t bit_idx) {
+        this->operator[](bit_idx) = false;
+    }
+
+    // Set a given range of [a, b) bits to false.
+    inline void
+    reset(const size_t bit_idx_start, const size_t size) {
+        this->set(bit_idx_start, size, false);
+    }
+
+    // Inplace and.
+    template <typename I, bool R>
+    inline void
+    inplace_and(const BitsetBase<PolicyT, I, R>& other,
+                const size_t size,
+                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        range_checker::le(size, other.size());
+
+        policy_type::op_and(this->data(),
+                            other.data(),
+                            this->offset() + dst_offset,
+                            other.offset(),
+                            size);
+    }
+
+    // AND with other, then complement [dst_offset, dst_offset + size).
+    // Adjacent bits are unchanged. This is NAND, not AND-NOT (inplace_sub).
+    template <typename I, bool R>
+    inline void
+    inplace_and_flip(const BitsetBase<PolicyT, I, R>& other,
+                     const size_t size,
+                     const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        range_checker::le(size, other.size());
+
+        policy_type::op_and_flip(this->data(),
+                                 other.data(),
+                                 this->offset() + dst_offset,
+                                 other.offset(),
+                                 size);
+    }
+
+    template <bool R>
+    inline void
+    inplace_and(const BitsetView<PolicyT, R>* const others,
+                const size_t n_others,
+                const size_t size,
+                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        for (size_t i = 0; i < n_others; i++) {
+            range_checker::le(size, others[i].size());
+        }
+
+        // pick buffers
+        detail::MaybeVector<const data_type*> tmp_data(n_others);
+        detail::MaybeVector<size_t> tmp_offset(n_others);
+
+        for (size_t i = 0; i < n_others; i++) {
+            tmp_data[i] = others[i].data();
+            tmp_offset[i] = others[i].offset();
+        }
+
+        policy_type::op_and_multiple(this->data(),
+                                     tmp_data.data(),
+                                     this->offset() + dst_offset,
+                                     tmp_offset.data(),
+                                     n_others,
+                                     size);
+    }
+
+    template <bool R>
+    inline void
+    inplace_and(const BitsetView<PolicyT, R>* const others,
+                const size_t n_others) {
+        this->inplace_and(others, n_others, this->size());
+    }
+
+    template <typename ContainerT, bool R>
+    inline void
+    inplace_and(const Bitset<PolicyT, ContainerT, R>* const others,
+                const size_t n_others,
+                const size_t size,
+                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        for (size_t i = 0; i < n_others; i++) {
+            range_checker::le(size, others[i].size());
+        }
+
+        // pick buffers
+        detail::MaybeVector<const data_type*> tmp_data(n_others);
+        detail::MaybeVector<size_t> tmp_offset(n_others);
+
+        for (size_t i = 0; i < n_others; i++) {
+            tmp_data[i] = others[i].data();
+            tmp_offset[i] = others[i].offset();
+        }
+
+        policy_type::op_and_multiple(this->data(),
+                                     tmp_data.data(),
+                                     this->offset() + dst_offset,
+                                     tmp_offset.data(),
+                                     n_others,
+                                     size);
+    }
+
+    template <typename ContainerT, bool R>
+    inline void
+    inplace_and(const Bitset<PolicyT, ContainerT, R>* const others,
+                const size_t n_others) {
+        this->inplace_and(others, n_others, this->size());
+    }
+
+    // Inplace and. A given bitset / bitset view is expected to have the same size.
+    template <typename I, bool R>
+    inline ImplT&
+    operator&=(const BitsetBase<PolicyT, I, R>& other) {
+        range_checker::eq(other.size(), this->size());
+
+        this->inplace_and(other, this->size());
+        return as_derived();
+    }
+
+    // Inplace or.
+    template <typename I, bool R>
+    inline void
+    inplace_or(const BitsetBase<PolicyT, I, R>& other,
+               const size_t size,
+               const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        range_checker::le(size, other.size());
+
+        policy_type::op_or(this->data(),
+                           other.data(),
+                           this->offset() + dst_offset,
+                           other.offset(),
+                           size);
+    }
+
+    template <bool R>
+    inline void
+    inplace_or(const BitsetView<PolicyT, R>* const others,
+               const size_t n_others,
+               const size_t size,
+               const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        for (size_t i = 0; i < n_others; i++) {
+            range_checker::le(size, others[i].size());
+        }
+
+        // pick buffers
+        detail::MaybeVector<const data_type*> tmp_data(n_others);
+        detail::MaybeVector<size_t> tmp_offset(n_others);
+
+        for (size_t i = 0; i < n_others; i++) {
+            tmp_data[i] = others[i].data();
+            tmp_offset[i] = others[i].offset();
+        }
+
+        policy_type::op_or_multiple(this->data(),
+                                    tmp_data.data(),
+                                    this->offset() + dst_offset,
+                                    tmp_offset.data(),
+                                    n_others,
+                                    size);
+    }
+
+    template <bool R>
+    inline void
+    inplace_or(const BitsetView<PolicyT, R>* const others,
+               const size_t n_others) {
+        this->inplace_or(others, n_others, this->size());
+    }
+
+    template <typename ContainerT, bool R>
+    inline void
+    inplace_or(const Bitset<PolicyT, ContainerT, R>* const others,
+               const size_t n_others,
+               const size_t size,
+               const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        for (size_t i = 0; i < n_others; i++) {
+            range_checker::le(size, others[i].size());
+        }
+
+        // pick buffers
+        detail::MaybeVector<const data_type*> tmp_data(n_others);
+        detail::MaybeVector<size_t> tmp_offset(n_others);
+
+        for (size_t i = 0; i < n_others; i++) {
+            tmp_data[i] = others[i].data();
+            tmp_offset[i] = others[i].offset();
+        }
+
+        policy_type::op_or_multiple(this->data(),
+                                    tmp_data.data(),
+                                    this->offset() + dst_offset,
+                                    tmp_offset.data(),
+                                    n_others,
+                                    size);
+    }
+
+    template <typename ContainerT, bool R>
+    inline void
+    inplace_or(const Bitset<PolicyT, ContainerT, R>* const others,
+               const size_t n_others) {
+        this->inplace_or(others, n_others, this->size());
+    }
+
+    // Inplace or. A given bitset / bitset view is expected to have the same size.
+    template <typename I, bool R>
+    inline ImplT&
+    operator|=(const BitsetBase<PolicyT, I, R>& other) {
+        range_checker::eq(other.size(), this->size());
+
+        this->inplace_or(other, this->size());
+        return as_derived();
+    }
+
+    // Revert all bits.
+    inline void
+    flip() {
+        this->flip(0, this->size());
+    }
+
+    // Revert only [begin, begin + size); adjacent bits are unchanged.
+    inline void
+    flip(const size_t begin, const size_t size) {
+        check_range(begin, size);
+        policy_type::op_flip(this->data(), this->offset() + begin, size);
+    }
+
+    // Inplace xor.
+    template <typename I, bool R>
+    inline void
+    inplace_xor(const BitsetBase<PolicyT, I, R>& other,
+                const size_t size,
+                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        range_checker::le(size, other.size());
+
+        policy_type::op_xor(this->data(),
+                            other.data(),
+                            this->offset() + dst_offset,
+                            other.offset(),
+                            size);
+    }
+
+    // Inplace xor. A given bitset / bitset view is expected to have the same size.
+    template <typename I, bool R>
+    inline ImplT&
+    operator^=(const BitsetBase<PolicyT, I, R>& other) {
+        range_checker::eq(other.size(), this->size());
+
+        this->inplace_xor(other, this->size());
+        return as_derived();
+    }
+
+    // Inplace sub.
+    template <typename I, bool R>
+    inline void
+    inplace_sub(const BitsetBase<PolicyT, I, R>& other,
+                const size_t size,
+                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
+        range_checker::le(size, other.size());
+
+        policy_type::op_sub(this->data(),
+                            other.data(),
+                            this->offset() + dst_offset,
+                            other.offset(),
+                            size);
+    }
+
+    // Inplace sub. A given bitset / bitset view is expected to have the same size.
+    template <typename I, bool R>
+    inline ImplT&
+    operator-=(const BitsetBase<PolicyT, I, R>& other) {
+        range_checker::eq(other.size(), this->size());
+
+        this->inplace_sub(other, this->size());
+        return as_derived();
+    }
+
     // Compare two arrays element-wise
     template <typename T, typename U>
     void
     inplace_compare_column(const T* const __restrict t,
                            const U* const __restrict u,
                            const size_t size,
-                           CompareOpType op) {
+                           CompareOpType op,
+                           const size_t dst_offset = 0) {
         if (op == CompareOpType::EQ) {
-            this->inplace_compare_column<T, U, CompareOpType::EQ>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::EQ>(
+                t, u, size, dst_offset);
         } else if (op == CompareOpType::GE) {
-            this->inplace_compare_column<T, U, CompareOpType::GE>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::GE>(
+                t, u, size, dst_offset);
         } else if (op == CompareOpType::GT) {
-            this->inplace_compare_column<T, U, CompareOpType::GT>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::GT>(
+                t, u, size, dst_offset);
         } else if (op == CompareOpType::LE) {
-            this->inplace_compare_column<T, U, CompareOpType::LE>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::LE>(
+                t, u, size, dst_offset);
         } else if (op == CompareOpType::LT) {
-            this->inplace_compare_column<T, U, CompareOpType::LT>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::LT>(
+                t, u, size, dst_offset);
         } else if (op == CompareOpType::NE) {
-            this->inplace_compare_column<T, U, CompareOpType::NE>(t, u, size);
+            this->inplace_compare_column<T, U, CompareOpType::NE>(
+                t, u, size, dst_offset);
         } else {
             // unimplemented
         }
@@ -623,11 +663,12 @@ class BitsetBase {
     void
     inplace_compare_column(const T* const __restrict t,
                            const U* const __restrict u,
-                           const size_t size) {
-        range_checker::le(size, this->size());
+                           const size_t size,
+                           const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
 
         policy_type::template op_compare_column<T, U, Op>(
-            this->data(), this->offset(), t, u, size);
+            this->data(), this->offset() + dst_offset, t, u, size);
     }
 
     // Compare elements of an given array with a given value
@@ -636,19 +677,26 @@ class BitsetBase {
     inplace_compare_val(const T* const __restrict t,
                         const size_t size,
                         const T& value,
-                        CompareOpType op) {
+                        CompareOpType op,
+                        const size_t dst_offset = 0) {
         if (op == CompareOpType::EQ) {
-            this->inplace_compare_val<T, CompareOpType::EQ>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::EQ>(
+                t, size, value, dst_offset);
         } else if (op == CompareOpType::GE) {
-            this->inplace_compare_val<T, CompareOpType::GE>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::GE>(
+                t, size, value, dst_offset);
         } else if (op == CompareOpType::GT) {
-            this->inplace_compare_val<T, CompareOpType::GT>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::GT>(
+                t, size, value, dst_offset);
         } else if (op == CompareOpType::LE) {
-            this->inplace_compare_val<T, CompareOpType::LE>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::LE>(
+                t, size, value, dst_offset);
         } else if (op == CompareOpType::LT) {
-            this->inplace_compare_val<T, CompareOpType::LT>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::LT>(
+                t, size, value, dst_offset);
         } else if (op == CompareOpType::NE) {
-            this->inplace_compare_val<T, CompareOpType::NE>(t, size, value);
+            this->inplace_compare_val<T, CompareOpType::NE>(
+                t, size, value, dst_offset);
         } else {
             // unimplemented
         }
@@ -658,11 +706,12 @@ class BitsetBase {
     void
     inplace_compare_val(const T* const __restrict t,
                         const size_t size,
-                        const T& value) {
-        range_checker::le(size, this->size());
+                        const T& value,
+                        const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
 
         policy_type::template op_compare_val<T, Op>(
-            this->data(), this->offset(), t, size, value);
+            this->data(), this->offset() + dst_offset, t, size, value);
     }
 
     //
@@ -672,19 +721,20 @@ class BitsetBase {
                                 const T* const __restrict upper,
                                 const T* const __restrict values,
                                 const size_t size,
-                                const RangeType op) {
+                                const RangeType op,
+                                const size_t dst_offset = 0) {
         if (op == RangeType::IncInc) {
             this->inplace_within_range_column<T, RangeType::IncInc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::IncExc) {
             this->inplace_within_range_column<T, RangeType::IncExc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::ExcInc) {
             this->inplace_within_range_column<T, RangeType::ExcInc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::ExcExc) {
             this->inplace_within_range_column<T, RangeType::ExcExc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else {
             // unimplemented
         }
@@ -695,11 +745,17 @@ class BitsetBase {
     inplace_within_range_column(const T* const __restrict lower,
                                 const T* const __restrict upper,
                                 const T* const __restrict values,
-                                const size_t size) {
-        range_checker::le(size, this->size());
+                                const size_t size,
+                                const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
 
         policy_type::template op_within_range_column<T, Op>(
-            this->data(), this->offset(), lower, upper, values, size);
+            this->data(),
+            this->offset() + dst_offset,
+            lower,
+            upper,
+            values,
+            size);
     }
 
     //
@@ -709,19 +765,20 @@ class BitsetBase {
                              const T& upper,
                              const T* const __restrict values,
                              const size_t size,
-                             const RangeType op) {
+                             const RangeType op,
+                             const size_t dst_offset = 0) {
         if (op == RangeType::IncInc) {
             this->inplace_within_range_val<T, RangeType::IncInc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::IncExc) {
             this->inplace_within_range_val<T, RangeType::IncExc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::ExcInc) {
             this->inplace_within_range_val<T, RangeType::ExcInc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else if (op == RangeType::ExcExc) {
             this->inplace_within_range_val<T, RangeType::ExcExc>(
-                lower, upper, values, size);
+                lower, upper, values, size, dst_offset);
         } else {
             // unimplemented
         }
@@ -732,11 +789,17 @@ class BitsetBase {
     inplace_within_range_val(const T& lower,
                              const T& upper,
                              const T* const __restrict values,
-                             const size_t size) {
-        range_checker::le(size, this->size());
+                             const size_t size,
+                             const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
 
         policy_type::template op_within_range_val<T, Op>(
-            this->data(), this->offset(), lower, upper, values, size);
+            this->data(),
+            this->offset() + dst_offset,
+            lower,
+            upper,
+            values,
+            size);
     }
 
     //
@@ -747,38 +810,39 @@ class BitsetBase {
                           const ArithHighPrecisionType<T>& value,
                           const size_t size,
                           const ArithOpType a_op,
-                          const CompareOpType cmp_op) {
+                          const CompareOpType cmp_op,
+                          const size_t dst_offset = 0) {
         if (a_op == ArithOpType::Add) {
             if (cmp_op == CompareOpType::EQ) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Add,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -787,32 +851,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Sub,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -821,32 +885,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mul,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -855,32 +919,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Div,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -889,32 +953,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Mod,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -923,32 +987,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitAnd,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -957,32 +1021,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitOr,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -991,32 +1055,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::BitXor,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -1025,32 +1089,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shl,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -1059,32 +1123,32 @@ class BitsetBase {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::EQ>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::GE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::GT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::GT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::LE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::LT) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::LT>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else if (cmp_op == CompareOpType::NE) {
                 this->inplace_arith_compare<T,
                                             ArithOpType::Shr,
                                             CompareOpType::NE>(
-                    src, right_operand, value, size);
+                    src, right_operand, value, size, dst_offset);
             } else {
                 // unimplemented
             }
@@ -1098,11 +1162,17 @@ class BitsetBase {
     inplace_arith_compare(const T* const __restrict src,
                           const ArithHighPrecisionType<T>& right_operand,
                           const ArithHighPrecisionType<T>& value,
-                          const size_t size) {
-        range_checker::le(size, this->size());
+                          const size_t size,
+                          const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
 
         policy_type::template op_arith_compare<T, AOp, CmpOp>(
-            this->data(), this->offset(), src, right_operand, value, size);
+            this->data(),
+            this->offset() + dst_offset,
+            src,
+            right_operand,
+            value,
+            size);
     }
 
     //
@@ -1110,47 +1180,53 @@ class BitsetBase {
     template <typename I, bool R>
     inline size_t
     inplace_and_with_count(const BitsetBase<PolicyT, I, R>& other,
-                           const size_t size) {
-        range_checker::le(size, this->size());
+                           const size_t size,
+                           const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        return policy_type::op_and_with_count(
-            this->data(), other.data(), this->offset(), other.offset(), size);
+        return policy_type::op_and_with_count(this->data(),
+                                              other.data(),
+                                              this->offset() + dst_offset,
+                                              other.offset(),
+                                              size);
     }
 
     // Inplace or. Also, counts the number of inactive bits.
     template <typename I, bool R>
     inline size_t
     inplace_or_with_count(const BitsetBase<PolicyT, I, R>& other,
-                          const size_t size) {
-        range_checker::le(size, this->size());
+                          const size_t size,
+                          const size_t dst_offset = 0) {
+        check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        return policy_type::op_or_with_count(
-            this->data(), other.data(), this->offset(), other.offset(), size);
-    }
-
-    // Return the starting bit offset in our container.
-    inline size_t
-    offset() const {
-        return as_derived().offset_impl();
+        return policy_type::op_or_with_count(this->data(),
+                                             other.data(),
+                                             this->offset() + dst_offset,
+                                             other.offset(),
+                                             size);
     }
 
  private:
-    // CRTP
+    inline void
+    check_range(size_t begin, size_t length) const {
+        range_checker::le(begin, this->size());
+        range_checker::le(length, this->size() - begin);
+    }
+
     inline ImplT&
     as_derived() {
         return static_cast<ImplT&>(*this);
     }
-
-    // CRTP
-    inline const ImplT&
-    as_derived() const {
-        return static_cast<const ImplT&>(*this);
-    }
 };
+}  // namespace detail
 
-// Bitset view
+// Non-owning read-only view. Owner writes remain observable. The backing
+// storage and the referenced range must remain alive and valid; operations
+// such as resize, reserve, clear, append, move assignment, and destruction can
+// invalidate views. A view is not an immutable snapshot, so count() is not
+// cached here. Concurrent owner writes still require external synchronization.
 template <typename PolicyT, bool IsRangeCheckEnabled>
 class BitsetView : public BitsetBase<PolicyT,
                                      BitsetView<PolicyT, IsRangeCheckEnabled>,
@@ -1162,7 +1238,6 @@ class BitsetView : public BitsetBase<PolicyT,
  public:
     using policy_type = PolicyT;
     using data_type = typename policy_type::data_type;
-    using proxy_type = typename policy_type::proxy_type;
     using const_proxy_type = typename policy_type::const_proxy_type;
 
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
@@ -1176,30 +1251,28 @@ class BitsetView : public BitsetBase<PolicyT,
     operator=(BitsetView&&) = default;
 
     template <typename ImplT, bool R>
-    explicit BitsetView(BitsetBase<PolicyT, ImplT, R>& bitset)
+    explicit BitsetView(const BitsetBase<PolicyT, ImplT, R>& bitset)
         : Data{bitset.data()}, Size{bitset.size()}, Offset{bitset.offset()} {
     }
 
-    BitsetView(void* data, const size_t size)
-        : Data{reinterpret_cast<data_type*>(data)}, Size{size} {
+    BitsetView(const void* data, const size_t size)
+        : Data{reinterpret_cast<const data_type*>(data)}, Size{size} {
     }
 
-    BitsetView(void* data, const size_t offset, const size_t size)
-        : Data{reinterpret_cast<data_type*>(data)}, Size{size}, Offset{offset} {
+    BitsetView(const void* data, const size_t offset, const size_t size)
+        : Data{reinterpret_cast<const data_type*>(data)},
+          Size{size},
+          Offset{offset} {
     }
 
  private:
     // the referenced bits are [Offset, Offset + Size)
-    data_type* Data = nullptr;
+    const data_type* Data = nullptr;
     // measured in bits
     size_t Size = 0;
     // measured in bits
     size_t Offset = 0;
 
-    inline data_type*
-    data_impl() {
-        return Data;
-    }
     inline const data_type*
     data_impl() const {
         return Data;
@@ -1216,13 +1289,17 @@ class BitsetView : public BitsetBase<PolicyT,
 
 // Bitset
 template <typename PolicyT, typename ContainerT, bool IsRangeCheckEnabled>
-class Bitset
-    : public BitsetBase<PolicyT,
-                        Bitset<PolicyT, ContainerT, IsRangeCheckEnabled>,
-                        IsRangeCheckEnabled> {
+class Bitset : public detail::BitsetMutatingBase<
+                   PolicyT,
+                   Bitset<PolicyT, ContainerT, IsRangeCheckEnabled>,
+                   IsRangeCheckEnabled> {
     friend class BitsetBase<PolicyT,
                             Bitset<PolicyT, ContainerT, IsRangeCheckEnabled>,
                             IsRangeCheckEnabled>;
+    friend class detail::BitsetMutatingBase<
+        PolicyT,
+        Bitset<PolicyT, ContainerT, IsRangeCheckEnabled>,
+        IsRangeCheckEnabled>;
 
  public:
     using policy_type = PolicyT;

@@ -338,10 +338,12 @@ FillRandom<std::string>(std::vector<std::string>& t,
 
 template <typename BitsetT>
 void
-FillRandom(BitsetT& bitset, std::default_random_engine& rng) {
+FillRandom(BitsetT& bitset,
+           std::default_random_engine& rng,
+           const size_t offset = 0) {
     std::uniform_int_distribution<uint8_t> tt(0, 1);
-    for (size_t i = 0; i < bitset.size(); i++) {
-        bitset[i] = (tt(rng) == 0);
+    for (size_t i = 0; i < bitset.size() - offset; i++) {
+        bitset[offset + i] = (tt(rng) == 0);
     }
 }
 
@@ -363,7 +365,11 @@ from_i32(const int32_t i) {
 //
 template <typename BitsetT>
 void
-TestFindImpl(BitsetT& bitset, const size_t max_v, const bool is_set) {
+TestFindImpl(BitsetT& owner,
+             const size_t max_v,
+             const bool is_set,
+             const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
 
     std::default_random_engine rng(123);
@@ -374,12 +380,12 @@ TestFindImpl(BitsetT& bitset, const size_t max_v, const bool is_set) {
         bool enabled = (u(rng) == 0);
         if (enabled) {
             one_pos.push_back(i);
-            bitset[i] = true;
+            owner[offset + i] = true;
         }
     }
 
     if (!is_set) {
-        bitset.flip();
+        owner.flip(offset, n);
     }
 
     StopWatch sw;
@@ -428,7 +434,6 @@ TestFindImpl() {
                     }
 
                     bitset.reset();
-                    auto view = bitset.view(offset);
 
                     if (print_log) {
                         printf(
@@ -440,7 +445,7 @@ TestFindImpl() {
                             pr);
                     }
 
-                    TestFindImpl(view, pr, is_set);
+                    TestFindImpl(bitset, pr, is_set, offset);
                 }
             }
         }
@@ -546,7 +551,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(FindTest, FindSuite, Ttypes0);
 //
 template <typename BitsetT, typename T, typename U>
 void
-TestInplaceCompareColumnImpl(BitsetT& bitset, CompareOpType op) {
+TestInplaceCompareColumnImpl(BitsetT& owner,
+                             CompareOpType op,
+                             const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
     constexpr size_t max_v = 2;
 
@@ -558,7 +566,7 @@ TestInplaceCompareColumnImpl(BitsetT& bitset, CompareOpType op) {
     FillRandom(u, rng, max_v);
 
     StopWatch sw;
-    bitset.inplace_compare_column(t.data(), u.data(), n, op);
+    owner.inplace_compare_column(t.data(), u.data(), n, op, offset);
 
     if (print_timing) {
         printf("elapsed %f\n", sw.elapsed());
@@ -603,7 +611,6 @@ TestInplaceCompareColumnImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, op=%zd\n",
@@ -612,7 +619,7 @@ TestInplaceCompareColumnImpl() {
                            (size_t)op);
                 }
 
-                TestInplaceCompareColumnImpl<decltype(view), T, U>(view, op);
+                TestInplaceCompareColumnImpl<BitsetT, T, U>(bitset, op, offset);
             }
         }
     }
@@ -749,7 +756,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceCompareColumnTest,
 //
 template <typename BitsetT, typename T>
 void
-TestInplaceCompareValImpl(BitsetT& bitset, CompareOpType op) {
+TestInplaceCompareValImpl(BitsetT& owner,
+                          CompareOpType op,
+                          const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
     constexpr size_t max_v = 3;
     const T value = from_i32<T>(1);
@@ -760,7 +770,7 @@ TestInplaceCompareValImpl(BitsetT& bitset, CompareOpType op) {
     FillRandom(t, rng, max_v);
 
     StopWatch sw;
-    bitset.inplace_compare_val(t.data(), n, value, op);
+    owner.inplace_compare_val(t.data(), n, value, op, offset);
 
     if (print_timing) {
         printf("elapsed %f\n", sw.elapsed());
@@ -805,7 +815,6 @@ TestInplaceCompareValImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, op=%zd\n",
@@ -814,7 +823,7 @@ TestInplaceCompareValImpl() {
                            (size_t)op);
                 }
 
-                TestInplaceCompareValImpl<decltype(view), T>(view, op);
+                TestInplaceCompareValImpl<BitsetT, T>(bitset, op, offset);
             }
         }
     }
@@ -935,7 +944,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceCompareValTest,
 //
 template <typename BitsetT, typename T>
 void
-TestInplaceWithinRangeColumnImpl(BitsetT& bitset, RangeType op) {
+TestInplaceWithinRangeColumnImpl(BitsetT& owner,
+                                 RangeType op,
+                                 const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
     constexpr size_t max_v = 3;
 
@@ -955,8 +967,8 @@ TestInplaceWithinRangeColumnImpl(BitsetT& bitset, RangeType op) {
     }
 
     StopWatch sw;
-    bitset.inplace_within_range_column(
-        lower.data(), upper.data(), values.data(), n, op);
+    owner.inplace_within_range_column(
+        lower.data(), upper.data(), values.data(), n, op, offset);
 
     if (print_timing) {
         printf("elapsed %f\n", sw.elapsed());
@@ -1001,7 +1013,6 @@ TestInplaceWithinRangeColumnImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, op=%zd\n",
@@ -1010,7 +1021,8 @@ TestInplaceWithinRangeColumnImpl() {
                            (size_t)op);
                 }
 
-                TestInplaceWithinRangeColumnImpl<decltype(view), T>(view, op);
+                TestInplaceWithinRangeColumnImpl<BitsetT, T>(
+                    bitset, op, offset);
             }
         }
     }
@@ -1131,7 +1143,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceWithinRangeColumnTest,
 //
 template <typename BitsetT, typename T>
 void
-TestInplaceWithinRangeValImpl(BitsetT& bitset, RangeType op) {
+TestInplaceWithinRangeValImpl(BitsetT& owner,
+                              RangeType op,
+                              const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
     constexpr size_t max_v = 10;
     const T lower_v = from_i32<T>(3);
@@ -1143,7 +1158,8 @@ TestInplaceWithinRangeValImpl(BitsetT& bitset, RangeType op) {
     FillRandom(values, rng, max_v);
 
     StopWatch sw;
-    bitset.inplace_within_range_val(lower_v, upper_v, values.data(), n, op);
+    owner.inplace_within_range_val(
+        lower_v, upper_v, values.data(), n, op, offset);
 
     if (print_timing) {
         printf("elapsed %f\n", sw.elapsed());
@@ -1188,7 +1204,6 @@ TestInplaceWithinRangeValImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, op=%zd\n",
@@ -1197,7 +1212,7 @@ TestInplaceWithinRangeValImpl() {
                            (size_t)op);
                 }
 
-                TestInplaceWithinRangeValImpl<decltype(view), T>(view, op);
+                TestInplaceWithinRangeValImpl<BitsetT, T>(bitset, op, offset);
             }
         }
     }
@@ -1318,13 +1333,15 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceWithinRangeValTest,
 template <typename BitsetT, typename T>
 struct TestInplaceArithCompareImplS {
     static void
-    process(BitsetT& bitset,
+    process(BitsetT& owner,
             ArithOpType a_op,
             CompareOpType cmp_op,
             const int32_t right_operand_in,
-            const int32_t value_in) {
+            const int32_t value_in,
+            const size_t offset = 0) {
         using HT = ArithHighPrecisionType<T>;
 
+        auto bitset = owner.view(offset);
         const size_t n = bitset.size();
         constexpr int32_t max_v = 10;
 
@@ -1338,8 +1355,8 @@ struct TestInplaceArithCompareImplS {
         FillRandomRange(left, rng, -max_v, max_v);
 
         StopWatch sw;
-        bitset.inplace_arith_compare(
-            left.data(), right_operand, value, n, a_op, cmp_op);
+        owner.inplace_arith_compare(
+            left.data(), right_operand, value, n, a_op, cmp_op, offset);
 
         if (print_timing) {
             printf("elapsed %f\n", sw.elapsed());
@@ -1591,7 +1608,6 @@ TestInplaceArithCompareImpl() {
                                 }
 
                                 bitset.reset();
-                                auto view = bitset.view(offset);
 
                                 if (print_log) {
                                     printf(
@@ -1605,13 +1621,13 @@ TestInplaceArithCompareImpl() {
                                         right_operand);
                                 }
 
-                                TestInplaceArithCompareImplS<
-                                    decltype(view),
-                                    T>::process(view,
-                                                a_op,
-                                                cmp_op,
-                                                right_operand,
-                                                value);
+                                TestInplaceArithCompareImplS<BitsetT, T>::
+                                    process(bitset,
+                                            a_op,
+                                            cmp_op,
+                                            right_operand,
+                                            value,
+                                            offset);
                             }
                         }
                     }
@@ -1953,7 +1969,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(AppendTest, AppendSuite, Ttypes0);
 //
 template <typename BitsetT>
 void
-TestCountImpl(BitsetT& bitset, const size_t max_v) {
+TestCountImpl(BitsetT& owner, const size_t max_v, const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
 
     std::default_random_engine rng(123);
@@ -1964,7 +1981,7 @@ TestCountImpl(BitsetT& bitset, const size_t max_v) {
         bool enabled = (u(rng) == 0);
         if (enabled) {
             one_pos.push_back(i);
-            bitset[i] = true;
+            owner[offset + i] = true;
         }
     }
 
@@ -1998,7 +2015,6 @@ TestCountImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, pr=%zd\n",
@@ -2007,7 +2023,7 @@ TestCountImpl() {
                            pr);
                 }
 
-                TestCountImpl(view, pr);
+                TestCountImpl(bitset, pr, offset);
             }
         }
     }
@@ -2124,8 +2140,17 @@ enum class TestInplaceOp {
 //
 template <typename BitsetT>
 void
-TestInplaceOpImpl(BitsetT& bitset, BitsetT& bitset_2, const TestInplaceOp op) {
-    const size_t n = bitset.size();
+TestInplaceOpImpl(BitsetT& owner,
+                  BitsetT& owner_2,
+                  const TestInplaceOp op,
+                  const size_t offset = 0,
+                  const size_t offset_2 = 0,
+                  const size_t length = std::numeric_limits<size_t>::max()) {
+    const size_t n = length == std::numeric_limits<size_t>::max()
+                         ? owner.size() - offset
+                         : length;
+    auto bitset = owner.view(offset, n);
+    auto bitset_2 = owner_2.view(offset_2, n);
     const size_t max_v = 3;
 
     std::default_random_engine rng(123);
@@ -2137,7 +2162,7 @@ TestInplaceOpImpl(BitsetT& bitset, BitsetT& bitset_2, const TestInplaceOp op) {
         bool enabled = (u(rng) == 0);
 
         ref_bitset[i] = enabled;
-        bitset[i] = enabled;
+        owner[offset + i] = enabled;
     }
 
     // populate second bitset
@@ -2146,7 +2171,7 @@ TestInplaceOpImpl(BitsetT& bitset, BitsetT& bitset_2, const TestInplaceOp op) {
         bool enabled = (u(rng) == 0);
 
         ref_bitset_2[i] = enabled;
-        bitset_2[i] = enabled;
+        owner_2[offset_2 + i] = enabled;
     }
 
     // for _WITH_COUNT ops
@@ -2159,22 +2184,22 @@ TestInplaceOpImpl(BitsetT& bitset, BitsetT& bitset_2, const TestInplaceOp op) {
     StopWatch sw;
 
     if (op == TestInplaceOp::AND) {
-        bitset.inplace_and(bitset_2, n);
+        owner.inplace_and(bitset_2, n, offset);
     } else if (op == TestInplaceOp::OR) {
-        bitset.inplace_or(bitset_2, n);
+        owner.inplace_or(bitset_2, n, offset);
     } else if (op == TestInplaceOp::XOR) {
-        bitset.inplace_xor(bitset_2, n);
+        owner.inplace_xor(bitset_2, n, offset);
     } else if (op == TestInplaceOp::SUB) {
-        bitset.inplace_sub(bitset_2, n);
+        owner.inplace_sub(bitset_2, n, offset);
     } else if (op == TestInplaceOp::AND_WITH_COUNT) {
         // number of active bits
-        bits_count = bitset.inplace_and_with_count(bitset_2, n);
+        bits_count = owner.inplace_and_with_count(bitset_2, n, offset);
     } else if (op == TestInplaceOp::OR_WITH_COUNT) {
         // number of inactive bits
-        bits_count = bitset.inplace_or_with_count(bitset_2, n);
+        bits_count = owner.inplace_or_with_count(bitset_2, n, offset);
     } else if (op == TestInplaceOp::FLIP) {
-        bitset.flip();
-        bitset_2.flip();
+        owner.flip(offset, n);
+        owner_2.flip(offset_2, n);
     } else if (op == TestInplaceOp::ALL) {
         bits_flag = bitset.all();
         bits_flag_2 = bitset_2.all();
@@ -2298,9 +2323,8 @@ TestInplaceOpImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
+
                 bitset_2.reset();
-                auto view_2 = bitset_2.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, op=%zd\n",
@@ -2309,7 +2333,8 @@ TestInplaceOpImpl() {
                            (size_t)op);
                 }
 
-                TestInplaceOpImpl<decltype(view)>(view, view_2, op);
+                TestInplaceOpImpl<BitsetT>(
+                    bitset, bitset_2, op, offset, offset, n - offset);
             }
 
             // fixed left offset
@@ -2319,9 +2344,8 @@ TestInplaceOpImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(0, n - offset);
+
                 bitset_2.reset();
-                auto view_2 = bitset_2.view(offset);
 
                 if (print_log) {
                     printf(
@@ -2332,7 +2356,8 @@ TestInplaceOpImpl() {
                         (size_t)op);
                 }
 
-                TestInplaceOpImpl<decltype(view)>(view, view_2, op);
+                TestInplaceOpImpl<BitsetT>(
+                    bitset, bitset_2, op, 0, offset, n - offset);
             }
 
             // fixed right offset
@@ -2342,9 +2367,8 @@ TestInplaceOpImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
+
                 bitset_2.reset();
-                auto view_2 = bitset_2.view(0, n - offset);
 
                 if (print_log) {
                     printf(
@@ -2355,7 +2379,8 @@ TestInplaceOpImpl() {
                         (size_t)op);
                 }
 
-                TestInplaceOpImpl<decltype(view)>(view, view_2, op);
+                TestInplaceOpImpl<BitsetT>(
+                    bitset, bitset_2, op, offset, 0, n - offset);
             }
         }
     }
@@ -2466,10 +2491,14 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceOpTest, InplaceOpSuite, Ttypes0);
 //
 template <typename BitsetT>
 void
-TestInplaceOpMultipleImpl(BitsetT& bitset,
+TestInplaceOpMultipleImpl(BitsetT& owner,
                           std::vector<BitsetT>& bitset_others,
-                          const TestInplaceOp op) {
+                          const TestInplaceOp op,
+                          const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
+    std::vector<typename BitsetT::view_type> views;
+    for (const auto& other : bitset_others) views.push_back(other.view(offset));
     const size_t n_others = bitset_others.size();
     const size_t max_v = 3;
 
@@ -2482,7 +2511,7 @@ TestInplaceOpMultipleImpl(BitsetT& bitset,
         bool enabled = (u(rng) == 0);
 
         ref_bitset[i] = enabled;
-        bitset[i] = enabled;
+        owner[offset + i] = enabled;
     }
 
     // populate others
@@ -2493,7 +2522,7 @@ TestInplaceOpMultipleImpl(BitsetT& bitset,
             bool enabled = (u(rng) == 0);
 
             ref_other[i] = enabled;
-            bitset_others[j][i] = enabled;
+            bitset_others[j][offset + i] = enabled;
         }
 
         ref_others.push_back(std::move(ref_other));
@@ -2502,9 +2531,15 @@ TestInplaceOpMultipleImpl(BitsetT& bitset,
     // evaluate
     StopWatch sw;
     if (op == TestInplaceOp::AND) {
-        bitset.inplace_and(bitset_others.data(), n_others, n);
+        if (offset == 0)
+            owner.inplace_and(bitset_others.data(), n_others, n);
+        else
+            owner.inplace_and(views.data(), n_others, n, offset);
     } else if (op == TestInplaceOp::OR) {
-        bitset.inplace_or(bitset_others.data(), n_others, n);
+        if (offset == 0)
+            owner.inplace_or(bitset_others.data(), n_others, n);
+        else
+            owner.inplace_or(views.data(), n_others, n, offset);
     } else {
         ASSERT_TRUE(false) << "Not implemented";
     }
@@ -2564,15 +2599,8 @@ TestInplaceOpMultipleImpl() {
                     }
 
                     bitset.reset();
-                    auto view = bitset.view(offset);
 
-                    std::vector<typename BitsetT::view_type> view_others;
-                    for (size_t i = 0; i < n_ngb; i++) {
-                        bitset_others[i].reset();
-                        auto view_other = bitset_others[i].view(offset);
-
-                        view_others.push_back(std::move(view_other));
-                    }
+                    for (auto& other : bitset_others) other.reset();
 
                     if (print_log) {
                         printf(
@@ -2582,8 +2610,8 @@ TestInplaceOpMultipleImpl() {
                             (size_t)op);
                     }
 
-                    TestInplaceOpMultipleImpl<decltype(view)>(
-                        view, view_others, op);
+                    TestInplaceOpMultipleImpl<BitsetT>(
+                        bitset, bitset_others, op, offset);
                 }
             }
         }
@@ -2697,7 +2725,8 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceOpMultipleTest,
 //
 template <typename BitsetT>
 void
-TestFillImpl(BitsetT& bitset, const bool flag) {
+TestFillImpl(BitsetT& owner, const bool flag, const size_t offset = 0) {
+    auto bitset = owner.view(offset);
     const size_t n = bitset.size();
 
     // rng
@@ -2705,15 +2734,15 @@ TestFillImpl(BitsetT& bitset, const bool flag) {
 
     // test everything
     {
-        FillRandom(bitset, rng);
+        FillRandom(owner, rng, offset);
 
         //
         StopWatch sw;
 
         if (flag) {
-            bitset.set();
+            owner.set(offset, n);
         } else {
-            bitset.reset();
+            owner.reset(offset, n);
         }
 
         if (print_timing) {
@@ -2727,15 +2756,15 @@ TestFillImpl(BitsetT& bitset, const bool flag) {
 
     // test a first half
     {
-        FillRandom(bitset, rng);
+        FillRandom(owner, rng, offset);
 
         //
         StopWatch sw;
 
         if (flag) {
-            bitset.set(0, n / 2);
+            owner.set(offset, n / 2);
         } else {
-            bitset.reset(0, n / 2);
+            owner.reset(offset, n / 2);
         }
 
         if (print_timing) {
@@ -2749,15 +2778,15 @@ TestFillImpl(BitsetT& bitset, const bool flag) {
 
     // test a second half
     {
-        FillRandom(bitset, rng);
+        FillRandom(owner, rng, offset);
 
         //
         StopWatch sw;
 
         if (flag) {
-            bitset.set(n / 2, n - n / 2);
+            owner.set(offset + n / 2, n - n / 2);
         } else {
-            bitset.reset(n / 2, n - n / 2);
+            owner.reset(offset + n / 2, n - n / 2);
         }
 
         if (print_timing) {
@@ -2790,7 +2819,6 @@ TestFillImpl() {
                 }
 
                 bitset.reset();
-                auto view = bitset.view(offset);
 
                 if (print_log) {
                     printf("Testing bitset view, n=%zd, offset=%zd, flag=%zd\n",
@@ -2799,7 +2827,7 @@ TestFillImpl() {
                            size_t(flag));
                 }
 
-                TestFillImpl(view, flag);
+                TestFillImpl(bitset, flag, offset);
             }
         }
     }
@@ -3111,6 +3139,7 @@ void
 TestAndFlipBoundaries() {
     using T = typename Policy::data_type;
     using View = BitsetView<Policy, true>;
+    using Owner = Bitset<Policy, std::vector<T>, true>;
     constexpr size_t width = sizeof(T) * 8;
     std::mt19937_64 rng(94025);
     for (size_t left = 0; left < width; ++left) {
@@ -3141,19 +3170,23 @@ TestAndFlipBoundaries() {
                         T((expected[(left + i) / width] & ~mask) |
                           ((T(0) - T(!(x && y))) & mask));
                 }
-                View dst(a.data(), left, size);
+                Owner dst(left + size);
+                std::copy(a.begin(), a.end(), dst.data());
                 const View src(b.data(), right, size);
-                dst.inplace_and_flip(src, size);
-                ASSERT_EQ(a, expected) << left << ',' << right << ',' << size;
+                dst.inplace_and_flip(src, size, left);
+                ASSERT_EQ(std::move(dst).into(), expected)
+                    << left << ',' << right << ',' << size;
                 ASSERT_EQ(b, original_b);
             }
         }
     }
     // The explicit size only changes a prefix of the destination view.
     std::vector<T> data(8, T(-1)), valid(8, T(-1));
-    View dst(data.data(), 1, 6 * width);
+    Owner dst(data.size() * width);
+    std::copy(data.begin(), data.end(), dst.data());
     const View src(valid.data(), 3, 6 * width);
-    dst.inplace_and_flip(src, width + 1);
+    dst.inplace_and_flip(src, width + 1, 1);
+    data = std::move(dst).into();
     for (size_t i = 0; i < data.size() * width; ++i) {
         ASSERT_EQ(bool((data[i / width] >> (i % width)) & 1),
                   !(i >= 1 && i < width + 2));
@@ -3218,6 +3251,396 @@ TEST(AndFlipTest, OverlappingViewsRetainTwoPassTraversal) {
     TestAndFlipAliasing<
         VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
 }
+
+namespace {
+
+using ReadOnlyPolicy =
+    milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t>;
+using ReadOnlyOwner = Bitset<ReadOnlyPolicy, std::vector<uint8_t>, true>;
+using ReadOnlyView = ReadOnlyOwner::view_type;
+
+// Descriptor constness must never grant writes to the referenced storage.
+static_assert(std::is_same_v<decltype(std::declval<ReadOnlyView&>().data()),
+                             const uint64_t*>);
+static_assert(std::is_same_v<decltype(std::declval<ReadOnlyView&>()[0]), bool>);
+static_assert(
+    std::is_same_v<decltype(std::declval<ReadOnlyOwner&>().data()), uint64_t*>);
+static_assert(std::is_constructible_v<ReadOnlyView, const ReadOnlyOwner&>);
+static_assert(std::is_constructible_v<ReadOnlyView, const void*, size_t>);
+static_assert(std::is_trivially_copyable_v<ReadOnlyView>);
+
+#define BITSET_WRITE_TRAIT(Name, ...)                                       \
+    template <typename T, typename = void>                                  \
+    struct Name : std::false_type {};                                       \
+    template <typename T>                                                   \
+    struct Name<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {}; \
+    static_assert(Name<ReadOnlyOwner>::value);                              \
+    static_assert(!Name<ReadOnlyView>::value)
+
+BITSET_WRITE_TRAIT(HasSet, std::declval<T&>().set());
+BITSET_WRITE_TRAIT(HasReset, std::declval<T&>().reset());
+BITSET_WRITE_TRAIT(HasFlip, std::declval<T&>().flip());
+BITSET_WRITE_TRAIT(HasBitWrite, std::declval<T&>()[0] = true);
+BITSET_WRITE_TRAIT(HasAnd,
+                   std::declval<T&>().inplace_and(std::declval<ReadOnlyView>(),
+                                                  0));
+BITSET_WRITE_TRAIT(HasOr,
+                   std::declval<T&>().inplace_or(std::declval<ReadOnlyView>(),
+                                                 0));
+BITSET_WRITE_TRAIT(HasXor,
+                   std::declval<T&>().inplace_xor(std::declval<ReadOnlyView>(),
+                                                  0));
+BITSET_WRITE_TRAIT(HasSub,
+                   std::declval<T&>().inplace_sub(std::declval<ReadOnlyView>(),
+                                                  0));
+BITSET_WRITE_TRAIT(
+    HasNand,
+    std::declval<T&>().inplace_and_flip(std::declval<ReadOnlyView>(), 0));
+BITSET_WRITE_TRAIT(
+    HasAndCount,
+    std::declval<T&>().inplace_and_with_count(std::declval<ReadOnlyView>(), 0));
+BITSET_WRITE_TRAIT(
+    HasOrCount,
+    std::declval<T&>().inplace_or_with_count(std::declval<ReadOnlyView>(), 0));
+BITSET_WRITE_TRAIT(HasAndAssign,
+                   std::declval<T&>() &= std::declval<ReadOnlyView>());
+BITSET_WRITE_TRAIT(HasOrAssign,
+                   std::declval<T&>() |= std::declval<ReadOnlyView>());
+BITSET_WRITE_TRAIT(HasXorAssign,
+                   std::declval<T&>() ^= std::declval<ReadOnlyView>());
+BITSET_WRITE_TRAIT(HasSubAssign,
+                   std::declval<T&>() -= std::declval<ReadOnlyView>());
+BITSET_WRITE_TRAIT(
+    HasColumnWrite,
+    std::declval<T&>().inplace_compare_column(static_cast<const int*>(nullptr),
+                                              static_cast<const int*>(nullptr),
+                                              0,
+                                              CompareOpType::EQ));
+BITSET_WRITE_TRAIT(
+    HasValueWrite,
+    std::declval<T&>().inplace_compare_val(
+        static_cast<const int*>(nullptr), 0, 0, CompareOpType::EQ));
+BITSET_WRITE_TRAIT(HasRangeColumnWrite,
+                   std::declval<T&>().inplace_within_range_column(
+                       static_cast<const int*>(nullptr),
+                       static_cast<const int*>(nullptr),
+                       static_cast<const int*>(nullptr),
+                       0,
+                       RangeType::IncInc));
+BITSET_WRITE_TRAIT(
+    HasRangeValueWrite,
+    std::declval<T&>().inplace_within_range_val(
+        0, 1, static_cast<const int*>(nullptr), 0, RangeType::IncInc));
+BITSET_WRITE_TRAIT(
+    HasArithWrite,
+    std::declval<T&>().inplace_arith_compare(static_cast<const int*>(nullptr),
+                                             int64_t(1),
+                                             int64_t(0),
+                                             0,
+                                             ArithOpType::Add,
+                                             CompareOpType::EQ));
+#undef BITSET_WRITE_TRAIT
+
+TEST(ReadOnlyBitsetViewTest, ConstBuffersAndLiveOwnerReads) {
+    ReadOnlyOwner owner(193, false);
+    const auto& const_owner = owner;
+    ReadOnlyView view(const_owner);
+    auto window = const_owner.view(7, 130);
+    EXPECT_TRUE(view.none());
+    EXPECT_EQ(window.count(), 0);
+    owner.set(7);
+    owner.set(136);
+    EXPECT_TRUE(window[0]);
+    EXPECT_TRUE(window[129]);
+    EXPECT_EQ(window.count(), 2);
+    EXPECT_EQ(window.find_first().value(), 0);
+    EXPECT_EQ(window.find_next(0).value(), 129);
+    owner.set(7, 130, true);
+    EXPECT_TRUE(window.all());
+    owner.reset(7, 130);
+    EXPECT_TRUE(window.none());
+    const ReadOnlyOwner copied(window);
+    EXPECT_TRUE(copied.view() == window);
+    EXPECT_TRUE(const_owner.view(7).view(0, 130) == window);
+    EXPECT_TRUE((window + 130).empty());
+
+    const uint64_t buffer[] = {0x81, 0};
+    ReadOnlyView borrowed(buffer, 7, 65);
+    EXPECT_TRUE(borrowed[0]);
+    EXPECT_EQ(borrowed.count(), 1);
+    EXPECT_EQ(borrowed.read(0, 64), 1);
+    EXPECT_EQ(borrowed.read(64, 1), 0);
+    ReadOnlyView empty;
+    EXPECT_TRUE(empty.empty());
+    EXPECT_EQ(empty.count(), 0);
+    EXPECT_TRUE(empty.all());
+    EXPECT_TRUE(empty.none());
+}
+
+template <typename Policy>
+void
+TestOwnerWindowWrites() {
+    using Owner = Bitset<Policy, std::vector<typename Policy::data_type>, true>;
+    const size_t offsets[] = {0, 1, 7, 8, 9, 63, 64, 65};
+    const size_t lengths[] = {0, 1, 7, 8, 9, 63, 64, 65, 257, 1027};
+    for (size_t begin : offsets) {
+        for (size_t src_begin : offsets) {
+            for (size_t length : lengths) {
+                // Exact buffers with an untouched prefix and suffix.
+                Owner original(begin + length + 11, false);
+                Owner source(src_begin + length, false);
+                for (size_t i = 0; i < original.size(); ++i)
+                    original.set(i, (i % 3) == 0);
+                for (size_t i = 0; i < source.size(); ++i)
+                    source.set(i, (i % 5) < 2);
+                const auto rhs = source.view(src_begin, length);
+                for (int op = 0; op < 11; ++op) {
+                    Owner actual = original.clone();
+                    size_t counted = 0;
+                    switch (op) {
+                        case 0:
+                            actual.inplace_and(rhs, length, begin);
+                            break;
+                        case 1:
+                            actual.inplace_or(rhs, length, begin);
+                            break;
+                        case 2:
+                            actual.inplace_xor(rhs, length, begin);
+                            break;
+                        case 3:
+                            actual.inplace_sub(rhs, length, begin);
+                            break;
+                        case 4:
+                            actual.inplace_and_flip(rhs, length, begin);
+                            break;
+                        case 5:
+                            counted = actual.inplace_and_with_count(
+                                rhs, length, begin);
+                            break;
+                        case 6:
+                            counted = actual.inplace_or_with_count(
+                                rhs, length, begin);
+                            break;
+                        case 7:
+                            actual.flip(begin, length);
+                            break;
+                        case 8:
+                            actual.set(begin, length, true);
+                            break;
+                        case 9:
+                            actual.reset(begin, length);
+                            break;
+                        case 10:
+                            actual.set(begin, length, false);
+                            break;
+                    }
+                    size_t ones = 0;
+                    for (size_t i = 0; i < actual.size(); ++i) {
+                        bool expected = original[i];
+                        if (i >= begin && i - begin < length) {
+                            const bool y = rhs[i - begin];
+                            switch (op) {
+                                case 0:
+                                case 5:
+                                    expected = expected && y;
+                                    break;
+                                case 1:
+                                case 6:
+                                    expected = expected || y;
+                                    break;
+                                case 2:
+                                    expected = expected != y;
+                                    break;
+                                case 3:
+                                    expected = expected && !y;
+                                    break;
+                                case 4:
+                                    expected = !(expected && y);
+                                    break;
+                                case 7:
+                                    expected = !expected;
+                                    break;
+                                case 8:
+                                    expected = true;
+                                    break;
+                                case 9:
+                                case 10:
+                                    expected = false;
+                                    break;
+                            }
+                            ones += expected;
+                        }
+                        ASSERT_EQ(bool(actual[i]), expected)
+                            << begin << ',' << src_begin << ',' << length << ','
+                            << op << ',' << i;
+                    }
+                    if (op == 5)
+                        ASSERT_EQ(counted, ones);
+                    if (op == 6)
+                        ASSERT_EQ(counted, length - ones);
+                }
+            }
+        }
+    }
+    // An empty range at the end is valid; no input elements are accessed.
+    Owner end(71, true);
+    end.inplace_and(typename Owner::view_type{}, 0, end.size());
+}
+
+// Runtime and compile-time comparison dispatch both target a middle window.
+TEST(ReadOnlyBitsetViewTest, ComparisonWritersPreserveAdjacentBits) {
+    const int values[] = {-2, -1, 0, 1, 2, 3, 4, 5};
+    ReadOnlyOwner owner(31, true);
+    auto check = [&](auto write, auto predicate) {
+        owner.set();
+        write();
+        for (size_t i = 0; i < owner.size(); ++i) {
+            const bool expected =
+                i >= 13 && i < 21 ? predicate(values[i - 13]) : true;
+            ASSERT_EQ(bool(owner[i]), expected) << i;
+        }
+    };
+    check(
+        [&] { owner.inplace_compare_val(values, 8, 1, CompareOpType::GT, 13); },
+        [](int v) { return v > 1; });
+    check(
+        [&] {
+            owner.inplace_compare_val<int, CompareOpType::GT>(values, 8, 1, 13);
+        },
+        [](int v) { return v > 1; });
+    check(
+        [&] {
+            owner.inplace_compare_column(
+                values, values, 8, CompareOpType::NE, 13);
+        },
+        [](int) { return false; });
+    check(
+        [&] {
+            owner.inplace_compare_column<int, int, CompareOpType::NE>(
+                values, values, 8, 13);
+        },
+        [](int) { return false; });
+    check(
+        [&] {
+            owner.inplace_within_range_val(
+                0, 3, values, 8, RangeType::IncExc, 13);
+        },
+        [](int v) { return v >= 0 && v < 3; });
+    check(
+        [&] {
+            owner.inplace_within_range_val<int, RangeType::IncExc>(
+                0, 3, values, 8, 13);
+        },
+        [](int v) { return v >= 0 && v < 3; });
+    check(
+        [&] {
+            owner.inplace_within_range_column(
+                values, values, values, 8, RangeType::IncInc, 13);
+        },
+        [](int) { return true; });
+    check(
+        [&] {
+            owner.inplace_within_range_column<int, RangeType::ExcExc>(
+                values, values, values, 8, 13);
+        },
+        [](int) { return false; });
+    check(
+        [&] {
+            owner.inplace_arith_compare(values,
+                                        int64_t(2),
+                                        int64_t(3),
+                                        8,
+                                        ArithOpType::Add,
+                                        CompareOpType::GE,
+                                        13);
+        },
+        [](int v) { return v + 2 >= 3; });
+    check(
+        [&] {
+            owner.inplace_arith_compare<int,
+                                        ArithOpType::Add,
+                                        CompareOpType::GE>(
+                values, int64_t(2), int64_t(3), 8, 13);
+        },
+        [](int v) { return v + 2 >= 3; });
+}
+
+TEST(ReadOnlyBitsetViewTest, OwnerRangeBoundaries) {
+    using namespace milvus::bitset::detail;
+    TestOwnerWindowWrites<ElementWiseBitsetPolicy<uint8_t>>();
+    TestOwnerWindowWrites<ElementWiseBitsetPolicy<uint64_t>>();
+    TestOwnerWindowWrites<BitWiseBitsetPolicy<uint8_t>>();
+    TestOwnerWindowWrites<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedRef>>();
+    TestOwnerWindowWrites<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
+}
+
+template <typename Policy>
+void
+TestOwnerMultipleWindows() {
+    using Owner = Bitset<Policy, std::vector<typename Policy::data_type>, true>;
+    using View = typename Owner::view_type;
+    Owner dst(321, true);
+    Owner a(257, false), b(257, false);
+    for (size_t i = 0; i < 257; ++i) {
+        a.set(i, i % 3 == 0);
+        b.set(i, i % 5 == 0);
+    }
+    const View inputs[] = {a.view(7, 193), b.view(31, 193)};
+    for (bool is_and : {true, false}) {
+        dst.set(0, dst.size(), is_and);
+        if (is_and) {
+            dst.inplace_and(inputs, 2, 193, 65);
+        } else {
+            dst.inplace_or(inputs, 2, 193, 65);
+        }
+        for (size_t i = 0; i < dst.size(); ++i) {
+            bool expected = is_and;
+            if (i >= 65 && i < 258) {
+                expected = is_and ? inputs[0][i - 65] && inputs[1][i - 65]
+                                  : inputs[0][i - 65] || inputs[1][i - 65];
+            }
+            ASSERT_EQ(bool(dst[i]), expected) << i;
+        }
+    }
+    auto before = dst.clone();
+    dst.inplace_and(inputs, 0, 193, 65);
+    dst.inplace_or(inputs, 0, 193, 65);
+    dst.inplace_and(inputs, 2, 0, dst.size());
+    dst.inplace_or(inputs, 2, 0, dst.size());
+    EXPECT_TRUE(before == dst);
+
+    // The owner-array overload also accepts a destination window.
+    Owner owners[] = {a.clone(), b.clone()};
+    dst.set();
+    dst.inplace_and(owners, 2, 193, 65);
+    EXPECT_TRUE(dst.view(0, 65).all());
+    EXPECT_TRUE(dst.view(258).all());
+    for (size_t i = 0; i < 193; ++i) {
+        EXPECT_EQ(bool(dst[65 + i]), bool(a[i]) && bool(b[i]));
+    }
+    dst.reset();
+    dst.inplace_or(owners, 2, 193, 65);
+    EXPECT_TRUE(dst.view(0, 65).none());
+    EXPECT_TRUE(dst.view(258).none());
+    for (size_t i = 0; i < 193; ++i) {
+        EXPECT_EQ(bool(dst[65 + i]), bool(a[i]) || bool(b[i]));
+    }
+}
+
+TEST(ReadOnlyBitsetViewTest, MultipleSourcesUseIndependentWindows) {
+    using namespace milvus::bitset::detail;
+    TestOwnerMultipleWindows<ElementWiseBitsetPolicy<uint8_t>>();
+    TestOwnerMultipleWindows<ElementWiseBitsetPolicy<uint64_t>>();
+    TestOwnerMultipleWindows<BitWiseBitsetPolicy<uint8_t>>();
+    TestOwnerMultipleWindows<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedRef>>();
+    TestOwnerMultipleWindows<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
+}
+
+}  // namespace
 
 int
 main(int argc, char* argv[]) {
