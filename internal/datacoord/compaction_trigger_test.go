@@ -2726,7 +2726,6 @@ func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection(
 		s.meta.segments.segments[enabledSegmentID] = seg
 		s.meta.segments.secondaryIndexes.coll2Segments[enabledCollectionID] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
 		s.meta.segments.secondaryIndexes.channel2Segments[enabledChannel] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
-		s.meta.collections.Insert(enabledCollectionID, &collectionInfo{ID: enabledCollectionID, Schema: schema})
 	}
 
 	run := func(skipped *collectionInfo) {

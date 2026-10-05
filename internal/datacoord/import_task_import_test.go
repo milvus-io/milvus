@@ -183,7 +183,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			alloc:      alloc,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			meta:       &meta{},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}

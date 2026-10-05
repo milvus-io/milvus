@@ -44,7 +44,7 @@ func TestDroppedImportSegmentGCJobProtection(t *testing.T) {
 		t.Run(state.String(), func(t *testing.T) {
 			ctx := context.Background()
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(false)
+			catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(false, nil)
 			mt := &meta{catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
 			for _, id := range []int64{1, 2} {
 				mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -82,7 +82,7 @@ func TestDroppedImportSegmentGCJobProtection(t *testing.T) {
 
 func TestDroppedImportSegmentGCStillChecksRetentionAndCheckpoint(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(true)
+	catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(true, nil)
 	gc := newGarbageCollector(&meta{catalog: catalog}, nil, GcOption{dropTolerance: time.Hour})
 	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 1, CollectionID: 100, InsertChannel: "ch", IsImporting: true,
@@ -104,7 +104,7 @@ func TestDroppedImportSegmentGCStillChecksRetentionAndCheckpoint(t *testing.T) {
 func TestDroppedImportSegmentGCConcurrentNewJob(t *testing.T) {
 	ctx := context.Background()
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(false)
+	catalog.EXPECT().ChannelExists(mock.Anything, "ch").Return(false, nil)
 	mt := &meta{catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
 	addMarker := func(id int64) {
 		mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
