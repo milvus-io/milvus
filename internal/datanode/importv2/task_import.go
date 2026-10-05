@@ -174,7 +174,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
 		err := merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
 		mlog.Warn(t.ctx, "invalid import RLS predicate", WrapLogFields(t, mlog.Err(err))...)
-		t.manager.Update(t.GetTaskID(),
+		t.manager.Update(t,
 			UpdateState(datapb.ImportTaskStateV2_Failed),
 			UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) {
