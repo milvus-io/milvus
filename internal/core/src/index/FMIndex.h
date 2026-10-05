@@ -91,8 +91,9 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 // Scalar-index wrapper around the self-contained byte-exact FM-index library
 // (milvus::index::fmindex::FMIndex). It accelerates LIKE prefix/infix/suffix on
 // VARCHAR exactly (no recheck). General LIKE (Match) returns rarest-fragment
-// candidates; ExecFMMatch rechecks those rows on the sealed VARCHAR column.
-// Regex / range / equality fall back to the raw-data scan (see ShouldUseOp).
+// candidates; ExecFMPatternCandidates rechecks those rows on sealed VARCHAR.
+// RegexMatch also returns candidates from a required regex prefix. Both paths
+// always recheck; range / equality fall back to the raw-data scan.
 class FMIndex : public ScalarIndex<std::string> {
  public:
     using MemFileManager = storage::MemFileManagerImpl;
@@ -217,6 +218,9 @@ class FMIndex : public ScalarIndex<std::string> {
         ThrowInfo(ErrorCode::Unsupported, "FM-index does not support range");
     }
 
+    // Prefix/Postfix/InnerMatch return exact results. Match/RegexMatch return
+    // candidate supersets ONLY; every caller must recheck the original pattern
+    // on raw values. Missing literal requirements yield all non-null rows.
     const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) override;
 
@@ -230,12 +234,13 @@ class FMIndex : public ScalarIndex<std::string> {
     //
     // 1. Op ALLOWLIST with a false default: declining an op merely downgrades
     //    to the raw-data scan (correct, just slower), while wrongly accepting
-    //    one routes it into a method that throws (Range() is Unsupported;
-    //    PatternMatch rejects RegexMatch) and FAILS the query. So the
+    //    one routes it into a method that throws (Range() is Unsupported)
+    //    and FAILS the query. So the
     //    safe default for any op not explicitly supported, including future
     //    enum additions, is false. The allowlist is the three anchored pattern
     //    ops (PrefixMatch/PostfixMatch/InnerMatch, answered exactly) plus
-    //    general LIKE (Match, candidate plus recheck). The equality family
+    //    general LIKE and regex (Match/RegexMatch, candidate plus recheck).
+    //    The equality family
     //    (Equal/NotEqual, IN/NOT IN) is deliberately NOT in the allowlist.
     //
     // 2. Count-first guard on the anchored pattern ops, when the caller
@@ -295,13 +300,13 @@ class FMIndex : public ScalarIndex<std::string> {
                        ratio * static_cast<double>(TotalTokens());
             }
             case proto::plan::OpType::Match:
-                return MatchGuardAccepts(pattern);
+            case proto::plan::OpType::RegexMatch:
+                return PatternCandidateGuardAccepts(pattern, op);
             // Notable declines (fall back to the scan / another index):
             // Equal/NotEqual (and IN/NOT IN via TermExpr): FM equality
             // enumerates ALL prefix candidates of the value before the length
             // filter, which loses to a scan or an equality-oriented index.
             // FMINDEX is a substring index, not an equality index.
-            // RegexMatch: required-literal extraction is a later follow-up.
             // Lexicographic range (GT/GE/LT/LE): needs forward navigation the
             // FM-index does not carry.
             default:
@@ -336,7 +341,8 @@ class FMIndex : public ScalarIndex<std::string> {
     }
 
  private:
-    // Count-first guard for general LIKE (Match). Match declines an empty
+    // Count-first guard for general LIKE and regex. Regex declines when RE2
+    // cannot prove a nonempty required prefix. Match declines an empty
     // pattern and every pattern with no literal fragment (`%`, `%_%`), because
     // phase 1 has no seed. Otherwise the rarest fragment is scored as
     // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
@@ -344,7 +350,8 @@ class FMIndex : public ScalarIndex<std::string> {
     // VARCHAR via ProcessDataByOffsets; its byte cost is not priced here
     // (known approximation for long rows x unselective fragments).
     bool
-    MatchGuardAccepts(const std::string& pattern) const;
+    PatternCandidateGuardAccepts(const std::string& pattern,
+                                proto::plan::OpType op) const;
 
     void
     RefreshResidentSize();

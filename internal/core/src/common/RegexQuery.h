@@ -13,7 +13,6 @@
 
 #include <string>
 #include <string_view>
-#include <optional>
 #include <re2/re2.h>
 #include <utility>
 #include <memory>
@@ -105,7 +104,58 @@ struct PartialRegexMatcher {
         }
     }
 
+    // A byte prefix required by every matching substring, not necessarily by
+    // the whole row. After excluding external word-boundary context, RE2's
+    // lexicographic bounds share a prefix required by every match. Extraction in
+    // RE2 handles alternation, optional groups, escapes and Unicode folding
+    // without interpreting regex syntax a second time. Empty means scan.
+    std::string
+    RequiredPrefix() const {
+        if (re2_->pattern().size() > kMaxProgramSize ||
+            re2_->ProgramSize() > kMaxProgramSize) {
+            return {};
+        }
+        // PossibleMatchRange starts an anchored search at beginning of text.
+        // It can discard branches that PartialMatch accepts using the preceding
+        // row byte: \\Bfoo|bar yields "bar", but matches "afoo". Likewise,
+        // \\b-foo|bar matches "a-foo". Never use those bounds as requirements.
+        // This deliberately also declines escaped/quoted occurrences: a false
+        // positive here only disables pruning and avoids a second regex parser.
+        const auto& pattern = re2_->pattern();
+        if (pattern.find(R"(\b)") != std::string::npos ||
+            pattern.find(R"(\B)") != std::string::npos) {
+            return {};
+        }
+        // A match on empty input proves there is no mandatory nonempty
+        // literal. Avoid range construction for nullable forms such as a*
+        // and foo|, using the canonical engine rather than parsing them here.
+        if (RE2::FullMatch(re2::StringPiece("", 0), *re2_)) {
+            return {};
+        }
+        std::string lower;
+        std::string upper;
+        if (!re2_->PossibleMatchRange(&lower, &upper, kMaxPrefixBytes)) {
+            return {};
+        }
+        size_t length = 0;
+        while (length < lower.size() && length < upper.size() &&
+               lower[length] == upper[length]) {
+            ++length;
+        }
+        return lower.substr(0, length);
+    }
+
+    // A mandatory byte substring for raw-scan prefiltering. Bounded structural
+    // analysis in RegexLiteral.cpp preserves literals across concatenation,
+    // groups and repetition. Unsupported syntax falls back to RequiredPrefix().
+    // Empty means no filter.
+    std::string
+    RequiredLiteral() const;
+
  private:
+    static constexpr int kMaxPrefixBytes = 64;
+    static constexpr int kMaxScanLiteralBytes = 4096;
+    static constexpr int kMaxProgramSize = 4096;
     std::unique_ptr<RE2> re2_;
 };
 

@@ -56,6 +56,20 @@ bytes(const std::string& s) {
     return reinterpret_cast<const uint8_t*>(s.data());
 }
 
+// Every returned literal is required. An empty set must yield all non-null
+// candidates (or decline routing), never an empty result.
+std::vector<std::string>
+CandidateLiterals(const std::string& pattern, proto::plan::OpType op) {
+    if (op == proto::plan::OpType::Match) {
+        return split_by_wildcard(pattern);
+    }
+    auto prefix = PartialRegexMatcher(pattern).RequiredPrefix();
+    if (prefix.empty()) {
+        return {};
+    }
+    return {std::move(prefix)};
+}
+
 // Trailing slack appended to the mmap'd blob file so any word-granular read at
 // the very end of the FM-index stays inside the mapping.
 constexpr size_t kFMIndexMmapPadding = 64;
@@ -309,8 +323,9 @@ FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
 }
 
 bool
-FMIndex::MatchGuardAccepts(const std::string& pattern) const {
-    auto parts = split_by_wildcard(pattern);
+FMIndex::PatternCandidateGuardAccepts(const std::string& pattern,
+                                     proto::plan::OpType op) const {
+    auto parts = CandidateLiterals(pattern, op);
     // No literal fragment to seed phase 1 with. Covers the wildcard-only
     // patterns ("%", "%_%") and, because split_by_wildcard("") is also empty,
     // the empty pattern: PatternMatch(Match, "") can only answer by handing
@@ -392,11 +407,12 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                                   [&](uint64_t d) { bitset.set(d); });
             return bitset;
         }
-        case proto::plan::OpType::Match: {
+        case proto::plan::OpType::Match:
+        case proto::plan::OpType::RegexMatch: {
             // Phase 1 only: rarest literal fragment to candidate rows.
-            // ExecFMMatch rechecks those offsets on sealed VARCHAR.
+            // ExecFMPatternCandidates rechecks those offsets on sealed VARCHAR.
             TargetBitmap candidates(total_rows_);
-            auto parts = split_by_wildcard(pattern);
+            auto parts = CandidateLiterals(pattern, op);
             if (parts.empty()) {
                 for (int64_t i = 0; i < total_rows_; ++i) {
                     if (!null_bitmap_[i]) {
