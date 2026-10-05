@@ -85,21 +85,36 @@ are outside this change.
 The related [SortedIndexReader refactor #53585](https://github.com/milvus-io/milvus/pull/53585)
 will require adapting the value accessor and posting visitor if it lands first.
 
-## Test Plan
+## Validation
 
-- Compare all supported types against scan oracles for empty, repeated,
-  missing, extreme, and NULL values, with varied query order and cardinality.
-- Verify signed zero and infinities; compare NaN queries against the original
-  binary-search algorithm. Check query buffers byte-for-byte for numeric types.
-- Cover empty strings, embedded NULs, high bytes, UTF-8, and long common
-  prefixes, including repeated terms and unchanged input strings.
-- Exercise real indexes through legacy BinarySet and packed V3 reloads,
-  heap/mmap storage, synchronous/asynchronous loading, and all-NULL indexes.
+Native CI passed Build, Code Check, UT Integration, UT Go, and UT C++
+coverage. The C++ suite reported 9,734 of 9,734 tests passed.
 
-The Int64 component benchmark compares against the original binary-search
-baseline across query size, cardinality, repetition, and selectivity, including
-query preparation and bitmap work. It provides a basis for strategy tuning;
-its results do not establish performance for other types or server workloads.
+The focused tests compare supported types with scan oracles and cover empty,
+repeated, missing, extreme, and NULL values, query order, input immutability,
+reloads, heap/mmap storage, and synchronous/asynchronous loading. Floating-point
+tests cover signed zero, infinities, and NaN compatibility. String tests cover
+empty strings, embedded NULs, high bytes, UTF-8, long common prefixes, and
+repeated terms.
+
+The standalone Int64 benchmark compares the original binary-search baseline
+with the batched path, including query preparation and bitmap work. Across 576
+main-sweep cases, average speedups by query size were:
+
+| Query terms | Average speedup |
+| ---: | ---: |
+| 1 | 1.027x |
+| 8 | 2.268x |
+| 64 | 3.873x |
+| 128 | 4.860x |
+| 512 | 9.237x |
+| 4,096 | 33.738x |
+
+The benchmark also passed 2,400 scan/baseline correctness comparisons. Small
+queries and small indexes contain regressions: 40 of 576 main-sweep cases and
+64 of 144 small-index cases were slower. The initial implementation keeps the
+same strategy for all query sizes; per-type and small-list fast paths remain
+follow-up tuning based on these measurements.
 
 ## References
 
