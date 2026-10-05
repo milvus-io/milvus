@@ -57,6 +57,10 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
+	// DefaultMaxMembershipFilterPlanSize bounds serialized RLS-bearing
+	// HybridSearch plans. Membership filters are not supported in 2.6.
+	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
+
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
 	DefaultPQCodeBudgetGBRatio      = 0.125
@@ -2126,6 +2130,7 @@ type proxyConfig struct {
 	MaxPasswordLength              ParamItem `refreshable:"true"`
 	MaxFieldNum                    ParamItem `refreshable:"true"`
 	MaxVectorFieldNum              ParamItem `refreshable:"true"`
+	MaxMembershipFilterPlanSize    ParamItem `refreshable:"true"`
 	MaxShardNum                    ParamItem `refreshable:"true"`
 	MaxDimension                   ParamItem `refreshable:"true"`
 	GinLogging                     ParamItem `refreshable:"false"`
@@ -2307,6 +2312,24 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxVectorFieldNum.Init(base.mgr)
+
+	p.MaxMembershipFilterPlanSize = ParamItem{
+		Key:          "proxy.maxMembershipFilterPlanSize",
+		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
+		Version:      "2.6.0",
+		Doc: "The request-wide large-filter budget in bytes for the aggregate serialized size of " +
+			"RLS-bearing HybridSearch plans. The proxy checks assembled plans with proto.Size before " +
+			"proto.Marshal. Must be positive; invalid values fall back to 128 MiB.",
+		Export:       true,
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			if n, err := strconv.Atoi(v); err != nil || n <= 0 {
+				return strconv.Itoa(DefaultMaxMembershipFilterPlanSize)
+			}
+			return v
+		},
+	}
+	p.MaxMembershipFilterPlanSize.Init(base.mgr)
 
 	if p.MaxVectorFieldNum.GetAsInt() <= 0 {
 		panic("Maximum number of vector fields in a collection can't be negative")
@@ -2777,7 +2800,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -2788,7 +2811,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -2810,7 +2833,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "67108864",
 		PanicIfEmpty: true,
-		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.",
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("67108864"),
 	}

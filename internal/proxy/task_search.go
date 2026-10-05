@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -453,6 +454,7 @@ func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask, plan *pl
 func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init advanced search request")
 	defer sp.End()
+	var filterPlanSize int64
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := log.Ctx(ctx).With(zap.Int64("collID", t.GetCollectionID()), zap.String("collName", t.collectionName))
 	var err error
@@ -617,7 +619,8 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.DynamicFields = t.userDynamicFields
 		}
 
-		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
+		accountRLSPlan := t.rlsPredicate != nil && !rewriter.IsAlwaysTrueExpr(t.rlsPredicate)
+		internalSubReq.SerializedExprPlan, filterPlanSize, err = marshalPlanWithFilterSizeLimit(plan, filterPlanSize, accountRLSPlan)
 		if err != nil {
 			return err
 		}
