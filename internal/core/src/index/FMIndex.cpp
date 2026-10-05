@@ -63,11 +63,7 @@ CandidateLiterals(const std::string& pattern, proto::plan::OpType op) {
     if (op == proto::plan::OpType::Match) {
         return split_by_wildcard(pattern);
     }
-    auto prefix = PartialRegexMatcher(pattern).RequiredPrefix();
-    if (prefix.empty()) {
-        return {};
-    }
-    return {std::move(prefix)};
+    return PartialRegexMatcher(pattern).RequiredIndexLiterals();
 }
 
 // Trailing slack appended to the mmap'd blob file so any word-granular read at

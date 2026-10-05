@@ -1994,8 +1994,8 @@ TEST(FMIndex, RegexCandidatesAndRecheckEqualCanonicalScan) {
     // Candidate membership alone must never be treated as a final result.
     const auto candidates =
         idx->PatternMatch("foo.*bar", proto::plan::OpType::RegexMatch);
-    EXPECT_TRUE(candidates[1]);
-    EXPECT_FALSE(PartialRegexMatcher("foo.*bar")(rows[1]));
+    EXPECT_TRUE(candidates[4]);  // "barfoo" has both literals in the wrong order.
+    EXPECT_FALSE(PartialRegexMatcher("foo.*bar")(rows[4]));
     EXPECT_LT(candidates.count(), rows.size());
 }
 
@@ -2040,7 +2040,7 @@ TEST(FMIndex, RegexExternalWordBoundaryCandidatesAndRawFallback) {
     }
 }
 
-TEST(FMIndex, RegexInteriorLiteralRawFallback) {
+TEST(FMIndex, RegexInteriorLiteralCandidatesAndFallback) {
     std::vector<std::string> rows(200, std::string(500, 'x') + "COMMON");
     rows[0] += "RARE123END";
     rows[1] += "RAREwrong";
@@ -2063,34 +2063,38 @@ TEST(FMIndex, RegexInteriorLiteralRawFallback) {
                                         validity.data(),
                                         nullptr,
                                         with_index);
-        for (const std::string pattern : {".*RARE",
-                                          "x.*RARE123END",
-                                          ".*RARE[0-9]+END",
-                                          R"(.*RARE\d+END)",
-                                          "x.*RARE123END+",
-                                          "x.*RARE123END?",
-                                          "x.*(RARE123END){1,2}",
-                                          "x.*RARE(123)END",
-                                          ".*x{500}COMMONRARE123END",
-                                          "(?s).*RARE123END",
-                                          "x.*(?P<n>RARE123END)",
-                                          R"(.*\QRARE123END\E)",
-                                          "x.*(RARE123END)",
-                                          ".*(RARE123END)?COMMON",
-                                          ".*((RARE123END)+)?COMMON",
-                                          ".*RARE[[:digit:]]+END",
-                                          "x.*RARE?",
-                                          "x.*(RARE)?",
-                                          "x.*RARE|bar",
-                                          R"(.*\x41)",
-                                          R"(\Bfoo|bar)"}) {
+        for (const auto& [pattern, uses_index] :
+             std::vector<std::pair<std::string, bool>>{
+                 {".*RARE", true},
+                 {"x.*RARE123END", true},
+                 {".*RARE[0-9]+END", true},
+                 {R"(.*RARE\d+END)", true},
+                 {"x.*RARE123END+", true},
+                 {"x.*RARE123END?", true},
+                 {"x.*(RARE123END){1,2}", true},
+                 {"x.*RARE(123)END", true},
+                 {".*x{500}COMMONRARE123END", true},
+                 {"(?s).*RARE123END", true},
+                 {"x.*(?P<n>RARE123END)", true},
+                 {R"(.*\QRARE123END\E)", true},
+                 {"x.*(RARE123END)", true},
+                 {".*(RARE123END)?COMMON", false},
+                 {".*((RARE123END)+)?COMMON", false},
+                 {".*RARE[[:digit:]]+END", true},
+                 {"x.*RARE?", true},
+                 {"x.*(RARE)?", false},
+                 {"x.*RARE|bar", false},
+                 {R"(.*\x41)", true},
+                 {R"(\Bfoo|bar)", false}}) {
             auto expression = MakeMatchTypedExpr(loaded.schema,
                                                  loaded.varchar_id,
                                                  pattern,
                                                  true,
                                                  proto::plan::RegexMatch);
-            EXPECT_FALSE(CompiledUseIndexCursor(
-                expression, loaded.segment.get(), rows.size()));
+            EXPECT_EQ(CompiledUseIndexCursor(
+                          expression, loaded.segment.get(), rows.size()),
+                      with_index && uses_index)
+                << pattern;
             auto evaluated = milvus::test::EvalExprInBatches(
                 expression, loaded.segment.get(), rows.size());
             TargetBitmapView result(evaluated.result->GetRawData(),
@@ -2116,12 +2120,26 @@ TEST(FMIndex, RegexGuardAndFallback) {
     auto idx = MakeRawDataIndex(rows);
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, R"(RARE\d+)"));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "ABSENT.*"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, ".*RARE"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "x.*RARE123"));
+    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(), 1);
     for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
         EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern))
             << pattern;
     }
     EXPECT_FALSE(
         idx->ShouldUseOp(proto::plan::RegexMatch, std::string(4097, 'a')));
+}
+
+TEST(FMIndex, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
+    std::vector<std::string> rows(1000, std::string(500, 'x') + "COMMON");
+    rows[500] = "RARE" + rows[500];
+    auto idx = MakeRawDataIndex(rows);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "RARE.*COMMON"));
+    const auto candidates =
+        idx->PatternMatch("RARE.*COMMON", proto::plan::RegexMatch);
+    EXPECT_EQ(candidates.count(), 1);
+    EXPECT_TRUE(candidates[500]);
 }
 
 TEST(FMIndex, ExecutorRegexFallbackNegationAndInvalidPattern) {
@@ -2144,6 +2162,8 @@ TEST(FMIndex, ExecutorRegexFallbackNegationAndInvalidPattern) {
                                       "foo|bar",
                                       "(?i)foo",
                                       "foo.*bar",
+                                      ".*foo",
+                                      "x.*foo",
                                       R"(\x41\141\.)",
                                       "é+b",
                                       R"(a\x00b)",
@@ -2206,7 +2226,7 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
         if (i % 1000 == 0) {
             rows[i] += "RARE123END";
         } else if (i % 1000 == 1) {
-            rows[i] += "RAREwrong";  // candidate rejected by exact recheck
+            rows[i] = "RAREwrong" + rows[i];  // rejected by exact recheck
         }
     }
     auto indexed =
@@ -2217,7 +2237,11 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
     const std::vector<std::pair<std::string, std::string>> workloads{
         {"selective", R"(RARE\d+END)"},
         {"unselective", "COMMON.*"},
-        {"no_literal", ".*RARE"},
+        {"interior", ".*RARE"},
+        {"common_prefix", "x.*RARE123END"},
+        {"long_literal", ".*x{500}COMMONRARE123END"},
+        {"rare_prefix", "RARE.*COMMON"},
+        {"no_literal", ".*"},
         {"empty_branch", "RARE|"},
         {"zero_hits", "ABSENT.*"},
     };

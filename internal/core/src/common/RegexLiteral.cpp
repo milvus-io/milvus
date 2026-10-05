@@ -413,4 +413,46 @@ PartialRegexMatcher::RequiredLiteral() const {
     return literal.has_value() ? std::move(*literal) : RequiredPrefix();
 }
 
+std::vector<std::string>
+PartialRegexMatcher::RequiredIndexLiterals() const {
+    if (re2_->pattern().size() > kMaxProgramSize ||
+        re2_->ProgramSize() > kMaxProgramSize) {
+        return {};
+    }
+    auto prefix = RequiredPrefix();
+    // Analyze directly so unsupported syntax reuses the prefix above rather
+    // than computing RE2's bounds again through RequiredLiteral's fallback.
+    auto literal = RegexLiteralAnalyzer(
+                       re2_->pattern(), re2_->options(), kMaxScanLiteralBytes)
+                       .Extract();
+    std::vector<std::string> requirements;
+    auto add = [&](std::string requirement) {
+        if (requirement.empty() ||
+            std::any_of(requirements.begin(),
+                        requirements.end(),
+                        [&](const auto& existing) {
+                            return existing.find(requirement) !=
+                                   std::string::npos;
+                        })) {
+            return;
+        }
+        // Remove weaker requirements implied by the new substring.
+        std::erase_if(requirements, [&](const auto& existing) {
+            return requirement.find(existing) != std::string::npos;
+        });
+        requirements.push_back(std::move(requirement));
+    };
+    if (literal.has_value()) {
+        // Bound backward-search work, retaining both ends so either can supply
+        // selectivity. Every substring of a mandatory literal is mandatory;
+        // these fragments are independent requirements, never concatenated.
+        add(literal->substr(0, kMaxPrefixBytes));
+        if (literal->size() > kMaxPrefixBytes) {
+            add(literal->substr(literal->size() - kMaxPrefixBytes));
+        }
+    }
+    add(std::move(prefix));
+    return requirements;
+}
+
 }  // namespace milvus

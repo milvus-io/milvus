@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -59,6 +60,40 @@ TEST(RegexRequiredPrefix, DeclinesExternalWordBoundaryContext) {
     }
     EXPECT_TRUE(PartialRegexMatcher(R"(\Bfoo|bar)")(std::string("afoo")));
     EXPECT_TRUE(PartialRegexMatcher(R"(\b-foo|bar)")(std::string("a-foo")));
+}
+
+TEST(RegexRequiredPrefix, IndexRequirementsKeepIndependentSelectiveLiterals) {
+    for (const auto& [pattern, expected] :
+         std::vector<std::pair<std::string, std::vector<std::string>>>{
+             {".*RARE", {"RARE"}},
+             {"x.*RARE123END", {"RARE123END", "x"}},
+             {"RARE.*COMMON", {"COMMON", "RARE"}},
+             {"foo.*foobar", {"foobar"}},
+             {"[a]needle", {"aneedle"}},
+             {"foo|foobar", {"foo"}},
+             {R"(.*\x41)", {"A"}},
+             {R"(\Bfoo)", {"foo"}},
+             {R"(\Bfoo|bar)", {}},
+             {"foo|bar", {}},
+             {"foo|", {}},
+             {"(?i)foo", {}},
+             {"a*", {}},
+             {"", {}}}) {
+        EXPECT_EQ(PartialRegexMatcher(pattern).RequiredIndexLiterals(), expected)
+            << pattern;
+    }
+    EXPECT_EQ(PartialRegexMatcher(".*" + std::string(500, 'x') + "END")
+                  .RequiredIndexLiterals(),
+              (std::vector<std::string>{std::string(64, 'x'),
+                                       std::string(61, 'x') + "END"}));
+    EXPECT_EQ(PartialRegexMatcher("RARE.*BEGIN" + std::string(100, 'x') + "END")
+                  .RequiredIndexLiterals(),
+              (std::vector<std::string>{"BEGIN" + std::string(59, 'x'),
+                                       std::string(61, 'x') + "END",
+                                       "RARE"}));
+    EXPECT_TRUE(PartialRegexMatcher(std::string(4097, 'a'))
+                    .RequiredIndexLiterals()
+                    .empty());
 }
 
 TEST(RegexRequiredPrefix, RawScanPreservesSelectiveInteriorLiterals) {
@@ -180,6 +215,10 @@ TEST(RegexRequiredPrefix, LargeRepeatedLiteralsRemainSound) {
         const auto literal = matcher.RequiredLiteral();
         EXPECT_LE(literal.size(), 4096);
         EXPECT_NE(row.find(literal), std::string::npos) << pattern;
+        for (const auto& requirement : matcher.RequiredIndexLiterals()) {
+            EXPECT_LE(requirement.size(), 64);
+            EXPECT_NE(row.find(requirement), std::string::npos) << pattern;
+        }
     }
 }
 
@@ -467,6 +506,21 @@ TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {
         ASSERT_LE(prefix.size(), 64);
         const auto literal = matcher.RequiredLiteral();
         ASSERT_LE(literal.size(), 4096);
+        const auto requirements = matcher.RequiredIndexLiterals();
+        ASSERT_LE(requirements.size(), 3);
+        std::vector<bool> index_candidates(rows.size(), true);
+        for (const auto& requirement : requirements) {
+            ASSERT_FALSE(requirement.empty());
+            ASSERT_LE(requirement.size(), 64);
+            std::vector<bool> hits(rows.size(), false);
+            index.VisitMatchingDocs(
+                reinterpret_cast<const uint8_t*>(requirement.data()),
+                requirement.size(),
+                [&](uint64_t row) { hits.at(row) = true; });
+            for (size_t i = 0; i < rows.size(); ++i) {
+                index_candidates[i] = index_candidates[i] && hits[i];
+            }
+        }
         milvus::VolnitskySearcher searcher(literal);
         std::vector<bool> candidates(rows.size(), prefix.empty());
         if (!prefix.empty()) {
@@ -482,6 +536,11 @@ TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {
                     << "pattern=" << pattern << " row=" << row;
                 EXPECT_TRUE(candidates[i])
                     << "pattern=" << pattern << " row=" << row;
+                // Even intersecting every requirement must retain all matches;
+                // choosing only the rarest one therefore remains sound.
+                EXPECT_TRUE(index_candidates[i])
+                    << "index requirements rejected pattern=" << pattern
+                    << " row=" << row;
                 EXPECT_NE(row.find(literal), std::string::npos)
                     << "pattern=" << pattern << " row=" << row;
                 EXPECT_TRUE(searcher.contains(row))
@@ -628,7 +687,7 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
         if (i % 1000 == 0) {
             rows[i] += "RARE123END";
         } else if (i % 1000 == 1) {
-            rows[i] += "RAREwrong";
+            rows[i] = "RAREwrong" + rows[i];
         }
     }
     std::vector<std::string_view> docs(rows.begin(), rows.end());
@@ -641,7 +700,11 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
     const std::vector<std::pair<std::string, std::string>> workloads{
         {"selective", R"(RARE\d+END)"},
         {"unselective", "COMMON.*"},
-        {"no_literal", ".*RARE"},
+        {"interior", ".*RARE"},
+        {"common_prefix", "x.*RARE123END"},
+        {"long_literal", ".*x{500}COMMONRARE123END"},
+        {"rare_prefix", "RARE.*COMMON"},
+        {"no_literal", ".*"},
         {"empty_branch", "RARE|"},
         {"zero_hits", "ABSENT.*"},
     };
@@ -649,60 +712,104 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
     RecordProperty("bytes", std::to_string(bytes));
     RecordProperty("sa_sample_rate", 8);
     RecordProperty("fmindex_cost_ratio", "0.001");
+    const std::string modes[]{"full_re2", "raw", "prefix_fm", "literal_fm"};
     for (const auto& [name, pattern] : workloads) {
-        // Mirror the wrapper's guard and recheck with the native FM library.
-        // Construction and extraction are included, so fallback overhead is
-        // visible rather than hidden by a precompiled benchmark-only matcher.
-        auto run = [&](bool use_index) {
+        // Mirror separate wrapper calls: the guard and candidate generation
+        // each compile/analyze/count, in addition to the canonical matcher.
+        // A declined FM guard uses the production raw literal + Volnitsky
+        // prefilter, so improvements are not inflated by a pure RE2 baseline.
+        auto run = [&](int mode) {
             PartialRegexMatcher matcher(pattern);
-            std::vector<bool> candidates(rows.size(), true);
-            bool accepted = false;
-            if (use_index) {
-                const auto prefix = matcher.RequiredPrefix();
-                if (!prefix.empty()) {
-                    const auto* data =
-                        reinterpret_cast<const uint8_t*>(prefix.data());
-                    const auto count = index.Count(data, prefix.size());
-                    accepted = count == 0 || count * 8.0 < bytes * 0.001;
-                    if (accepted) {
-                        std::fill(candidates.begin(), candidates.end(), false);
-                        index.VisitMatchingDocs(
-                            data, prefix.size(), [&](uint64_t row) {
-                                candidates.at(row) = true;
-                            });
+            auto select = [&]() {
+                PartialRegexMatcher analysis(pattern);
+                auto parts = mode == 3 ? analysis.RequiredIndexLiterals()
+                                       : std::vector<std::string>{};
+                if (mode == 2) {
+                    auto prefix = analysis.RequiredPrefix();
+                    if (!prefix.empty()) {
+                        parts.push_back(std::move(prefix));
                     }
                 }
+                std::string best;
+                uint64_t minimum = 0;
+                for (const auto& part : parts) {
+                    const auto count = index.Count(
+                        reinterpret_cast<const uint8_t*>(part.data()),
+                        part.size());
+                    if (best.empty() || count < minimum) {
+                        best = part;
+                        minimum = count;
+                    }
+                }
+                return std::make_pair(std::move(best), minimum);
+            };
+            std::vector<bool> candidates(rows.size(), true);
+            bool accepted = false;
+            if (mode >= 2) {
+                const auto [guard_literal, count] = select();
+                accepted = !guard_literal.empty() &&
+                           (count == 0 || count * 8.0 < bytes * 0.001);
+                if (accepted) {
+                    const auto [literal, unused_count] = select();
+                    std::fill(candidates.begin(), candidates.end(), false);
+                    index.VisitMatchingDocs(
+                        reinterpret_cast<const uint8_t*>(literal.data()),
+                        literal.size(),
+                        [&](uint64_t row) { candidates.at(row) = true; });
+                }
             }
-            const auto count =
+            const auto candidate_count =
                 std::count(candidates.begin(), candidates.end(), true);
-            for (size_t i = 0; i < rows.size(); ++i) {
-                candidates[i] = candidates[i] && matcher(rows[i]);
+            const auto raw_literal = mode != 0 && !accepted
+                                         ? matcher.RequiredLiteral()
+                                         : std::string{};
+            std::unique_ptr<milvus::VolnitskySearcher> searcher;
+            if (!raw_literal.empty()) {
+                searcher =
+                    std::make_unique<milvus::VolnitskySearcher>(raw_literal);
             }
-            return std::make_tuple(std::move(candidates), count, accepted);
+            size_t checks = 0;
+            for (size_t i = 0; i < rows.size(); ++i) {
+                if (candidates[i] &&
+                    (!searcher || searcher->contains(rows[i]))) {
+                    ++checks;
+                    candidates[i] = matcher(rows[i]);
+                } else {
+                    candidates[i] = false;
+                }
+            }
+            return std::make_tuple(
+                std::move(candidates), candidate_count, checks, accepted);
         };
-        auto [expected, unused_count, unused_accepted] = run(false);
-        for (bool use_index : {false, true}) {
-            std::vector<double> times;
-            for (int iteration = 0; iteration < 10; ++iteration) {
+        auto [expected, unused_count, unused_checks, unused_accepted] = run(0);
+        std::vector<double> times[4];
+        // One warmup and nine samples per mode, rotating their order.
+        for (int round = 0; round < 10; ++round) {
+            for (int offset = 0; offset < 4; ++offset) {
+                const int mode = (round + offset) % 4;
                 const auto start = std::chrono::steady_clock::now();
-                auto [actual, candidates, accepted] = run(use_index);
+                auto [actual, candidates, checks, accepted] = run(mode);
                 const auto elapsed =
                     std::chrono::duration<double, std::micro>(
                         std::chrono::steady_clock::now() - start)
                         .count();
-                EXPECT_EQ(actual, expected) << name;
-                if (iteration > 0) {
-                    times.push_back(elapsed);
-                }
-                if (use_index && iteration == 0) {
-                    RecordProperty(name + "_candidates",
+                ASSERT_EQ(actual, expected) << name << " mode=" << modes[mode];
+                if (round > 0) {
+                    times[mode].push_back(elapsed);
+                } else {
+                    RecordProperty(name + "_" + modes[mode] + "_candidates",
                                    static_cast<int>(candidates));
-                    RecordProperty(name + "_uses_index", accepted);
+                    RecordProperty(name + "_" + modes[mode] + "_checks",
+                                   static_cast<int>(checks));
+                    RecordProperty(name + "_" + modes[mode] + "_uses_index",
+                                   accepted);
                 }
             }
-            std::sort(times.begin(), times.end());
-            RecordProperty(name + (use_index ? "_indexed_us" : "_scan_us"),
-                           std::to_string(times[times.size() / 2]));
+        }
+        for (int mode = 0; mode < 4; ++mode) {
+            std::sort(times[mode].begin(), times[mode].end());
+            RecordProperty(name + "_" + modes[mode] + "_us",
+                           std::to_string(times[mode][4]));
         }
     }
 }

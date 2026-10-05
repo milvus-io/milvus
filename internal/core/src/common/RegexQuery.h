@@ -152,6 +152,13 @@ struct PartialRegexMatcher {
     std::string
     RequiredLiteral() const;
 
+    // At most three mandatory byte substrings (each <= 64 bytes): the RE2
+    // prefix and both ends of the structural interior literal. The index may
+    // count and choose any one. These are AND requirements, never alternatives.
+    // Subsumed requirements are omitted; empty means no filtering, not no hits.
+    std::vector<std::string>
+    RequiredIndexLiterals() const;
+
  private:
     static constexpr int kMaxPrefixBytes = 64;
     static constexpr int kMaxScanLiteralBytes = 4096;

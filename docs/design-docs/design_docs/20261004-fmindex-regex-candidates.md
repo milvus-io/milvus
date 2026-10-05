@@ -8,35 +8,55 @@
 
 ## Candidate contract
 
-`PartialRegexMatcher::RequiredPrefix()` returns zero or one mandatory byte
-literal, at most 64 bytes long. It uses the common prefix of RE2's public
-[`PossibleMatchRange` bounds](https://github.com/google/re2/blob/2023-03-01/re2/re2.h#L483-L498).
-This is a prefix of the **matched substring**, not necessarily of the row;
-FMIndex therefore uses unanchored substring lookup. Partial UTF-8 code points
-in the common byte prefix are safe requirements for the byte index.
+`PartialRegexMatcher::RequiredIndexLiterals()` returns at most three mandatory
+byte substrings, each at most 64 bytes long. They are **AND requirements**:
+every match must contain every returned substring. FMIndex counts them and
+uses just the least frequent requirement to generate candidate rows. Canonical
+RE2 recheck is always required; ordering and other regex constraints are not
+answered by substring membership.
 
-Extraction declines patterns containing `\b` or `\B`. RE2 computes the bounds
-for an anchored search starting at the beginning of text, which can exclude
-branches accepted with external word-boundary context. For example,
+The requirements combine two existing analyses:
+
+- `RequiredPrefix()` uses the common prefix of RE2's public
+  [`PossibleMatchRange` bounds](https://github.com/google/re2/blob/2023-03-01/re2/re2.h#L483-L498).
+  This is a prefix of the matched substring, not necessarily of the row.
+- The bounded structural analyzer behind `RequiredLiteral()` finds a mandatory
+  interior literal. For index lookup, use its first and last 64 bytes (only one
+  fragment for shorter literals). Substrings of a mandatory literal remain
+  mandatory. Do not concatenate these fragments or infer exactness from them.
+
+Equal or subsumed requirements are omitted. Keeping independent prefix and
+interior requirements avoids replacing a rare prefix with a common interior.
+Capping index fragments bounds backward-search work on long repetitive literals;
+raw scanning retains its separate, up-to-4096-byte literal. Only the ends of a
+long interior literal are considered, so a selective middle may be missed.
+This loses performance opportunities, never matches. Partial UTF-8 code points
+are safe for the byte index.
+
+The range-based prefix declines patterns containing `\b` or `\B`: RE2 computes
+bounds for an anchored search starting at the beginning of text, which can
+exclude branches accepted with external word-boundary context. For example,
 `\Bfoo|bar` can yield the prefix `bar` but partially matches `afoo`.
-Conservatively declining escaped or quoted spellings only loses pruning.
-Patterns exceeding 4096 bytes or 4096 compiled instructions also decline.
-A canonical match on empty input proves no nonempty literal is mandatory;
-these nullable patterns skip range construction entirely.
-A missing requirement means scan, never an empty result.
+The structural analyzer can still prove `foo` for `\Bfoo`, but declines the
+alternation. Escaped or quoted spellings may conservatively disable the prefix.
+Patterns exceeding 4096 bytes or compiled instructions decline both analyses.
+Empty-match patterns supply no mandatory bytes. A missing requirement means
+scan, never an empty result; unsupported structural syntax retains a safe
+range-based prefix if one exists.
 
-| Pattern | Requirement / behavior |
+| Pattern | Requirements / behavior |
 | --- | --- |
-| `ERROR.*timeout` | `ERROR`; canonical recheck required |
-| `foo\|foobar` | `foo` |
+| `ERROR.*timeout` | `timeout`, `ERROR`; count and choose the rarer one |
+| `.*needle` | `needle` |
+| `foo\|foobar` | `foo` via RE2 bounds |
 | `\x41\141\.` | decoded bytes `Aa.` |
 | `foo\|bar`, `foo\|`, `a*`, empty pattern | scan |
-| `(?i)foo`, `[a-z]+`, `.*needle` | scan |
-| Any pattern containing `\b` or `\B` | scan |
+| `(?i)foo`, `[a-z]+` | scan |
+| `\Bfoo` / `\Bfoo\|bar` | `foo` / scan |
 
-FMIndex does not extract arbitrary interior literals or OR trees. Alternation
-and empty-match correctness may be satisfied through fallback; this change
-does not promise acceleration for every supported RE2 pattern.
+No OR tree or new regex engine is introduced. Alternation and empty-match
+correctness may be satisfied through fallback; this does not promise
+acceleration for every supported RE2 pattern.
 
 ## Execution and fallback
 
@@ -67,8 +87,9 @@ path, planner, proto, configuration or error-code mapping changes are needed.
 
 `RegexQuery.h` owns canonical matching and the public requirement methods;
 `RegexQuery.cpp` retains LIKE translation utilities. `RegexLiteral.cpp` owns
-the bounded structural analysis behind `RequiredLiteral()`. FMIndex uses the
-prefix method; raw scanning uses the potentially stronger interior literal.
+the bounded structural analysis shared by `RequiredLiteral()` and
+`RequiredIndexLiterals()`. FMIndex combines interior requirements with the RE2
+prefix; raw scanning keeps its existing interior literal and Volnitsky search.
 The existing NGRAM extractor is not a correctness gate: it can misinterpret
 escape payloads such as the digits of `\x41`. Its own index path is unchanged.
 
@@ -87,7 +108,7 @@ RE2 decodes consuming escapes. Quote boundaries are preserved: globally
 removing `\Q\E` could turn `\0\Q\E12` into a different octal escape.
 Unsupported syntax invalidates the entire tentative summary and falls back
 to `RequiredPrefix()`. Limits are 4096 pattern bytes/instructions, 64 nested
-groups and 4096 literal bytes. FM prefixes retain their separate 64-byte cap.
+groups and 4096 literal bytes. FM lookup fragments have a separate 64-byte cap.
 
 `EnsureRegexScanCache` constructs the literal and Volnitsky table only when
 raw scanning occurs. FM candidate rechecks use the canonical matcher directly.
@@ -111,14 +132,15 @@ exact/prefix/suffix analysis. Its principal gap is the single requirement:
 alternation with different literals still falls back. Keeping a richer result
 bounded is more important than supporting every pattern.
 
-Recommended order for a follow-up:
+Adoption and remaining work:
 
-1. **Evaluate existing interior requirements for FM candidates.** Reuse
-   `RequiredLiteral()` as a candidate requirement alongside `RequiredPrefix()`;
-   compare bounded analysis cost and occurrence counts before choosing a route.
-   Keep canonical recheck and existing fallback. Share immutable per-query
-   analysis between the guard and candidate generation if approved interfaces
-   allow it, rather than recompiling the regex independently at each step.
+1. **Implemented: bounded interior requirements for FM candidates.**
+   `RequiredIndexLiterals()` reuses the existing structural analyzer alongside
+   the canonical prefix. The guard and candidate generation share this one
+   extraction entry point, retain the existing occurrence-count selection,
+   and always recheck. This follows the bounded-summary and conservative
+   weakening principles above. Sharing immutable per-query analysis across
+   these calls remains a separate interface change requiring native evidence.
 2. **Add a bounded Boolean requirement representation only when needed.**
    `ERROR.*timeout` permits `ERROR AND timeout`; `(ERROR|WARN).*timeout`
    permits `(ERROR OR WARN) AND timeout`. For AND, using just a selective
@@ -134,24 +156,11 @@ Recommended order for a follow-up:
    many needles in row bytes, not FM-index lookup; defer that extra machinery
    until workloads establish a benefit. RE2 remains the final matcher.
 
-An isolated feasibility probe used the current analyzer and native FM library
-on the existing 20,000-row fixture. It changed only the probe's requirement
-selection, not the production wrapper or executor:
-
-| Pattern | Current prefix route / candidates | Interior-literal probe / candidates |
-| --- | --- | --- |
-| `x.*RARE123END` | scan / 20,000 | FM `RARE123END` / 20 |
-| `.*RARE` | scan / 20,000 | FM `RARE` / 40 |
-| `RARE\|OTHER` | scan / 20,000 | scan / 20,000 |
-| `RARE\|` | scan / 20,000 | scan / 20,000 |
-
-All canonical matches survived the probe's filtering. This demonstrates
-candidate reduction for these fixtures, not latency improvements or native
-integration. The same RE2 2025-11-05 environment also reproduced the
-FilteredRE2 incompatibility: `ERROR.*timeout` matches `ERROR timeout`, but
-its atoms include lowercase `error`, absent from the original bytes. Sending
-that atom directly to the existing case-sensitive index would be unsound.
-The pinned RE2 source documents the same lowercase contract.
+An isolated RE2 2025-11-05 probe reproduced the FilteredRE2 incompatibility:
+`ERROR.*timeout` matches `ERROR timeout`, but its atoms include lowercase
+`error`, absent from the original bytes. Sending that atom directly to the
+existing case-sensitive index would be unsound. The pinned RE2 source
+documents the same lowercase contract.
 
 [codesearch]: https://github.com/google/codesearch/blob/74a12a911a79b901d1158c48d011b2da1b090fc9/index/regexp.go
 [rust-literals]: https://github.com/rust-lang/regex/blob/72d650cb0a880a01ab6dc2137c0888e8f89740f7/regex-syntax/src/hir/literal.rs
@@ -175,7 +184,9 @@ internal/core/output/unittest/all_tests \
 
 Performance fixtures are opt-in and verify result parity rather than asserting
 a speedup. The component and raw-scan fixtures use 20,000 rows of 500 `x` bytes
-plus `COMMON`, 20 true `RARE123END` rows and 20 `RAREwrong` false positives.
+plus `COMMON`, 20 true `RARE123END` rows and 20 `RAREwrong` false positives
+for `RARE\d+END`. In the component and native fixtures, `RAREwrong` is prepended
+so `RARE.*COMMON` exercises a rare prefix with a common interior requirement.
 The analysis fixture isolates extraction from compilation and row scanning.
 The native end-to-end fixture includes expression compilation and column reads
 on equivalent indexed/unindexed sealed segments. Build/load time is excluded.
@@ -188,53 +199,93 @@ internal/core/output/unittest/all_tests --gtest_also_run_disabled_tests \
 
 Disable expression caches for the end-to-end run. Record CPU, build flags, RE2
 version, cost ratio, candidate counts and route selection; include declined
-and regressing workloads. Component fallback is a direct RE2 scan, not the
-production Volnitsky executor. The fixed old-needle raw baseline omits legacy
-extraction and is not a full pre-change executor baseline.
+and regressing workloads. The component benchmark compares four modes in one
+binary: full RE2 reference, raw Volnitsky + RE2, prior prefix-only FM policy,
+and the new bounded-literal FM policy. Both FM policies use the same raw
+prefilter on fallback. Timing includes separate matcher compilation and
+analysis/counting for the guard and accepted candidate generation, mirroring
+the existing wrapper calls. Parity checks are outside the timed region.
+It uses the actual FM library but in-memory row vectors and `vector<bool>`;
+segment dispatch, bitmap implementations and sealed-column reads need the
+native benchmark. The fixed old-needle raw baseline omits legacy extraction
+and is not a full pre-change executor baseline.
 
 ### Local evidence (2026-10-05)
 
-Seven enabled correctness tests and all three opt-in benchmarks passed. The
-soundness corpus covers 6,162 patterns against 1,589 rows. The seven current
-correctness test bodies also passed ASan/UBSan in a standalone assertion
-harness; prebuilt RE2/libsais and the native Milvus binary were not sanitized.
-Candidate counts, routing choices and all 14 raw-scan exact-check counts were
-unchanged by the latest optimization.
+Eight enabled correctness tests and all three opt-in component/raw/analysis
+benchmarks passed. The soundness corpus covers 6,162 patterns against 1,589
+rows using canonical RE2 and the actual FM library. Even intersecting all
+returned requirements retained every canonical match in that corpus; choosing
+just one is therefore covered. Long literals also exercise the byte cap and
+independent prefix retention. The eight enabled test bodies passed ASan/UBSan
+in a standalone assertion harness; prebuilt RE2/libsais and the native Milvus
+binary were not sanitized.
 
 Environment: Apple M1 Pro / arm64, Apple Clang 21, C++20 `-O2`, RE2
-2025-11-05_2 and an error-header adapter. Before/after refers to the uncommitted
-implementation immediately before the optimization, not repository HEAD.
-Three serial process pairs alternated order. Each process warmed up once and
-measured nine samples; tables report the median of the three process medians.
+2025-11-05_2 and an error-header adapter. FM sample rate is 8 and cost ratio is
+0.001. Three serial processes each warmed up once and measured nine samples
+per mode with rotating order. The table reports the median of three process
+medians. The prefix policy models repository HEAD before this change in the
+same binary, with the same raw fallback and equivalent repeated compilation;
+it is not a historical native-binary comparison.
 
-| Extraction only, warmed matcher | Before (µs) | After (µs) |
-| --- | ---: | ---: |
-| 3000-byte literal run | 971.940 | 188.631 |
-| Repeated literal | 7.559 | 2.504 |
-| Empty-alternative prefix | 2.406 | 0.024 |
-| Escaped literals | 11.646 | 12.073 |
+| Pattern | New FM candidates | Raw prefilter (µs) | Prefix FM (µs) | New FM (µs) | Change vs prefix |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `RARE\d+END` | 40 | 3546.6 | 107.9 | 90.8 | -15.8% |
+| `COMMON.*` | scan | 3297.2 | 3257.0 | 3259.2 | +0.1% |
+| `.*RARE` | 40 | 3591.7 | 3671.7 | 117.9 | -96.8% |
+| `x.*RARE123END` | 20 | 1654.3 | 1581.9 | 134.6 | -91.5% |
+| `.*x{500}COMMONRARE123END` | 20 | 2027.2 | 2216.8 | 2132.5 | -3.8% |
+| `RARE.*COMMON` | 40 | 3230.9 | 133.2 | 119.0 | -10.6% |
+| `.*` | scan | 1340.5 | 1311.0 | 1427.4 | +8.9% |
+| `RARE\|` | scan | 1486.2 | 1545.2 | 1422.7 | -7.9% |
+| `ABSENT.*` | 0 | 2299.9 | 91.6 | 80.3 | -12.3% |
 
-Extraction excludes matcher compilation, first-use DFA setup and row scanning.
-Buffer reuse and bounded repetition reduce analysis work; the empty-input
-probe avoids unnecessary range analysis. These are not query speedup claims.
+`.*RARE` and `x.*RARE123END` reduce FM candidates from a 20,000-row scan to
+40 and 20 rows (99.8% and 99.9% pruning). The existing raw Volnitsky prefilter
+already performs only 40 and 20 canonical checks respectively: the new benefit
+is avoiding substring scans over all row bytes, not reducing those exact-check
+counts further. `RARE.*COMMON` retains the rare prefix's 40 candidates instead
+of selecting the common interior. Zero-hit lookup performs no canonical checks.
 
-| FM component workload | Candidates / 20,000 | Before (µs) | After (µs) |
-| --- | ---: | ---: | ---: |
-| Selective | 40 | 68.375 | 68.625 |
-| Unselective, scan fallback | 20,000 | 1021.000 | 1067.583 |
-| No prefix, scan fallback | 20,000 | 23605.500 | 23804.583 |
-| Empty alternative, scan fallback | 20,000 | 1750.667 | 1324.959 |
-| Zero hits | 0 | 59.125 | 57.083 |
+Regressions remain visible. The no-literal fallback is 8.9% slower in this
+sample. An earlier measurement round showed +4.3% for the long repeated
+pattern, while the final round shows -3.8%; its final cost is still 5.2% above
+the raw prefilter alone. Small differences are noisy and do not establish
+stable improvements. Before limiting FM fragments to 64 bytes, this long
+pattern regressed about 15% against the prefix policy. The cap bounds lookup
+work, but does not price repeated regex compilation, candidate reads or all
+analysis costs. Do not claim a general or production end-to-end speedup.
 
-Selective candidates remove 99.8% of exact checks. Raw-scan query medians vary
-from -1.17% to +4.67% across the 14 fixtures; component unselective fallback
-increases 4.56% in this sample. These measurements do not establish a stable
-whole-query speedup or rule out small regressions. Keep fallback costs in
-future comparisons. Full local XML, logs and source snapshots are retained in
-`/tmp/milvus-r01-optimization-20261005`.
+The unchanged raw-scan benchmark's 14 syntax fixtures and the analysis-only
+benchmark were also rerun in three processes. Earlier extraction optimizations
+(buffer reuse, bounded repetition, and empty-input range avoidance) are already
+in HEAD; their historical comparisons remain under
+`/tmp/milvus-r01-optimization-20261005`. Current XML, sanitizer log, binary,
+source snapshots and measurement summary are under
+`/tmp/milvus-r01-interior-20261005`.
+
+### Integration audit and remaining gate
+
+Source tracing checked both `CandidateLiterals` consumers: no requirement
+makes the guard decline and direct candidate calls return all non-null rows;
+a zero count accepts an empty candidate set; otherwise the rarest requirement
+feeds locate. No OR alternatives enter this AND-only interface. Unsupported,
+optional and empty-match extraction paths are exercised in component tests.
+
+The existing expression constructor validates regex before routing. The
+FM-specific branch in `ExecRangeVisitorImpl` sends candidates through
+`ExecFMPatternCandidates`, intersects input bits, fetches raw offsets and
+rechecks canonically. Validity is returned independently; offset input retains
+the raw path. Native fixtures now cover newly accepted interior patterns,
+nullable/NOT parity, a rare prefix with common interior, and ordering false
+positives. These wrapper/executor fixtures were updated but **not run locally**.
 
 **Still required:** reconfigure/build native Milvus with pinned RE2 20230301,
 run the wrapper/executor correctness fixtures and the native end-to-end
 benchmark, and obtain maintainer agreement on the target branch and design.
-The existing CMake source glob includes `RegexLiteral.cpp` after reconfiguration.
-No native integration, end-to-end performance or design approval is implied.
+The local native `all_tests` binary is absent. The existing CMake source glob
+includes `RegexLiteral.cpp` after reconfiguration. No native integration,
+production performance or design approval is implied. Sharing per-query
+analysis and calibrating total routing cost remain follow-ups requiring that
+environment; Boolean OR extraction is also deferred.
