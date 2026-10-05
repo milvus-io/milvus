@@ -71,11 +71,12 @@ func MarshalPlanWithMembershipFilterSizeLimit(plan *planpb.PlanNode, accumulated
 	return marshalPlanWithFilterSizeLimit(plan, accumulatedSize, false)
 }
 
-// marshalPlanWithFilterSizeLimit also lets HybridSearch account RLS-bearing
-// subplans against the same serialized-plan resource budget.
-func marshalPlanWithFilterSizeLimit(plan *planpb.PlanNode, accumulatedSize int64, accountAdditionalFilters bool) ([]byte, int64, error) {
+// marshalPlanWithFilterSizeLimit counts the whole serialized plan when
+// accountWholePlan is true, even without a membership filter. HybridSearch uses
+// this to account RLS-bearing subplans against the same request-wide budget.
+func marshalPlanWithFilterSizeLimit(plan *planpb.PlanNode, accumulatedSize int64, accountWholePlan bool) ([]byte, int64, error) {
 	nextSize := accumulatedSize
-	if accountAdditionalFilters || planparserv2.PlanContainsMembershipFilter(plan) {
+	if accountWholePlan || planparserv2.PlanContainsMembershipFilter(plan) {
 		planSize := int64(proto.Size(plan))
 		maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64()
 		if accumulatedSize > maxSize || planSize > maxSize-accumulatedSize {
