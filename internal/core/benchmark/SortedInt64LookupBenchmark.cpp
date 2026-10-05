@@ -32,7 +32,7 @@
 #include "bitset/bitset.h"
 #include "bitset/detail/element_wise.h"
 #include "index/IndexStructure.h"
-#include "index/SortedInt64Lookup.h"
+#include "index/SortedMembership.h"
 
 namespace {
 
@@ -53,11 +53,11 @@ Lookup(const std::vector<Entry>& entries,
     auto result = not_in ? valid.clone() : Bitmap(valid.size(), false);
     auto visit = [&](int32_t row) { result[row] = !not_in; };
     if (batch) {
-        milvus::index::detail::VisitSortedInt64Matches(entries.begin(),
-                                                       entries.end(),
-                                                       queries.size(),
-                                                       queries.data(),
-                                                       visit);
+        milvus::index::detail::VisitSortedMatches(entries.begin(),
+                                                  entries.end(),
+                                                  queries.size(),
+                                                  queries.data(),
+                                                  visit);
     } else if (!entries.empty()) {
         // The original full-range lower_bound/upper_bound loop, including
         // repeated writes for duplicate query values.
@@ -143,12 +143,14 @@ CheckEdgeCases() {
     // or dereference them, even with a large query list.
     const Entry* empty = nullptr;
     std::vector<int64_t> queries(1024, 42);
-    milvus::index::detail::VisitSortedInt64Matches(
+    milvus::index::detail::VisitSortedMatches(
         empty, empty, queries.size(), queries.data(), [](int32_t) {
             std::abort();
         });
-    milvus::index::detail::VisitSortedInt64Matches(
-        empty, empty, 0, nullptr, [](int32_t) { std::abort(); });
+    milvus::index::detail::VisitSortedMatches(
+        empty, empty, 0, static_cast<const int64_t*>(nullptr), [](int32_t) {
+            std::abort();
+        });
 }
 
 void
@@ -176,19 +178,19 @@ CheckValidationCallbacks() {
                                               visit,
                                               validate);
     if (validations != 1) {
-        std::cerr << "fallback validation callback count mismatch\n";
+        std::cerr << "single-term validation callback count mismatch\n";
         std::exit(1);
     }
 
     std::vector<int64_t> batch_query(128);
     std::iota(batch_query.begin(), batch_query.end(), 0);
     validations = 0;
-    milvus::index::detail::VisitSortedInt64Matches(entries.begin(),
-                                                   entries.end(),
-                                                   batch_query.size(),
-                                                   batch_query.data(),
-                                                   visit,
-                                                   validate);
+    milvus::index::detail::VisitSortedMatches(entries.begin(),
+                                              entries.end(),
+                                              batch_query.size(),
+                                              batch_query.data(),
+                                              visit,
+                                              validate);
     if (validations != batch_query.size()) {
         std::cerr << "batch validation callback count mismatch\n";
         std::exit(1);

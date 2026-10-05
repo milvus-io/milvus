@@ -45,7 +45,7 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
-#include "index/SortedInt64Lookup.h"
+#include "index/SortedMembership.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
@@ -521,12 +521,7 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
         }
     };
 
-    if constexpr (std::is_same_v<T, int64_t>) {
-        detail::VisitSortedInt64Matches(
-            begin(), end(), n, values, visit, validate);
-    } else {
-        detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
-    }
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
@@ -548,12 +543,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
         }
     };
 
-    if constexpr (std::is_same_v<T, int64_t>) {
-        detail::VisitSortedInt64Matches(
-            begin(), end(), n, values, visit, validate);
-    } else {
-        detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
-    }
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
