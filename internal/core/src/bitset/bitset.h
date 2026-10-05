@@ -92,56 +92,135 @@ struct RangeChecker<true> {
 }  // namespace
 
 namespace detail {
-// Only invalidation metadata lives on the owner. Statistics live on views.
-// Owner mutation and readers must be externally synchronized. Concurrent
-// readers may activate/cache statistics, hence the atomic activation flags.
-struct BitsetMutationState {
-    static constexpr uint8_t kTracked = 1;
-    static constexpr uint8_t kEscaped = 2;
-    static constexpr uint8_t kWriting = 4;
-    size_t write_depth = 0;
-    mutable std::atomic<uint8_t> flags{0};
-    uint64_t generation = 0;
+// Owned together with the bitmap storage, with a stable address across moves.
+// Views only borrow this state; cache storage and invalidation stay here.
+// Atomic statistics support concurrent readers. Bitmap writes still require
+// external synchronization with readers and other writers.
+class BitsetState {
+ public:
+    explicit BitsetState(size_t size) : Size(size) {
+    }
 
     void
     Modified() {
-        if (write_depth == 0 &&
-            flags.load(std::memory_order_relaxed) == kTracked) {
-            if (generation == std::numeric_limits<uint64_t>::max()) {
-                Escape();
-            } else {
-                ++generation;
-            }
+        if (WriteDepth == 0 &&
+            CachedPredicates.load(std::memory_order_relaxed) != 0) {
+            ClearStatistics();
         }
     }
     void
     Escape() {
-        flags.fetch_or(kEscaped, std::memory_order_relaxed);
+        Escaped = true;
+        ClearStatistics();
+    }
+    void
+    Resize(size_t size) {
+        Modified();
+        Size = size;
+    }
+    void
+    BeginWrite() {
+        Modified();
+        ++WriteDepth;
+    }
+    void
+    EndWrite() {
+        assert(WriteDepth != 0);
+        if (--WriteDepth == 0)
+            Modified();
+    }
+
+    template <typename Policy>
+    size_t
+    Count(const typename Policy::data_type* data,
+          size_t offset,
+          size_t size) const {
+        if (size == 0)
+            return 0;
+        if (!CanCache(offset, size))
+            return Policy::op_count(data, offset, size);
+        auto count = CachedCount.load(std::memory_order_relaxed);
+        if (count == kUnknown) {
+            count = Policy::op_count(data, offset, size);
+            CachedCount.store(count, std::memory_order_relaxed);
+            CachedPredicates.fetch_or(kCountKnown, std::memory_order_relaxed);
+        }
+        return count;
+    }
+    template <typename Policy>
+    bool
+    All(const typename Policy::data_type* data,
+        size_t offset,
+        size_t size) const {
+        return Predicate<Policy>(data, offset, size, true);
+    }
+    template <typename Policy>
+    bool
+    None(const typename Policy::data_type* data,
+         size_t offset,
+         size_t size) const {
+        return Predicate<Policy>(data, offset, size, false);
+    }
+
+ private:
+    static constexpr size_t kUnknown = std::numeric_limits<size_t>::max();
+    static constexpr uint8_t kAllKnown = 1, kAllTrue = 2, kNoneKnown = 4,
+                             kNoneTrue = 8, kCountKnown = 16;
+    size_t Size;
+    size_t WriteDepth = 0;
+    bool Escaped = false;
+    mutable std::atomic<size_t> CachedCount{kUnknown};
+    mutable std::atomic<uint8_t> CachedPredicates{0};
+
+    void
+    ClearStatistics() {
+        CachedCount.store(kUnknown, std::memory_order_relaxed);
+        CachedPredicates.store(0, std::memory_order_relaxed);
     }
     bool
-    Track() const {
-        const auto current = flags.load(std::memory_order_relaxed);
-        if (current & (kEscaped | kWriting))
-            return false;
-        if (!(current & kTracked))
-            flags.fetch_or(kTracked, std::memory_order_relaxed);
-        return true;
+    CanCache(size_t offset, size_t size) const {
+        return offset == 0 && size == Size && WriteDepth == 0 && !Escaped;
+    }
+    template <typename Policy>
+    bool
+    Predicate(const typename Policy::data_type* data,
+              size_t offset,
+              size_t size,
+              bool all) const {
+        if (size == 0)
+            return true;
+        if (!CanCache(offset, size))
+            return all ? Policy::op_all(data, offset, size)
+                       : Policy::op_none(data, offset, size);
+        const auto count = CachedCount.load(std::memory_order_relaxed);
+        if (count != kUnknown)
+            return all ? count == size : count == 0;
+        const auto known = all ? kAllKnown : kNoneKnown;
+        const auto value = all ? kAllTrue : kNoneTrue;
+        const auto flags = CachedPredicates.load(std::memory_order_relaxed);
+        if (flags & known)
+            return flags & value;
+        const bool result = all ? Policy::op_all(data, offset, size)
+                                : Policy::op_none(data, offset, size);
+        CachedPredicates.fetch_or(known | (result ? value : 0),
+                                  std::memory_order_relaxed);
+        if (result)
+            CachedCount.store(all ? size : 0, std::memory_order_relaxed);
+        return result;
     }
 };
 
-// Suppress per-bit version updates in a batch; statistics are uncached until
-// the batch closes. Nested scopes on the same owner are supported.
+// Clear statistics on batch entry and keep reads uncached until it closes.
+// Nested scopes on the same owner are supported.
 class BitsetWriteScope {
-    BitsetMutationState* state_;
+    BitsetState* state_;
     void* data_;
 
  public:
-    BitsetWriteScope(BitsetMutationState* state, void* data)
+    BitsetWriteScope(BitsetState* state, void* data)
         : state_(state), data_(data) {
-        if (state_ && state_->write_depth++ == 0) {
-            state_->flags.fetch_or(BitsetMutationState::kWriting,
-                                   std::memory_order_relaxed);
-        }
+        if (state_)
+            state_->BeginWrite();
     }
     void*
     data() const {
@@ -151,22 +230,18 @@ class BitsetWriteScope {
     BitsetWriteScope&
     operator=(const BitsetWriteScope&) = delete;
     ~BitsetWriteScope() {
-        if (state_ && --state_->write_depth == 0) {
-            state_->flags.fetch_and(uint8_t(~BitsetMutationState::kWriting),
-                                    std::memory_order_relaxed);
-            state_->Modified();
-        }
+        if (state_)
+            state_->EndWrite();
     }
 };
 
 template <typename PolicyT>
 class TrackedBitProxy {
     typename PolicyT::proxy_type proxy_;
-    BitsetMutationState* state_;
+    BitsetState* state_;
 
  public:
-    TrackedBitProxy(typename PolicyT::proxy_type proxy,
-                    BitsetMutationState* state)
+    TrackedBitProxy(typename PolicyT::proxy_type proxy, BitsetState* state)
         : proxy_(proxy), state_(state) {
     }
     operator bool() const {
@@ -296,6 +371,9 @@ class BitsetBase {
     // Return whether all bits are set to true.
     inline bool
     all() const {
+        if (const auto* state = as_derived().mutation_state_impl())
+            return state->template All<policy_type>(
+                this->data(), this->offset(), this->size());
         return policy_type::op_all(this->data(), this->offset(), this->size());
     }
 
@@ -308,6 +386,9 @@ class BitsetBase {
     // Return whether all bits are set to false.
     inline bool
     none() const {
+        if (const auto* state = as_derived().mutation_state_impl())
+            return state->template None<policy_type>(
+                this->data(), this->offset(), this->size());
         return policy_type::op_none(this->data(), this->offset(), this->size());
     }
 
@@ -361,6 +442,9 @@ class BitsetBase {
     // Return the number of bits which are set to true.
     inline size_t
     count() const {
+        if (const auto* state = as_derived().mutation_state_impl())
+            return state->template Count<policy_type>(
+                this->data(), this->offset(), this->size());
         return policy_type::op_count(
             this->data(), this->offset(), this->size());
     }
@@ -430,7 +514,7 @@ class BitsetBase {
     }
 
  protected:
-    const detail::BitsetMutationState*
+    const detail::BitsetState*
     mutation_state_impl() const {
         return as_derived().mutation_state_impl();
     }
@@ -1415,7 +1499,7 @@ class BitsetMutatingBase
 
 // A non-owning writable interval. Its offset is applied by the shared kernels
 // and tracked bit proxies. It cannot resize, reserve, append or replace storage.
-// ReadView caches observe writes through the same stable owner mutation state.
+// Writes are reported to the stable owner state; this view owns no statistics.
 template <typename PolicyT, bool IsRangeCheckEnabled>
 class BitsetWriteView : public detail::BitsetMutatingBase<
                             PolicyT,
@@ -1454,14 +1538,14 @@ class BitsetWriteView : public detail::BitsetMutatingBase<
     BitsetWriteView(data_type* data,
                     size_t offset,
                     size_t size,
-                    detail::BitsetMutationState* state)
+                    detail::BitsetState* state)
         : Data(data), Size(size), Offset(offset), State(state) {
     }
 
     data_type* Data = nullptr;
     size_t Size = 0;
     size_t Offset = 0;
-    detail::BitsetMutationState* State = nullptr;
+    detail::BitsetState* State = nullptr;
 
     data_type*
     data_impl() {
@@ -1479,11 +1563,11 @@ class BitsetWriteView : public detail::BitsetMutatingBase<
     offset_impl() const {
         return Offset;
     }
-    detail::BitsetMutationState*
+    detail::BitsetState*
     mutation_state_impl() {
         return State;
     }
-    const detail::BitsetMutationState*
+    const detail::BitsetState*
     mutation_state_impl() const {
         return State;
     }
@@ -1502,9 +1586,9 @@ class BitsetWriteView : public detail::BitsetMutatingBase<
 // Non-owning read-only view. Owner writes remain observable. The backing
 // storage and the referenced range must remain alive and valid; operations
 // such as resize, reserve, clear, append, move assignment, and destruction can
-// invalidate views. Statistics are cached against the owner's mutation version.
-// Raw borrowed buffers and escaped writable pointers remain uncached. Concurrent
-// owner writes still require external synchronization.
+// invalidate views. Statistics are delegated to the owner; this descriptor
+// stores no cache and performs no invalidation. Raw borrowed buffers and partial
+// intervals are scanned. Owner writes require external synchronization.
 template <typename PolicyT, bool IsRangeCheckEnabled>
 class BitsetView : public BitsetBase<PolicyT,
                                      BitsetView<PolicyT, IsRangeCheckEnabled>,
@@ -1520,36 +1604,6 @@ class BitsetView : public BitsetBase<PolicyT,
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
 
     BitsetView() = default;
-    BitsetView(const BitsetView& other) {
-        *this = other;
-    }
-    BitsetView(BitsetView&& other) noexcept {
-        *this = other;
-    }
-    BitsetView&
-    operator=(const BitsetView& other) {
-        if (this != &other) {
-            Data = other.Data;
-            Size = other.Size;
-            Offset = other.Offset;
-            State = other.State;
-            // Observe the generation before copying facts. A concurrent first
-            // read can publish a reset for a newer owner generation.
-            const auto generation =
-                other.CachedGeneration.load(std::memory_order_acquire);
-            CachedCount.store(other.CachedCount.load(std::memory_order_relaxed),
-                              std::memory_order_relaxed);
-            CachedPredicates.store(
-                other.CachedPredicates.load(std::memory_order_relaxed),
-                std::memory_order_relaxed);
-            CachedGeneration.store(generation, std::memory_order_relaxed);
-        }
-        return *this;
-    }
-    BitsetView&
-    operator=(BitsetView&& other) noexcept {
-        return *this = other;
-    }
 
     template <typename ImplT, bool R>
     BitsetView(const BitsetBase<PolicyT, ImplT, R>& bitset)
@@ -1569,90 +1623,20 @@ class BitsetView : public BitsetBase<PolicyT,
           Offset{offset} {
     }
 
-    size_t
-    count() const {
-        if (Size == 0)
-            return 0;
-        if (!PrepareCache())
-            return policy_type::op_count(Data, Offset, Size);
-        auto count = CachedCount.load(std::memory_order_relaxed);
-        if (count == kUnknown) {
-            count = policy_type::op_count(Data, Offset, Size);
-            CachedCount.store(count, std::memory_order_relaxed);
-        }
-        return count;
-    }
-
-    bool
-    all() const {
-        return Predicate(true);
-    }
-    bool
-    none() const {
-        return Predicate(false);
-    }
-    bool
-    any() const {
-        return !none();
-    }
-
  private:
     BitsetView(const void* data,
                size_t offset,
                size_t size,
-               const detail::BitsetMutationState* state)
+               const detail::BitsetState* state)
         : Data{reinterpret_cast<const data_type*>(data)},
           Size{size},
           Offset{offset},
           State{state} {
     }
 
-    static constexpr size_t kUnknown = std::numeric_limits<size_t>::max();
-    static constexpr uint8_t kAllKnown = 1, kAllTrue = 2, kNoneKnown = 4,
-                             kNoneTrue = 8;
-    const detail::BitsetMutationState* State = nullptr;
-    mutable std::atomic<size_t> CachedCount{kUnknown};
-    mutable std::atomic<uint8_t> CachedPredicates{0};
-    mutable std::atomic<uint64_t> CachedGeneration{
-        std::numeric_limits<uint64_t>::max()};
+    const detail::BitsetState* State = nullptr;
 
-    bool
-    PrepareCache() const {
-        if (State == nullptr || !State->Track())
-            return false;
-        const auto generation = State->generation;
-        if (CachedGeneration.load(std::memory_order_acquire) != generation) {
-            CachedCount.store(kUnknown, std::memory_order_relaxed);
-            CachedPredicates.store(0, std::memory_order_relaxed);
-            // Publish cleared facts before readers accept this generation.
-            CachedGeneration.store(generation, std::memory_order_release);
-        }
-        return true;
-    }
-    bool
-    Predicate(bool all) const {
-        if (Size == 0)
-            return true;
-        if (!PrepareCache())
-            return all ? policy_type::op_all(Data, Offset, Size)
-                       : policy_type::op_none(Data, Offset, Size);
-        const auto count = CachedCount.load(std::memory_order_relaxed);
-        if (count != kUnknown)
-            return all ? count == Size : count == 0;
-        const auto known = all ? kAllKnown : kNoneKnown;
-        const auto value = all ? kAllTrue : kNoneTrue;
-        const auto flags = CachedPredicates.load(std::memory_order_relaxed);
-        if (flags & known)
-            return flags & value;
-        const bool result = all ? policy_type::op_all(Data, Offset, Size)
-                                : policy_type::op_none(Data, Offset, Size);
-        CachedPredicates.fetch_or(known | (result ? value : 0),
-                                  std::memory_order_relaxed);
-        if (result)
-            CachedCount.store(all ? Size : 0, std::memory_order_relaxed);
-        return result;
-    }
-    const detail::BitsetMutationState*
+    const detail::BitsetState*
     mutation_state_impl() const {
         return State;
     }
@@ -1720,8 +1704,7 @@ class Bitset : public detail::BitsetMutatingBase<
     explicit Bitset(const size_t size)
         : Data(get_required_size_in_container_elements(size)),
           Size{size},
-          State(size ? std::make_unique<detail::BitsetMutationState>()
-                     : nullptr) {
+          State(size ? std::make_unique<detail::BitsetState>(size) : nullptr) {
     }
     // Allocate the given number of bits, initialize with a given value.
     Bitset(const size_t size, const bool init)
@@ -1729,8 +1712,7 @@ class Bitset : public detail::BitsetMutatingBase<
                init ? static_cast<container_data_type>(data_type(-1))
                     : container_data_type(0)),
           Size{size},
-          State(size ? std::make_unique<detail::BitsetMutationState>()
-                     : nullptr) {
+          State(size ? std::make_unique<detail::BitsetState>(size) : nullptr) {
     }
     // Do not allow implicit copies (Rust style).
     Bitset(const Bitset&) = delete;
@@ -1764,7 +1746,7 @@ class Bitset : public detail::BitsetMutatingBase<
             get_required_size_in_container_elements(other.size()));
         Size = other.size();
         if (Size)
-            State = std::make_unique<detail::BitsetMutationState>();
+            State = std::make_unique<detail::BitsetState>(Size);
 
         policy_type::op_copy(other.data(),
                              other.offset(),
@@ -1780,7 +1762,7 @@ class Bitset : public detail::BitsetMutatingBase<
         cloned.Data = Data;
         cloned.Size = Size;
         if (Size)
-            cloned.State = std::make_unique<detail::BitsetMutationState>();
+            cloned.State = std::make_unique<detail::BitsetState>(Size);
         return cloned;
     }
 
@@ -1798,9 +1780,11 @@ class Bitset : public detail::BitsetMutatingBase<
             get_required_size_in_container_elements(new_size);
         modified_impl();
         if (new_size && !State)
-            State = std::make_unique<detail::BitsetMutationState>();
+            State = std::make_unique<detail::BitsetState>(new_size);
         Data.resize(new_size_in_container_elements);
         Size = new_size;
+        if (State)
+            State->Resize(Size);
     }
 
     // Resize and initialize new bits with a given value if grown.
@@ -1861,6 +1845,8 @@ class Bitset : public detail::BitsetMutatingBase<
         modified_impl();
         Data.clear();
         Size = 0;
+        if (State)
+            State->Resize(0);
     }
 
     // Reserve
@@ -1895,13 +1881,13 @@ class Bitset : public detail::BitsetMutatingBase<
     container_type Data;
     // the actual number of bits
     size_t Size = 0;
-    std::unique_ptr<detail::BitsetMutationState> State;
+    std::unique_ptr<detail::BitsetState> State;
 
-    detail::BitsetMutationState*
+    detail::BitsetState*
     mutation_state_impl() {
         return State.get();
     }
-    const detail::BitsetMutationState*
+    const detail::BitsetState*
     mutation_state_impl() const {
         return State.get();
     }

@@ -7,8 +7,8 @@ Related issue: #53669. Related PR: #53865.
 Milvus's expression and MVCC pipeline previously wrote bitmap windows through
 `milvus::bitset::BitsetView`. Read-only use and output mutation shared the same
 type, so adding a count cache directly to the view could return stale results.
-This change separates borrowed read and write permissions and gives read-view
-statistics an explicit owner invalidation source.
+This change separates borrowed read and write permissions. Bitset owns the
+statistics and their invalidation; views delegate reads and report writes.
 
 ## Lifecycle
 
@@ -16,8 +16,9 @@ statistics an explicit owner invalidation source.
 2. ColumnVector retains the owners instead of extracting their byte vectors.
 3. Producers pass fixed-size WriteView windows to callbacks. Readers borrow
    ReadView windows, keeping the existing bit semantics for each stage.
-4. A view caches population count and all/none results for its own interval.
-   Owner writes invalidate these values through a mutation version.
+4. Bitset caches population count and all/none for the complete bitmap.
+   Views covering that interval reuse the cache; partial intervals are scanned.
+   Owner and WriteView writes notify Bitset to clear its cached statistics.
 5. SQL predicate conversion computes excluded rows as `~(data & valid)`, then
    resets validity. MVCC and sampling mutate owners.
 6. ANN receives a read-only filter whose storage remains owned by the query or
@@ -26,9 +27,11 @@ statistics an explicit owner invalidation source.
    asynchronous iterators must retain actual owners for the entire read period.
 
 Bitset owns storage and exposes resize/reserve/append. ReadView borrows a read-only
-interval and caches statistics. WriteView borrows a writable interval and cannot
-resize, reserve, append or replace storage. Both view types borrow the same stable
-owner mutation state. Existing BitsetView/TargetBitmapView names alias ReadView.
+interval and delegates statistics to its owner. WriteView borrows a writable
+interval and cannot resize, reserve, append or replace storage. Both view types
+borrow the same stable owner state. Neither view stores statistics or checks a
+mutation version.
+Existing BitsetView/TargetBitmapView names alias ReadView.
 Scalar indexes that return newly allocated results continue returning owners;
 a view cannot replace ownership of a temporary result.
 
@@ -43,9 +46,9 @@ write.inplace_and(other.read_view(other_begin, length), length);
 
 Only owners and WriteView can produce a write window. ReadView and const owners
 cannot be converted to WriteView. ReadView is a live read-only alias, not a frozen
-snapshot: later owner/WriteView writes invalidate its cached statistics. Column
-getters retain persistent ReadView descriptors and return WriteView by value via
-`GetBitmapWriteView()` and `GetValidBitmapWriteView()`.
+snapshot: later owner/WriteView writes change its contents and clear the owner's
+statistics. Column getters retain persistent ReadView descriptors and return
+WriteView by value via `GetBitmapWriteView()` and `GetValidBitmapWriteView()`.
 
 ## Cache contract
 
@@ -53,11 +56,16 @@ The cached facts are bitmap population count and all/none. They do not replace
 expression result caching, its admission/eviction policy, or query decision
 flags such as all-rows-visible.
 
-The owner stores mutation/escape/write-scope metadata with an address that moves
-alongside its buffer. The statistics themselves are stored on the view. An
-owner mutation changes the generation when cached views exist. View reads check
-the generation and lazily recompute stale facts. Copies may reuse already known
-facts; subviews represent new intervals and start with unknown statistics.
+The owner stores statistics and escape/write-scope metadata with an address that
+moves alongside its buffer. All supported writes notify this state, which
+clears known statistics. ReadView stores only data, offset, size and a borrowed
+owner-state pointer. It has no cached facts, generation checks or invalidation
+logic. Both view descriptors are trivially copyable.
+
+The owner and complete-interval views share one cache, even across fresh view
+descriptors. Partial views and raw-buffer views use the existing scan kernels;
+they do not reuse a complete bitmap count or retain separate range caches. This
+avoids introducing a range-cache table and its allocation/synchronization costs.
 
 Cold all/none use their existing early-exit scans. Caching them does not force a
 full count. When count is known, all/none are derived from it. A true all/none
@@ -69,10 +77,10 @@ Native kernels may use a scoped write pointer that must not outlive its scope.
 Raw pointers reference base storage, so callers must honor the view bit offset
 and interval. The typed kernels apply these offsets automatically.
 
-A write scope makes view statistics uncached while editing and invalidates them
-on scope exit, including exceptions. Nested scopes on one owner are supported.
-Per-bit proxies remain safe when retained and assigned later. Owner mutation and
-read access require external synchronization. Atomic cache fields permit
+A write scope clears the owner's statistics on entry and keeps reads uncached
+while editing, including exception unwinding. Nested scopes on one owner are
+supported. Per-bit proxies remain safe when retained and assigned later. Owner
+mutation and read access require external synchronization. Atomic cache fields permit
 concurrent read-only use, including the first cache computation.
 
 ## Window and ID domains
@@ -97,9 +105,10 @@ are consumed. Disk cache writes normalize windows before locking/writing slots.
 
 ## Validation requirements
 
-The library tests must verify cached reuse and invalidation across every mutation
-family, retained proxies, raw pointer escape, owner move, independent windows,
-nested scopes, exception exit and concurrent readers. Integration tests must
+The library tests must verify shared owner-cache reuse and invalidation across
+every mutation family, retained proxies, raw pointer escape, owner move,
+independently scanned windows, nested scopes, exception exit and concurrent
+readers. Integration tests must
 cover SQL three-valued logic, validity masking, sequential/scattered expression
 batches, MVCC snapshots/TTL, array-element folding, scorer ID domains, serializer
 windows and iterator buffer lifetime.
@@ -112,28 +121,38 @@ and architecture-specific validation remain required before publishing claims.
 ## Validation results and limits
 
 The native Release build uses GCC 14.2, Knowhere `faff72c4` and MilvusStorage
-`15ab3d7`, including the real Go/native plan-parser bridge. The final read/write
+`15ab3d7`, including the real Go/native plan-parser bridge. The final owner-cache
 implementation passed 5,287 affected Milvus tests, 17 JSON numeric tests through
-`all_tests`, and 352 native bitset tests. All three test processes exited 0,
+`all_tests`, and 354 native bitset tests. All three test processes exited 0,
 and the complete validation driver exited 0. Checksums for all 143 changed
 C++/build files matched between the local source and test machine.
 
-ARM library-only Release and ASan/UBSan each passed 352 tests plus the C++17
-header-only check. New cases cover nested writable windows, read-statistics
-invalidation, retained proxies and copied views, owner moves, nested write scopes,
-raw pointer escape and unaligned kernels with preserved neighboring bits. The
-unchanged read-cache implementation also passed an earlier x86 TSAN reader smoke
-check.
+ARM library-only Release and ASan/UBSan each passed 354 tests plus the C++17
+header-only check. Cases cover nested writable windows, owner-statistics
+invalidation, retained proxies and copied views, owner moves, resize/clear,
+nested write scopes, raw pointer escape and unaligned kernels with preserved
+neighboring bits. New cases verify shared statistics across owners and fresh
+complete-interval views, independently scanned partial intervals and trivially
+copyable descriptors. An ARM64 size check with the uint64 element-wise policy
+measured ReadView at 32 bytes, down from 56 bytes at the preceding implementation
+head; WriteView remains 32 bytes. This measures descriptor layout, not query QPS.
+
+The new x86 TSAN concurrent-reader smoke binary could not start: ThreadSanitizer
+reports an unexpected memory mapping. Disabling ASLR for that test process was
+not permitted. The preceding-head TSAN result does not verify this redesign;
+the normal and ASan/UBSan suites include concurrent read-only cases.
 
 DiskANN and SVS were disabled. Performance tests and `SkipIndexPr51441.*` were
 excluded; the latter fixtures require creating an absolute root directory that
-the test user cannot write. The standalone `test_json_uint64` executable was
-observed to abort during process teardown, even with zero tests; its abort trace
+the test user cannot write. At the preceding implementation head, the standalone
+`test_json_uint64` executable was observed to abort during process teardown, even
+with zero tests; its abort trace
 reaches the MilvusStorage global finalizer. Those same 17 numeric cases pass
 through the initialized Milvus `all_tests` entry point with exit status 0. The
 standalone exit failure remains a validation limitation.
 
-These checks establish covered bitmap, expression and query behavior. They do
-not measure end-to-end Milvus/ANN QPS or prove that every mutation workload is
-faster. Statistics require reuse of a ReadView descriptor. Owners and intervals
-must remain alive; concurrent owner writes require external synchronization.
+These checks establish covered bitmap, expression and query behavior. They do not
+measure end-to-end Milvus/ANN QPS or prove that every mutation workload is
+faster. Owner statistics can be reused across fresh complete-interval views.
+Owners and intervals must remain alive; concurrent owner writes require external
+synchronization.

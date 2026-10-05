@@ -39,6 +39,8 @@ int
 main() {
     using Policy = milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t>;
     using Owner = milvus::bitset::Bitset<Policy, std::vector<uint8_t>, true>;
+    static_assert(std::is_trivially_copyable_v<Owner::read_view_type>);
+    static_assert(std::is_trivially_copyable_v<Owner::write_view_type>);
     Owner bits(32771, true);
     const auto view = bits.view();
     static_assert(std::is_same_v<decltype(view.data()), const uint64_t*>);

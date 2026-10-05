@@ -3689,7 +3689,7 @@ TEST(BitsetViewStatsTest, CountCachesAndInvalidatesLiveViews) {
     EXPECT_EQ(window.count(), 2);
     auto copied = window;
     EXPECT_EQ(copied.count(), 2);
-    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 3);
     auto retained = bits[136];
     retained = false;
     EXPECT_EQ(view.count(), 1);
@@ -3822,24 +3822,72 @@ TEST(BitsetViewStatsTest, AliasedAppendSurvivesStorageGrowth) {
     EXPECT_EQ(bits.size(), 264);
 }
 
-TEST(BitsetViewStatsTest, GenerationOverflowDisablesCaching) {
-    struct Owner : StatsOwner {
-        using StatsOwner::StatsOwner;
-        void
-        SetLastGeneration() {
-            mutation_state_impl()->generation =
-                std::numeric_limits<uint64_t>::max();
-        }
-    };
-    Owner bits(65, false);
-    auto view = bits.view();
-    EXPECT_EQ(view.count(), 0);
-    bits.SetLastGeneration();
-    EXPECT_EQ(view.count(), 0);
-    bits.set(64);
-    EXPECT_EQ(view.count(), 1);
-    bits.set(0);
-    EXPECT_EQ(view.count(), 2);
+TEST(BitsetViewStatsTest, OwnerAndFreshViewsShareStatistics) {
+    static_assert(std::is_trivially_copyable_v<StatsOwner::read_view_type>);
+    static_assert(std::is_trivially_copyable_v<StatsOwner::write_view_type>);
+    StatsOwner bits(193, false);
+    bits.set(136);
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(bits.count(), 1);
+    EXPECT_EQ(bits.view().count(), 1);
+    EXPECT_EQ(bits.read_view().count(), 1);
+    EXPECT_EQ(bits.write_view().count(), 1);
+    EXPECT_FALSE(bits.all());
+    EXPECT_FALSE(bits.read_view().none());
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::all_calls, 0);
+    EXPECT_EQ(CountingStatsPolicy::none_calls, 0);
+
+    auto read = bits.read_view();
+    auto write = bits.write_view(136, 1);
+    write.reset();
+    EXPECT_EQ(read.count(), 0);
+    EXPECT_TRUE(bits.none());
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
+}
+
+TEST(BitsetViewStatsTest, PartialIntervalsDoNotReuseWholeBitmapStatistics) {
+    StatsOwner bits(193, false);
+    bits.set(136);
+    EXPECT_EQ(bits.count(), 1);
+    auto window = bits.read_view(7, 65);
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(window.count(), 0);
+    EXPECT_EQ(window.count(), 0);
+    EXPECT_TRUE(window.none());
+    EXPECT_FALSE(window.all());
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
+    EXPECT_EQ(CountingStatsPolicy::none_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::all_calls, 1);
+    EXPECT_EQ(bits.read_view().count(), 1);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
+
+    bits.write_view(7, 65).set();
+    EXPECT_TRUE(window.all());
+    EXPECT_EQ(window.count(), 65);
+    EXPECT_EQ(bits.count(), 66);
+}
+
+TEST(BitsetViewStatsTest, OwnerStatisticsFollowStorageLifetime) {
+    StatsOwner bits;
+    bits.resize(65, false);
+    auto read = bits.read_view();
+    EXPECT_EQ(read.count(), 0);
+    bits.write_view().set(64);
+    StatsOwner moved(std::move(bits));
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(moved.count(), 1);
+    EXPECT_EQ(read.count(), 1);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    moved.resize(129, true);
+    EXPECT_EQ(moved.count(), 65);
+    EXPECT_EQ(moved.read_view().count(), 65);
+    moved.clear();
+    EXPECT_EQ(moved.count(), 0);
+    EXPECT_TRUE(moved.all());
+    EXPECT_TRUE(moved.none());
+    moved.resize(65, false);
+    EXPECT_EQ(moved.read_view().count(), 0);
 }
 
 TEST(BitsetViewStatsTest, BulkWritersInvalidateCachedWindows) {
@@ -3914,7 +3962,7 @@ TEST(BitsetWriteViewTest, BatchWritesAndPointerEscapeKeepReadsCurrent) {
     CountingStatsPolicy::ResetCalls();
     EXPECT_EQ(read.count(), 65);
     EXPECT_EQ(read.count(), 65);
-    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
     auto* raw = write.data();
     raw[0] = 0;
     EXPECT_EQ(read.count(), 8);
