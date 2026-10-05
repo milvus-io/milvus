@@ -92,7 +92,7 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 // (milvus::index::fmindex::FMIndex). It accelerates LIKE prefix/infix/suffix on
 // VARCHAR exactly (no recheck). General LIKE (Match) returns rarest-fragment
 // candidates; ExecFMPatternCandidates rechecks those rows on sealed VARCHAR.
-// RegexMatch also returns candidates from a required regex prefix. Both paths
+// RegexMatch also returns candidates from mandatory regex literals. Both paths
 // always recheck; range / equality fall back to the raw-data scan.
 class FMIndex : public ScalarIndex<std::string> {
  public:
@@ -341,8 +341,8 @@ class FMIndex : public ScalarIndex<std::string> {
     }
 
  private:
-    // Count-first guard for general LIKE and regex. Regex declines when RE2
-    // cannot prove a nonempty required prefix. Match declines an empty
+    // Count-first guard for general LIKE and regex. Regex declines when no
+    // nonempty mandatory literal is available. Match declines an empty
     // pattern and every pattern with no literal fragment (`%`, `%_%`), because
     // phase 1 has no seed. Otherwise the rarest fragment is scored as
     // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
