@@ -965,7 +965,7 @@ func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parse
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match", "text_match query")
 	if err != nil {
@@ -1004,7 +1004,7 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 }
 
 func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
-	identifier := ctx.Identifier(0).GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match fuzzy", "text_match_fuzzy query")
 	if err != nil {
@@ -1014,7 +1014,7 @@ func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) i
 	// The option name is a soft keyword (a plain identifier) so that a scalar
 	// field literally named "max_edit_distance" is still usable elsewhere in a
 	// filter; only accept the expected option name here.
-	optionName := ctx.Identifier(1).GetText()
+	optionName := ctx.Identifier().GetText()
 	if !strings.EqualFold(optionName, "max_edit_distance") {
 		return merr.WrapErrParameterInvalidMsg(
 			"invalid option %q for text_match_fuzzy, expected max_edit_distance", optionName)
@@ -1068,7 +1068,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 }
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(0), "phrase match", "phrase_match query")
 	if err != nil {
@@ -1394,7 +1394,7 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}, nil
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getChildColumnInfo(identifier parser.IFieldNameContext, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -1439,7 +1439,7 @@ func (v *ParserVisitor) getStructArrayParentColumnInfo(fieldName string) (*planp
 	}, true, nil
 }
 
-func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getNullExprColumnInfo(identifier parser.IFieldNameContext, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		// try struct first
 		if columnInfo, ok, err := v.getStructArrayParentColumnInfo(identifier.GetText()); ok || err != nil {
@@ -1505,21 +1505,22 @@ func (v *ParserVisitor) VisitMembershipMatchWithOption(ctx *parser.MembershipMat
 	var fieldText string
 	var fieldInfo *planpb.ColumnInfo
 	var err error
-	fieldText = ctx.GetField().GetText()
-	switch ctx.GetField().GetTokenType() {
-	case parser.PlanParserIdentifier, parser.PlanParserMeta:
+	field := ctx.GetField()
+	fieldText = field.GetText()
+	switch {
+	case field.FieldName() != nil || field.Meta() != nil:
 		var fieldExpr *ExprWithType
 		fieldExpr, err = v.translateIdentifier(fieldText)
 		if err == nil {
 			fieldInfo = toColumnInfo(fieldExpr)
 		}
-	case parser.PlanParserJSONIdentifier:
+	case field.JSONIdentifier() != nil:
 		fieldInfo, err = v.getColumnInfoFromJSONIdentifier(fieldText)
-	case parser.PlanParserStructFieldIdentifier:
+	case field.StructFieldIdentifier() != nil:
 		fieldInfo, err = v.getColumnInfoFromStructField(fieldText)
-	case parser.PlanParserStructIndexFieldIdentifier:
+	case field.StructIndexFieldIdentifier() != nil:
 		fieldInfo, err = v.getColumnInfoFromStructIndexField(fieldText)
-	case parser.PlanParserStructSubFieldIdentifier:
+	case field.StructSubFieldIdentifier() != nil:
 		fieldInfo, err = v.getColumnInfoFromStructSubField(fieldText)
 	}
 	if err != nil {
@@ -1545,7 +1546,7 @@ func (v *ParserVisitor) VisitMembershipMatchWithOption(ctx *parser.MembershipMat
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	columnInfo, err := v.getChildColumnInfo(
-		ctx.Identifier(),
+		ctx.FieldName(),
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
@@ -1625,7 +1626,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
 	columnInfo, err := v.getChildColumnInfo(
-		ctx.Identifier(),
+		ctx.FieldName(),
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
@@ -2438,7 +2439,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
@@ -2481,7 +2482,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
 	}
@@ -2773,15 +2774,15 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			Nullable:    field.GetNullable(),
 		}
 	} else {
-		if ctx.Identifier() != nil {
-			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
+		if ctx.FieldName() != nil {
+			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.FieldName().GetText()); ok || parentErr != nil {
 				columnInfo = parentColumnInfo
 				err = parentErr
 			}
 		}
 		if columnInfo == nil && err == nil {
 			columnInfo, err = v.getChildColumnInfo(
-				ctx.Identifier(),
+				ctx.FieldName(),
 				ctx.JSONIdentifier(),
 				ctx.StructSubFieldIdentifier(),
 				nil,
@@ -2827,7 +2828,7 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 			Expr: &planpb.Expr_ValueExpr{
 				ValueExpr: &planpb.ValueExpr{
 					Value:                nil,
-					TemplateVariableName: ctx.Identifier().GetText(),
+					TemplateVariableName: ctx.FieldName().GetText(),
 				},
 			},
 			IsTemplate: true,
@@ -2836,7 +2837,7 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 }
 
 func (v *ParserVisitor) VisitSpatialBinary(ctx *parser.SpatialBinaryContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -2896,7 +2897,7 @@ func (v *ParserVisitor) VisitSpatialBinary(ctx *parser.SpatialBinaryContext) int
 }
 
 func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -2922,7 +2923,7 @@ func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{}
 
 func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{} {
 	// Process the geometry field identifier
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -3006,8 +3007,8 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 //  2. Slow Path: If an INTERVAL exists, it generates a TimestamptzArithCompareExpr
 //     for specialized arithmetic evaluation.
 func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
-	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	identifier := ctx.Identifier().Accept(v)
+	colExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
+	identifier := ctx.FieldName().GetText()
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
@@ -3080,8 +3081,8 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 //  3. Slow Path: For complex expressions involving INTERVAL, it produces a
 //     TimestamptzArithCompareExpr with the reversed operator.
 func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
-	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	identifier := ctx.Identifier().GetText()
+	colExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
+	identifier := ctx.FieldName().GetText()
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
@@ -3197,7 +3198,7 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	}
 
 	// Get struct array field name (first parameter)
-	arrayFieldName := ctx.Identifier().GetText()
+	arrayFieldName := ctx.FieldName().GetText()
 
 	// Set current context for element expression parsing
 	v.currentStructArrayField = arrayFieldName
@@ -3360,7 +3361,7 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 // VisitMatchSimple handles MATCH_ALL and MATCH_ANY expressions
 // Syntax: MATCH_ALL/MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
 func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	structArrayFieldName := ctx.FieldName().GetText()
 	var matchType planpb.MatchType
 	var opName string
 	switch ctx.GetOp().GetTokenType() {
@@ -3379,7 +3380,7 @@ func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interfa
 // VisitMatchThreshold handles MATCH_LEAST, MATCH_MOST, and MATCH_EXACT expressions
 // Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(structArrayField, $[intField] == 1, threshold=N)
 func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	structArrayFieldName := ctx.FieldName().GetText()
 
 	countStr := ctx.IntegerConstant().GetText()
 	count, err := strconv.ParseInt(countStr, 10, 64)
