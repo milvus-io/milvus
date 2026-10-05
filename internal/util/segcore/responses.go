@@ -56,6 +56,12 @@ func (r *SearchResult) ValidCount() int64 {
 	return int64(C.GetSearchResultValidCount(r.cSearchResult))
 }
 
+// IteratorPKCursorExecuted confirms that the core actually used the PK
+// continuation path; an acknowledged plan alone is not execution evidence.
+func (r *SearchResult) IteratorPKCursorExecuted() bool {
+	return bool(C.GetSearchResultIteratorPkCursorExecuted(r.cSearchResult))
+}
+
 type RetrieveResult struct {
 	cRetrieveResult *C.CRetrieveResult
 }

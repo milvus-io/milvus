@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <memory>
 
 #include "common/Consts.h"
@@ -25,6 +26,7 @@
 #include "index/Utils.h"
 #include "index/VectorIndex.h"
 #include "knowhere/expected.h"
+#include "knowhere/sparse_utils.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "nlohmann/json.hpp"
 #include "query/CachedSearchIterator.h"
@@ -32,8 +34,219 @@
 #include "query/Utils.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/Utils.h"
 
 namespace milvus::query {
+
+CachedSearchIterator::PrimaryKeyGetter
+CachedSearchIterator::MakePrimaryKeyGetter(
+    const segcore::SegmentInternalInterface& segment,
+    milvus::OpContext* op_context,
+    SearchResult& search_result) {
+    auto schema = segment.get_schema_snapshot();
+    auto pk_field = schema->get_primary_field_id();
+    AssertInfo(pk_field.has_value(), "Iterator segment has no primary key");
+    return [&segment, pk_field = pk_field.value(), op_context, &search_result](
+               const std::vector<int64_t>& offsets) {
+        milvus::OpContext local_context;
+        if (op_context != nullptr) {
+            local_context.cancellation_token = op_context->cancellation_token;
+            local_context.runtime_load_priority =
+                op_context->runtime_load_priority;
+        }
+        auto data = segment.bulk_subscript(
+            &local_context, pk_field, offsets.data(), offsets.size());
+        std::vector<PkType> pks(offsets.size());
+        segcore::ParsePksFromFieldData(pks, *data);
+        search_result.search_storage_cost_.scanned_remote_bytes +=
+            local_context.storage_usage.scanned_cold_bytes.load();
+        search_result.search_storage_cost_.scanned_total_bytes +=
+            local_context.storage_usage.scanned_total_bytes.load();
+        return pks;
+    };
+}
+
+CachedSearchIterator::RawVectorGetter
+CachedSearchIterator::MakeRawVectorGetter(
+    const segcore::SegmentInternalInterface& segment,
+    FieldId field_id,
+    milvus::OpContext* op_context,
+    SearchResult& search_result) {
+    return [&segment, field_id, op_context, &search_result](
+               const std::vector<int64_t>& offsets) {
+        milvus::OpContext local_context;
+        if (op_context != nullptr) {
+            local_context.cancellation_token = op_context->cancellation_token;
+            local_context.runtime_load_priority =
+                op_context->runtime_load_priority;
+        }
+        auto data = segment.bulk_subscript(
+            &local_context, field_id, offsets.data(), offsets.size());
+        search_result.search_storage_cost_.scanned_remote_bytes +=
+            local_context.storage_usage.scanned_cold_bytes.load();
+        search_result.search_storage_cost_.scanned_total_bytes +=
+            local_context.storage_usage.scanned_total_bytes.load();
+        return data;
+    };
+}
+
+CachedSearchIterator::CachedSearchIterator(
+    const dataset::SearchDataset& query_ds,
+    int64_t row_count,
+    const SearchInfo& search_info,
+    const std::map<std::string, std::string>& index_info,
+    const BitsetView& bitset,
+    DataType data_type,
+    RawVectorGetter vector_getter,
+    PrimaryKeyGetter pk_getter,
+    milvus::OpContext* op_context)
+    : nq_(query_ds.num_queries),
+      pk_getter_(std::move(pk_getter)),
+      op_context_(op_context),
+      exact_row_count_(row_count),
+      exact_bitset_(bitset) {
+    AssertInfo(
+        query_ds.query_data != nullptr && query_ds.query_offsets == nullptr,
+        "Strict iterator requires a plain query vector");
+    AssertInfo(nq_ == 1 && row_count >= 0 && vector_getter,
+               "Invalid strict iterator corpus scan");
+    AssertInfo(
+        bitset.empty() || bitset.size() >= static_cast<size_t>(row_count),
+        "Strict iterator filter is smaller than the frozen row count");
+    if (query_ds.metric_type == knowhere::metric::BM25) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Strict iterator requires frozen BM25 statistics; live IDF "
+                  "and avgdl cannot be paginated");
+    }
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        AssertInfo(query_ds.metric_type == knowhere::metric::IP,
+                   "Strict sparse iterator supports only IP");
+    }
+    Init(search_info);
+    AssertInfo(search_info.iterator_v2_info_->cursor_version == 2,
+               "Corpus iterator requires a strict PK cursor");
+    auto full_info = search_info;
+    full_info.round_decimal_ = -1;
+    if (full_info.search_params_.is_null()) {
+        full_info.search_params_ = knowhere::Json::object();
+    }
+    // Bounds are applied after scoring, so the scorer must return every valid
+    // row rather than range-search output or a top-B subset.
+    full_info.search_params_.erase(RADIUS);
+    full_info.search_params_.erase(RANGE_FILTER);
+    exact_candidates_ = [query_ds,
+                         data_type,
+                         vector_getter = std::move(vector_getter),
+                         full_info,
+                         index_info,
+                         op_context](
+                            const std::vector<int64_t>& offsets) mutable {
+        auto data = vector_getter(offsets);
+        AssertInfo(data != nullptr,
+                   "Strict iterator vector getter returned no data");
+        AssertInfo(
+            data->valid_data_size() == 0 ||
+                data->valid_data_size() == static_cast<int>(offsets.size()),
+            "Strict iterator vector validity size mismatch");
+        std::vector<int64_t> valid_offsets;
+        valid_offsets.reserve(offsets.size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            if (data->valid_data_size() == 0 || data->valid_data(i)) {
+                valid_offsets.push_back(offsets[i]);
+            }
+        }
+        std::vector<ScoredOffset> results;
+        if (valid_offsets.empty()) {
+            return results;
+        }
+        results.reserve(valid_offsets.size());
+        const auto& vectors = data->vectors();
+        if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+            using Row = knowhere::sparse::SparseRow<SparseValueType>;
+            const auto& rows = vectors.sparse_float_vector().contents();
+            AssertInfo(rows.size() == static_cast<int>(valid_offsets.size()),
+                       "Strict iterator sparse payload size mismatch");
+            auto computer = knowhere::sparse::GetDocValueOriginalComputer<
+                SparseValueType>();
+            const auto& query = *static_cast<const Row*>(query_ds.query_data);
+            for (size_t i = 0; i < valid_offsets.size(); ++i) {
+                const auto& bytes = rows.Get(i);
+                AssertInfo(bytes.size() % Row::element_size() == 0,
+                           "Strict iterator received malformed sparse data");
+                Row row(
+                    bytes.size() / Row::element_size(),
+                    reinterpret_cast<uint8_t*>(const_cast<char*>(bytes.data())),
+                    false);
+                // Sparse top-k helpers discard zero/negative scores. Direct
+                // scoring retains them, including an empty query's zero ties.
+                results.emplace_back(valid_offsets[i],
+                                     query.dot(row, computer));
+            }
+            return results;
+        }
+        const void* raw_data = nullptr;
+        size_t payload_size = 0;
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT:
+                raw_data = vectors.float_vector().data().data();
+                payload_size =
+                    vectors.float_vector().data_size() * sizeof(float);
+                break;
+            case DataType::VECTOR_FLOAT16:
+                raw_data = vectors.float16_vector().data();
+                payload_size = vectors.float16_vector().size();
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                raw_data = vectors.bfloat16_vector().data();
+                payload_size = vectors.bfloat16_vector().size();
+                break;
+            case DataType::VECTOR_INT8:
+                raw_data = vectors.int8_vector().data();
+                payload_size = vectors.int8_vector().size();
+                break;
+            case DataType::VECTOR_BINARY:
+                raw_data = vectors.binary_vector().data();
+                payload_size = vectors.binary_vector().size();
+                break;
+            default:
+                ThrowInfo(ErrorCode::Unsupported,
+                          "Strict iterator cannot score vector type {}",
+                          data_type);
+        }
+        AssertInfo(payload_size == valid_offsets.size() *
+                                       GetDataTypeSize(data_type, query_ds.dim),
+                   "Strict iterator vector payload size mismatch");
+        auto block_query = query_ds;
+        block_query.topk = valid_offsets.size();
+        block_query.round_decimal = -1;
+        full_info.topk_ = block_query.topk;
+        dataset::RawDataset raw{0,
+                                query_ds.dim,
+                                static_cast<int64_t>(valid_offsets.size()),
+                                raw_data};
+        auto scored = BruteForceSearch(block_query,
+                                       raw,
+                                       full_info,
+                                       index_info,
+                                       BitsetView{},
+                                       data_type,
+                                       DataType::NONE,
+                                       op_context);
+        std::vector<bool> seen(valid_offsets.size(), false);
+        for (size_t i = 0; i < valid_offsets.size(); ++i) {
+            auto local = scored.get_offsets()[i];
+            AssertInfo(local >= 0 &&
+                           local < static_cast<int64_t>(valid_offsets.size()) &&
+                           !seen[local],
+                       "Strict iterator scorer did not return every vector");
+            seen[local] = true;
+            results.emplace_back(valid_offsets[local],
+                                 scored.get_distances()[i]);
+        }
+        return results;
+    };
+}
 
 // For sealed segment with vector index
 CachedSearchIterator::CachedSearchIterator(
@@ -41,7 +254,9 @@ CachedSearchIterator::CachedSearchIterator(
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
     const BitsetView& bitset,
-    milvus::OpContext* op_context) {
+    milvus::OpContext* op_context,
+    PrimaryKeyGetter pk_getter)
+    : pk_getter_(std::move(pk_getter)), op_context_(op_context) {
     if (query_ds == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
@@ -49,6 +264,12 @@ CachedSearchIterator::CachedSearchIterator(
     auto offsets =
         query_ds->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
     if (offsets != nullptr) {
+        if (search_info.iterator_v2_info_.has_value() &&
+            search_info.iterator_v2_info_->cursor_version == 2) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "Strict iterator cursor does not support embedding lists");
+        }
         nq_ = query_ds->Get<int64_t>(knowhere::meta::NQ);
         AssertInfo(nq_ > 0, "embedding list query count is missing");
         auto total_vectors = static_cast<size_t>(query_ds->GetRows());
@@ -62,6 +283,12 @@ CachedSearchIterator::CachedSearchIterator(
         nq_ = query_ds->GetRows();
     }
     Init(search_info);
+
+    if (search_info.iterator_v2_info_->cursor_version == 2) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Strict iterator requires a corpus vector getter, not ANN "
+                  "enumeration");
+    }
 
     auto search_json = index.PrepareSearchParams(search_info);
     index::CheckAndUpdateKnowhereRangeSearchParam(
@@ -141,7 +368,10 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    PrimaryKeyGetter pk_getter,
+    milvus::OpContext* op_context)
+    : pk_getter_(std::move(pk_getter)), op_context_(op_context) {
     if (vec_data == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Vector data is nullptr, cannot initialize iterator");
@@ -247,7 +477,10 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    PrimaryKeyGetter pk_getter,
+    milvus::OpContext* op_context)
+    : pk_getter_(std::move(pk_getter)), op_context_(op_context) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -268,7 +501,10 @@ CachedSearchIterator::CachedSearchIterator(
         data_type,
         [this, column, &query_ds, &search_info, &bitset](
             int64_t chunk_id, int64_t physical_begin) {
-            auto pw = column->DataOfChunk(nullptr, chunk_id)
+            auto* load_context =
+                search_info.iterator_v2_info_->cursor_version == 2 ? op_context_
+                                                                   : nullptr;
+            auto pw = column->DataOfChunk(load_context, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
@@ -284,7 +520,7 @@ CachedSearchIterator::CachedSearchIterator(
             // must be the element count in this chunk, not the row count.
             if (search_info.array_offsets_ != nullptr) {
                 auto elem_offsets_pw =
-                    column->VectorArrayOffsets(nullptr, chunk_id);
+                    column->VectorArrayOffsets(load_context, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];
             }
             // pw guarantees chunk_data is kept alive.
@@ -306,11 +542,19 @@ CachedSearchIterator::CachedSearchIterator(
 void
 CachedSearchIterator::NextBatch(const SearchInfo& search_info,
                                 SearchResult& search_result) {
-    if (iterators_.empty()) {
+    if (search_info.iterator_v2_info_.has_value() &&
+        search_info.iterator_v2_info_->cursor_version == 2) {
+        ValidateSearchInfo(search_info);
+        AssertInfo(exact_candidates_,
+                   "Strict iterator requires complete corpus scoring");
+    }
+    if (iterators_.empty() && !exact_candidates_) {
+        search_result.iterator_pk_cursor_executed_ =
+            search_info.iterator_v2_info_->cursor_version == 2;
         return;
     }
 
-    if (iterators_.size() != nq_ * num_chunks_) {
+    if (!exact_candidates_ && iterators_.size() != nq_ * num_chunks_) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Iterator size mismatch, expect %d, but got %d",
                   nq_ * num_chunks_,
@@ -325,9 +569,143 @@ CachedSearchIterator::NextBatch(const SearchInfo& search_info,
     search_result.distances_.resize(nq_ * batch_size_);
 
     for (size_t query_idx = 0; query_idx < nq_; ++query_idx) {
-        auto rst = GetBatchedNextResults(query_idx, search_info);
+        auto rst = search_info.iterator_v2_info_->cursor_version == 2
+                       ? GetPkOrderedResults(search_info)
+                       : GetBatchedNextResults(query_idx, search_info);
         WriteSingleQuerySearchResult(search_result, query_idx, rst);
     }
+    search_result.iterator_pk_cursor_executed_ =
+        search_info.iterator_v2_info_->cursor_version == 2;
+}
+
+std::vector<CachedSearchIterator::DisIdPair>
+CachedSearchIterator::GetPkOrderedResults(const SearchInfo& search_info) {
+    AssertInfo(pk_getter_, "Strict iterator cursor requires a PK getter");
+    const auto& cursor = search_info.iterator_v2_info_.value();
+    const auto last_bound = ConvertIncomingDistance(cursor.last_bound);
+    AssertInfo(last_bound.has_value() == cursor.last_pk.has_value(),
+               "Strict iterator cursor requires both score and primary key");
+    const auto radius = ConvertIncomingDistance(
+        index::GetValueFromConfig<float>(search_info.search_params_, RADIUS));
+    const auto range_filter =
+        ConvertIncomingDistance(index::GetValueFromConfig<float>(
+            search_info.search_params_, RANGE_FILTER));
+
+    struct Candidate {
+        DisIdPair result;
+        PkType pk;
+    };
+    auto better = [](const Candidate& left, const Candidate& right) {
+        if (left.result.first != right.result.first) {
+            return left.result.first < right.result.first;
+        }
+        if (left.pk != right.pk) {
+            return left.pk < right.pk;
+        }
+        return left.result.second < right.result.second;
+    };
+    // The heap holds at most one output batch, with its worst row at the top.
+    std::priority_queue<Candidate, std::vector<Candidate>, decltype(better)>
+        selected(better);
+    constexpr size_t pk_read_batch_size = 256;
+    std::vector<DisIdPair> pending;
+    std::vector<int64_t> offsets;
+    pending.reserve(pk_read_batch_size);
+    offsets.reserve(pk_read_batch_size);
+    const std::string pk_read_operation = "Strict iterator PK read";
+    const std::string scan_operation = "Strict iterator scan";
+    auto select_pending = [&] {
+        if (pending.empty()) {
+            return;
+        }
+        segcore::CheckCancellation(op_context_, -1, pk_read_operation);
+        auto pks = pk_getter_(offsets);
+        AssertInfo(pks.size() == pending.size(),
+                   "PK getter returned {} keys for {} iterator candidates",
+                   pks.size(),
+                   pending.size());
+        for (size_t i = 0; i < pending.size(); ++i) {
+            if (last_bound.has_value()) {
+                AssertInfo(pks[i].index() == cursor.last_pk->index(),
+                           "Iterator cursor PK type does not match segment");
+                if (pending[i].first == last_bound.value() &&
+                    pks[i] <= cursor.last_pk.value()) {
+                    continue;
+                }
+            }
+            Candidate candidate{pending[i], std::move(pks[i])};
+            if (selected.size() < static_cast<size_t>(batch_size_)) {
+                selected.push(std::move(candidate));
+            } else if (better(candidate, selected.top())) {
+                selected.pop();
+                selected.push(std::move(candidate));
+            }
+        }
+        pending.clear();
+        offsets.clear();
+    };
+
+    auto consume = [&](const ScoredOffset& next) {
+        auto result = ConvertIteratorResult(next);
+        if (result.second < 0) {
+            return;
+        }
+        AssertInfo(std::isfinite(result.first),
+                   "Strict iterator returned a nonfinite score");
+        if (!IsValid(result, std::nullopt, radius, range_filter) ||
+            (last_bound.has_value() && result.first < last_bound.value())) {
+            return;
+        }
+        pending.push_back(result);
+        offsets.push_back(result.second);
+        if (pending.size() == pk_read_batch_size) {
+            select_pending();
+        }
+    };
+    {
+        std::vector<int64_t> eligible;
+        eligible.reserve(pk_read_batch_size);
+        auto score_block = [&] {
+            if (!eligible.empty()) {
+                segcore::CheckCancellation(op_context_, -1, scan_operation);
+                for (const auto& result : exact_candidates_(eligible)) {
+                    consume(result);
+                }
+                eligible.clear();
+            }
+        };
+        for (int64_t offset = 0; offset < exact_row_count_; ++offset) {
+            if (offset % pk_read_batch_size == 0) {
+                segcore::CheckCancellation(op_context_, -1, scan_operation);
+            }
+            if (!exact_bitset_.empty() && exact_bitset_.test(offset)) {
+                continue;
+            }
+            eligible.push_back(offset);
+            if (eligible.size() == pk_read_batch_size) {
+                score_block();
+            }
+        }
+        score_block();
+    }
+    select_pending();
+    std::vector<Candidate> candidates;
+    candidates.reserve(selected.size());
+    while (!selected.empty()) {
+        candidates.push_back(selected.top());
+        selected.pop();
+    }
+    std::sort(candidates.begin(), candidates.end(), better);
+    std::vector<DisIdPair> result;
+    result.reserve(batch_size_);
+    for (const auto& candidate : candidates) {
+        result.emplace_back(candidate.result.first * sign_,
+                            candidate.result.second);
+    }
+    while (result.size() < static_cast<size_t>(batch_size_)) {
+        result.emplace_back(std::numeric_limits<float>::infinity(), -1);
+    }
+    return result;
 }
 
 void
@@ -338,6 +716,14 @@ CachedSearchIterator::ValidateSearchInfo(const SearchInfo& search_info) {
     }
 
     const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
+    if (iterator_v2_info.cursor_version == 2 &&
+        (search_info.array_offsets_ != nullptr || search_info.has_group_by() ||
+         search_info.iterative_filter_execution ||
+         search_info.global_refine_enable_)) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Strict iterator cursor does not support element search, "
+                  "group by, iterative filtering, or global refinement");
+    }
     if (iterator_v2_info.batch_size != batch_size_) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size mismatch, expect %d, but got %d",
@@ -500,6 +886,10 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
                   "Batch size is 0, cannot initialize iterator");
     }
     batch_size_ = iterator_v2_info.batch_size;
+    if (iterator_v2_info.cursor_version == 2) {
+        ValidateSearchInfo(search_info);
+        AssertInfo(pk_getter_, "Strict iterator cursor requires a PK getter");
+    }
 
     if (search_info.metric_type_.empty()) {
         ThrowInfo(ErrorCode::UnexpectedError,

@@ -175,6 +175,12 @@ PhyVectorSearchNode::GetOutput() {
             auto search_result = empty_search_result(num_queries);
             search_result.total_data_cnt_ = data_cnt;
             search_result.element_level_ = ph.element_level_;
+            search_result.iterator_pk_cursor_executed_ =
+                search_info_.iterator_v2_info_.has_value() &&
+                search_info_.iterator_v2_info_->cursor_version == 2 &&
+                !ph.element_level_ && !search_info_.has_group_by() &&
+                !search_info_.iterative_filter_execution &&
+                !search_info_.global_refine_enable_;
             query_context_->set_search_result(std::move(search_result));
             return input_;
         }

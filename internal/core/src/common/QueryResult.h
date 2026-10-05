@@ -387,6 +387,8 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+    // Set only after the strict PK cursor path has selected its batch.
+    bool iterator_pk_cursor_executed_{false};
 
     bool element_level_{false};
     std::vector<int32_t> element_indices_;

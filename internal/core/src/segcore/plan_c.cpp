@@ -131,6 +131,16 @@ GetTopK(CSearchPlan plan) {
     return res;
 }
 
+uint32_t
+GetSearchIteratorPkCursorVersion(CSearchPlan plan) {
+    auto p = static_cast<milvus::query::Plan*>(plan);
+    if (p == nullptr || p->plan_node_ == nullptr) {
+        return 0;
+    }
+    const auto& info = p->plan_node_->search_info_.iterator_v2_info_;
+    return info.has_value() ? info->cursor_version : 0;
+}
+
 int64_t
 GetGroupSize(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);

@@ -1702,7 +1702,7 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
     return ret;
 }
 
-// sortEqualScoresOneNQ sorts an equal-score run within [nq_begin, nq_end) by
+// sortEqualScoresOneNQ sorts an exactly equal-score run within [nq_begin, nq_end) by
 // PK ASC, using in-place cyclic permutation. Handles optional element_indices_
 // and composite_group_by_values_ fields.
 static void
@@ -1716,9 +1716,10 @@ sortEqualScoresOneNQ(size_t nq_begin,
     size_t start = nq_begin;
     while (start < nq_end) {
         size_t end = start + 1;
-        while (end < nq_end &&
-               std::fabs(search_result->distances_[end] -
-                         search_result->distances_[start]) < EPSILON) {
+        // Cursor boundaries compare scores exactly. Treating nearby scores as
+        // ties would let PK order move a worse result before a better one.
+        while (end < nq_end && search_result->distances_[end] ==
+                                   search_result->distances_[start]) {
             ++end;
         }
 
@@ -1748,6 +1749,7 @@ sortEqualScoresOneNQ(size_t nq_begin,
 
                 PkType temp_pk =
                     std::move(search_result->primary_keys_[start + i]);
+                float temp_distance = search_result->distances_[start + i];
                 int64_t temp_offset = search_result->seg_offsets_[start + i];
                 int32_t temp_elem_idx =
                     has_element_level
@@ -1765,6 +1767,8 @@ sortEqualScoresOneNQ(size_t nq_begin,
                     size_t next = indices[curr];
                     search_result->primary_keys_[start + curr] =
                         std::move(search_result->primary_keys_[start + next]);
+                    search_result->distances_[start + curr] =
+                        search_result->distances_[start + next];
                     search_result->seg_offsets_[start + curr] =
                         search_result->seg_offsets_[start + next];
                     if (has_element_level) {
@@ -1782,6 +1786,7 @@ sortEqualScoresOneNQ(size_t nq_begin,
                 }
 
                 search_result->primary_keys_[start + curr] = std::move(temp_pk);
+                search_result->distances_[start + curr] = temp_distance;
                 search_result->seg_offsets_[start + curr] = temp_offset;
                 if (has_element_level) {
                     search_result->element_indices_[start + curr] =

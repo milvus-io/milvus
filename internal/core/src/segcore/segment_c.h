@@ -157,6 +157,10 @@ DeleteSearchResult(CSearchResult search_result);
 int64_t
 GetSearchResultValidCount(CSearchResult search_result);
 
+/** Whether this result actually executed score/primary-key continuation. */
+bool
+GetSearchResultIteratorPkCursorExecuted(CSearchResult search_result);
+
 /**
  * @brief Execute search on a segment
  *

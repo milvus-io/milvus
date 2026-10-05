@@ -159,6 +159,7 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 	defer searchReq.Delete()
+	pkCursorRequested := searchReq.Plan().IteratorPKCursorVersion() == 2
 	// Use the merged NQ and maximum requested topK as the group's output
 	// upper bound; the optimizer may lower the C++ plan topK. Keep this
 	// decision unchanged when materializing each original request's output.
@@ -263,6 +264,9 @@ func (t *SearchTask) Execute() error {
 				ServiceTime: tr.ElapseSpan().Milliseconds(),
 			}
 			task.result = searchResults
+		}
+		if pkCursorRequested {
+			return t.markIteratorPKCursorResults()
 		}
 		return nil
 	}
@@ -387,6 +391,16 @@ func (t *SearchTask) Execute() error {
 		}
 	}
 	t.attributeStorageCost(results)
+	if pkCursorRequested {
+		for _, result := range results {
+			if !result.IteratorPKCursorExecuted() {
+				return merr.Wrapf(merr.ErrServiceUnimplemented, "segment did not execute search iterator primary-key continuation")
+			}
+		}
+		if err := t.markIteratorPKCursorResults(); err != nil {
+			return err
+		}
+	}
 
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the

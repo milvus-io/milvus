@@ -151,7 +151,12 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                       bitset,
                       op_context,
                       search_result,
-                      is_sparse);
+                      is_sparse,
+                      search_conf.iterator_v2_info_.has_value() &&
+                              search_conf.iterator_v2_info_->cursor_version == 2
+                          ? CachedSearchIterator::MakePrimaryKeyGetter(
+                                segment, op_context, search_result)
+                          : CachedSearchIterator::PrimaryKeyGetter{});
     }
 }
 
@@ -219,6 +224,48 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     auto topk = info.topk_;
     auto metric_type = info.metric_type_;
     auto round_decimal = info.round_decimal_;
+
+    if (info.iterator_v2_info_.has_value() &&
+        info.iterator_v2_info_->cursor_version == 2) {
+        if (data_type != DataType::VECTOR_ARRAY && query_offsets == nullptr &&
+            segment.HasRawData(vecfield_id.get())) {
+            dataset::SearchDataset dataset{
+                metric_type,
+                num_queries,
+                topk,
+                -1,
+                data_type == DataType::VECTOR_SPARSE_U32_F32 ? 0
+                                                             : field.get_dim(),
+                query_data};
+            std::map<std::string, std::string> index_info;
+            if (segment.get_indexing_record().has_field_index_meta(
+                    vecfield_id)) {
+                index_info = segment.get_indexing_record()
+                                 .get_field_index_meta(vecfield_id)
+                                 .GetIndexParams();
+            }
+            const auto row_count = info.active_count_ >= 0
+                                       ? info.active_count_
+                                       : segment.get_active_count(timestamp);
+            CachedSearchIterator iterator(
+                dataset,
+                row_count,
+                info,
+                index_info,
+                bitset,
+                data_type,
+                CachedSearchIterator::MakeRawVectorGetter(
+                    segment, vecfield_id, op_context, search_result),
+                CachedSearchIterator::MakePrimaryKeyGetter(
+                    segment, op_context, search_result),
+                op_context);
+            iterator.NextBatch(info, search_result);
+            return;
+        }
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Strict iterator raw vector data is not ready for field {}",
+                  vecfield_id.get());
+    }
 
     // step 2: small indexing search
     if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
@@ -319,6 +366,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 return;
             }
             FillEmptySearchResult(search_result, num_queries, info.topk_);
+            search_result.iterator_pk_cursor_executed_ =
+                info.iterator_v2_info_.has_value() &&
+                info.iterator_v2_info_->cursor_version == 2;
             return;
         }
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
@@ -365,6 +415,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         if (active_count == 0) {
             // All vectors are null, return empty result
             FillEmptySearchResult(search_result, num_queries, info.topk_);
+            search_result.iterator_pk_cursor_executed_ =
+                info.iterator_v2_info_.has_value() &&
+                info.iterator_v2_info_->cursor_version == 2;
             return;
         }
 
@@ -387,14 +440,20 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             // reads the same generation the scan below would have. Reading the
             // live container instead would assert once try_remove_chunks has
             // reclaimed it -- reclamation no longer waits for a chunk lock.
-            CachedSearchIterator cached_iter(search_dataset,
-                                             vec_ptr,
-                                             chunks,
-                                             active_count,
-                                             info,
-                                             index_info,
-                                             search_bitset,
-                                             iter_data_type);
+            CachedSearchIterator cached_iter(
+                search_dataset,
+                vec_ptr,
+                chunks,
+                active_count,
+                info,
+                index_info,
+                search_bitset,
+                iter_data_type,
+                info.iterator_v2_info_->cursor_version == 2
+                    ? CachedSearchIterator::MakePrimaryKeyGetter(
+                          segment, op_context, search_result)
+                    : CachedSearchIterator::PrimaryKeyGetter{},
+                op_context);
             cached_iter.NextBatch(info, search_result);
             FinalizeVectorSearchOffsets(search_result,
                                         info.array_offsets_.get());

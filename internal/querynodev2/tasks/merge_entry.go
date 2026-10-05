@@ -23,9 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 )
 
-// epsilon matches C++ common/Consts.h: const float EPSILON = 0.0000000119
-const epsilon float32 = 0.0000000119
-
 // mergeEntry represents one segment's search results for a single NQ chunk,
 // with a cursor that advances row by row. The C++ exporter has already
 // normalized the row order (score DESC, equal-score ties broken by PK ASC),
@@ -68,23 +65,23 @@ func (e *mergeEntry) advance() bool {
 	return e.cursor < e.scoreArr.Len()
 }
 
-// greaterInt64Pk: equal scores (within epsilon) → smaller PK is "greater" so it
+// greaterInt64Pk: exactly equal scores → smaller PK is "greater" so it
 // pops first; otherwise sort by score DESC.
 func (e *mergeEntry) greaterInt64Pk(other *mergeEntry) bool {
-	diff := e.scoreVal() - other.scoreVal()
-	if diff > -epsilon && diff < epsilon {
+	score, otherScore := e.scoreVal(), other.scoreVal()
+	if score == otherScore {
 		return e.idInt64Val() < other.idInt64Val() // equal score → PK ASC
 	}
-	return diff > 0 // score DESC
+	return score > otherScore // score DESC
 }
 
 // greaterStringPk is the varchar PK variant of greater.
 func (e *mergeEntry) greaterStringPk(other *mergeEntry) bool {
-	diff := e.scoreVal() - other.scoreVal()
-	if diff > -epsilon && diff < epsilon {
+	score, otherScore := e.scoreVal(), other.scoreVal()
+	if score == otherScore {
 		return e.idStringVal() < other.idStringVal()
 	}
-	return diff > 0
+	return score > otherScore
 }
 
 // mergeHeapInt64Pk is a max-heap of mergeEntry by greaterInt64Pk.
@@ -110,10 +107,7 @@ func (h *mergeHeapInt64Pk) Pop() interface{} {
 // advanceRoot consumes the current root and moves that entry to its next row.
 // It deliberately preserves the legacy heap.Pop -> advance -> heap.Push
 // ordering: first remove the current root and repair the remaining heap, then
-// advance and reinsert the entry if it still has rows. This two-phase repair is
-// required because the epsilon-based score comparator is not a strict weak
-// ordering, so advancing the root in place and performing a single sift-down
-// can produce a different result from the legacy merge path.
+// advance and reinsert the entry if it still has rows.
 func (h *mergeHeapInt64Pk) advanceRoot() {
 	entries := *h
 	entry := entries[0]

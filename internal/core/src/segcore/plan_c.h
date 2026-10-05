@@ -47,6 +47,9 @@ GetTopK(CSearchPlan plan);
 int64_t
 GetGroupSize(CSearchPlan plan);
 
+uint32_t
+GetSearchIteratorPkCursorVersion(CSearchPlan plan);
+
 void
 SetSearchPlanTakeForOutputAllowed(CSearchPlan plan, bool allowed);
 

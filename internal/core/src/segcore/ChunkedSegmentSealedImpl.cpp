@@ -123,6 +123,8 @@
 #include "pb/segcore.pb.h"
 #include "prometheus/histogram.h"
 #include "query/PlanImpl.h"
+#include "query/CachedSearchIterator.h"
+#include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
@@ -4224,12 +4226,65 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const BitsetView& bitset,
                                         milvus::OpContext* op_context,
                                         SearchResult& output) const {
+    if (search_info.iterator_v2_info_.has_value() &&
+        search_info.iterator_v2_info_->cursor_version == 2) {
+        // bulk_subscript acquires the vector-state lock for indexed reads;
+        // execute this path before taking that lock below. The segment search
+        // lease and each getter's published-state owners protect the data.
+        auto state = CapturePublishedState();
+        auto field_id = search_info.field_id_;
+        const auto& field = (*state->schema)[field_id];
+        if (field.get_data_type() != DataType::VECTOR_ARRAY &&
+            query_offsets == nullptr &&
+            (HasFieldData(field_id) || HasRawData(field_id.get()))) {
+            query::CheckBruteForceSearchParam(field, search_info);
+            query::dataset::SearchDataset dataset{
+                search_info.metric_type_,
+                query_count,
+                search_info.topk_,
+                -1,
+                field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
+                    ? 0
+                    : field.get_dim(),
+                query_data};
+            std::map<std::string, std::string> index_info;
+            if (col_index_meta_ != nullptr &&
+                col_index_meta_->HasField(field_id)) {
+                index_info = col_index_meta_->GetFieldIndexMeta(field_id)
+                                 .GetIndexParams();
+            }
+            query::CachedSearchIterator iterator(
+                dataset,
+                state->runtime != nullptr ? state->runtime->row_count : 0,
+                search_info,
+                index_info,
+                bitset,
+                field.get_data_type(),
+                query::CachedSearchIterator::MakeRawVectorGetter(
+                    *this, field_id, op_context, output),
+                query::CachedSearchIterator::MakePrimaryKeyGetter(
+                    *this, op_context, output),
+                op_context);
+            iterator.NextBatch(search_info, output);
+            return;
+        }
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Strict iterator raw vector data is not ready for field {}",
+                  field_id.get());
+    }
     std::shared_lock vector_state_lck(mutex_);
     auto snapshot = CapturePublishedState();
     AssertInfo(snapshot->system_field_ready, "System field is not ready");
     auto field_id = search_info.field_id_;
     auto runtime = snapshot->runtime;
     auto& field_meta = snapshot->schema->operator[](field_id);
+
+    query::CachedSearchIterator::PrimaryKeyGetter pk_getter;
+    if (search_info.iterator_v2_info_.has_value() &&
+        search_info.iterator_v2_info_->cursor_version == 2) {
+        pk_getter = query::CachedSearchIterator::MakePrimaryKeyGetter(
+            *this, op_context, output);
+    }
 
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
@@ -4252,7 +4307,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_count,
                                    bitset,
                                    op_context,
-                                   output);
+                                   output,
+                                   pk_getter);
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(snapshot->index_ready_bitset, field_id)) {
@@ -4272,7 +4328,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_count,
                                    bitset,
                                    op_context,
-                                   output);
+                                   output,
+                                   pk_getter);
         milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
         AssertInfo(
@@ -4307,7 +4364,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     row_count,
                                     bitset,
                                     op_context,
-                                    output);
+                                    output,
+                                    pk_getter);
         milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }

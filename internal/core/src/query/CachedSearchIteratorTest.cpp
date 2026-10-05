@@ -11,9 +11,11 @@
 
 #include <gtest/gtest.h>
 #include <memory>
+#include <chrono>
 #include <random>
 #include <unordered_set>
 #include "common/BitsetView.h"
+#include "common/FastMem.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Utils.h"
@@ -24,12 +26,15 @@
 #include "index/VectorIndex.h"
 #include "index/IndexFactory.h"
 #include "knowhere/dataset.h"
+#include "knowhere/sparse_utils.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+#include "segcore/SegmentGrowing.h"
 #include "mmap/ChunkedColumn.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -363,6 +368,830 @@ std::shared_ptr<Schema> CachedSearchIteratorTest::schema_{nullptr};
 FieldId CachedSearchIteratorTest::fakevec_id_(0);
 
 /********* Testcases Start **********/
+
+TEST(CachedSearchIteratorStrictPkTest, ExactCorpusAcrossRecreatedPages) {
+    constexpr int64_t num_rows = 257;
+    constexpr int64_t dim = 4;
+    constexpr int64_t batch_size = 17;
+    std::vector<float> vectors(num_rows * dim, 1.0f);
+    std::vector<float> query(dim, 1.0f);
+    auto base = knowhere::GenDataSet(num_rows, dim, vectors.data());
+    auto query_ds = knowhere::GenDataSet(1, dim, query.data());
+    auto vector_base =
+        std::make_unique<ConcurrentVector<milvus::FloatVector>>(dim, 128);
+    vector_base->set_data_raw(0, vectors.data(), num_rows);
+
+    for (const auto& metric : kMetricTypes) {
+        CreateIndexInfo index_info;
+        index_info.field_type = DataType::VECTOR_FLOAT;
+        index_info.metric_type = metric;
+        index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+        index_info.index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        auto index = IndexFactory::GetInstance().CreateIndex(
+            index_info, storage::FileManagerContext());
+        index->BuildWithDataset(
+            base,
+            {{knowhere::meta::METRIC_TYPE, metric},
+             {knowhere::meta::DIM, std::to_string(dim)},
+             {knowhere::indexparam::M, "16"},
+             {knowhere::indexparam::EFCONSTRUCTION, "128"}});
+
+        for (bool indexed : {false, true}) {
+            for (bool varchar_pk : {false, true}) {
+                for (bool sorted_pks : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << metric << " indexed=" << indexed
+                                 << " varchar=" << varchar_pk
+                                 << " pk_sorted=" << sorted_pks);
+                    std::vector<PkType> pks;
+                    for (int64_t i = 0; i < num_rows; ++i) {
+                        auto pk = sorted_pks ? i + 1 : num_rows - i;
+                        if (varchar_pk) {
+                            auto value = std::to_string(pk);
+                            pks.emplace_back(
+                                std::string(4 - value.size(), '0') + value);
+                        } else {
+                            pks.emplace_back(pk);
+                        }
+                    }
+                    auto expected = pks;
+                    std::sort(expected.begin(), expected.end());
+                    size_t max_pk_batch = 0;
+                    auto getter = [&](const std::vector<int64_t>& offsets) {
+                        max_pk_batch = std::max(max_pk_batch, offsets.size());
+                        std::vector<PkType> values;
+                        for (auto offset : offsets) {
+                            values.push_back(pks.at(offset));
+                        }
+                        return values;
+                    };
+                    SearchInfo info;
+                    info.topk_ = batch_size;
+                    info.round_decimal_ = -1;
+                    info.metric_type_ = metric;
+                    info.search_params_ = {{knowhere::indexparam::EF, "64"}};
+                    SearchIteratorV2Info cursor;
+                    cursor.batch_size = batch_size;
+                    cursor.cursor_version = 2;
+                    info.iterator_v2_info_ = cursor;
+                    if (indexed) {
+                        // Keep the independent ANN baseline as evidence: the
+                        // exact cursor must also retrieve graph-unreachable rows.
+                        const auto& vector_index =
+                            dynamic_cast<const VectorIndex&>(*index);
+                        auto reference_params =
+                            vector_index.PrepareSearchParams(info);
+                        reference_params[knowhere::meta::RANGE_SEARCH_K] = -1;
+                        reference_params
+                            [knowhere::meta::RETAIN_ITERATOR_ORDER] = false;
+                        auto reference = vector_index.VectorIterators(
+                            query_ds, reference_params, BitsetView{}, nullptr);
+                        ASSERT_TRUE(reference.has_value());
+                        ASSERT_EQ(reference.value().size(), 1);
+                        std::vector<PkType> available;
+                        std::vector<bool> seen(num_rows, false);
+                        while (true) {
+                            auto more = reference.value()[0]->HasNext();
+                            ASSERT_TRUE(more.has_value());
+                            if (!more.value()) {
+                                break;
+                            }
+                            auto next = reference.value()[0]->Next();
+                            ASSERT_TRUE(next.has_value());
+                            const auto offset = next.value().first;
+                            ASSERT_GE(offset, 0);
+                            ASSERT_LT(offset, num_rows);
+                            ASSERT_FALSE(seen.at(offset));
+                            seen.at(offset) = true;
+                            available.push_back(pks.at(offset));
+                        }
+                        std::sort(available.begin(), available.end());
+                        std::cout << "PK_ANN_ORACLE metric=" << metric
+                                  << " available=" << available.size()
+                                  << " corpus=" << num_rows
+                                  << " missing_offsets=";
+                        for (size_t offset = 0; offset < num_rows; ++offset) {
+                            if (!seen[offset]) {
+                                std::cout << offset << ",";
+                            }
+                        }
+                        std::cout << std::endl;
+                    }
+                    auto vector_getter =
+                        [&](const std::vector<int64_t>& offsets) {
+                            auto data = std::make_unique<DataArray>();
+                            auto* array = data->mutable_vectors();
+                            array->set_dim(dim);
+                            auto* values =
+                                array->mutable_float_vector()->mutable_data();
+                            if (indexed) {
+                                auto ids = knowhere::GenIdsDataSet(
+                                    offsets.size(), offsets.data());
+                                auto raw =
+                                    dynamic_cast<const VectorIndex&>(*index)
+                                        .GetVector(ids);
+                                const auto* first =
+                                    reinterpret_cast<const float*>(raw.data());
+                                values->Add(first,
+                                            first + offsets.size() * dim);
+                            } else {
+                                for (auto offset : offsets) {
+                                    const auto* first =
+                                        vectors.data() + offset * dim;
+                                    values->Add(first, first + dim);
+                                }
+                            }
+                            return data;
+                        };
+                    std::vector<PkType> actual;
+                    for (size_t page = 0; page < 20; ++page) {
+                        dataset::SearchDataset search_ds{
+                            metric, 1, batch_size, -1, dim, query.data()};
+                        auto iterator = std::make_unique<CachedSearchIterator>(
+                            search_ds,
+                            num_rows,
+                            info,
+                            std::map<std::string, std::string>{},
+                            BitsetView{},
+                            DataType::VECTOR_FLOAT,
+                            vector_getter,
+                            getter);
+                        SearchResult result;
+                        iterator->NextBatch(info, result);
+                        ASSERT_TRUE(result.iterator_pk_cursor_executed_);
+                        size_t count = 0;
+                        for (size_t i = 0; i < result.seg_offsets_.size();
+                             ++i) {
+                            auto offset = result.seg_offsets_[i];
+                            if (offset < 0) {
+                                break;
+                            }
+                            actual.push_back(pks.at(offset));
+                            info.iterator_v2_info_->last_bound =
+                                result.distances_[i];
+                            info.iterator_v2_info_->last_pk = pks.at(offset);
+                            ++count;
+                        }
+                        if (count == 0) {
+                            break;
+                        }
+                    }
+                    EXPECT_EQ(actual, expected);
+                    EXPECT_EQ(max_pk_batch,
+                              std::min(expected.size(), size_t{256}));
+                }
+            }
+        }
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest, ReadsActualGrowingPrimaryKeys) {
+    constexpr int64_t rows = 20;
+    for (const auto pk_type : {DataType::INT64, DataType::VARCHAR}) {
+        auto schema = std::make_shared<Schema>();
+        auto pk_field = schema->AddDebugField("pk", pk_type);
+        schema->set_primary_field_id(pk_field);
+        auto data = DataGen(schema, rows);
+        for (auto& field : *data.raw_->mutable_fields_data()) {
+            if (field.field_id() != pk_field.get()) {
+                continue;
+            }
+            for (int64_t i = 0; i < rows; ++i) {
+                if (pk_type == DataType::INT64) {
+                    field.mutable_scalars()->mutable_long_data()->set_data(
+                        i, rows - i);
+                } else {
+                    field.mutable_scalars()->mutable_string_data()->set_data(
+                        i, "pk-" + std::to_string(rows - i));
+                }
+            }
+        }
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto offset = segment->PreInsert(rows);
+        segment->Insert(offset,
+                        rows,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.raw_);
+        SearchResult result;
+        auto getter = CachedSearchIterator::MakePrimaryKeyGetter(
+            *segment, nullptr, result);
+        const auto keys = getter({3, 0, 19});
+        if (pk_type == DataType::INT64) {
+            EXPECT_EQ(
+                keys,
+                (std::vector<PkType>{int64_t(17), int64_t(20), int64_t(1)}));
+        } else {
+            EXPECT_EQ(keys,
+                      (std::vector<PkType>{std::string("pk-17"),
+                                           std::string("pk-20"),
+                                           std::string("pk-1")}));
+        }
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest, FirstBatchCost) {
+    // Report a warm native selection microbenchmark, not RPC throughput.
+    // PKs come from an in-memory mapper, so this excludes PK-column I/O.
+    constexpr int64_t rows = 4096;
+    constexpr int64_t dim = 16;
+    constexpr int64_t batch = 32;
+    std::vector<float> vectors(rows * dim, 1.0f);
+    std::vector<float> query(dim, 1.0f);
+    auto base = knowhere::GenDataSet(rows, dim, vectors.data());
+    auto query_ds = knowhere::GenDataSet(1, dim, query.data());
+    auto vector_base =
+        std::make_unique<ConcurrentVector<milvus::FloatVector>>(dim, 128);
+    vector_base->set_data_raw(0, vectors.data(), rows);
+    CreateIndexInfo index_info;
+    index_info.field_type = DataType::VECTOR_FLOAT;
+    index_info.metric_type = knowhere::metric::L2;
+    index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto index = IndexFactory::GetInstance().CreateIndex(
+        index_info, storage::FileManagerContext());
+    index->BuildWithDataset(
+        base,
+        {{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+         {knowhere::meta::DIM, std::to_string(dim)},
+         {knowhere::indexparam::M, "16"},
+         {knowhere::indexparam::EFCONSTRUCTION, "128"}});
+    for (bool indexed : {false, true}) {
+        for (uint32_t version : {0U, 2U}) {
+            std::vector<int64_t> elapsed;
+            size_t read_keys = 0;
+            for (int repetition = 0; repetition < 6; ++repetition) {
+                read_keys = 0;
+                auto getter = [&](const std::vector<int64_t>& offsets) {
+                    read_keys += offsets.size();
+                    std::vector<PkType> values;
+                    for (auto offset : offsets) {
+                        values.emplace_back(rows - offset);
+                    }
+                    return values;
+                };
+                SearchInfo info;
+                info.metric_type_ = knowhere::metric::L2;
+                info.topk_ = batch;
+                info.round_decimal_ = -1;
+                info.search_params_ = {{knowhere::indexparam::EF, "64"}};
+                SearchIteratorV2Info cursor;
+                cursor.batch_size = batch;
+                cursor.cursor_version = version;
+                info.iterator_v2_info_ = cursor;
+                const auto begin = std::chrono::steady_clock::now();
+                std::unique_ptr<CachedSearchIterator> iterator;
+                if (version == 2) {
+                    auto vector_getter =
+                        [&, indexed](const std::vector<int64_t>& offsets) {
+                            auto data = std::make_unique<DataArray>();
+                            auto* array = data->mutable_vectors();
+                            array->set_dim(dim);
+                            auto* values =
+                                array->mutable_float_vector()->mutable_data();
+                            if (indexed) {
+                                auto ids = knowhere::GenIdsDataSet(
+                                    offsets.size(), offsets.data());
+                                auto raw =
+                                    dynamic_cast<const VectorIndex&>(*index)
+                                        .GetVector(ids);
+                                const auto* first =
+                                    reinterpret_cast<const float*>(raw.data());
+                                values->Add(first,
+                                            first + offsets.size() * dim);
+                            } else {
+                                for (auto offset : offsets) {
+                                    const auto* first =
+                                        vectors.data() + offset * dim;
+                                    values->Add(first, first + dim);
+                                }
+                            }
+                            return data;
+                        };
+                    dataset::SearchDataset search_ds{
+                        knowhere::metric::L2, 1, batch, -1, dim, query.data()};
+                    iterator = std::make_unique<CachedSearchIterator>(
+                        search_ds,
+                        rows,
+                        info,
+                        std::map<std::string, std::string>{},
+                        BitsetView{},
+                        DataType::VECTOR_FLOAT,
+                        vector_getter,
+                        getter);
+                } else if (indexed) {
+                    iterator = std::make_unique<CachedSearchIterator>(
+                        dynamic_cast<const VectorIndex&>(*index),
+                        query_ds,
+                        info,
+                        BitsetView{},
+                        nullptr,
+                        getter);
+                } else {
+                    dataset::SearchDataset search_ds{
+                        knowhere::metric::L2, 1, batch, -1, dim, query.data()};
+                    auto chunks = vector_base->acquire_chunks();
+                    iterator = std::make_unique<CachedSearchIterator>(
+                        search_ds,
+                        vector_base.get(),
+                        chunks,
+                        rows,
+                        info,
+                        std::map<std::string, std::string>{},
+                        BitsetView{},
+                        DataType::VECTOR_FLOAT,
+                        getter);
+                }
+                SearchResult result;
+                iterator->NextBatch(info, result);
+                const auto micros =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - begin)
+                        .count();
+                ASSERT_EQ(result.seg_offsets_.size(), batch);
+                ASSERT_EQ(result.iterator_pk_cursor_executed_, version == 2);
+                if (repetition > 0) {
+                    elapsed.push_back(micros);
+                }
+            }
+            std::sort(elapsed.begin(), elapsed.end());
+            std::cout << "PK_CURSOR_COST backend="
+                      << (indexed ? "HNSW" : "growing_BF")
+                      << " version=" << version << " rows=" << rows
+                      << " dim=" << dim << " batch=" << batch
+                      << " median_us=" << elapsed[elapsed.size() / 2]
+                      << " pk_candidates=" << read_keys << std::endl;
+        }
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest, DenseTypesIncludeEveryCorpusRow) {
+    constexpr int64_t rows = 257;
+    constexpr int64_t batch = 17;
+    for (auto type : {DataType::VECTOR_FLOAT,
+                      DataType::VECTOR_FLOAT16,
+                      DataType::VECTOR_BFLOAT16,
+                      DataType::VECTOR_INT8,
+                      DataType::VECTOR_BINARY}) {
+        SCOPED_TRACE(static_cast<int>(type));
+        const int64_t dim = type == DataType::VECTOR_BINARY ? 8 : 4;
+        const auto bytes_per_row = GetDataTypeSize(type, dim);
+        std::vector<uint8_t> query(bytes_per_row, 0);
+        auto vector_getter = [=](const std::vector<int64_t>& offsets) {
+            auto data = std::make_unique<DataArray>();
+            auto* vector = data->mutable_vectors();
+            vector->set_dim(dim);
+            std::string bytes(offsets.size() * bytes_per_row, 0);
+            switch (type) {
+                case DataType::VECTOR_FLOAT:
+                    vector->mutable_float_vector()->mutable_data()->Resize(
+                        offsets.size() * dim, 0);
+                    break;
+                case DataType::VECTOR_FLOAT16:
+                    vector->set_float16_vector(bytes);
+                    break;
+                case DataType::VECTOR_BFLOAT16:
+                    vector->set_bfloat16_vector(bytes);
+                    break;
+                case DataType::VECTOR_INT8:
+                    vector->set_int8_vector(bytes);
+                    break;
+                case DataType::VECTOR_BINARY:
+                    vector->set_binary_vector(bytes);
+                    break;
+                default:
+                    break;
+            }
+            return data;
+        };
+        auto pk_getter = [=](const std::vector<int64_t>& offsets) {
+            std::vector<PkType> pks;
+            for (auto offset : offsets) pks.emplace_back(rows - offset);
+            return pks;
+        };
+        SearchInfo info;
+        info.metric_type_ = type == DataType::VECTOR_BINARY
+                                ? knowhere::metric::HAMMING
+                                : knowhere::metric::L2;
+        info.round_decimal_ = -1;
+        info.topk_ = batch;
+        SearchIteratorV2Info cursor;
+        cursor.batch_size = batch;
+        cursor.cursor_version = 2;
+        info.iterator_v2_info_ = cursor;
+        dataset::SearchDataset dataset{
+            info.metric_type_, 1, batch, -1, dim, query.data()};
+        std::vector<int64_t> actual;
+        for (int page = 0; page < 20; ++page) {
+            CachedSearchIterator iterator(dataset,
+                                          rows,
+                                          info,
+                                          {},
+                                          BitsetView{},
+                                          type,
+                                          vector_getter,
+                                          pk_getter);
+            SearchResult result;
+            iterator.NextBatch(info, result);
+            ASSERT_TRUE(result.iterator_pk_cursor_executed_);
+            size_t count = 0;
+            for (auto offset : result.seg_offsets_) {
+                if (offset < 0)
+                    break;
+                actual.push_back(rows - offset);
+                ++count;
+            }
+            if (count == 0)
+                break;
+            info.iterator_v2_info_->last_pk = PkType(actual.back());
+            info.iterator_v2_info_->last_bound = result.distances_[count - 1];
+        }
+        ASSERT_EQ(actual.size(), rows);
+        for (int64_t i = 0; i < rows; ++i) ASSERT_EQ(actual[i], i + 1);
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest, NullableCompactVectorsAndLogicalFilter) {
+    const std::vector<int64_t> pks{100, 7, 3, 1, 0};
+    const std::vector<float> vectors{0, 1, 1, 2, 1};
+    BitsetType filtered(5, false);
+    filtered.set(4, true);
+    auto vector_getter = [&](const std::vector<int64_t>& offsets) {
+        auto data = std::make_unique<DataArray>();
+        auto* array = data->mutable_vectors();
+        array->set_dim(1);
+        for (auto offset : offsets) {
+            data->add_valid_data(offset != 0);
+            if (offset != 0)
+                array->mutable_float_vector()->add_data(vectors[offset]);
+        }
+        return data;
+    };
+    auto pk_getter = [&](const std::vector<int64_t>& offsets) {
+        std::vector<PkType> values;
+        for (auto offset : offsets) values.emplace_back(pks[offset]);
+        return values;
+    };
+    SearchInfo info;
+    info.metric_type_ = knowhere::metric::L2;
+    info.round_decimal_ = -1;
+    info.topk_ = 2;
+    SearchIteratorV2Info cursor;
+    cursor.batch_size = 2;
+    cursor.cursor_version = 2;
+    info.iterator_v2_info_ = cursor;
+    float query = 0;
+    dataset::SearchDataset dataset{info.metric_type_, 1, 2, -1, 1, &query};
+    CachedSearchIterator first(dataset,
+                               5,
+                               info,
+                               {},
+                               BitsetView(filtered),
+                               DataType::VECTOR_FLOAT,
+                               vector_getter,
+                               pk_getter);
+    SearchResult result;
+    first.NextBatch(info, result);
+    ASSERT_EQ(result.seg_offsets_, (std::vector<int64_t>{2, 1}));
+    ASSERT_EQ(result.distances_, (std::vector<float>{1, 1}));
+    info.iterator_v2_info_->last_bound = 1;
+    info.iterator_v2_info_->last_pk = PkType(int64_t{7});
+    CachedSearchIterator next(dataset,
+                              5,
+                              info,
+                              {},
+                              BitsetView(filtered),
+                              DataType::VECTOR_FLOAT,
+                              vector_getter,
+                              pk_getter);
+    next.NextBatch(info, result);
+    ASSERT_EQ(result.seg_offsets_, (std::vector<int64_t>{3, -1}));
+    ASSERT_EQ(result.distances_[0], 4);
+}
+
+TEST(CachedSearchIteratorStrictPkTest,
+     SparseKeepsZeroNegativeAndEmptyQueryScores) {
+    using Row = knowhere::sparse::SparseRow<SparseValueType>;
+    auto packed = [](uint32_t index, float value) {
+        std::string bytes(Row::element_size(), 0);
+        milvus::fastmem::FastMemcpy(bytes.data(), &index, sizeof(index));
+        milvus::fastmem::FastMemcpy(
+            bytes.data() + sizeof(index), &value, sizeof(value));
+        return bytes;
+    };
+    std::vector<std::string> docs{
+        packed(2, -1), packed(3, 1), "", packed(2, 1)};
+    std::vector<int64_t> pks{3, 6, 2, 5};
+    auto vector_getter = [&](const std::vector<int64_t>& offsets) {
+        auto data = std::make_unique<DataArray>();
+        auto* sparse = data->mutable_vectors()->mutable_sparse_float_vector();
+        for (auto offset : offsets) sparse->add_contents(docs[offset]);
+        return data;
+    };
+    auto pk_getter = [&](const std::vector<int64_t>& offsets) {
+        std::vector<PkType> values;
+        for (auto offset : offsets) values.emplace_back(pks[offset]);
+        return values;
+    };
+    Row query(1);
+    const auto bytes = packed(2, 1);
+    milvus::fastmem::FastMemcpy(query.data(), bytes.data(), bytes.size());
+    Row empty(0);
+    for (bool empty_query : {false, true}) {
+        SearchInfo info;
+        info.metric_type_ = knowhere::metric::IP;
+        info.topk_ = 1;
+        info.round_decimal_ = -1;
+        SearchIteratorV2Info cursor;
+        cursor.batch_size = 1;
+        cursor.cursor_version = 2;
+        info.iterator_v2_info_ = cursor;
+        dataset::SearchDataset dataset{
+            info.metric_type_, 1, 1, -1, 0, empty_query ? &empty : &query};
+        std::vector<int64_t> actual;
+        std::vector<float> scores;
+        for (int page = 0; page < 5; ++page) {
+            CachedSearchIterator iterator(dataset,
+                                          4,
+                                          info,
+                                          {},
+                                          BitsetView{},
+                                          DataType::VECTOR_SPARSE_U32_F32,
+                                          vector_getter,
+                                          pk_getter);
+            SearchResult result;
+            iterator.NextBatch(info, result);
+            if (result.seg_offsets_[0] < 0)
+                break;
+            actual.push_back(pks[result.seg_offsets_[0]]);
+            scores.push_back(result.distances_[0]);
+            info.iterator_v2_info_->last_bound = result.distances_[0];
+            info.iterator_v2_info_->last_pk = PkType(actual.back());
+        }
+        ASSERT_EQ(actual,
+                  (empty_query ? std::vector<int64_t>{2, 3, 5, 6}
+                               : std::vector<int64_t>{5, 2, 6, 3}));
+        ASSERT_EQ(scores,
+                  (empty_query ? std::vector<float>{0, 0, 0, 0}
+                               : std::vector<float>{1, 0, 0, -1}));
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest, SealedHnswRawIndexReadsEveryLogicalRow) {
+    constexpr int64_t rows = 257;
+    constexpr int64_t dim = 4;
+    constexpr int64_t batch = 17;
+    for (auto pk_type : {DataType::INT64, DataType::VARCHAR}) {
+        for (const auto& metric : kMetricTypes) {
+            SCOPED_TRACE(::testing::Message()
+                         << metric << " pk=" << static_cast<int>(pk_type));
+            auto schema = std::make_shared<Schema>();
+            auto pk_field = schema->AddDebugField("pk", pk_type);
+            schema->set_primary_field_id(pk_field);
+            auto vector_field = schema->AddDebugField(
+                "vector", DataType::VECTOR_FLOAT, dim, metric);
+            auto generated = DataGen(schema, rows);
+            for (auto& field : *generated.raw_->mutable_fields_data()) {
+                if (field.field_id() == pk_field.get()) {
+                    for (int64_t i = 0; i < rows; ++i) {
+                        if (pk_type == DataType::INT64) {
+                            field.mutable_scalars()
+                                ->mutable_long_data()
+                                ->set_data(i, rows - i);
+                        } else {
+                            const auto value = std::to_string(rows - i);
+                            field.mutable_scalars()
+                                ->mutable_string_data()
+                                ->set_data(
+                                    i,
+                                    std::string(4 - value.size(), '0') + value);
+                        }
+                    }
+                } else if (field.field_id() == vector_field.get()) {
+                    for (int64_t i = 0; i < rows * dim; ++i) {
+                        field.mutable_vectors()
+                            ->mutable_float_vector()
+                            ->set_data(i, 1);
+                    }
+                }
+            }
+            auto segment = CreateSealedWithFieldDataLoaded(
+                schema, generated, false, {vector_field.get()});
+            CreateIndexInfo index_info;
+            index_info.field_type = DataType::VECTOR_FLOAT;
+            index_info.metric_type = metric;
+            index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+            index_info.index_engine_version =
+                knowhere::Version::GetCurrentVersion().VersionNumber();
+            auto index = IndexFactory::GetInstance().CreateIndex(
+                index_info, storage::FileManagerContext());
+            std::vector<float> vectors(rows * dim, 1);
+            index->BuildWithDataset(
+                knowhere::GenDataSet(rows, dim, vectors.data()),
+                {{knowhere::meta::METRIC_TYPE, metric},
+                 {knowhere::meta::DIM, std::to_string(dim)},
+                 {knowhere::indexparam::M, "16"},
+                 {knowhere::indexparam::EFCONSTRUCTION, "128"}});
+            LoadIndexInfo load_info;
+            load_info.field_id = vector_field.get();
+            load_info.index_params = GenIndexParams(index.get());
+            load_info.cache_index = CreateTestCacheIndex(
+                "strict-pk-sealed-" + metric +
+                    std::to_string(static_cast<int>(pk_type)),
+                std::move(index));
+            segment->LoadIndex(load_info);
+            ASSERT_TRUE(segment->HasIndex(vector_field));
+            ASSERT_FALSE(segment->HasFieldData(vector_field));
+            SearchInfo info;
+            info.field_id_ = vector_field;
+            info.metric_type_ = metric;
+            info.topk_ = batch;
+            info.round_decimal_ = -1;
+            info.search_params_ = {{knowhere::indexparam::EF, "64"}};
+            SearchIteratorV2Info cursor;
+            cursor.batch_size = batch;
+            cursor.cursor_version = 2;
+            info.iterator_v2_info_ = cursor;
+            std::vector<float> query(dim, 1);
+            std::vector<PkType> actual;
+            for (int page = 0; page < 20; ++page) {
+                SearchResult result;
+                segment->vector_search(info,
+                                       query.data(),
+                                       nullptr,
+                                       1,
+                                       std::numeric_limits<Timestamp>::max(),
+                                       BitsetView{},
+                                       nullptr,
+                                       result);
+                ASSERT_TRUE(result.iterator_pk_cursor_executed_);
+                auto get_pks = CachedSearchIterator::MakePrimaryKeyGetter(
+                    *segment, nullptr, result);
+                std::vector<int64_t> offsets;
+                for (auto offset : result.seg_offsets_) {
+                    if (offset < 0)
+                        break;
+                    offsets.push_back(offset);
+                }
+                if (offsets.empty())
+                    break;
+                auto page_pks = get_pks(offsets);
+                actual.insert(actual.end(), page_pks.begin(), page_pks.end());
+                info.iterator_v2_info_->last_bound =
+                    result.distances_[offsets.size() - 1];
+                info.iterator_v2_info_->last_pk = actual.back();
+            }
+            ASSERT_EQ(actual.size(), rows);
+            for (int64_t i = 0; i < rows; ++i) {
+                if (pk_type == DataType::INT64) {
+                    EXPECT_EQ(actual[i], PkType(i + 1));
+                } else {
+                    const auto value = std::to_string(i + 1);
+                    EXPECT_EQ(
+                        actual[i],
+                        PkType(std::string(4 - value.size(), '0') + value));
+                }
+            }
+        }
+    }
+}
+
+TEST(CachedSearchIteratorStrictPkTest,
+     MissingRawDataIsSystemErrorWithoutFallback) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto vector =
+        schema->AddDebugField("vector", DataType::VECTOR_FLOAT, 4, "L2");
+    auto generated = DataGen(schema, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(
+        schema, generated, false, {vector.get()});
+    SearchInfo info;
+    info.field_id_ = vector;
+    info.metric_type_ = knowhere::metric::L2;
+    info.round_decimal_ = -1;
+    info.topk_ = 1;
+    SearchIteratorV2Info cursor;
+    cursor.batch_size = 1;
+    cursor.cursor_version = 2;
+    info.iterator_v2_info_ = cursor;
+    float query[4] = {};
+    SearchResult result;
+    try {
+        segment->vector_search(info,
+                               query,
+                               nullptr,
+                               1,
+                               std::numeric_limits<Timestamp>::max(),
+                               BitsetView{},
+                               nullptr,
+                               result);
+        FAIL() << "Strict scan must fail when no raw vector source exists";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        EXPECT_NE(
+            std::string(error.what()).find("must exist when getting raw data"),
+            std::string::npos);
+    }
+    EXPECT_FALSE(result.iterator_pk_cursor_executed_);
+}
+
+TEST(CachedSearchIteratorStrictPkTest,
+     DuplicateEqualScoreRowsDoNotHideOtherKeys) {
+    // Page reduction deduplicates PKs. Nonempty short pages must still advance
+    // the composite cursor, even when duplicates occupy a whole core batch.
+    const std::vector<int64_t> pks{1, 4, 1, 2, 1, 3, 1, 2, 1, 3, 1, 2, 1, 1};
+    auto vectors = [](const std::vector<int64_t>& offsets) {
+        auto data = std::make_unique<DataArray>();
+        data->mutable_vectors()->set_dim(1);
+        data->mutable_vectors()->mutable_float_vector()->mutable_data()->Resize(
+            offsets.size(), 1);
+        return data;
+    };
+    auto keys = [&](const std::vector<int64_t>& offsets) {
+        std::vector<PkType> values;
+        for (auto offset : offsets) values.emplace_back(pks[offset]);
+        return values;
+    };
+    SearchInfo info;
+    info.metric_type_ = knowhere::metric::L2;
+    info.round_decimal_ = -1;
+    info.topk_ = 2;
+    SearchIteratorV2Info cursor;
+    cursor.batch_size = 2;
+    cursor.cursor_version = 2;
+    info.iterator_v2_info_ = cursor;
+    float query = 0;
+    dataset::SearchDataset dataset{info.metric_type_, 1, 2, -1, 1, &query};
+    std::vector<int64_t> actual;
+    for (int page = 0; page < 8; ++page) {
+        CachedSearchIterator iterator(dataset,
+                                      pks.size(),
+                                      info,
+                                      {},
+                                      BitsetView{},
+                                      DataType::VECTOR_FLOAT,
+                                      vectors,
+                                      keys);
+        SearchResult result;
+        iterator.NextBatch(info, result);
+        std::vector<int64_t> reduced;
+        size_t count = 0;
+        for (auto offset : result.seg_offsets_) {
+            if (offset < 0)
+                break;
+            const auto pk = pks[offset];
+            if (reduced.empty() || reduced.back() != pk)
+                reduced.push_back(pk);
+            ++count;
+        }
+        if (reduced.empty())
+            break;
+        actual.insert(actual.end(), reduced.begin(), reduced.end());
+        info.iterator_v2_info_->last_bound = result.distances_[count - 1];
+        info.iterator_v2_info_->last_pk = PkType(reduced.back());
+    }
+    EXPECT_EQ(actual, (std::vector<int64_t>{1, 2, 3, 4}));
+}
+
+TEST(CachedSearchIteratorStrictPkTest,
+     LiveBm25StatisticsAreRejectedWithoutReads) {
+    SearchInfo info;
+    info.metric_type_ = knowhere::metric::BM25;
+    info.round_decimal_ = -1;
+    info.topk_ = 1;
+    SearchIteratorV2Info cursor;
+    cursor.batch_size = 1;
+    cursor.cursor_version = 2;
+    info.iterator_v2_info_ = cursor;
+    using Row = knowhere::sparse::SparseRow<SparseValueType>;
+    Row query(0);
+    dataset::SearchDataset dataset{info.metric_type_, 1, 1, -1, 0, &query};
+    bool read = false;
+    auto vectors = [&](const std::vector<int64_t>&) {
+        read = true;
+        return std::make_unique<DataArray>();
+    };
+    auto keys = [](const std::vector<int64_t>&) {
+        return std::vector<PkType>{};
+    };
+    try {
+        CachedSearchIterator iterator(dataset,
+                                      1,
+                                      info,
+                                      {},
+                                      BitsetView{},
+                                      DataType::VECTOR_SPARSE_U32_F32,
+                                      vectors,
+                                      keys);
+        FAIL() << "Live BM25 statistics cannot provide a stable score cursor";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+    EXPECT_FALSE(read);
+}
 
 TEST_P(CachedSearchIteratorTest, NextBatchNormal) {
     SearchInfo search_info = GetDefaultNormalSearchInfo();

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/iteratorutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -48,12 +49,20 @@ func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchRe
 }
 
 func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
+	// Capability must include every participating worker, including empty replies.
+	participatingResults := results
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && (result.GetSlicedBlob() != nil || result.GetResultData() != nil)
 	})
 
 	if len(results) == 1 {
 		mlog.Debug(ctx, "Shortcut return ReduceSearchResults", mlog.Any("result info", info))
+		if results[0].GetStatus().GetExtraInfo()[iteratorutil.CursorVersionKey] == iteratorutil.PKCursorVersionString &&
+			!iteratorutil.AllResultsUsePKCursor(participatingResults) {
+			result := proto.Clone(results[0]).(*internalpb.SearchResults)
+			iteratorutil.PropagatePKCursor(participatingResults, result)
+			return result, nil
+		}
 		return results[0], nil
 	}
 
@@ -131,6 +140,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	searchResults.IsRecallEvaluation = isRecallEvaluation
 	searchResults.ScannedRemoteBytes = storageCost.ScannedRemoteBytes
 	searchResults.ScannedTotalBytes = storageCost.ScannedTotalBytes
+	iteratorutil.PropagatePKCursor(participatingResults, searchResults)
 	return searchResults, nil
 }
 
