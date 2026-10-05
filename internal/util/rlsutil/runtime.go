@@ -61,10 +61,17 @@ func (kind expressionKind) expression(policy *RowPolicy) string {
 }
 
 type compiledPolicyExpression struct {
-	expr                 *planpb.Expr
-	needsPrincipal       bool
-	tagVariables         map[string]string
-	tagVariableDataTypes map[string][]schemapb.DataType
+	expr           *planpb.Expr
+	needsPrincipal bool
+	tagBinding     *policyTagBinding
+}
+
+// Validated policy predicates contain at most one tag variable.
+type policyTagBinding struct {
+	key          string
+	variable     string
+	dataTypes    []schemapb.DataType
+	expectsArray bool
 }
 
 func compiledExpressionNeedsTags(e *CompiledExpression) bool {
@@ -75,7 +82,7 @@ func compiledExpressionNeedsTags(e *CompiledExpression) bool {
 	}
 	for _, policies := range [...][]*compiledPolicyExpression{e.permissive, e.restrictive} {
 		for _, policy := range policies {
-			if len(policy.tagVariables) > 0 {
+			if policy.tagBinding != nil {
 				return true
 			}
 		}
@@ -88,7 +95,7 @@ func (e *CompiledExpression) NeedsTags() bool {
 }
 
 func (e *compiledPolicyExpression) isStatic() bool {
-	return e != nil && !e.needsPrincipal && len(e.tagVariables) == 0
+	return e != nil && !e.needsPrincipal && e.tagBinding == nil
 }
 
 func (e *CompiledExpression) isStatic() bool {
@@ -162,6 +169,17 @@ func preparePolicyExprTemplates(policies []*RowPolicy, action PolicyAction, kind
 		combinedLength += len(" and ") + restrictiveLength + 2
 	}
 	return templates, combinedLength
+}
+
+// CombinedExpressionLength shares admission accounting with runtime compilation.
+// check selects CHECK instead of USING; neither path materializes a combined string.
+func CombinedExpressionLength(policies []*RowPolicy, action PolicyAction, check bool) int {
+	kind := usingExpression
+	if check {
+		kind = checkExpression
+	}
+	_, length := preparePolicyExprTemplates(policies, action, kind)
+	return length
 }
 
 func CompileUsingExpression(policies []*RowPolicy, action PolicyAction, schema *typeutil.SchemaHelper, maxLength int) (*CompiledExpression, error) {
@@ -298,20 +316,15 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 	if err := ValidateParsedExpression(parsedExpr, allowedTemplateVariables); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS policy expression")
 	}
-	var tagVariableDataTypes map[string][]schemapb.DataType
-	if len(template.tagVariables) > 0 {
-		tagVariableDataTypes = make(map[string][]schemapb.DataType, len(template.tagVariables))
-		for _, variable := range template.tagVariables {
-			dataTypes := make([]schemapb.DataType, 0, 1)
-			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes)
-			tagVariableDataTypes[variable] = dataTypes
-		}
+	var binding *policyTagBinding
+	for key, variable := range template.tagVariables {
+		binding = &policyTagBinding{key: key, variable: variable}
+		collectRLSTemplateDataTypes(parsedExpr, variable, &binding.dataTypes, &binding.expectsArray)
 	}
 	return &compiledPolicyExpression{
-		expr:                 parsedExpr,
-		needsPrincipal:       template.needsPrincipal,
-		tagVariables:         template.tagVariables,
-		tagVariableDataTypes: tagVariableDataTypes,
+		expr:           parsedExpr,
+		needsPrincipal: template.needsPrincipal,
+		tagBinding:     binding,
 	}, nil
 }
 
@@ -385,7 +398,8 @@ func (e *CompiledExpression) instantiate(principalName string, principalTags map
 		return nil, nil
 	}
 
-	restrictiveExprs, restrictiveFalse, err := instantiatePolicyExprs(e.restrictive, principalName, principalTags, planpb.BinaryExpr_LogicalAnd)
+	remainingTemplateBytes := maxRLSPrincipalMetadataBytes
+	restrictiveExprs, restrictiveFalse, err := instantiatePolicyExprs(e.restrictive, principalName, principalTags, planpb.BinaryExpr_LogicalAnd, &remainingTemplateBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +407,7 @@ func (e *CompiledExpression) instantiate(principalName string, principalTags map
 		return alwaysFalsePredicate(), nil
 	}
 
-	permissiveExprs, permissiveFalse, err := instantiatePolicyExprs(e.permissive, principalName, principalTags, planpb.BinaryExpr_LogicalOr)
+	permissiveExprs, permissiveFalse, err := instantiatePolicyExprs(e.permissive, principalName, principalTags, planpb.BinaryExpr_LogicalOr, &remainingTemplateBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -413,10 +427,11 @@ func instantiatePolicyExprs(
 	principalName string,
 	principalTags map[string]TagValue,
 	op planpb.BinaryExpr_BinaryOp,
+	remainingTemplateBytes *int64,
 ) ([]*planpb.Expr, bool, error) {
 	exprs := make([]*planpb.Expr, 0, len(policies))
 	for _, policy := range policies {
-		expr, err := policy.Instantiate(principalName, principalTags)
+		expr, err := policy.instantiate(principalName, principalTags, remainingTemplateBytes)
 		if err != nil {
 			return nil, false, err
 		}
@@ -431,7 +446,7 @@ func instantiatePolicyExprs(
 	return exprs, len(policies) > 0 && len(exprs) == 0, nil
 }
 
-func (e *compiledPolicyExpression) Instantiate(principalName string, principalTags map[string]TagValue) (*planpb.Expr, error) {
+func (e *compiledPolicyExpression) instantiate(principalName string, principalTags map[string]TagValue, remainingTemplateBytes *int64) (*planpb.Expr, error) {
 	if e == nil || e.expr == nil {
 		return nil, nil
 	}
@@ -443,46 +458,99 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 	}
 
 	// A policy is a single predicate, so validation guarantees at most one tag
-	// variable. Normalize it before allocating or cloning an expression.
-	var normalizedVariable string
-	var normalizedTagValue TagValue
-	for tagKey, variable := range e.tagVariables {
-		tagValue, ok := principalTags[tagKey]
+	// variable. Validate and charge it before allocating or cloning an expression.
+	var sourceTagValue TagValue
+	binding := e.tagBinding
+	materializedBytes := int64(0)
+	if e.needsPrincipal {
+		materializedBytes = int64(len(principalName))
+	}
+	if binding != nil {
+		tagValue, ok := principalTags[binding.key]
 		if !ok {
 			return nil, nil
 		}
-		normalizedTagValue, ok = normalizeRLSTagValue(e.tagVariableDataTypes[variable], tagValue)
+		valueBytes, ok := normalizedRLSTagValueSize(binding.dataTypes, binding.expectsArray, tagValue)
 		if !ok {
 			return nil, nil
 		}
-		normalizedVariable = variable
+		materializedBytes += valueBytes
+		sourceTagValue = tagValue
+	}
+	if remainingTemplateBytes != nil {
+		if materializedBytes > *remainingTemplateBytes {
+			return nil, merr.WrapErrServiceQuotaExceededMsg(
+				"RLS materialized template values exceed max size %d",
+				maxRLSPrincipalMetadataBytes,
+			)
+		}
+		*remainingTemplateBytes -= materializedBytes
+	}
+	expr := proto.Clone(e.expr).(*planpb.Expr)
+	if binding != nil && binding.expectsArray {
+		// Validation admits one contains_any/all predicate, optionally under NOT.
+		// Values are already type-checked and budgeted above. Fill its final slice
+		// directly instead of copying and rescanning a generic array template.
+		leaf := expr
+		if unary := leaf.GetUnaryExpr(); unary != nil {
+			leaf = unary.GetChild()
+		}
+		elements, ok := rlsArrayTagElements(binding.dataTypes, sourceTagValue.arrayValue)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("RLS principal tag changed while instantiating policy")
+		}
+		leaf.GetJsonContainsExpr().Elements = elements
+		leaf.GetJsonContainsExpr().ElementsSameType = true
+		return expr, nil
 	}
 
-	values := make(map[string]*planpb.GenericValue, len(e.tagVariables)+1)
+	values := make(map[string]*planpb.GenericValue, 1)
 	if e.needsPrincipal {
 		values[funcutil.RLSPrincipalTemplateName] = planparserv2.NewString(principalName)
 	}
-	if normalizedVariable != "" {
-		values[normalizedVariable] = rlsTagValueToGenericValue(normalizedTagValue)
+	if binding != nil {
+		value, ok := rlsTagValueToGenericValue(binding.dataTypes, sourceTagValue)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("RLS principal tag changed while instantiating policy")
+		}
+		values[binding.variable] = value
 	}
 
-	expr := proto.Clone(e.expr).(*planpb.Expr)
 	if err := planparserv2.FillExpressionValue(expr, values); err != nil {
 		return nil, err
 	}
 	return expr, nil
 }
 
-func rlsTagValueToGenericValue(value TagValue) *planpb.GenericValue {
-	switch value.Kind {
+func rlsArrayTagElements(dataTypes []schemapb.DataType, array *tagArray) ([]*planpb.GenericValue, bool) {
+	elements := make([]*planpb.GenericValue, array.len())
+	for i := range elements {
+		var ok bool
+		elements[i], ok = rlsTagValueToGenericValue(dataTypes, array.at(i))
+		if !ok {
+			return nil, false
+		}
+	}
+	return elements, true
+}
+
+func rlsTagValueToGenericValue(dataTypes []schemapb.DataType, value TagValue) (*planpb.GenericValue, bool) {
+	if len(dataTypes) == 0 {
+		return nil, false
+	}
+	normalized, ok := normalizeRLSScalarTagValue(dataTypes, value)
+	if !ok {
+		return nil, false
+	}
+	switch normalized.Kind {
 	case TagValueKindString:
-		return planparserv2.NewString(value.StringValue)
+		return planparserv2.NewString(normalized.StringValue), true
 	case TagValueKindInt64:
-		return planparserv2.NewInt(value.Int64Value)
+		return planparserv2.NewInt(normalized.Int64Value), true
 	case TagValueKindDouble:
-		return planparserv2.NewFloat(value.DoubleValue)
+		return planparserv2.NewFloat(normalized.DoubleValue), true
 	default:
-		return nil
+		return nil, false
 	}
 }
 
@@ -497,12 +565,43 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 	return dataType
 }
 
-// normalizeRLSTagValue chooses a representation that can be safely consumed by
-// every occurrence of a tag variable in an expression. Numeric conversions are
-// allowed only when they preserve the value exactly; otherwise the policy is
-// treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
-	if len(dataTypes) == 0 {
+func normalizedRLSTagValueSize(dataTypes []schemapb.DataType, expectsArray bool, value TagValue) (int64, bool) {
+	if !expectsArray {
+		normalized, ok := normalizeRLSScalarTagValue(dataTypes, value)
+		if !ok {
+			return 0, false
+		}
+		size := rlsTemplateValueSize
+		switch normalized.Kind {
+		case TagValueKindString:
+			if int64(len(normalized.StringValue)) > math.MaxInt64-size {
+				return 0, false
+			}
+			size += int64(len(normalized.StringValue))
+		case TagValueKindInt64, TagValueKindDouble:
+		default:
+			return 0, false
+		}
+		return size, true
+	}
+	if value.Kind != TagValueKindArray || value.arrayValue == nil {
+		return 0, false
+	}
+	size := rlsTemplateValueSize
+	for i := 0; i < value.arrayValue.len(); i++ {
+		elementSize, ok := normalizedRLSTagValueSize(dataTypes, false, value.arrayValue.at(i))
+		if !ok || elementSize > math.MaxInt64-size {
+			return 0, false
+		}
+		size += elementSize
+	}
+	return size, true
+}
+
+// Numeric conversions must preserve the value exactly; incompatible or lossy
+// bindings make the entire policy non-matching, even under NOT.
+func normalizeRLSScalarTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
+	if value.Kind == TagValueKindArray {
 		return TagValue{}, false
 	}
 	for _, dataType := range dataTypes {
@@ -535,6 +634,7 @@ func normalizeRLSTagValue(dataTypes []schemapb.DataType, value TagValue) (TagVal
 				} else if int64(float64(value.Int64Value)) != value.Int64Value {
 					return TagValue{}, false
 				}
+				value = NewDoubleTagValue(float64(value.Int64Value))
 			case TagValueKindDouble:
 				if dataType == schemapb.DataType_Float && float64(float32(value.DoubleValue)) != value.DoubleValue {
 					return TagValue{}, false
@@ -564,16 +664,16 @@ func integerTagFitsDataType(value int64, dataType schemapb.DataType) bool {
 	}
 }
 
-func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *[]schemapb.DataType) {
+func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *[]schemapb.DataType, expectsArray *bool) {
 	if expr == nil {
 		return
 	}
 	switch node := expr.GetExpr().(type) {
 	case *planpb.Expr_UnaryExpr:
-		collectRLSTemplateDataTypes(node.UnaryExpr.GetChild(), variable, dataTypes)
+		collectRLSTemplateDataTypes(node.UnaryExpr.GetChild(), variable, dataTypes, expectsArray)
 	case *planpb.Expr_BinaryExpr:
-		collectRLSTemplateDataTypes(node.BinaryExpr.GetLeft(), variable, dataTypes)
-		collectRLSTemplateDataTypes(node.BinaryExpr.GetRight(), variable, dataTypes)
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetLeft(), variable, dataTypes, expectsArray)
+		collectRLSTemplateDataTypes(node.BinaryExpr.GetRight(), variable, dataTypes, expectsArray)
 	case *planpb.Expr_UnaryRangeExpr:
 		if node.UnaryRangeExpr.GetTemplateVariableName() == variable {
 			*dataTypes = append(*dataTypes, rlsTemplateColumnDataType(node.UnaryRangeExpr.GetColumnInfo()))
@@ -581,6 +681,7 @@ func collectRLSTemplateDataTypes(expr *planpb.Expr, variable string, dataTypes *
 	case *planpb.Expr_JsonContainsExpr:
 		if node.JsonContainsExpr.GetTemplateVariableName() == variable {
 			*dataTypes = append(*dataTypes, node.JsonContainsExpr.GetColumnInfo().GetElementType())
+			*expectsArray = node.JsonContainsExpr.GetOp() != planpb.JSONContainsExpr_Contains
 		}
 	}
 }
@@ -777,6 +878,12 @@ func validateRowDataByPredicate(ctx context.Context, rowData *rowData, reference
 	if err := rowData.validateRowCount(referencedFieldIDs, rowNum); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := rowData.preparePredicate(parsedExpr); err != nil {
+		return merr.Wrapf(err, "invalid RLS %s expression for %s", exprKind, operation)
+	}
 
 	for rowIdx := 0; rowIdx < rowNum; rowIdx++ {
 		if rowIdx&255 == 0 {
@@ -844,10 +951,11 @@ func (value truthValue) or(other truthValue) truthValue {
 }
 
 type fieldReader struct {
-	field        *schemapb.FieldData
-	storageData  any
+	valueAt      func(int) any
+	typeValid    bool
 	fieldName    string
 	dataType     schemapb.DataType
+	elementType  schemapb.DataType
 	validData    []bool
 	dataLen      int
 	rowCount     int
@@ -866,6 +974,10 @@ type StorageFieldData interface {
 	GetValidData() []bool
 }
 
+type storageArrayFieldData interface {
+	GetElementType() schemapb.DataType
+}
+
 type rowData struct {
 	fields        map[int64]*fieldReader
 	termMatchers  map[*planpb.TermExpr]*literalMatcher
@@ -876,8 +988,6 @@ type literalMatcher struct {
 	dataType schemapb.DataType
 	values   map[any]int
 }
-
-type neverMatchLiteral struct{}
 
 // arrayLiteralMatcher reuses target ordinals across rows. seen records the
 // evaluation generation for each ordinal, avoiding a per-row allocation.
@@ -901,26 +1011,9 @@ func newRowData(fieldsData []*schemapb.FieldData, referencedFieldIDs []int64) *r
 		if _, ok := referencedFields[fieldData.GetFieldId()]; !ok {
 			continue
 		}
-		reader := &fieldReader{
-			field:        fieldData,
-			fieldName:    fieldData.GetFieldName(),
-			dataType:     fieldData.GetType(),
-			lastLogical:  -1,
-			lastPhysical: -1,
-		}
-		if isRLSScalarType(fieldData.GetType()) {
-			reader.dataLen = rlsScalarDataLen(fieldData)
-		} else if fieldData.GetType() == schemapb.DataType_Array {
-			reader.dataLen = len(fieldData.GetScalars().GetArrayData().GetData())
-		}
-		reader.validData = fieldData.GetValidData()
-		reader.rowCount = reader.dataLen
-		reader.shapeValid = true
-		if len(reader.validData) > 0 {
-			reader.rowCount = len(reader.validData)
-			reader.shapeValid = reader.dataLen == len(reader.validData) ||
-				reader.dataLen == int(funcutil.CountValidRows(reader.validData))
-		}
+		reader := newFieldReader(fieldData.GetFieldName(), fieldData.GetType(),
+			fieldData.GetValidData(), rlsFieldDataValues(fieldData))
+		reader.elementType = fieldData.GetScalars().GetArrayData().GetElementType()
 		data.fields[fieldData.GetFieldId()] = reader
 	}
 	return data
@@ -939,22 +1032,12 @@ func newInsertRowData[T StorageFieldData](fieldsData map[int64]T, referencedFiel
 		if _, ok := referencedFields[fieldID]; !ok {
 			continue
 		}
-		storageData := fieldData.GetDataRows()
-		reader := &fieldReader{
-			storageData:  storageData,
-			fieldName:    strconv.FormatInt(fieldID, 10),
-			dataType:     fieldData.GetDataType(),
-			validData:    fieldData.GetValidData(),
-			dataLen:      rlsStorageDataLen(storageData),
-			lastLogical:  -1,
-			lastPhysical: -1,
-		}
-		reader.rowCount = reader.dataLen
-		reader.shapeValid = true
-		if len(reader.validData) > 0 {
-			reader.rowCount = len(reader.validData)
-			reader.shapeValid = reader.dataLen == len(reader.validData) ||
-				reader.dataLen == int(funcutil.CountValidRows(reader.validData))
+		reader := newFieldReader(strconv.FormatInt(fieldID, 10), fieldData.GetDataType(),
+			fieldData.GetValidData(), fieldData.GetDataRows())
+		if reader.dataType == schemapb.DataType_Array {
+			if arrayData, ok := any(fieldData).(storageArrayFieldData); ok {
+				reader.elementType = arrayData.GetElementType()
+			}
 		}
 		data.fields[fieldID] = reader
 	}
@@ -966,6 +1049,9 @@ func (d *rowData) validateRowCount(referencedFieldIDs []int64, expected int) err
 		reader, ok := d.fields[fieldID]
 		if !ok {
 			return merr.WrapErrServiceInternalMsg("RLS expression references field id %d which is not present in row data", fieldID)
+		}
+		if !reader.typeValid {
+			return merr.WrapErrServiceInternalMsg("RLS field %s has invalid storage data for type %s", reader.fieldName, reader.dataType.String())
 		}
 
 		var actual int
@@ -1009,6 +1095,11 @@ func (d *rowData) termMatcher(expr *planpb.TermExpr) (*literalMatcher, error) {
 	if d.termMatchers == nil {
 		d.termMatchers = make(map[*planpb.TermExpr]*literalMatcher)
 	}
+	for i, value := range expr.GetValues() {
+		if !canonicalScalarLiteral(expr.GetColumnInfo().GetDataType(), value) {
+			return nil, merr.WrapErrDataIntegrityMsg("RLS term literal %d does not match field type %s", i, expr.GetColumnInfo().GetDataType().String())
+		}
+	}
 	matcher, err := newLiteralMatcher(expr.GetColumnInfo().GetDataType(), expr.GetValues())
 	if err != nil {
 		return nil, err
@@ -1046,19 +1137,8 @@ func genericLiteralKey(dataType schemapb.DataType, value *planpb.GenericValue) (
 		typed, ok := value.GetVal().(*planpb.GenericValue_BoolVal)
 		return value.GetBoolVal(), ok && typed != nil
 	case typeutil.IsIntegerType(dataType):
-		switch typed := value.GetVal().(type) {
-		case *planpb.GenericValue_Int64Val:
-			if typed == nil {
-				return nil, false
-			}
-			return typed.Int64Val, true
-		case *planpb.GenericValue_FloatVal:
-			// ARRAY all/any accepts cross-numeric literals, but integer ARRAY
-			// execution currently treats floating literals as non-matching.
-			return neverMatchLiteral{}, typed != nil
-		default:
-			return nil, false
-		}
+		typed, ok := value.GetVal().(*planpb.GenericValue_Int64Val)
+		return value.GetInt64Val(), ok && typed != nil
 	case typeutil.IsTimestamptzType(dataType):
 		typed, ok := value.GetVal().(*planpb.GenericValue_Int64Val)
 		return value.GetInt64Val(), ok && typed != nil
@@ -1105,27 +1185,25 @@ func (m *literalMatcher) index(value any) (int, bool) {
 	return index, ok
 }
 
-func (m *arrayLiteralMatcher) matches(arrayValue *schemapb.ScalarField) (bool, error) {
+func (m *arrayLiteralMatcher) matches(arrayValue *schemapb.ScalarField, rowData *rowData) (bool, error) {
+	if len(m.values) == 0 {
+		_, err := visitScalarArrayElements(arrayValue, m.dataType, rowData, nil)
+		return err == nil && m.op != planpb.JSONContainsExpr_ContainsAny, err
+	}
 	if m.op == planpb.JSONContainsExpr_ContainsAny {
-		if len(m.values) == 0 {
-			return false, nil
-		}
-		return visitScalarArrayElements(arrayValue, func(value any) bool {
+		return visitScalarArrayElements(arrayValue, m.dataType, rowData, func(value any) bool {
 			_, ok := m.index(value)
 			return ok
 		})
 	}
 
-	if len(m.values) == 0 {
-		return true, nil
-	}
 	m.generation++
 	if m.generation == 0 {
 		clear(m.seen)
 		m.generation = 1
 	}
 	matched := 0
-	return visitScalarArrayElements(arrayValue, func(value any) bool {
+	return visitScalarArrayElements(arrayValue, m.dataType, rowData, func(value any) bool {
 		index, ok := m.index(value)
 		if !ok || m.seen[index] == m.generation {
 			return false
@@ -1172,72 +1250,48 @@ func (r *fieldReader) dataIndex(rowIdx int) int {
 	return physical
 }
 
-func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
+func (d *rowData) validateColumn(column *planpb.ColumnInfo) error {
 	if column == nil {
-		return nil, merr.WrapErrServiceInternalMsg("RLS expression has empty column info")
+		return merr.WrapErrServiceInternalMsg("RLS expression has empty column info")
 	}
 	if len(column.GetNestedPath()) > 0 {
-		return nil, merr.WrapErrServiceInternalMsg("RLS expression does not support nested or element-level fields")
+		return merr.WrapErrServiceInternalMsg("RLS expression does not support nested or element-level fields")
 	}
+	reader, ok := d.fields[column.GetFieldId()]
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("RLS expression references field id %d which is not present in row data", column.GetFieldId())
+	}
+	if reader.dataType != column.GetDataType() {
+		return merr.WrapErrServiceInternalMsg(
+			"RLS field %s has type %s but expression expects %s",
+			reader.fieldName,
+			reader.dataType.String(),
+			column.GetDataType().String(),
+		)
+	}
+	if reader.dataType == schemapb.DataType_Array && reader.elementType != column.GetElementType() {
+		return merr.WrapErrServiceInternalMsg(
+			"RLS array field %s has element type %s but expression expects %s",
+			reader.fieldName, reader.elementType.String(), column.GetElementType().String())
+	}
+	return nil
+}
+
+// Batch preparation validates column/storage types and binds valueAt once.
+// Reads only map the current row through its nullable layout and index it.
+func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 	reader, ok := d.fields[column.GetFieldId()]
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("RLS expression references field id %d which is not present in row data", column.GetFieldId())
 	}
-	switch reader.dataType {
-	case schemapb.DataType_Bool,
-		schemapb.DataType_Int8,
-		schemapb.DataType_Int16,
-		schemapb.DataType_Int32,
-		schemapb.DataType_Int64,
-		schemapb.DataType_Float,
-		schemapb.DataType_Double,
-		schemapb.DataType_Timestamptz,
-		schemapb.DataType_VarChar,
-		schemapb.DataType_Text:
-		if !reader.shapeValid {
-			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.fieldName)
-		}
-		if rowIdx < 0 || rowIdx >= reader.rowCount {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.fieldName, reader.rowCount)
-		}
-		dataIdx := reader.dataIndex(rowIdx)
-		if dataIdx < 0 {
-			return nil, nil
-		}
-		if reader.storageData != nil {
-			value, ok := rlsStorageValue(reader.storageData, dataIdx)
-			if !ok {
-				return nil, merr.WrapErrServiceInternalMsg("RLS field %s has invalid storage data for type %s", reader.fieldName, reader.dataType.String())
-			}
-			return value, nil
-		}
-		return rlsScalarValue(reader.field, dataIdx), nil
-	case schemapb.DataType_Array:
-		if !reader.shapeValid {
-			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.fieldName)
-		}
-		if rowIdx < 0 || rowIdx >= reader.rowCount {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.fieldName, reader.rowCount)
-		}
-		if reader.storageData != nil {
-			dataIdx := reader.dataIndex(rowIdx)
-			if dataIdx < 0 {
-				return nil, nil
-			}
-			value, ok := rlsStorageValue(reader.storageData, dataIdx)
-			if !ok {
-				return nil, merr.WrapErrServiceInternalMsg("RLS field %s has invalid storage data for type %s", reader.fieldName, reader.dataType.String())
-			}
-			return value, nil
-		}
-		value, err := arrayValue(reader, rowIdx)
-		if err != nil || value == nil {
-			return nil, err
-		}
-		return value, nil
-	default:
-		return nil, merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.fieldName, reader.dataType.String())
+	if rowIdx < 0 || rowIdx >= reader.rowCount {
+		return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.fieldName, reader.rowCount)
 	}
+	dataIdx := reader.dataIndex(rowIdx)
+	if dataIdx < 0 {
+		return nil, nil
+	}
+	return reader.valueAt(dataIdx), nil
 }
 
 func isRLSScalarType(dataType schemapb.DataType) bool {
@@ -1258,96 +1312,75 @@ func isRLSScalarType(dataType schemapb.DataType) bool {
 	}
 }
 
-func rlsScalarDataLen(field *schemapb.FieldData) int {
+func rlsFieldDataValues(field *schemapb.FieldData) any {
 	switch field.GetType() {
 	case schemapb.DataType_Bool:
-		return len(field.GetScalars().GetBoolData().GetData())
+		return field.GetScalars().GetBoolData().GetData()
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		return len(field.GetScalars().GetIntData().GetData())
+		return field.GetScalars().GetIntData().GetData()
 	case schemapb.DataType_Int64:
-		return len(field.GetScalars().GetLongData().GetData())
+		return field.GetScalars().GetLongData().GetData()
 	case schemapb.DataType_Float:
-		return len(field.GetScalars().GetFloatData().GetData())
+		return field.GetScalars().GetFloatData().GetData()
 	case schemapb.DataType_Double:
-		return len(field.GetScalars().GetDoubleData().GetData())
+		return field.GetScalars().GetDoubleData().GetData()
 	case schemapb.DataType_Timestamptz:
-		return len(field.GetScalars().GetTimestamptzData().GetData())
+		return field.GetScalars().GetTimestamptzData().GetData()
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
-		return len(field.GetScalars().GetStringData().GetData())
-	default:
-		return 0
-	}
-}
-
-func rlsScalarValue(field *schemapb.FieldData, idx int) any {
-	switch field.GetType() {
-	case schemapb.DataType_Bool:
-		return field.GetScalars().GetBoolData().GetData()[idx]
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		return field.GetScalars().GetIntData().GetData()[idx]
-	case schemapb.DataType_Int64:
-		return field.GetScalars().GetLongData().GetData()[idx]
-	case schemapb.DataType_Float:
-		return field.GetScalars().GetFloatData().GetData()[idx]
-	case schemapb.DataType_Double:
-		return field.GetScalars().GetDoubleData().GetData()[idx]
-	case schemapb.DataType_Timestamptz:
-		return field.GetScalars().GetTimestamptzData().GetData()[idx]
-	case schemapb.DataType_VarChar, schemapb.DataType_Text:
-		return field.GetScalars().GetStringData().GetData()[idx]
+		return field.GetScalars().GetStringData().GetData()
+	case schemapb.DataType_Array:
+		return field.GetScalars().GetArrayData().GetData()
 	default:
 		return nil
 	}
 }
 
-func rlsStorageDataLen(data any) int {
+func newFieldReader(name string, dataType schemapb.DataType, validData []bool, data any) *fieldReader {
+	r := &fieldReader{
+		fieldName: name, dataType: dataType, validData: validData,
+		lastLogical: -1, lastPhysical: -1,
+	}
 	switch values := data.(type) {
 	case []bool:
-		return len(values)
+		bindScalarValues(r, values)
 	case []int8:
-		return len(values)
+		bindScalarValues(r, values)
 	case []int16:
-		return len(values)
+		bindScalarValues(r, values)
 	case []int32:
-		return len(values)
+		bindScalarValues(r, values)
 	case []int64:
-		return len(values)
+		bindScalarValues(r, values)
 	case []float32:
-		return len(values)
+		bindScalarValues(r, values)
 	case []float64:
-		return len(values)
+		bindScalarValues(r, values)
 	case []string:
-		return len(values)
+		bindScalarValues(r, values)
 	case []*schemapb.ScalarField:
-		return len(values)
-	default:
-		return 0
+		r.typeValid = dataType == schemapb.DataType_Array
+		r.dataLen = len(values)
+		r.valueAt = func(idx int) any {
+			if values[idx] == nil {
+				return nil
+			}
+			return values[idx]
+		}
 	}
+	r.rowCount = r.dataLen
+	r.shapeValid = true
+	if len(validData) > 0 {
+		r.rowCount = len(validData)
+		r.shapeValid = r.dataLen == len(validData) || r.dataLen == int(funcutil.CountValidRows(validData))
+	}
+	return r
 }
 
-func rlsStorageValue(data any, idx int) (any, bool) {
-	switch values := data.(type) {
-	case []bool:
-		return values[idx], true
-	case []int8:
-		return values[idx], true
-	case []int16:
-		return values[idx], true
-	case []int32:
-		return values[idx], true
-	case []int64:
-		return values[idx], true
-	case []float32:
-		return values[idx], true
-	case []float64:
-		return values[idx], true
-	case []string:
-		return values[idx], true
-	case []*schemapb.ScalarField:
-		return values[idx], true
-	default:
-		return nil, false
-	}
+func bindScalarValues[T any](r *fieldReader, values []T) {
+	var zero T
+	_, r.typeValid = scalarLiteralKey(r.dataType, zero)
+	r.dataLen = len(values)
+	r.valueAt = func(idx int) any { return values[idx] }
 }
 
 func evalExpr(expr *planpb.Expr, rowData *rowData, rowIdx int) (truthValue, error) {
@@ -1412,8 +1445,35 @@ func evalBinaryExpr(expr *planpb.BinaryExpr, rowData *rowData, rowIdx int) (trut
 	}
 }
 
+// Column types and comparison literals are immutable across rows. Check them
+// once per batch, including branches that row evaluation may short-circuit.
+func (d *rowData) preparePredicate(expr *planpb.Expr) error {
+	switch node := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryExpr:
+		return d.preparePredicate(node.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		if err := d.preparePredicate(node.BinaryExpr.GetLeft()); err != nil {
+			return err
+		}
+		return d.preparePredicate(node.BinaryExpr.GetRight())
+	case *planpb.Expr_UnaryRangeExpr:
+		if err := d.validateColumn(node.UnaryRangeExpr.GetColumnInfo()); err != nil {
+			return err
+		}
+		dataType := node.UnaryRangeExpr.GetColumnInfo().GetDataType()
+		if !canonicalScalarLiteral(dataType, node.UnaryRangeExpr.GetValue()) {
+			return merr.WrapErrDataIntegrityMsg("RLS comparison value does not match field type %s", dataType.String())
+		}
+	case *planpb.Expr_TermExpr:
+		return d.validateColumn(node.TermExpr.GetColumnInfo())
+	case *planpb.Expr_JsonContainsExpr:
+		return d.validateColumn(node.JsonContainsExpr.GetColumnInfo())
+	}
+	return nil
+}
+
 func evalUnaryRangeExpr(expr *planpb.UnaryRangeExpr, rowData *rowData, rowIdx int) (truthValue, error) {
-	if expr.GetOp() != planpb.OpType_Equal {
+	if expr.GetOp() != planpb.OpType_Equal && expr.GetOp() != planpb.OpType_NotEqual {
 		return truthUnknown, merr.WrapErrServiceInternalMsg("unsupported RLS comparison operator %s", expr.GetOp().String())
 	}
 	rowValue, err := rowData.value(expr.GetColumnInfo(), rowIdx)
@@ -1427,7 +1487,25 @@ func evalUnaryRangeExpr(expr *planpb.UnaryRangeExpr, rowData *rowData, rowIdx in
 	if err != nil {
 		return truthUnknown, err
 	}
+	if expr.GetOp() == planpb.OpType_NotEqual {
+		match = !match
+	}
 	return truthValueFromBool(match), nil
+}
+
+func canonicalScalarLiteral(dataType schemapb.DataType, value *planpb.GenericValue) bool {
+	switch {
+	case typeutil.IsBoolType(dataType):
+		return planparserv2.IsBool(value)
+	case typeutil.IsIntegerType(dataType), typeutil.IsTimestamptzType(dataType):
+		return planparserv2.IsInteger(value)
+	case typeutil.IsFloatingType(dataType):
+		return planparserv2.IsFloating(value)
+	case typeutil.IsStringType(dataType):
+		return planparserv2.IsString(value)
+	default:
+		return false
+	}
 }
 
 func evalTermExpr(expr *planpb.TermExpr, rowData *rowData, rowIdx int) (truthValue, error) {
@@ -1444,9 +1522,6 @@ func evalTermExpr(expr *planpb.TermExpr, rowData *rowData, rowIdx int) (truthVal
 	matcher, err := rowData.termMatcher(expr)
 	if err != nil {
 		return truthUnknown, err
-	}
-	if _, usable := scalarLiteralKey(matcher.dataType, rowValue); !usable {
-		return truthUnknown, merr.WrapErrServiceInternalMsg("RLS field value type %T does not match expression type %s", rowValue, matcher.dataType.String())
 	}
 	_, matched := matcher.index(rowValue)
 	return truthValueFromBool(matched), nil
@@ -1473,7 +1548,7 @@ func evalJSONContainsExpr(expr *planpb.JSONContainsExpr, rowData *rowData, rowId
 		if err != nil {
 			return truthUnknown, err
 		}
-		matched, err := matcher.matches(arrayValue)
+		matched, err := matcher.matches(arrayValue, rowData)
 		if err != nil {
 			return truthUnknown, err
 		}
@@ -1574,42 +1649,45 @@ func genericNumericValue(value *planpb.GenericValue) (float64, bool) {
 	}
 }
 
-func arrayValue(reader *fieldReader, rowIdx int) (*schemapb.ScalarField, error) {
-	data := reader.field.GetScalars().GetArrayData().GetData()
-	dataIdx := reader.dataIndex(rowIdx)
-	if dataIdx < 0 {
-		return nil, nil
-	}
-	if dataIdx >= len(data) {
-		return nil, merr.WrapErrServiceInternalMsg("RLS row index %d maps outside data length %d", rowIdx, len(data))
-	}
-	return data[dataIdx], nil
-}
-
-func visitScalarArrayElements(arrayValue *schemapb.ScalarField, visit func(any) bool) (bool, error) {
+// A nil visit validates the row without scanning elements, for empty targets.
+func visitScalarArrayElements(arrayValue *schemapb.ScalarField, expected schemapb.DataType, rowData *rowData, visit func(any) bool) (bool, error) {
 	switch data := arrayValue.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
-		return containsArrayElement(data.BoolData.GetData(), func(value bool) bool { return visit(value) }), nil
+		if typeutil.IsBoolType(expected) {
+			return containsValidArrayElement(rowData, arrayValue, data.BoolData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_IntData:
-		return containsArrayElement(data.IntData.GetData(), func(value int32) bool { return visit(value) }), nil
+		if expected == schemapb.DataType_Int8 || expected == schemapb.DataType_Int16 || expected == schemapb.DataType_Int32 {
+			return containsValidArrayElement(rowData, arrayValue, data.IntData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_LongData:
-		return containsArrayElement(data.LongData.GetData(), func(value int64) bool { return visit(value) }), nil
+		if expected == schemapb.DataType_Int64 {
+			return containsValidArrayElement(rowData, arrayValue, data.LongData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_FloatData:
-		return containsArrayElement(data.FloatData.GetData(), func(value float32) bool { return visit(value) }), nil
+		if expected == schemapb.DataType_Float {
+			return containsValidArrayElement(rowData, arrayValue, data.FloatData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_DoubleData:
-		return containsArrayElement(data.DoubleData.GetData(), func(value float64) bool { return visit(value) }), nil
+		if expected == schemapb.DataType_Double {
+			return containsValidArrayElement(rowData, arrayValue, data.DoubleData.GetData(), visit)
+		}
 	case *schemapb.ScalarField_StringData:
-		return containsArrayElement(data.StringData.GetData(), func(value string) bool { return visit(value) }), nil
-	default:
-		return false, merr.WrapErrServiceInternalMsg("unsupported RLS array element type %T", data)
-	}
-}
-
-func containsArrayElement[T any](values []T, matches func(T) bool) bool {
-	for _, value := range values {
-		if matches(value) {
-			return true
+		if typeutil.IsStringType(expected) {
+			return containsValidArrayElement(rowData, arrayValue, data.StringData.GetData(), visit)
 		}
 	}
-	return false
+	return false, merr.WrapErrServiceInternalMsg("RLS array data does not match element type %s", expected.String())
+}
+
+func containsValidArrayElement[T any](rowData *rowData, arrayValue *schemapb.ScalarField, values []T, matches func(any) bool) (bool, error) {
+	if matches == nil {
+		return false, nil
+	}
+	for _, value := range values {
+		if matches(value) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

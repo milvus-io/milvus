@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -99,9 +100,7 @@ func TestRLSMetadataAckCallbacks(t *testing.T) {
 		return actual.DBID == principal.DBID &&
 			actual.CollectionID == principal.CollectionID &&
 			actual.PrincipalName == principal.PrincipalName &&
-			actual.Tags["tenant"] == rlsutil.NewStringTagValue("acme") &&
-			actual.Tags["level"] == rlsutil.NewInt64TagValue(3) &&
-			actual.Tags["score"] == rlsutil.NewDoubleTagValue(0.75)
+			assert.ObjectsAreEqual(principal.Tags, actual.Tags)
 	})).Return(nil).Once()
 	alterPrincipal := message.NewAlterRLSMetadataMessageBuilderV2().
 		WithHeader(&message.AlterRLSMetadataMessageHeader{

@@ -45,18 +45,15 @@ func TestRLSPolicyActionValuesMatchPublicProto(t *testing.T) {
 	}
 }
 
-func TestRLSPolicyMapConversions(t *testing.T) {
-	policies := []*RLSPolicy{
-		{PolicyID: 2, PolicyName: "policy_b", Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionSearch}},
-		nil,
-		{PolicyID: 1, PolicyName: "policy_a", Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}},
+func TestRLSPolicyMapToSlice(t *testing.T) {
+	policyMap := map[string]*RLSPolicy{
+		"policy_b": {PolicyID: 2, PolicyName: "policy_b", Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionSearch}},
+		"nil":      nil,
+		"policy_a": {PolicyID: 1, PolicyName: "policy_a", Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}},
 	}
 
-	policyMap := RLSPolicyMapFromSlice(policies)
-	require.Len(t, policyMap, 2)
-	require.NotSame(t, policies[0], policyMap["policy_b"])
-
 	policyList := RLSPolicyMapToSlice(policyMap)
+	require.Len(t, policyList, 2)
 	require.Equal(t, []string{"policy_a", "policy_b"}, []string{policyList[0].PolicyName, policyList[1].PolicyName})
 	require.NotSame(t, policyMap["policy_a"], policyList[0])
 

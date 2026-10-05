@@ -19,9 +19,6 @@ package rls
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -44,13 +41,6 @@ func SearchAction(isAdvanced bool, isIterator bool) rlsutil.PolicyAction {
 		return rlsutil.PolicyActionSearchIterator
 	}
 	return rlsutil.PolicyActionSearch
-}
-
-func MergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
-	if rlsPredicate != nil {
-		rlsPredicate = proto.Clone(rlsPredicate).(*planpb.Expr)
-	}
-	return mergePredicateToPlan(plan, rlsPredicate, mergePredicate)
 }
 
 // MergeNormalizedPredicateToPlan merges parser- and RLS-rewritten predicates
@@ -84,21 +74,6 @@ func mergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr, merg
 		return merr.WrapErrServiceInternalMsg("failed to merge RLS predicate into unsupported plan node %T", node)
 	}
 	return nil
-}
-
-func mergePredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *planpb.Expr {
-	if userPredicate == nil || rewriter.IsAlwaysTrueExpr(userPredicate) {
-		return rlsPredicate
-	}
-	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
-		return userPredicate
-	}
-	switch wrapper := userPredicate.GetExpr().(type) {
-	case *planpb.Expr_RandomSampleExpr:
-		wrapper.RandomSampleExpr.Predicate = mergePredicate(wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate)
-		return userPredicate
-	}
-	return rewriter.RewriteExpr(combinePredicate(userPredicate, rlsPredicate))
 }
 
 func mergeNormalizedPredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *planpb.Expr {
@@ -147,10 +122,6 @@ func alwaysFalsePredicate() *planpb.Expr {
 	}}}
 }
 
-func ValidateCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
-	return validateCheckForWrite(ctx, defaultManager, collectionID, principalName, action, fieldsData, schemaHelper, rowNum, operation)
-}
-
 func ResolveCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, schemaHelper *typeutil.SchemaHelper, operation string) (*planpb.Expr, error) {
 	checkExpr, err := defaultManager.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
 	if err != nil {
@@ -160,18 +131,4 @@ func ResolveCheckForWrite(ctx context.Context, collectionID UniqueID, principalN
 		return nil, err
 	}
 	return checkExpr, nil
-}
-
-func validateCheckForWrite(ctx context.Context, m *manager, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
-	checkExpr, err := m.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
-	if err != nil {
-		return err
-	}
-	if err := rlsutil.ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
-		return err
-	}
-	if checkExpr == nil {
-		return nil
-	}
-	return rlsutil.ValidateRowsByPredicate(ctx, fieldsData, rowNum, checkExpr, operation, "check")
 }

@@ -104,20 +104,6 @@ func (m *manager) policyRefreshBackoffError(collectionID UniqueID, now time.Time
 	return merr.WrapErrServiceUnavailableMsg("RLS policy metadata refresh is backing off for collection %d", collectionID)
 }
 
-func (m *manager) refreshPolicies(collectionID UniqueID) error {
-	if m == nil {
-		return merr.WrapErrServiceInternalMsg("failed to refresh RLS policy snapshot without manager")
-	}
-	if collectionID == 0 {
-		return merr.WrapErrServiceInternalMsg("failed to refresh RLS policy snapshot with empty collection id")
-	}
-	state, generation := m.beginPolicyRefresh(collectionID)
-	if state == nil {
-		return merr.WrapErrServiceUnavailableMsg("RLS collection %d was removed before policy refresh", collectionID)
-	}
-	return m.refreshPoliciesAtGeneration(collectionID, state, generation)
-}
-
 func (m *manager) refreshPoliciesAtGeneration(collectionID UniqueID, state *collectionState, generation uint64) error {
 	if !m.policyRefreshCurrent(collectionID, state, generation) {
 		return merr.WrapErrServiceUnavailableMsg("RLS policy metadata changed before refresh for collection %d", collectionID)
