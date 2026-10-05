@@ -299,6 +299,32 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
+	s.True(provider.truncate)
+
+	// Truncation unset defaults to true; explicit false is kept
+	{
+		unsetSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_Unknown,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
+				{Key: models.ModelNameParamKey, Value: TestModel},
+				{Key: models.CredentialParamKey, Value: "mock"},
+				{Key: models.DimParamKey, Value: "1024"},
+			},
+		}
+		unsetProvider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], unsetSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db", BatchFactor: 5})
+		s.NoError(err)
+		s.True(unsetProvider.truncate)
+
+		unsetSchema.Params = append(unsetSchema.Params, &commonpb.KeyValuePair{Key: models.TruncationParamKey, Value: "false"})
+		falseProvider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], unsetSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db", BatchFactor: 5})
+		s.NoError(err)
+		s.False(falseProvider.truncate)
+	}
 
 	// Invalid truncation
 	{
