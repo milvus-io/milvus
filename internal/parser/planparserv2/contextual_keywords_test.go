@@ -285,9 +285,10 @@ func TestContextualKeywordsSpatialPlans(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				helper := contextualKeywordSchema(t, name, schemapb.DataType_Geometry, true)
 				query := fmt.Sprintf(`%s(%s, "POINT(0 0)")`, name, name)
-				if tc.op == planpb.GISFunctionFilterExpr_DWithin {
+				switch tc.op {
+				case planpb.GISFunctionFilterExpr_DWithin:
 					query = fmt.Sprintf(`%s(%s, "POINT(0 0)", 5)`, name, name)
-				} else if tc.op == planpb.GISFunctionFilterExpr_STIsValid {
+				case planpb.GISFunctionFilterExpr_STIsValid:
 					query = fmt.Sprintf("%s(%s)", name, name)
 				}
 				expr, err := ParseExpr(helper, query, nil)
