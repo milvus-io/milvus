@@ -20,6 +20,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -94,6 +95,50 @@ TEST(RegexRequiredPrefix, IndexRequirementsKeepIndependentSelectiveLiterals) {
     EXPECT_TRUE(PartialRegexMatcher(std::string(4097, 'a'))
                     .RequiredIndexLiterals()
                     .empty());
+}
+
+TEST(RegexRequiredPrefix, NullableRequirementsAndPreparationCache) {
+    for (const auto& pattern :
+         {std::string(".*"), std::string("RARE|"),
+          "(?:" + std::string(3000, 'x') + ")?"}) {
+        PartialRegexMatcher matcher(pattern);
+        ASSERT_TRUE(matcher(std::string{}));
+        EXPECT_TRUE(matcher.RequiredLiteral().empty());
+        EXPECT_TRUE(matcher.RequiredIndexLiterals().empty());
+    }
+    // Interleave keys, unsupported forms, embedded NULs, and an over-budget
+    // pattern. Cache eviction or bypass must not change the analysis result.
+    const std::vector<std::string> patterns{
+        ".*RARE", "foo|bar", "", "(?i)RARE", std::string("a\\x00b"),
+        std::string("a\\x00c"), std::string("a\0b", 3),
+        std::string(4097, 'x'), ".*OTHER", ".*RARE"};
+    for (const auto& pattern : patterns) {
+        const auto expected =
+            PartialRegexMatcher(pattern).RequiredIndexLiterals();
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(pattern), expected);
+        auto copy = PartialRegexMatcher::PrepareIndexLiterals(pattern);
+        copy.clear();
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(pattern), expected);
+    }
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_ANY_THROW(PartialRegexMatcher::PrepareIndexLiterals("["));
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(".*RARE"),
+                  (std::vector<std::string>{"RARE"}));
+    }
+}
+
+TEST(RegexRequiredPrefix, PreparationCacheIsThreadLocal) {
+    auto exercise = [](const std::string& literal) {
+        for (int i = 0; i < 100; ++i) {
+            EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(".*" + literal),
+                      (std::vector<std::string>{literal}));
+            EXPECT_TRUE(PartialRegexMatcher::PrepareIndexLiterals(".*").empty());
+        }
+    };
+    std::thread first(exercise, "FIRST");
+    std::thread second(exercise, "SECOND");
+    first.join();
+    second.join();
 }
 
 TEST(RegexRequiredPrefix, RawScanPreservesSelectiveInteriorLiterals) {
@@ -506,7 +551,9 @@ TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {
         ASSERT_LE(prefix.size(), 64);
         const auto literal = matcher.RequiredLiteral();
         ASSERT_LE(literal.size(), 4096);
-        const auto requirements = matcher.RequiredIndexLiterals();
+        const auto requirements =
+            PartialRegexMatcher::PrepareIndexLiterals(pattern);
+        EXPECT_EQ(requirements, matcher.RequiredIndexLiterals());
         ASSERT_LE(requirements.size(), 3);
         std::vector<bool> index_candidates(rows.size(), true);
         for (const auto& requirement : requirements) {
@@ -639,6 +686,7 @@ TEST(RegexRequiredPrefix, DISABLED_AnalysisBenchmark) {
         {"short", R"(RARE\d+END)"},
         {"empty_branch", "RARE|"},
         {"optional", "(?:RARE123END)?"},
+        {"nullable_long", "(?:" + std::string(3000, 'x') + ")?"},
         {"long_run", ".*" + std::string(3000, 'x') + "RARE123END"},
         {"long_repeat", ".*x{500}COMMONRARE123END"},
         {"quoted", R"(.*\QRARE123END\E)"},
@@ -649,29 +697,40 @@ TEST(RegexRequiredPrefix, DISABLED_AnalysisBenchmark) {
     RecordProperty("iterations_per_sample", iterations);
     for (const auto& [name, pattern] : workloads) {
         PartialRegexMatcher matcher(pattern);
-        for (bool prefix : {false, true}) {
-            const auto expected = prefix ? matcher.RequiredPrefix()
-                                         : matcher.RequiredLiteral();
+        const std::string modes[]{"literal", "prefix", "index"};
+        for (int mode = 0; mode < 3; ++mode) {
+            auto extract_size = [&]() {
+                if (mode == 0) {
+                    return matcher.RequiredLiteral().size();
+                }
+                if (mode == 1) {
+                    return matcher.RequiredPrefix().size();
+                }
+                size_t size = 0;
+                for (const auto& part : matcher.RequiredIndexLiterals()) {
+                    size += part.size();
+                }
+                return size;
+            };
+            const auto expected = extract_size();
             std::vector<double> samples;
             for (int round = 0; round < 10; ++round) {
                 size_t bytes = 0;
                 const auto start = std::chrono::steady_clock::now();
                 for (int i = 0; i < iterations; ++i) {
-                    bytes += (prefix ? matcher.RequiredPrefix()
-                                     : matcher.RequiredLiteral())
-                                 .size();
+                    bytes += extract_size();
                 }
                 const auto us = std::chrono::duration<double, std::micro>(
                                     std::chrono::steady_clock::now() - start)
                                     .count() /
                                 iterations;
-                ASSERT_EQ(bytes, iterations * expected.size());
+                ASSERT_EQ(bytes, iterations * expected);
                 if (round > 0) {
                     samples.push_back(us);
                 }
             }
             std::sort(samples.begin(), samples.end());
-            RecordProperty(name + (prefix ? "_prefix_us" : "_literal_us"),
+            RecordProperty(name + "_" + modes[mode] + "_us",
                            std::to_string(samples[samples.size() / 2]));
         }
     }
@@ -705,6 +764,7 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
         {"long_literal", ".*x{500}COMMONRARE123END"},
         {"rare_prefix", "RARE.*COMMON"},
         {"no_literal", ".*"},
+        {"nullable_long", "(?:" + std::string(3000, 'x') + ")?"},
         {"empty_branch", "RARE|"},
         {"zero_hits", "ABSENT.*"},
     };
@@ -712,20 +772,29 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
     RecordProperty("bytes", std::to_string(bytes));
     RecordProperty("sa_sample_rate", 8);
     RecordProperty("fmindex_cost_ratio", "0.001");
-    const std::string modes[]{"full_re2", "raw", "prefix_fm", "literal_fm"};
+    const std::string modes[]{"full_re2",
+                              "raw",
+                              "prefix_fm",
+                              "literal_fm",
+                              "cached_cold_fm",
+                              "cached_warm_fm"};
     for (const auto& [name, pattern] : workloads) {
-        // Mirror separate wrapper calls: the guard and candidate generation
-        // each compile/analyze/count, in addition to the canonical matcher.
+        // Mirror separate wrapper calls: uncached modes prepare independently;
+        // cached modes reuse requirements, but always count against this index.
         // A declined FM guard uses the production raw literal + Volnitsky
         // prefilter, so improvements are not inflated by a pure RE2 baseline.
-        auto run = [&](int mode) {
-            PartialRegexMatcher matcher(pattern);
+        const std::string variants[]{pattern, pattern + "(?:)"};
+        auto run = [&](int mode, const std::string& query) {
+            PartialRegexMatcher matcher(query);
             auto select = [&]() {
-                PartialRegexMatcher analysis(pattern);
-                auto parts = mode == 3 ? analysis.RequiredIndexLiterals()
-                                       : std::vector<std::string>{};
+                std::vector<std::string> parts;
+                if (mode >= 4) {
+                    parts = PartialRegexMatcher::PrepareIndexLiterals(query);
+                } else if (mode == 3) {
+                    parts = PartialRegexMatcher(query).RequiredIndexLiterals();
+                }
                 if (mode == 2) {
-                    auto prefix = analysis.RequiredPrefix();
+                    auto prefix = PartialRegexMatcher(query).RequiredPrefix();
                     if (!prefix.empty()) {
                         parts.push_back(std::move(prefix));
                     }
@@ -781,18 +850,36 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
             return std::make_tuple(
                 std::move(candidates), candidate_count, checks, accepted);
         };
-        auto [expected, unused_count, unused_checks, unused_accepted] = run(0);
-        std::vector<double> times[4];
+        auto [expected, unused_count, unused_checks, unused_accepted] =
+            run(0, pattern);
+        std::vector<double> times[6];
         // One warmup and nine samples per mode, rotating their order.
+        // Ten queries per sample reduce single-query scheduling noise.
+        constexpr int queries_per_sample = 10;
+        RecordProperty("queries_per_sample", queries_per_sample);
         for (int round = 0; round < 10; ++round) {
-            for (int offset = 0; offset < 4; ++offset) {
-                const int mode = (round + offset) % 4;
+            for (int offset = 0; offset < 6; ++offset) {
+                const int mode = (round + offset) % 6;
+                // Set cache state outside timing. Cold still benefits from
+                // reuse between this query's guard and candidate generation.
+                if (mode >= 4) {
+                    PartialRegexMatcher::PrepareIndexLiterals(
+                        mode == 4 ? "__evict_benchmark_cache__" : pattern);
+                }
                 const auto start = std::chrono::steady_clock::now();
-                auto [actual, candidates, checks, accepted] = run(mode);
+                auto result = run(mode, pattern);
+                for (int query = 1; query < queries_per_sample; ++query) {
+                    // Equivalent regexes alternate so cold preparation misses
+                    // on EVERY query; warm mode intentionally reuses one key.
+                    result =
+                        run(mode, mode == 5 ? pattern : variants[query % 2]);
+                }
+                auto [actual, candidates, checks, accepted] = std::move(result);
                 const auto elapsed =
                     std::chrono::duration<double, std::micro>(
                         std::chrono::steady_clock::now() - start)
-                        .count();
+                        .count() /
+                    queries_per_sample;
                 ASSERT_EQ(actual, expected) << name << " mode=" << modes[mode];
                 if (round > 0) {
                     times[mode].push_back(elapsed);
@@ -806,7 +893,7 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
                 }
             }
         }
-        for (int mode = 0; mode < 4; ++mode) {
+        for (int mode = 0; mode < 6; ++mode) {
             std::sort(times[mode].begin(), times[mode].end());
             RecordProperty(name + "_" + modes[mode] + "_us",
                            std::to_string(times[mode][4]));

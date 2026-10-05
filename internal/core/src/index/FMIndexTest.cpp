@@ -2142,6 +2142,28 @@ TEST(FMIndex, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
     EXPECT_TRUE(candidates[500]);
 }
 
+TEST(FMIndex, RegexPreparationDoesNotCacheIndexStatistics) {
+    std::vector<std::string> first_rows(1000, std::string(500, 'x') + "bar");
+    first_rows[7] = "foo" + first_rows[7];
+    std::vector<std::string> second_rows(1000, "foo" + std::string(500, 'x'));
+    second_rows[9] += "bar";
+    auto first = MakeRawDataIndex(first_rows);
+    auto second = MakeRawDataIndex(second_rows);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        EXPECT_TRUE(first->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(second->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        // The same cached requirements choose different rarest fragments.
+        const auto first_candidates =
+            first->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        const auto second_candidates =
+            second->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        EXPECT_EQ(first_candidates.count(), 1);
+        EXPECT_TRUE(first_candidates[7]);
+        EXPECT_EQ(second_candidates.count(), 1);
+        EXPECT_TRUE(second_candidates[9]);
+    }
+}
+
 TEST(FMIndex, ExecutorRegexFallbackNegationAndInvalidPattern) {
     std::vector<std::string> rows(200, std::string(500, 'x'));
     rows[0] = "";
@@ -2242,6 +2264,7 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
         {"long_literal", ".*x{500}COMMONRARE123END"},
         {"rare_prefix", "RARE.*COMMON"},
         {"no_literal", ".*"},
+        {"nullable_long", "(?:" + std::string(3000, 'x') + ")?"},
         {"empty_branch", "RARE|"},
         {"zero_hits", "ABSENT.*"},
     };
@@ -2257,7 +2280,7 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
             candidate_index->PatternMatch(pattern, proto::plan::RegexMatch);
         RecordProperty(name + "_candidates",
                        static_cast<int>(candidates.count()));
-        auto measure = [&](const SealedFMMatch& fixture) {
+        auto measure = [&](const SealedFMMatch& fixture, bool cold = false) {
             auto expression = MakeMatchTypedExpr(fixture.schema,
                                                  fixture.varchar_id,
                                                  pattern,
@@ -2267,6 +2290,10 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
                 DEFAULT_PLANNODE_ID, expression);
             std::vector<double> times;
             for (int iteration = 0; iteration < 8; ++iteration) {
+                if (cold) {
+                    PartialRegexMatcher::PrepareIndexLiterals(
+                        "__evict_benchmark_cache__");
+                }
                 const auto start = std::chrono::steady_clock::now();
                 auto got = milvus::query::ExecuteQueryExpr(
                     node, fixture.segment.get(), rows.size(), MAX_TIMESTAMP);
@@ -2294,6 +2321,8 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
                            expression, indexed.segment.get(), rows.size()));
         RecordProperty(name + "_scan_us", std::to_string(measure(scan)));
         RecordProperty(name + "_indexed_us", std::to_string(measure(indexed)));
+        RecordProperty(name + "_indexed_cold_us",
+                       std::to_string(measure(indexed, true)));
     }
 }
 

@@ -63,7 +63,7 @@ CandidateLiterals(const std::string& pattern, proto::plan::OpType op) {
     if (op == proto::plan::OpType::Match) {
         return split_by_wildcard(pattern);
     }
-    return PartialRegexMatcher(pattern).RequiredIndexLiterals();
+    return PartialRegexMatcher::PrepareIndexLiterals(pattern);
 }
 
 // Trailing slack appended to the mmap'd blob file so any word-granular read at
