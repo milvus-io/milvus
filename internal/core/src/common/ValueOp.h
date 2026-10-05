@@ -22,7 +22,7 @@ class ThreeValuedLogicOp {
     // and store the result in the left column vector
     static void
     Not(const ColumnVectorPtr& left) {
-        auto& data = left->GetMutableBitmap();
+        auto data = left->GetBitmapWriteView();
         const auto& valid_data = left->GetValidBitmap();
 
         data.flip();
@@ -54,8 +54,8 @@ class ThreeValuedLogicOp {
     static void
     And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
-        auto& left_data = left->GetMutableBitmap();
-        auto& left_valid = left->GetMutableValidBitmap();
+        auto left_data = left->GetBitmapWriteView();
+        auto left_valid = left->GetValidBitmapWriteView();
         const auto& right_data = right->GetBitmap();
         const auto& right_valid = right->GetValidBitmap();
 
@@ -104,8 +104,8 @@ class ThreeValuedLogicOp {
     static void
     Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
-        auto& left_data = left->GetMutableBitmap();
-        auto& left_valid = left->GetMutableValidBitmap();
+        auto left_data = left->GetBitmapWriteView();
+        auto left_valid = left->GetValidBitmapWriteView();
         const auto& right_data = right->GetBitmap();
         const auto& right_valid = right->GetValidBitmap();
 

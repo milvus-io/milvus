@@ -3863,6 +3863,91 @@ TEST(BitsetViewStatsTest, BulkWritersInvalidateCachedWindows) {
     EXPECT_TRUE(window[3]);
 }
 
+TEST(BitsetWriteViewTest, NestedWindowsInvalidateReadStatistics) {
+    StatsOwner bits(193, false);
+    bits.set(6);
+    bits.set(137);
+    auto read = bits.read_view(7, 130);
+    auto write = bits.write_view(7, 130);
+    auto nested = write.write_view(63, 65);
+    auto nested_read = nested.read_view();
+    EXPECT_EQ(read.count(), 0);
+    EXPECT_TRUE(nested_read.none());
+    nested.set();
+    EXPECT_EQ(read.count(), 65);
+    EXPECT_TRUE(nested_read.all());
+    EXPECT_TRUE(bits[6]);
+    EXPECT_TRUE(bits[137]);
+    nested.flip();
+    EXPECT_TRUE(read.none());
+    EXPECT_EQ(nested_read.count(), 0);
+
+    auto proxy = nested[64];
+    auto copied = nested;
+    EXPECT_EQ(read.count(), 0);
+    proxy = true;
+    EXPECT_EQ(read.count(), 1);
+    EXPECT_TRUE(copied[64]);
+    StatsOwner moved(std::move(bits));
+    copied.set(0);
+    EXPECT_EQ(read.count(), 2);
+    EXPECT_TRUE(moved[70]);
+    EXPECT_TRUE(moved[134]);
+}
+
+TEST(BitsetWriteViewTest, BatchWritesAndPointerEscapeKeepReadsCurrent) {
+    StatsOwner bits(193, false);
+    auto read = bits.read_view(7, 65);
+    auto write = bits.write_view(7, 65);
+    EXPECT_EQ(read.count(), 0);
+    {
+        auto scope = write.scoped_write();
+        write[0] = true;
+        EXPECT_EQ(read.count(), 1);
+        {
+            auto nested = write.write_view(1, 64);
+            auto nested_scope = nested.scoped_write();
+            nested.set();
+        }
+        EXPECT_TRUE(read.all());
+    }
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(read.count(), 65);
+    EXPECT_EQ(read.count(), 65);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    auto* raw = write.data();
+    raw[0] = 0;
+    EXPECT_EQ(read.count(), 8);
+    raw[1] = 0;
+    EXPECT_TRUE(read.none());
+}
+
+TEST(BitsetWriteViewTest, UnalignedKernelsPreserveNeighborsAndCachedCounts) {
+    StatsOwner bits(193, true), source(149, false);
+    source.set(5, 65, true);
+    auto write = bits.write_view(7, 65);
+    auto read = write.read_view();
+    auto rhs = source.read_view(4, 65);
+    EXPECT_EQ(read.count(), 65);
+    write.inplace_and(rhs, write.size());
+    EXPECT_EQ(read.count(), 64);
+    write.inplace_and_flip(rhs, write.size());
+    EXPECT_EQ(read.count(), 1);
+    write.inplace_or(rhs, write.size());
+    EXPECT_TRUE(read.all());
+    write.inplace_xor(rhs, write.size());
+    EXPECT_EQ(read.count(), 1);
+    write.inplace_sub(rhs, write.size());
+    EXPECT_EQ(read.count(), 1);
+    const int64_t data[] = {1, 3, 0, 5};
+    auto output = write.write_view(0, 4);
+    output.inplace_compare_val<int64_t, milvus::bitset::CompareOpType::GT>(
+        data, 4, 2);
+    EXPECT_EQ(read.count(), 2);
+    EXPECT_TRUE(bits[6]);
+    EXPECT_TRUE(bits[72]);
+}
+
 }  // namespace
 
 int

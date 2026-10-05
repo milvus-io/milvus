@@ -248,19 +248,17 @@ class SetElement : public MultiElement {
     void
     FilterChunk(const T* data,
                 const int size,
-                TargetBitmap& res,
-                const size_t res_offset = 0) const {
+                TargetBitmapWriteView res) const {
         auto res_write_scope = res.scoped_write();
-
         for (int i = 0; i < size; ++i) {
             if constexpr (std::is_same_v<T, std::string>) {
                 // Use string_view to avoid copying into the hash function
                 if (values_.find(std::string_view(data[i])) != values_.end()) {
-                    res[res_offset + i] = true;
+                    res[i] = true;
                 }
             } else {
                 if (values_.find(data[i]) != values_.end()) {
-                    res[res_offset + i] = true;
+                    res[i] = true;
                 }
             }
         }
@@ -272,13 +270,11 @@ class SetElement : public MultiElement {
     void
     FilterChunk(const std::string_view* data,
                 const int size,
-                TargetBitmap& res,
-                const size_t res_offset = 0) const {
+                TargetBitmapWriteView res) const {
         auto res_write_scope = res.scoped_write();
-
         for (int i = 0; i < size; ++i) {
             if (values_.find(data[i]) != values_.end()) {
-                res[res_offset + i] = true;
+                res[i] = true;
             }
         }
     }
@@ -423,15 +419,13 @@ class SimdBatchElement : public MultiElement {
     void
     FilterChunk(const T* data,
                 const int size,
-                TargetBitmap& res,
-                const size_t res_offset = 0) const {
+                TargetBitmapWriteView res) const {
         auto res_write_scope = res.scoped_write();
-
         if (vals_.empty() || size <= 0) {
             return;
         }
 
-        int offset = res_offset;
+        int offset = res.offset();
         int start = 0;
 
         // Head: scalar for unaligned leading bits (up to 7 rows)
@@ -440,7 +434,7 @@ class SimdBatchElement : public MultiElement {
             int head = std::min(size, 8 - bit_offset);
             for (int i = 0; i < head; ++i) {
                 if (std::binary_search(vals_.begin(), vals_.end(), data[i])) {
-                    res[res_offset + i] = true;
+                    res[i] = true;
                 }
             }
             start = head;

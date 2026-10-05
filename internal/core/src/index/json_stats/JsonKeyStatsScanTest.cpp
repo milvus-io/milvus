@@ -253,18 +253,16 @@ TEST_P(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndHonorPinPolicy) {
     auto predicate = [&](const std::string_view* data,
                          ValidityView validity,
                          int64_t size,
-                         TargetBitmap& res,
-                         TargetBitmap& valid_res,
-                         const size_t res_offset,
-                         const size_t valid_res_offset,
+                         TargetBitmapWriteView res,
+                         TargetBitmapWriteView valid_res,
                          std::string_view target) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
 
         EXPECT_EQ(data, fixture.trace->last_values);
         for (int64_t i = 0; i < size; ++i) {
-            valid_res[valid_res_offset + i] = validity[i];
-            res[res_offset + i] = validity[i] && data[i] == target;
+            valid_res[i] = validity[i];
+            res[i] = validity[i] && data[i] == target;
         }
     };
     EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
@@ -274,8 +272,6 @@ TEST_P(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndHonorPinPolicy) {
                   nullptr,
                   result,
                   valid,
-                  0,
-                  0,
                   std::string_view("match")),
               rows);
     EXPECT_EQ(fixture.trace->scans, 1);
@@ -306,29 +302,26 @@ TEST_P(JsonKeyStatsScanTest, BinaryStringValuesKeepEmptyAndEmbeddedNulBytes) {
     auto predicate = [&](const std::string_view* data,
                          ValidityView validity,
                          int64_t size,
-                         TargetBitmap& res,
-                         TargetBitmap&,
-                         const size_t res_offset,
-                         const size_t) {
+                         TargetBitmapWriteView res,
+                         TargetBitmapWriteView) {
         auto res_write_scope = res.scoped_write();
 
         EXPECT_EQ(data, fixture.trace->last_values);
         EXPECT_FALSE(validity);
         for (int64_t i = 0; i < size; ++i) {
             EXPECT_EQ(data[i], values[row++]);
-            res[res_offset + i] = true;
+            res[i] = true;
         }
     };
-    EXPECT_EQ(
-        stats->ExecutorForShreddingData<std::string_view>(
-            nullptr, "test_path", predicate, nullptr, result, valid, 0, 0),
-        4);
+    EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
+                  nullptr, "test_path", predicate, nullptr, result, valid),
+              4);
     EXPECT_EQ(row, 4);
     EXPECT_EQ(result.count(), 4);
 }
 
 TEST_P(JsonKeyStatsScanTest,
-       OutputOffsetsPreserveNeighborsAndInvalidateCounts) {
+       OutputWindowsPreserveNeighborsAndInvalidateCounts) {
     const std::vector<std::string> values{
         "match", "no", "match", "no", "match"};
     auto fixture = MakeColumn({2, 3}, values, DataType::STRING, true);
@@ -341,19 +334,23 @@ TEST_P(JsonKeyStatsScanTest,
     auto predicate = [](const std::string_view* data,
                         ValidityView validity,
                         int64_t size,
-                        TargetBitmap& res,
-                        TargetBitmap& valid_res,
-                        size_t res_offset,
-                        size_t valid_res_offset) {
+                        TargetBitmapWriteView res,
+                        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (int64_t i = 0; i < size; ++i) {
-            valid_res[valid_res_offset + i] = validity[i];
-            res[res_offset + i] = validity[i] && data[i] == "match";
+            valid_res[i] = validity[i];
+            res[i] = validity[i] && data[i] == "match";
         }
     };
-    ASSERT_EQ(
-        stats->ExecutorForShreddingData<std::string_view>(
-            nullptr, "test_path", predicate, nullptr, result, valid, 3, 5),
-        values.size());
+    ASSERT_EQ(stats->ExecutorForShreddingData<std::string_view>(
+                  nullptr,
+                  "test_path",
+                  predicate,
+                  nullptr,
+                  result.write_view(3, 5),
+                  valid.write_view(5, 5)),
+              values.size());
     size_t result_count = 8, valid_count = 12;
     for (size_t i = 0; i < result_view.size(); ++i) {
         const bool expected =
@@ -372,15 +369,20 @@ TEST_P(JsonKeyStatsScanTest,
     TargetBitmap validity_only(17, true);
     const auto validity_only_view = validity_only.view();
     EXPECT_EQ(validity_only_view.count(), 17);
-    ASSERT_EQ(
-        stats->ExecutorForGettingValid(nullptr, "test_path", validity_only, 5),
-        values.size());
+    ASSERT_EQ(stats->ExecutorForGettingValid(
+                  nullptr, "test_path", validity_only.write_view(5, 5)),
+              values.size());
     for (size_t i = 0; i < valid_view.size(); ++i) {
         EXPECT_EQ(validity_only_view[i], valid_view[i]) << i;
     }
     EXPECT_EQ(validity_only_view.count(), valid_count);
     EXPECT_ANY_THROW(stats->ExecutorForShreddingData<std::string_view>(
-        nullptr, "test_path", predicate, nullptr, result, valid, 9, 5));
+        nullptr,
+        "test_path",
+        predicate,
+        nullptr,
+        result.write_view(9, 4),
+        valid.write_view(5, 5)));
 }
 
 TEST_P(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
@@ -406,24 +408,21 @@ TEST_P(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
         auto predicate = [&](const std::string_view* data,
                              ValidityView validity,
                              int64_t size,
-                             TargetBitmap& res,
-                             TargetBitmap& valid_res,
-                             const size_t res_offset,
-                             const size_t valid_res_offset) {
+                             TargetBitmapWriteView res,
+                             TargetBitmapWriteView valid_res) {
             auto res_write_scope = res.scoped_write();
             auto valid_res_write_scope = valid_res.scoped_write();
 
             EXPECT_EQ(data, fixture.trace->last_values);
             evaluated_rows += size;
             for (int64_t i = 0; i < size; ++i) {
-                valid_res[valid_res_offset + i] = !validity || validity[i];
-                res[res_offset + i] = !validity || validity[i];
+                valid_res[i] = !validity || validity[i];
+                res[i] = !validity || validity[i];
             }
         };
-        EXPECT_EQ(
-            stats->ExecutorForShreddingData<std::string_view>(
-                nullptr, "test_path", predicate, skip, result, valid, 0, 0),
-            rows);
+        EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
+                      nullptr, "test_path", predicate, skip, result, valid),
+                  rows);
         EXPECT_EQ(skip_calls, (std::vector<int>{0, 1}));
         EXPECT_EQ(evaluated_rows, 5);
         EXPECT_EQ(fixture.trace->pinned_chunks,
@@ -451,25 +450,22 @@ CheckFixedWidth(DataType type,
     auto predicate = [&](const T* data,
                          ValidityView validity,
                          int64_t size,
-                         TargetBitmap& res,
-                         TargetBitmap& valid_res,
-                         const size_t res_offset,
-                         const size_t valid_res_offset) {
+                         TargetBitmapWriteView res,
+                         TargetBitmapWriteView valid_res) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
 
         for (int64_t i = 0; i < size; ++i, ++row) {
-            valid_res[valid_res_offset + i] = validity[i];
-            res[res_offset + i] = validity[i];
+            valid_res[i] = validity[i];
+            res[i] = validity[i];
             if (validity[i]) {
                 EXPECT_EQ(data[i], values[row]);
             }
         }
     };
-    EXPECT_EQ(
-        stats->template ExecutorForShreddingData<T>(
-            nullptr, "test_path", predicate, nullptr, result, valid, 0, 0),
-        rows);
+    EXPECT_EQ(stats->template ExecutorForShreddingData<T>(
+                  nullptr, "test_path", predicate, nullptr, result, valid),
+              rows);
     EXPECT_EQ(row, rows);
     for (int64_t i = 0; i < rows; ++i) {
         EXPECT_EQ(result[i], ValidRow(i));
@@ -536,9 +532,7 @@ TEST_P(JsonKeyStatsScanTest,
                       std::move(executor),
                       nullptr,
                       result,
-                      valid,
-                      0,
-                      0),
+                      valid),
                   rows);
         for (int64_t i = 0; i < rows; ++i) {
             const auto sample = i % samples.size();
@@ -565,26 +559,14 @@ TEST_P(JsonKeyStatsScanTest, SkippedPatternDoesNotCompileInvalidRegex) {
     exec::ShreddingExecutor<std::string_view, std::string> executor(
         proto::plan::RegexMatch, "/test", "[");
     EXPECT_EQ(
-        stats->ExecutorForShreddingData<std::string_view>(nullptr,
-                                                          "test_path",
-                                                          std::move(executor),
-                                                          skip,
-                                                          result,
-                                                          valid,
-                                                          0,
-                                                          0),
+        stats->ExecutorForShreddingData<std::string_view>(
+            nullptr, "test_path", std::move(executor), skip, result, valid),
         rows);
     exec::ShreddingExecutor<std::string_view, std::string> evaluated(
         proto::plan::RegexMatch, "/test", "[");
     try {
-        stats->ExecutorForShreddingData<std::string_view>(nullptr,
-                                                          "test_path",
-                                                          std::move(evaluated),
-                                                          nullptr,
-                                                          result,
-                                                          valid,
-                                                          0,
-                                                          0);
+        stats->ExecutorForShreddingData<std::string_view>(
+            nullptr, "test_path", std::move(evaluated), nullptr, result, valid);
         FAIL() << "Invalid regex must fail when a batch is evaluated";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
@@ -599,20 +581,17 @@ TEST_P(JsonKeyStatsScanTest, MissingPathDoesNotScanAndPinFailurePropagates) {
     auto predicate = [](const std::string_view*,
                         ValidityView,
                         int64_t,
-                        TargetBitmap&,
-                        TargetBitmap&,
-                        size_t,
-                        size_t) { FAIL(); };
+                        TargetBitmapWriteView,
+                        TargetBitmapWriteView) { FAIL(); };
     EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
-                  nullptr, "absent", predicate, nullptr, result, valid, 0, 0),
+                  nullptr, "absent", predicate, nullptr, result, valid),
               0);
     EXPECT_EQ(fixture.trace->scans, 0);
     EXPECT_EQ(result.count(), 2);
     fixture.trace->fail_pin = true;
-    EXPECT_THROW(
-        stats->ExecutorForShreddingData<std::string_view>(
-            nullptr, "test_path", predicate, nullptr, result, valid, 0, 0),
-        std::runtime_error);
+    EXPECT_THROW(stats->ExecutorForShreddingData<std::string_view>(
+                     nullptr, "test_path", predicate, nullptr, result, valid),
+                 std::runtime_error);
 }
 
 INSTANTIATE_TEST_SUITE_P(ScanPinPolicy,

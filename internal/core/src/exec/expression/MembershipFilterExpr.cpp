@@ -141,8 +141,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     int processed_cursor = 0;
     auto execute_sub_batch =
@@ -152,13 +152,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmap& res,
-            TargetBitmap& valid_res,
-            const size_t res_offset,
-            const size_t valid_res_offset) {
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         // A null data pointer means evaluation was suppressed because the
         // payload was skipped, the candidate was inactive, or an index
         // reverse-lookup miss already applied its invalid result. Ordinary
@@ -186,10 +183,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
                 continue;
             }
             if (valid_data && !valid_data[offset]) {
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
-            res[res_offset + i] = probe_(data[offset]);
+            res[i] = probe_(data[offset]);
         }
         processed_cursor += size;
     };
@@ -201,12 +198,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
                                                          input,
                                                          res,
                                                          valid_res,
-                                                         0,
-                                                         0,
                                                          bitmap_input);
     } else {
         processed_size = ProcessDataChunks<T>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: {} processed rows {} not equal expect batch "
@@ -238,8 +233,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(bitmap_input.empty() ||
@@ -256,13 +251,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmap& res,
-        TargetBitmap& valid_res,
-        const size_t res_offset,
-        const size_t valid_res_offset) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         // data == nullptr means the helper either pruned an inactive candidate
         // before reverse lookup (leaving false/valid untouched), or found an
         // active missing value (after writing false/invalid). In both cases
@@ -276,10 +268,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
-            res[res_offset + i] = probe_(data[offset]);
+            res[i] = probe_(data[offset]);
         }
     };
 
@@ -290,8 +282,6 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
                                                          input,
                                                          res,
                                                          valid_res,
-                                                         0,
-                                                         0,
                                                          bitmap_input);
     } else {
         // No offset input: reverse-look-up the contiguous global row range
@@ -303,8 +293,6 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
                                                     real_batch_size,
                                                     res,
                                                     valid_res,
-                                                    0,
-                                                    0,
                                                     bitmap_input);
         // ProcessIndexLookupSequentialWithMask is stateless; advance the index
         // cursor for the next batch. MoveCursor() honors the has_offset_input_
@@ -353,8 +341,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
@@ -365,14 +353,11 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmap& res,
-            TargetBitmap& valid_res,
-            const size_t res_offset,
-            const size_t valid_res_offset,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         // A null data pointer means evaluation was suppressed because the
         // payload was skipped or the candidate was inactive. Ordinary
         // nullable Scan/Take rows carry a placeholder plus real validity.
@@ -393,7 +378,7 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
                 continue;
             }
             if (valid_data && !valid_data[offset]) {
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             // STRICTLY TYPED probe: the hash domain has exactly two kinds,
@@ -414,20 +399,18 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
             const auto value = json.at_string_or_int64(pointer);
             switch (value.kind) {
                 case JsonStringOrInt64::Kind::String:
-                    res[res_offset + i] = probe_.TestBytesValue(
-                        value.string_value.data(), value.string_value.size());
+                    res[i] = probe_.TestBytesValue(value.string_value.data(),
+                                                   value.string_value.size());
                     break;
                 case JsonStringOrInt64::Kind::Int64:
-                    res[res_offset + i] =
-                        probe_.TestInt64Value(value.int64_value);
+                    res[i] = probe_.TestInt64Value(value.int64_value);
                     break;
                 case JsonStringOrInt64::Kind::OtherNumber:
                     // A numeric value outside the int64 domain is a definite
                     // non-member, but it is still a valid JSON scalar.
                     break;
                 case JsonStringOrInt64::Kind::NoProbeValue:
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =
-                        false;
+                    res[i] = valid_res[i] = false;
                     break;
             }
         }
@@ -442,13 +425,11 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
                                                        input,
                                                        res,
                                                        valid_res,
-                                                       0,
-                                                       0,
                                                        bitmap_input,
                                                        pointer);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0, pointer);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: {} json path processed rows {} not equal "

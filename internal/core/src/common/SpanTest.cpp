@@ -114,8 +114,10 @@ TEST(Span, PackedValidityMasksBitmapsWithoutLosingOffsets) {
     for (int64_t i = 0; i < size; ++i) {
         result[result_offset + i] = (i % 3) != 0;
     }
-    ApplyValidMask(
-        validity, result, valid_result, result_offset, result_offset, size);
+    ApplyValidMask(validity,
+                   result.write_view(result_offset, size),
+                   valid_result.write_view(result_offset, size),
+                   size);
 
     for (int64_t i = 0; i < size; ++i) {
         const bool expected_valid = validity[i];

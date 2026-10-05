@@ -41,8 +41,8 @@ PhyAlwaysTrueExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     res.set();
     valid_res.set();

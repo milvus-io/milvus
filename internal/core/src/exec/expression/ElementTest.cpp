@@ -147,7 +147,7 @@ VerifyFilterChunk(const std::vector<T>& in_vals,
     const auto view_filter = bm_filter.view();
     const auto view_in = bm_in.view();
 
-    sb.FilterChunk(data.data(), n, bm_filter, 0);
+    sb.FilterChunk(data.data(), n, bm_filter.write_view(0, n));
 
     // Ground truth: per-row In() via SetElement (hash-based, known correct)
     for (int i = 0; i < n; ++i) {
@@ -217,7 +217,7 @@ TEST(FilterChunkTest, EmptyInList) {
     std::vector<int32_t> data = {1, 2, 3, 4, 5};
     milvus::TargetBitmap bm(5, false);
     const auto view = bm.view();
-    sb.FilterChunk(data.data(), 5, bm, 0);
+    sb.FilterChunk(data.data(), 5, bm.write_view(0, 5));
     for (int i = 0; i < 5; ++i) {
         EXPECT_FALSE(view[i]);
     }
@@ -364,7 +364,7 @@ VerifyFilterChunkWithOffset(const std::vector<T>& in_vals,
     milvus::TargetBitmap bm_backing(n + offset, false);
     const auto view_with_offset = bm_backing.view(offset, n);
 
-    sb.FilterChunk(data.data(), n, bm_backing, offset);
+    sb.FilterChunk(data.data(), n, bm_backing.write_view(offset, n));
 
     // Ground truth
     for (int i = 0; i < n; ++i) {
@@ -757,7 +757,7 @@ FilterChunkVsIn(const std::vector<T>& in_vals,
     const auto view_chunk = bm_chunk.view();
     const auto view_in = bm_in.view();
 
-    sb.FilterChunk(data.data(), n, bm_chunk, 0);
+    sb.FilterChunk(data.data(), n, bm_chunk.write_view(0, n));
     for (int i = 0; i < n; ++i) {
         bm_in[i] = sb.In(MakeVT(data[i]));
     }
@@ -930,7 +930,7 @@ TEST(FilterChunkTest, PreservesExistingTrueBits) {
     bm[2] = true;  // data[2]=3, not in IN list
 
     SimdBatchElement<int32_t> sb(in_vals);
-    sb.FilterChunk(data.data(), n, bm, 0);
+    sb.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     // Pre-set bits should be preserved (OR semantic)
     EXPECT_TRUE(view[0]) << "pre-set bit at index 0 should be preserved";
@@ -952,7 +952,7 @@ TEST(FilterChunkTest, PreservesExistingTrueBitsFloat) {
     bm[2] = true;  // pre-set, not a match
 
     SimdBatchElement<float> sb(in_vals);
-    sb.FilterChunk(data.data(), n, bm, 0);
+    sb.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_FALSE(view[0]);
     EXPECT_TRUE(view[1]);  // matched
@@ -1136,7 +1136,8 @@ TEST(FilterChunkTest, SizeZero) {
     milvus::TargetBitmap bm(0, false);
     const auto view = bm.view();
     // Should not crash with size=0
-    sb.FilterChunk(static_cast<const int32_t*>(nullptr), 0, bm, 0);
+    sb.FilterChunk(
+        static_cast<const int32_t*>(nullptr), 0, bm.write_view(0, 0));
 }
 
 TEST(FilterChunkTest, SizeOne) {
@@ -1352,7 +1353,7 @@ TEST(SetElementFilterChunkTest, Int32) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     // Expected: indices 0(-1), 2(0), 3(42), 5(999), 7(1) match
     EXPECT_TRUE(view[0]);
@@ -1373,7 +1374,7 @@ TEST(SetElementFilterChunkTest, Int64) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_TRUE(view[0]);
     EXPECT_FALSE(view[1]);
@@ -1390,7 +1391,7 @@ TEST(SetElementFilterChunkTest, StringDirect) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_TRUE(view[0]);
     EXPECT_FALSE(view[1]);
@@ -1411,7 +1412,7 @@ TEST(SetElementFilterChunkTest, StringViewData) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_TRUE(view[0]);   // alpha
     EXPECT_FALSE(view[1]);  // gamma
@@ -1659,7 +1660,7 @@ TEST(SetElementFilterChunkTest, StringViewEmptyStrings) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_TRUE(view[0]);
     EXPECT_FALSE(view[1]);
@@ -1677,7 +1678,7 @@ TEST(SetElementFilterChunkTest, StringViewAllMatch) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     for (int i = 0; i < n; ++i) {
         EXPECT_TRUE(view[i]) << "index " << i;
@@ -1695,7 +1696,7 @@ TEST(SetElementFilterChunkTest, StringViewNoneMatch) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     for (int i = 0; i < n; ++i) {
         EXPECT_FALSE(view[i]) << "index " << i;
@@ -1717,7 +1718,7 @@ TEST(SetElementFilterChunkTest, StringViewLongStrings) {
     const int n = static_cast<int>(data.size());
     milvus::TargetBitmap bm(n, false);
     const auto view = bm.view();
-    se.FilterChunk(data.data(), n, bm, 0);
+    se.FilterChunk(data.data(), n, bm.write_view(0, n));
 
     EXPECT_TRUE(view[0]);   // long1
     EXPECT_FALSE(view[1]);  // long2

@@ -172,7 +172,8 @@ TEST(chunk, nullable_chunk_bulk_masks_unaligned_range) {
     FixedWidthChunk chunk(
         row_count, 1, data.data(), data.size(), sizeof(int64_t), true, nullptr);
     TargetBitmap result(count + result_offset + 3, true);
-    chunk.ApplyValidityMask(chunk_offset, count, result, result_offset);
+    chunk.ApplyValidityMask(
+        chunk_offset, count, result.write_view(result_offset, count));
 
     for (int64_t i = 0; i < result_offset; ++i) {
         EXPECT_TRUE(result[i]);

@@ -56,31 +56,23 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
 }  // namespace
 
 bool
-ConvertPredicateToFilteredBitset(TargetBitmap& data,
-                                 TargetBitmap& valid,
+ConvertPredicateToFilteredBitset(TargetBitmapWriteView data,
+                                 TargetBitmapWriteView valid,
                                  const size_t size) {
-    return ConvertPredicateToFilteredBitset(
-        data, valid, size, 0, 0, data.size());
-}
-
-bool
-ConvertPredicateToFilteredBitset(TargetBitmap& data,
-                                 TargetBitmap& valid,
-                                 const size_t size,
-                                 const size_t data_offset,
-                                 const size_t valid_offset,
-                                 const size_t window_size) {
+    auto data_write_scope = data.scoped_write();
+    auto valid_write_scope = valid.scoped_write();
     // 1 means excluded: only definite TRUE predicates pass the filter.
-    AssertInfo(size <= window_size, "predicate size exceeds output window");
-    const auto validity = valid.view(valid_offset, window_size);
+    AssertInfo(size <= data.size() && size <= valid.size(),
+               "predicate size exceeds output window");
+    const auto validity = valid.read_view();
     if (validity.all()) {
-        data.flip(data_offset, window_size);
+        data.flip();
         return true;
     }
-    data.inplace_and_flip(validity, size, data_offset);
+    data.inplace_and_flip(validity, size);
     // Preserve the original FLIP over the entire destination view for a prefix.
-    data.flip(data_offset + size, window_size - size);
-    valid.set(valid_offset, window_size, true);
+    data.flip(size, data.size() - size);
+    valid.set();
     return false;
 }
 
@@ -208,8 +200,8 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result should be bitmap ColumnVector");
 
         auto col_vec_size = col_vec->size();
-        auto& view = col_vec->GetMutableBitmap();
-        auto& valid_view = col_vec->GetMutableValidBitmap();
+        auto view = col_vec->GetBitmapWriteView();
+        auto valid_view = col_vec->GetValidBitmapWriteView();
         ConvertPredicateToFilteredBitset(view, valid_view, col_vec_size);
         num_processed_rows_ = col_vec_size;
 

@@ -285,8 +285,8 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
 
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
     auto exec_sub_batch =
         [ arith_op,
           compare_op ]<FilterType filter_type = FilterType::sequential>(
@@ -294,15 +294,12 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmap& res,
-            TargetBitmap& valid_res,
-            const size_t res_offset,
-            const size_t valid_res_offset,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             T compare_value,
             proto::plan::Interval interval) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         if (data == nullptr) {
             return;
         }
@@ -315,10 +312,10 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either polarity (three-valued
                 // logic); do not evaluate the storage placeholder value.
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
-            res[res_offset + i] = EvaluateTimestamp(
+            res[i] = EvaluateTimestamp(
                 data[offset], arith_op, interval, compare_op, compare_us);
         }
     };
@@ -329,8 +326,6 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                                                  input,
                                                  res,
                                                  valid_res,
-                                                 0,
-                                                 0,
                                                  compare_value,
                                                  interval);
     } else {
@@ -338,8 +333,6 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
                                               std::nullptr_t{},
                                               res,
                                               valid_res,
-                                              0,
-                                              0,
                                               compare_value,
                                               interval);
     }

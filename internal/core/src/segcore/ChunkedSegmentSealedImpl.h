@@ -456,14 +456,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
              const PkType& pk,
-             BitsetType& bitset) const override;
+             BitsetTypeWriteView bitset) const override;
 
     void
     search_sorted_pk_range(
         milvus::OpContext* op_ctx,
         proto::plan::OpType op,
         const PkType& pk,
-        BitsetType& bitset,
+        BitsetTypeWriteView bitset,
         const std::shared_ptr<const PublishedSegmentState>& snapshot) const;
 
     void
@@ -472,7 +472,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     bool lower_inclusive,
                     const PkType& upper_pk,
                     bool upper_inclusive,
-                    BitsetType& bitset) const override;
+                    BitsetTypeWriteView bitset) const override;
 
     std::unique_ptr<DataArray>
     get_vector(milvus::OpContext* op_ctx,
@@ -500,7 +500,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    search_pks(BitsetType& bitset, const std::vector<PkType>& pks) const;
+    search_pks(BitsetTypeWriteView bitset,
+               const std::vector<PkType>& pks) const;
 
     void
     search_batch_pks(
@@ -613,8 +614,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmap& valid_result,
-                        const size_t valid_result_offset = 0) const override;
+                        TargetBitmapWriteView valid_result) const override;
 
     void
     ApplyFieldValidDataByOffsets(
@@ -622,8 +622,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id,
         const int64_t* offsets,
         int64_t count,
-        TargetBitmap& valid_result,
-        const size_t valid_result_offset = 0) const override;
+        TargetBitmapWriteView valid_result) const override;
 
     std::shared_ptr<ChunkedColumnInterface>
     GetChunkedColumn(FieldId field_id) const override {
@@ -811,7 +810,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         proto::plan::OpType op,
         const PK& target,
         const std::shared_ptr<ChunkedColumnInterface>& pk_column,
-        BitsetType& bitset) const {
+        BitsetTypeWriteView bitset) const {
         const auto num_chunk = pk_column->num_chunks();
         if (num_chunk == 0) {
             return;
@@ -903,7 +902,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const PK& upper_val,
         bool upper_inclusive,
         const std::shared_ptr<ChunkedColumnInterface>& pk_column,
-        BitsetType& bitset) const {
+        BitsetTypeWriteView bitset) const {
         const auto num_chunk = pk_column->num_chunks();
         if (num_chunk == 0) {
             return;
@@ -986,7 +985,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     template <typename PK>
     void
     search_pks_with_two_pointers_impl(
-        BitsetType& bitset,
+        BitsetTypeWriteView bitset,
         const std::vector<PkType>& pks,
         const std::shared_ptr<ChunkedColumnInterface>& pk_column) const {
         // TODO: we should sort pks during plan generation
@@ -1343,7 +1342,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeWriteView bitset_chunk,
                          Timestamp timestamp,
                          Timestamp collection_ttl) const override;
 
@@ -1358,12 +1357,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                   SearchResult& output) const override;
 
     void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeWriteView bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetTypeWriteView bitset,
+               const IdArray& id_array) const override;
 
     class StagedStateCommitter;
 

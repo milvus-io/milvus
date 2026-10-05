@@ -165,7 +165,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
         // native and non-native branches (PhyIterativeFilterNode folds on
         // both of its branches too).
         const auto& validview = col_vec->GetValidBitmap();
-        col_vec->GetMutableBitmap().inplace_and(validview, col_vec_size);
+        col_vec->GetBitmapWriteView().inplace_and(validview, col_vec_size);
         scorer->batch_score(op_context,
                             segment,
                             function_mode,

@@ -861,22 +861,19 @@ template <typename T, typename Predicate>
 inline void
 apply_predicate_on_batch(const T* data,
                          const int64_t size,
-                         TargetBitmap& res,
-                         const size_t res_offset,
+                         TargetBitmapWriteView res,
                          Predicate&& predicate) {
     auto res_write_scope = res.scoped_write();
-
-    const auto candidates = res.view(res_offset, size);
-    auto next_off_option = candidates.find_first();
+    auto next_off_option = res.find_first();
     while (next_off_option.has_value()) {
         auto next_off = next_off_option.value();
         if (next_off >= static_cast<size_t>(size)) {
             return;
         }
         if (!predicate(data[next_off])) {
-            res[res_offset + next_off] = false;
+            res[next_off] = false;
         }
-        next_off_option = candidates.find_next(next_off);
+        next_off_option = res.find_next(next_off);
     }
 }
 
@@ -1039,22 +1036,20 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                candidates.size(),
                batch_size);
 
-    auto& res = candidates;
+    TargetBitmapWriteView res(candidates);
 
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         // JSON type handling
         auto apply_predicate = [&](auto&& predicate) {
             auto execute_batch = [&predicate](const milvus::Json* data,
                                               const int64_t size,
-                                              TargetBitmap& res,
-                                              const size_t res_offset) {
+                                              TargetBitmapWriteView res) {
                 auto res_write_scope = res.scoped_write();
-
                 apply_predicate_on_batch<milvus::Json>(
-                    data, size, res, res_offset, predicate);
+                    data, size, res, predicate);
             };
             segment->template ProcessDataChunkForRange<milvus::Json>(
-                execute_batch, res, 0, segment_offset, batch_size);
+                execute_batch, res, segment_offset, batch_size);
         };
 
         switch (op_type) {
@@ -1132,15 +1127,13 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
         auto apply_predicate = [&](auto&& predicate) {
             auto execute_batch = [&predicate](const std::string_view* data,
                                               const int64_t size,
-                                              TargetBitmap& res,
-                                              const size_t res_offset) {
+                                              TargetBitmapWriteView res) {
                 auto res_write_scope = res.scoped_write();
-
                 apply_predicate_on_batch<std::string_view>(
-                    data, size, res, res_offset, predicate);
+                    data, size, res, predicate);
             };
             segment->template ProcessDataChunkForRange<std::string_view>(
-                execute_batch, res, 0, segment_offset, batch_size);
+                execute_batch, res, segment_offset, batch_size);
         };
 
         switch (op_type) {

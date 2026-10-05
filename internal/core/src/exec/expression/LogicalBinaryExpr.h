@@ -33,7 +33,9 @@ enum class LogicalOpType { Invalid = 0, And = 1, Or = 2, Xor = 3, Minus = 4 };
 template <LogicalOpType op>
 struct LogicalElementFunc {
     void
-    operator()(TargetBitmap& left, const TargetBitmapView& right, int n) {
+    operator()(TargetBitmapWriteView left,
+               const TargetBitmapView& right,
+               int n) {
         /*
         // This is the original code, kept here for the documentation purposes
         for (size_t i = 0; i < n; ++i) {

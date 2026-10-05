@@ -128,8 +128,8 @@ ElementBitsetAnyReduce(const Starts& starts,
                        int64_t elem_offset,
                        int64_t row_start,
                        int64_t row_count,
-                       TargetBitmap& row_result,
-                       size_t result_offset) {
+                       TargetBitmapWriteView row_result) {
+    auto row_result_write_scope = row_result.scoped_write();
     using word_t = TargetBitmapView::policy_type::data_type;
     constexpr int64_t kWordBits = static_cast<int64_t>(8 * sizeof(word_t));
 
@@ -166,7 +166,7 @@ ElementBitsetAnyReduce(const Starts& starts,
             while (starts[row + 1] <= elem_id) {
                 ++row;
             }
-            row_result[result_offset + row - row_start] = true;
+            row_result[row - row_start] = true;
             // Skip the rest of this row's elements.
             const int64_t row_end = starts[row + 1] - elem_offset;
             if (row_end >= pos + n) {
@@ -361,12 +361,9 @@ ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
-    TargetBitmap& row_result,
-    size_t result_offset) const {
-    AssertInfo(result_offset <= row_result.size(),
-               "result offset out of bounds");
-    auto write_scope = row_result.scoped_write();
-    const int64_t row_count = row_result.size() - result_offset;
+    TargetBitmapWriteView row_result) const {
+    auto row_result_write_scope = row_result.scoped_write();
+    const int64_t row_count = row_result.size();
     AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
                "row range out of bounds: row_start={}, row_count={}, "
                "total_rows={}",
@@ -379,8 +376,7 @@ ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
                            elem_offset,
                            row_start,
                            row_count,
-                           row_result,
-                           result_offset);
+                           row_result);
 }
 
 std::shared_ptr<ArrayOffsetsSealed>
@@ -732,14 +728,11 @@ ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
-    TargetBitmap& row_result,
-    size_t result_offset) const {
+    TargetBitmapWriteView row_result) const {
+    auto row_result_write_scope = row_result.scoped_write();
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
-    AssertInfo(result_offset <= row_result.size(),
-               "result offset out of bounds");
-    auto write_scope = row_result.scoped_write();
-    const int64_t row_count = row_result.size() - result_offset;
+    const int64_t row_count = row_result.size();
     AssertInfo(row_start >= 0 && row_start + row_count <= committed,
                "row range out of bounds: row_start={}, row_count={}, "
                "committed_rows={}",
@@ -748,13 +741,8 @@ ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
                committed);
 
     ChunkedReader starts(starts_chunks_);
-    ElementBitsetAnyReduce(starts,
-                           elem_bitset,
-                           elem_offset,
-                           row_start,
-                           row_count,
-                           row_result,
-                           result_offset);
+    ElementBitsetAnyReduce(
+        starts, elem_bitset, elem_offset, row_start, row_count, row_result);
 }
 
 void

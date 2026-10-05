@@ -297,7 +297,7 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     EXPECT_EQ(view1.count(), 0);
 
     // Simulate downstream mutation (ElementFilterBitsNode does doc_bitset.flip)
-    col1->GetMutableBitmap().flip();
+    col1->GetBitmapWriteView().flip();
     EXPECT_EQ(view1.count(), N_);
 
     // Second query on the same thread – must NOT see the flipped bits

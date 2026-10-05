@@ -152,8 +152,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
@@ -164,14 +164,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmap& res,
-            TargetBitmap& valid_res,
-            const size_t res_offset,
-            const size_t valid_res_offset,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -185,13 +182,13 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[res_offset + i] = false;
+                res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[res_offset + i] = data[offset].exist(pointer);
+            res[i] = data[offset].exist(pointer);
         }
         processed_cursor += size;
     };
@@ -203,12 +200,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    0,
-                                                    0,
                                                     pointer);
     } else {
         processed_size = ProcessDataChunks<Json>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0, pointer);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -254,7 +249,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         index->GetShreddingFieldsWithPrefix(pointer);
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
-                        TargetBitmapView temp_valid_view(temp_valid);
+                        TargetBitmapWriteView temp_valid_view(temp_valid);
                         index->ExecutorForGettingValid(
                             op_ctx_, field, temp_valid);
                         res_view |= temp_valid_view;

@@ -217,9 +217,9 @@ class FieldBitsetImpl : public FieldDataBase {
         return bitmap_view_;
     }
 
-    TargetBitmap&
-    GetMutableBitmap() {
-        return bitmap_;
+    TargetBitmapWriteView
+    GetBitmapWriteView() {
+        return bitmap_.write_view(0, length_);
     }
 
     uint8_t*

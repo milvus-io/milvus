@@ -231,21 +231,21 @@ TEST(ColumnVectorTest, CachedViewsFollowOwnerAndNullMutations) {
     EXPECT_EQ(data.count(), 3);
     EXPECT_EQ(valid.count(), 3);
     EXPECT_TRUE(vec->AllTrue());
-    vec->GetMutableBitmap().reset(1);
+    vec->GetBitmapWriteView().reset(1);
     EXPECT_EQ(data.count(), 2);
     EXPECT_FALSE(vec->AllTrue());
-    vec->GetMutableBitmap().reset();
+    vec->GetBitmapWriteView().reset();
     EXPECT_TRUE(vec->AllFalse());
     vec->nullAt(2);
     EXPECT_EQ(vec->nullCount(), 1);
     EXPECT_EQ(valid.count(), 2);
     EXPECT_FALSE(vec->AllFalse());
     // Mutating the validity owner also updates nullCount; it has no private cache.
-    vec->GetMutableValidBitmap().reset(0);
+    vec->GetValidBitmapWriteView().reset(0);
     EXPECT_EQ(vec->nullCount(), 2);
     vec->clearNullAt(2);
     EXPECT_EQ(vec->nullCount(), 1);
-    vec->GetMutableValidBitmap().set();
+    vec->GetValidBitmapWriteView().set();
     EXPECT_EQ(vec->nullCount(), 0);
     EXPECT_TRUE(vec->AllFalse());
     auto* raw = static_cast<uint64_t*>(vec->GetRawData());
@@ -300,10 +300,10 @@ TEST(ColumnVectorTest, ReservingBitmapStorageKeepsLogicalSize) {
     const auto& view = field.GetBitmap();
     EXPECT_EQ(view.count(), 5);
     field.Reserve(128);
-    EXPECT_EQ(field.GetMutableBitmap().size(), 5);
+    EXPECT_EQ(field.GetBitmapWriteView().size(), 5);
     EXPECT_EQ(view.size(), 5);
     EXPECT_EQ(view.count(), 5);
-    field.GetMutableBitmap().reset(4);
+    field.GetBitmapWriteView().reset(4);
     EXPECT_EQ(view.count(), 4);
     EXPECT_FALSE(view.all());
 }

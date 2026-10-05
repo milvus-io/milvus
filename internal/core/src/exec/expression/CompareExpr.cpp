@@ -96,8 +96,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         auto res_vec =
             std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                            TargetBitmap(real_batch_size, true));
-        auto& res = res_vec->GetMutableBitmap();
-        auto& valid_res = res_vec->GetMutableValidBitmap();
+        auto res = res_vec->GetBitmapWriteView();
+        auto valid_res = res_vec->GetValidBitmapWriteView();
 
         auto left_raw_data_chunk_count =
             segment_chunk_reader_.NumChunkData(expr_->left_field_id_);
@@ -205,8 +205,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
         auto res_vec = std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-        auto& res = res_vec->GetMutableBitmap();
-        auto& valid_res = res_vec->GetMutableValidBitmap();
+        auto res = res_vec->GetBitmapWriteView();
+        auto valid_res = res_vec->GetValidBitmapWriteView();
         valid_res.set();
 
         auto left = segment_chunk_reader_.GetMultipleChunkDataAccessor(
@@ -246,8 +246,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
         auto res_vec = std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-        auto& res = res_vec->GetMutableBitmap();
-        auto& valid_res = res_vec->GetMutableValidBitmap();
+        auto res = res_vec->GetBitmapWriteView();
+        auto valid_res = res_vec->GetValidBitmapWriteView();
         valid_res.set();
 
         int64_t processed_rows = 0;
@@ -457,8 +457,8 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     auto expr_type = expr_->op_type_;
     size_t processed_cursor = 0;
@@ -469,10 +469,8 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
             const U* right,
             const int32_t* offsets,
             const int size,
-            TargetBitmap& res,
-            const size_t res_offset) {
+            TargetBitmapWriteView res) {
         auto res_write_scope = res.scoped_write();
-
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan, filter_type>
@@ -481,7 +479,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -494,7 +491,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -507,7 +503,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -520,7 +515,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -532,7 +526,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -545,7 +538,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -558,7 +550,6 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                      right,
                      size,
                      res,
-                     res_offset,
                      bitmap_input,
                      processed_cursor,
                      offsets);
@@ -575,14 +566,12 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessBothDataByOffsets<T, U>(
-            execute_sub_batch, input, res, valid_res, 0, 0);
+            execute_sub_batch, input, res, valid_res);
     } else {
         processed_size = TryProcessBothDataByScan<T, U>(execute_sub_batch,
                                                         real_batch_size,
                                                         res,
                                                         valid_res,
-                                                        0,
-                                                        0,
                                                         processed_cursor);
         if (processed_size < 0) {
             if constexpr (IsCompareStringViewType<T> ||
@@ -602,7 +591,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                     left_field_.get(),
                     right_field_.get());
                 processed_size = ProcessBothDataChunks<T, U>(
-                    execute_sub_batch, res, valid_res, 0, 0);
+                    execute_sub_batch, res, valid_res);
             }
         }
     }

@@ -525,25 +525,24 @@ ReadJsonStatsInt64Equal(JsonKeyStats& stats,
                         size_t size) {
     TargetBitmap res(size);
     TargetBitmap valid_res(size);
+    auto res_view = res.write_view();
+    auto valid_res_view = valid_res.write_view();
 
     auto func = [expected](const int64_t* data,
                            ValidityView valid_data,
                            const int chunk_size,
-                           TargetBitmap& res,
-                           TargetBitmap& valid_res,
-                           const size_t res_offset,
-                           const size_t valid_res_offset) {
+                           TargetBitmapWriteView res,
+                           TargetBitmapWriteView valid_res) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         for (int i = 0; i < chunk_size; ++i) {
-            valid_res[valid_res_offset + i] = valid_data[i];
-            res[res_offset + i] = valid_data[i] && data[i] == expected;
+            valid_res[i] = valid_data[i];
+            res[i] = valid_data[i] && data[i] == expected;
         }
     };
 
     auto processed_size = stats.ExecutorForShreddingData<int64_t>(
-        nullptr, field_name, func, nullptr, res, valid_res, 0, 0);
+        nullptr, field_name, func, nullptr, res_view, valid_res_view);
     AssertInfo(processed_size == size,
                "processed json stats rows {} != {}",
                processed_size,

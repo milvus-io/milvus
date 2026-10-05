@@ -1565,17 +1565,14 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     auto func = [](const int64_t* data,
                    ValidityView valid_data,
                    const int size,
-                   TargetBitmap& res,
-                   TargetBitmap& valid_res,
-                   const size_t res_offset,
-                   const size_t valid_res_offset) {
+                   TargetBitmapWriteView res,
+                   TargetBitmapWriteView valid_res) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         for (int i = 0; i < size; i++) {
             if (valid_data[i]) {
-                res[res_offset + i] = true;
-                valid_res[valid_res_offset + i] = true;
+                res[i] = true;
+                valid_res[i] = true;
             }
         }
     };

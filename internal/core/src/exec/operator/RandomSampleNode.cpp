@@ -139,7 +139,7 @@ PhyRandomSampleNode::GetOutput() {
     RowVectorPtr result = nullptr;
     if (!is_source_node_) {
         auto input_col = GetColumnVector(input_);
-        auto& input_data = input_col->GetMutableBitmap();
+        auto input_data = input_col->GetBitmapWriteView();
         const auto& input_view = input_col->GetBitmap();
         // note: false means the elemnt is hit
         size_t input_false_count = input_data.size() - input_view.count();
@@ -168,7 +168,7 @@ PhyRandomSampleNode::GetOutput() {
     } else {
         auto sample_output = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
-        auto& data = sample_output->GetMutableBitmap();
+        auto data = sample_output->GetBitmapWriteView();
         // true in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
         // if it's sampled. So we need to flip the bits at last.
         // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling

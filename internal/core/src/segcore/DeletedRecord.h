@@ -225,7 +225,7 @@ class DeletedRecord {
     }
 
     void
-    Query(BitsetType& bitset,
+    Query(BitsetTypeWriteView bitset,
           int64_t insert_barrier,
           Timestamp query_timestamp) {
         Assert(bitset.size() == insert_barrier);

@@ -66,13 +66,11 @@ struct BinaryRangeElementFunc {
                const T& val2,
                const T* src,
                size_t n,
-               TargetBitmap& res,
-               const size_t res_offset,
+               TargetBitmapWriteView res,
                const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         auto res_write_scope = res.scoped_write();
-
         if constexpr (filter_type == FilterType::random ||
                       std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
@@ -83,17 +81,13 @@ struct BinaryRangeElementFunc {
                 }
                 auto offset = (offsets) ? offsets[i] : i;
                 if constexpr (lower_inclusive && upper_inclusive) {
-                    res[res_offset + i] =
-                        val1 <= src[offset] && src[offset] <= val2;
+                    res[i] = val1 <= src[offset] && src[offset] <= val2;
                 } else if constexpr (lower_inclusive && !upper_inclusive) {
-                    res[res_offset + i] =
-                        val1 <= src[offset] && src[offset] < val2;
+                    res[i] = val1 <= src[offset] && src[offset] < val2;
                 } else if constexpr (!lower_inclusive && upper_inclusive) {
-                    res[res_offset + i] =
-                        val1 < src[offset] && src[offset] <= val2;
+                    res[i] = val1 < src[offset] && src[offset] <= val2;
                 } else {
-                    res[res_offset + i] =
-                        val1 < src[offset] && src[offset] < val2;
+                    res[i] = val1 < src[offset] && src[offset] < val2;
                 }
             }
             return;
@@ -101,16 +95,16 @@ struct BinaryRangeElementFunc {
 
         if constexpr (lower_inclusive && upper_inclusive) {
             res.inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
-                val1, val2, src, n, res_offset);
+                val1, val2, src, n);
         } else if constexpr (lower_inclusive && !upper_inclusive) {
             res.inplace_within_range_val<T, milvus::bitset::RangeType::IncExc>(
-                val1, val2, src, n, res_offset);
+                val1, val2, src, n);
         } else if constexpr (!lower_inclusive && upper_inclusive) {
             res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcInc>(
-                val1, val2, src, n, res_offset);
+                val1, val2, src, n);
         } else {
             res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcExc>(
-                val1, val2, src, n, res_offset);
+                val1, val2, src, n);
         }
     }
 };
@@ -120,40 +114,40 @@ struct BinaryRangeElementFunc {
 // precision; uint64 and double values fall back to double comparison,
 // consistent with the Tantivy index and JSON-stats paths.
 // 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
-#define BinaryRangeJSONCompare(cmp)                                            \
-    do {                                                                       \
-        if (valid_data && !valid_data[offset]) {                               \
-            res[res_offset + i] = valid_res[valid_res_offset + i] = false;     \
-            break;                                                             \
-        }                                                                      \
-        if (has_bitmap_input && !bitmap_input[i + start_cursor]) {             \
-            break;                                                             \
-        }                                                                      \
-        if constexpr (std::is_same_v<GetType, int64_t>) {                      \
-            auto x = src[offset].at_numeric(pointer);                          \
-            if (x.error()) {                                                   \
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false; \
-                break;                                                         \
-            }                                                                  \
-            auto n = x.value();                                                \
-            if (n.is_int64()) {                                                \
-                auto value = n.get_int64();                                    \
-                res[res_offset + i] = (cmp);                                   \
-            } else {                                                           \
-                auto value = n.is_uint64()                                     \
-                                 ? static_cast<double>(n.get_uint64())         \
-                                 : n.get_double();                             \
-                res[res_offset + i] = (cmp);                                   \
-            }                                                                  \
-        } else {                                                               \
-            auto x = src[offset].template at<GetType>(pointer);                \
-            if (x.error()) {                                                   \
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false; \
-                break;                                                         \
-            }                                                                  \
-            auto value = x.value();                                            \
-            res[res_offset + i] = (cmp);                                       \
-        }                                                                      \
+#define BinaryRangeJSONCompare(cmp)                                    \
+    do {                                                               \
+        if (valid_data && !valid_data[offset]) {                       \
+            res[i] = valid_res[i] = false;                             \
+            break;                                                     \
+        }                                                              \
+        if (has_bitmap_input && !bitmap_input[i + start_cursor]) {     \
+            break;                                                     \
+        }                                                              \
+        if constexpr (std::is_same_v<GetType, int64_t>) {              \
+            auto x = src[offset].at_numeric(pointer);                  \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto n = x.value();                                        \
+            if (n.is_int64()) {                                        \
+                auto value = n.get_int64();                            \
+                res[i] = (cmp);                                        \
+            } else {                                                   \
+                auto value = n.is_uint64()                             \
+                                 ? static_cast<double>(n.get_uint64()) \
+                                 : n.get_double();                     \
+                res[i] = (cmp);                                        \
+            }                                                          \
+        } else {                                                       \
+            auto x = src[offset].template at<GetType>(pointer);        \
+            if (x.error()) {                                           \
+                res[i] = valid_res[i] = false;                         \
+                break;                                                 \
+            }                                                          \
+            auto value = x.value();                                    \
+            res[i] = (cmp);                                            \
+        }                                                              \
     } while (false)
 
 template <typename ValueType,
@@ -171,16 +165,13 @@ struct BinaryRangeElementFuncForJson {
                const milvus::Json* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmap& res,
-               TargetBitmap& valid_res,
-               const size_t res_offset,
-               const size_t valid_res_offset,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
                const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < n; ++i) {
             auto offset = i;
@@ -215,16 +206,13 @@ struct BinaryRangeElementFuncForArray {
                const milvus::ArrayView* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmap& res,
-               TargetBitmap& valid_res,
-               const size_t res_offset,
-               const size_t valid_res_offset,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
                const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         auto res_write_scope = res.scoped_write();
         auto valid_res_write_scope = valid_res.scoped_write();
-
         bool has_bitmap_input = !bitmap_input.empty();
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");
@@ -237,23 +225,23 @@ struct BinaryRangeElementFuncForArray {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
+                res[i] = valid_res[i] = false;
                 continue;
             }
             if (index >= src[offset].length()) {
-                res[res_offset + i] = false;
-                valid_res[valid_res_offset + i] = false;
+                res[i] = false;
+                valid_res[i] = false;
                 continue;
             }
             auto value = src[offset].get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
-                res[res_offset + i] = val1 <= value && value <= val2;
+                res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                res[res_offset + i] = val1 <= value && value < val2;
+                res[i] = val1 <= value && value < val2;
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                res[res_offset + i] = val1 < value && value <= val2;
+                res[i] = val1 < value && value <= val2;
             } else {
-                res[res_offset + i] = val1 < value && value < val2;
+                res[i] = val1 < value && value < val2;
             }
         }
     }

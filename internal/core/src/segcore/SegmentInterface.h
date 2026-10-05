@@ -443,18 +443,15 @@ class SegmentInternalInterface : public SegmentInterface {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmap& valid_result,
-                        const size_t valid_result_offset = 0) const = 0;
+                        TargetBitmapWriteView valid_result) const = 0;
 
     // Offsets are segment-level row offsets. valid_result must have count bits.
     virtual void
-    ApplyFieldValidDataByOffsets(
-        milvus::OpContext* op_ctx,
-        FieldId field_id,
-        const int64_t* offsets,
-        int64_t count,
-        TargetBitmap& valid_result,
-        const size_t valid_result_offset = 0) const = 0;
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapWriteView valid_result) const = 0;
 
     virtual std::shared_ptr<ChunkedColumnInterface>
     GetChunkedColumn(FieldId field_id) const {
@@ -729,7 +726,7 @@ class SegmentInternalInterface : public SegmentInterface {
                   SearchResult& output) const = 0;
 
     virtual void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeWriteView bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const = 0;
 
@@ -742,7 +739,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // bitset 1 means not hit. 0 means hit.
     virtual void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeWriteView bitset_chunk,
                          Timestamp timestamp,
                          Timestamp collection_ttl) const = 0;
 
@@ -784,7 +781,7 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(BitsetTypeWriteView bitset, const IdArray& id_array) const = 0;
 
     /**
      * Sort all candidates in ascending order, and then return the limit smallest.
@@ -958,7 +955,7 @@ class SegmentInternalInterface : public SegmentInterface {
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
              const PkType& pk,
-             BitsetType& bitset) const = 0;
+             BitsetTypeWriteView bitset) const = 0;
 
     virtual void
     pk_binary_range(milvus::OpContext* op_ctx,
@@ -966,7 +963,7 @@ class SegmentInternalInterface : public SegmentInterface {
                     bool lower_inclusive,
                     const PkType& upper_pk,
                     bool upper_inclusive,
-                    BitsetType& bitset) const = 0;
+                    BitsetTypeWriteView bitset) const = 0;
 
  protected:
     // mutex protecting rw options on schema_

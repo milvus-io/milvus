@@ -69,8 +69,8 @@ TEST(FilterBitsNodeTest, PredicateConversionUsesLiveAllValidBitmap) {
     const auto& data_view = col_vec->GetBitmap();
     const auto& valid_view = col_vec->GetValidBitmap();
     const bool used_all_valid_fast_path =
-        ConvertPredicateToFilteredBitset(col_vec->GetMutableBitmap(),
-                                         col_vec->GetMutableValidBitmap(),
+        ConvertPredicateToFilteredBitset(col_vec->GetBitmapWriteView(),
+                                         col_vec->GetValidBitmapWriteView(),
                                          col_vec->size());
 
     EXPECT_TRUE(used_all_valid_fast_path);
@@ -88,8 +88,8 @@ TEST(FilterBitsNodeTest, PredicateConversionUsesLiveInvalidBitmap) {
     const auto& data_view = col_vec->GetBitmap();
     const auto& valid_view = col_vec->GetValidBitmap();
     const bool used_all_valid_fast_path =
-        ConvertPredicateToFilteredBitset(col_vec->GetMutableBitmap(),
-                                         col_vec->GetMutableValidBitmap(),
+        ConvertPredicateToFilteredBitset(col_vec->GetBitmapWriteView(),
+                                         col_vec->GetValidBitmapWriteView(),
                                          col_vec->size());
 
     EXPECT_FALSE(used_all_valid_fast_path);
@@ -122,7 +122,9 @@ TEST(FilterBitsNodeTest, PredicateConversionPreservesUnalignedViewBoundaries) {
                 valid[offset + 3 + i] = i % 3 != 0;
             }
             EXPECT_EQ(ConvertPredicateToFilteredBitset(
-                          data, valid, size, offset, offset + 3, size),
+                          data.write_view(offset, size),
+                          valid.write_view(offset + 3, size),
+                          size),
                       size == 0);
             for (size_t i = 0; i < size; ++i) {
                 EXPECT_EQ(data_view[i], !(i % 2 == 0 && i % 3 != 0));

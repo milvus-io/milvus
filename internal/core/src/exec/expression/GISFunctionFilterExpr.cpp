@@ -48,10 +48,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmap& res,                           \
-                                    TargetBitmap& valid_res,                     \
-                                    const size_t res_offset,                     \
-                                    const size_t valid_res_offset,               \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
         auto res_write_scope = res.scoped_write();                               \
         auto valid_res_write_scope = valid_res.scoped_write();                   \
@@ -65,8 +63,7 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
@@ -77,11 +74,10 @@ namespace exec {
                  * can never satisfy the predicate, so evaluate it to false     \
                  * instead of failing the whole query. */ \
                 if (cached_geometry == nullptr) {                                \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] =                                            \
-                    cached_geometry->method(right_source, tls_ctx);              \
+                res[i] = cached_geometry->method(right_source, tls_ctx);         \
             }                                                                    \
         } else {                                                                 \
             /* Thread-local context: a throwing row can no longer leak a       \
@@ -93,28 +89,21 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 Geometry left;                                                   \
                 if (!left.TryParseFromWkb(                                       \
                         tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] = left.method(right_source, tls_ctx);        \
+                res[i] = left.method(right_source, tls_ctx);                     \
             }                                                                    \
         }                                                                        \
     };                                                                           \
-    int64_t processed_size =                                                     \
-        ProcessDataChunks<_DataType, true>(execute_sub_batch,                    \
-                                           std::nullptr_t{},                     \
-                                           res,                                  \
-                                           valid_res,                            \
-                                           0,                                    \
-                                           0,                                    \
-                                           right_source);                        \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);      \
     AssertInfo(processed_size == real_batch_size,                                \
                "internal error: expr processed rows {} not equal "               \
                "expect batch size {}",                                           \
@@ -128,10 +117,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmap& res,                           \
-                                    TargetBitmap& valid_res,                     \
-                                    const size_t res_offset,                     \
-                                    const size_t valid_res_offset,               \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
         auto res_write_scope = res.scoped_write();                               \
         auto valid_res_write_scope = valid_res.scoped_write();                   \
@@ -145,8 +132,7 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
@@ -155,10 +141,10 @@ namespace exec {
                 /* nullptr = empty/corrupt placeholder row: evaluate to false  \
                  * instead of failing the query (see the comparison macro). */ \
                 if (cached_geometry == nullptr) {                                \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] = cached_geometry->method(                   \
+                res[i] = cached_geometry->method(                                \
                     right_source, expr_->distance_, tls_ctx);                    \
             }                                                                    \
         } else {                                                                 \
@@ -167,29 +153,21 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 Geometry left;                                                   \
                 if (!left.TryParseFromWkb(                                       \
                         tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] =                                            \
-                    left.method(right_source, expr_->distance_, tls_ctx);        \
+                res[i] = left.method(right_source, expr_->distance_, tls_ctx);   \
             }                                                                    \
         }                                                                        \
     };                                                                           \
-    int64_t processed_size =                                                     \
-        ProcessDataChunks<_DataType, true>(execute_sub_batch,                    \
-                                           std::nullptr_t{},                     \
-                                           res,                                  \
-                                           valid_res,                            \
-                                           0,                                    \
-                                           0,                                    \
-                                           right_source);                        \
+    int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);      \
     AssertInfo(processed_size == real_batch_size,                                \
                "internal error: expr processed rows {} not equal "               \
                "expect batch size {}",                                           \
@@ -204,10 +182,8 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmap& res,                           \
-                                    TargetBitmap& valid_res,                     \
-                                    const size_t res_offset,                     \
-                                    const size_t valid_res_offset) {             \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res) {           \
         auto res_write_scope = res.scoped_write();                               \
         auto valid_res_write_scope = valid_res.scoped_write();                   \
         AssertInfo(segment_offsets != nullptr,                                   \
@@ -220,8 +196,7 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
@@ -231,10 +206,10 @@ namespace exec {
                  * geometry, so the unary predicate is false (see the           \
                  * comparison macro). */ \
                 if (cached_geometry == nullptr) {                                \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] = cached_geometry->method(tls_ctx);          \
+                res[i] = cached_geometry->method(tls_ctx);                       \
             }                                                                    \
         } else {                                                                 \
             /* Thread-local context + non-throwing parse: no context leak,     \
@@ -242,22 +217,21 @@ namespace exec {
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
-                    res[res_offset + i] = valid_res[valid_res_offset + i] =      \
-                        false;                                                   \
+                    res[i] = valid_res[i] = false;                               \
                     continue;                                                    \
                 }                                                                \
                 Geometry left;                                                   \
                 if (!left.TryParseFromWkb(                                       \
                         tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[res_offset + i] = false;                                 \
+                    res[i] = false;                                              \
                     continue;                                                    \
                 }                                                                \
-                res[res_offset + i] = left.method(tls_ctx);                      \
+                res[i] = left.method(tls_ctx);                                   \
             }                                                                    \
         }                                                                        \
     };                                                                           \
     int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0);              \
+        execute_sub_batch, std::nullptr_t{}, res, valid_res);                    \
     AssertInfo(processed_size == real_batch_size,                                \
                "internal error: expr processed rows {} not equal "               \
                "expect batch size {}",                                           \
@@ -298,8 +272,8 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     }
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-    auto& res = res_vec->GetMutableBitmap();
-    auto& valid_res = res_vec->GetMutableValidBitmap();
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
     valid_res.set();
 
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {

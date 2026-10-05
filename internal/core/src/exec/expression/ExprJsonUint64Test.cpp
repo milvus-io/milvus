@@ -200,8 +200,6 @@ TEST(JsonNumericTest, BinaryRangeUint64OutsideSmallRange) {
          N,
          res_bm,
          valid_res_bm,
-         0,
-         0,
          empty_bitmap,
          0);
 
@@ -238,8 +236,6 @@ TEST(JsonNumericTest, BinaryRangeUint64WithMaxRange) {
          N,
          res_bm,
          valid_res_bm,
-         0,
-         0,
          empty_bitmap,
          0);
 
@@ -272,8 +268,6 @@ TEST(JsonNumericTest, DoubleValuesStillWorkInBinaryRange) {
          N,
          res_bm,
          valid_res_bm,
-         0,
-         0,
          empty_bitmap,
          0);
 
@@ -308,8 +302,6 @@ TEST(JsonNumericTest, MixedTypeBinaryRange) {
          N,
          res_bm,
          valid_res_bm,
-         0,
-         0,
          empty_bitmap,
          0);
 
@@ -357,8 +349,6 @@ TEST(JsonNumericTest, Int64PrecisionPreservedInBinaryRange) {
          N,
          res_bm,
          valid_res_bm,
-         0,
-         0,
          empty_bitmap,
          0);
 

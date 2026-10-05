@@ -1,10 +1,12 @@
-# Bitset ownership, read-only views and statistics
+# Bitset ownership, read/write views and statistics
 
 `Bitset<Policy, Container, RangeCheck>` owns its storage and exposes writes.
-`BitsetView<Policy, RangeCheck>` borrows a read-only interval: `data()` returns a
+`BitsetReadView<Policy, RangeCheck>` (also named `BitsetView`) borrows a read-only interval: `data()` returns a
 const pointer and indexing returns a bool, even for a non-const descriptor.
 Read-only parameters can borrow an owner through the view constructor; bitmap
-bytes are not copied.
+bytes are not copied. `BitsetWriteView<Policy, RangeCheck>` borrows a fixed-size
+writable interval and reports writes through the owner mutation state. It cannot
+resize, reserve, append or replace storage.
 
 ## Lifetime and statistics
 
@@ -33,23 +35,27 @@ through a const owner or a view instead.
 
 ## Writing a window
 
-Write into the owner, and pass the destination bit offset as the final argument:
+Create a write window; indices and kernel offsets are local to that window:
 
 ```cpp
-dst.inplace_and(src.view(src_begin, length), length, dst_begin);
-dst.inplace_or(src.view(src_begin, length), length, dst_begin);
-dst.inplace_xor(src.view(src_begin, length), length, dst_begin);
-dst.inplace_sub(src.view(src_begin, length), length, dst_begin);
-dst.inplace_and_flip(src.view(src_begin, length), length, dst_begin);
-dst.set(dst_begin, length, true);
-dst.reset(dst_begin, length);
-dst.flip(dst_begin, length);
+auto dst = bitmap.write_view(dst_begin, length);
+auto src = source.read_view(src_begin, length);
+dst.inplace_and(src, length);
+dst.inplace_or(src, length);
+dst.inplace_xor(src, length);
+dst.inplace_sub(src, length);
+dst.inplace_and_flip(src, length);
+dst.set();
+dst.reset();
+dst.flip();
+dst[i] = predicate(i);
 ```
 
 The destination interval is `[dst_begin, dst_begin + length)`. Adjacent bits are
-preserved. Existing zero-offset owner calls and whole-owner `flip()` remain
-available. Comparisons and arithmetic comparisons accept the same optional final
-destination offset, for runtime and compile-time operation selection.
+preserved. Only a mutable owner or WriteView can create a WriteView; a ReadView
+and const owner cannot. `view()`/`read_view()` always produce read-only views;
+`WriteView + offset` produces a writable suffix for existing window callbacks.
+Owner kernels retain optional destination offsets for compatibility.
 
 Multi-input AND/OR accept read-only views or owners. Their aligned fast path
 requires both destination and sources to be aligned. Counted AND returns set
@@ -73,9 +79,9 @@ storage must outlive the scope, and must not be resized or replaced within it.
 ## Milvus use
 
 Bitmap columns retain owning bitsets. `GetBitmap()`/`GetValidBitmap()` return
-persistent read-only views; `GetMutableBitmap()`/`GetMutableValidBitmap()` return
-owners for bit writes. Column dimensions and storage identity must not be changed
-through the mutable references. Scalar column resizing uses the column API.
+persistent read-only views; `GetBitmapWriteView()`/`GetValidBitmapWriteView()` return
+fixed-size write windows. Column dimensions and storage identity stay behind the
+column API. Scalar column resizing uses the column API.
 Null counts derive from validity view counts. Expression result cache ownership,
 admission and eviction remain in the query cache manager.
 

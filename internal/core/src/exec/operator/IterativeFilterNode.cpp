@@ -264,7 +264,7 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec =
                         std::dynamic_pointer_cast<ColumnVector>(results[0]);
                     auto col_vec_size = col_vec->size();
-                    auto& bitsetview = col_vec->GetMutableBitmap();
+                    auto bitsetview = col_vec->GetBitmapWriteView();
                     // Fold UNKNOWN into FALSE explicitly (data &= valid):
                     // rows are included below on the data bit alone.
                     const auto& validview = col_vec->GetValidBitmap();

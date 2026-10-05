@@ -226,12 +226,17 @@ class TrackedBitProxy {
 template <typename PolicyT, bool IsRangeCheckEnabled>
 class BitsetView;
 
+template <typename PolicyT, bool IsRangeCheckEnabled>
+using BitsetReadView = BitsetView<PolicyT, IsRangeCheckEnabled>;
+
+template <typename PolicyT, bool IsRangeCheckEnabled>
+class BitsetWriteView;
+
 // Bitset, which owns the data.
 template <typename PolicyT, typename ContainerT, bool IsRangeCheckEnabled>
 class Bitset;
 
-// Shared read operations. The only public storage types are Bitset and
-// BitsetView; mutating operations are available on Bitset only.
+// Shared read operations for owners and both borrowed view types.
 template <typename PolicyT, typename ImplT, bool IsRangeCheckEnabled>
 class BitsetBase {
     template <typename, bool>
@@ -343,6 +348,16 @@ class BitsetBase {
         return this->view(0);
     }
 
+    inline BitsetReadView<PolicyT, IsRangeCheckEnabled>
+    read_view(const size_t begin, const size_t length) const {
+        return this->view(begin, length);
+    }
+
+    inline BitsetReadView<PolicyT, IsRangeCheckEnabled>
+    read_view(const size_t begin = 0) const {
+        return this->view(begin);
+    }
+
     // Return the number of bits which are set to true.
     inline size_t
     count() const {
@@ -428,10 +443,9 @@ class BitsetBase {
 };
 
 namespace detail {
-// Internal CRTP implementation for owners; never inherited by BitsetView.
-// Writers accept an optional destination bit offset. The source offset is
-// selected with a read-only source view. No writable view or intermediate
-// bitmap is required to update a window of the owner.
+// Internal CRTP implementation for owners and fixed-size write views.
+// Kernel offsets are local to the destination. ReadView selects source windows;
+// WriteView selects destination windows without allocating another bitmap.
 template <typename PolicyT, typename ImplT, bool IsRangeCheckEnabled>
 class BitsetMutatingBase
     : public BitsetBase<PolicyT, ImplT, IsRangeCheckEnabled> {
@@ -443,6 +457,30 @@ class BitsetMutatingBase
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
     using read_base::data;
     using read_base::operator[];
+
+    inline BitsetWriteView<PolicyT, IsRangeCheckEnabled>
+    write_view(const size_t begin, const size_t length) {
+        check_range(begin, length);
+        return BitsetWriteView<PolicyT, IsRangeCheckEnabled>(
+            as_derived().data_impl(),
+            this->offset() + begin,
+            length,
+            as_derived().mutation_state_impl());
+    }
+
+    inline BitsetWriteView<PolicyT, IsRangeCheckEnabled>
+    write_view(const size_t begin = 0) {
+        range_checker::le(begin, this->size());
+        return this->write_view(begin, this->size() - begin);
+    }
+
+    // The owner and storage must outlive the scope. Do not resize or replace
+    // them while writing; concurrent readers require external synchronization.
+    detail::BitsetWriteScope
+    scoped_write() {
+        return detail::BitsetWriteScope(as_derived().mutation_state_impl(),
+                                        as_derived().data_impl());
+    }
     inline data_type*
     data() {
         as_derived().escape_data_impl();
@@ -1375,6 +1413,92 @@ class BitsetMutatingBase
 };
 }  // namespace detail
 
+// A non-owning writable interval. Its offset is applied by the shared kernels
+// and tracked bit proxies. It cannot resize, reserve, append or replace storage.
+// ReadView caches observe writes through the same stable owner mutation state.
+template <typename PolicyT, bool IsRangeCheckEnabled>
+class BitsetWriteView : public detail::BitsetMutatingBase<
+                            PolicyT,
+                            BitsetWriteView<PolicyT, IsRangeCheckEnabled>,
+                            IsRangeCheckEnabled> {
+    template <typename, typename, bool>
+    friend class BitsetBase;
+    template <typename, typename, bool>
+    friend class detail::BitsetMutatingBase;
+
+ public:
+    using policy_type = PolicyT;
+    using data_type = typename policy_type::data_type;
+    using proxy_type = detail::TrackedBitProxy<PolicyT>;
+    using const_proxy_type = typename policy_type::const_proxy_type;
+    using read_base = BitsetBase<PolicyT,
+                                 BitsetWriteView<PolicyT, IsRangeCheckEnabled>,
+                                 IsRangeCheckEnabled>;
+    using read_base::operator+;
+
+    BitsetWriteView() = default;
+
+    BitsetWriteView
+    operator+(const size_t begin) {
+        return this->write_view(begin);
+    }
+
+    template <typename ContainerT, bool R>
+    BitsetWriteView(Bitset<PolicyT, ContainerT, R>& owner)
+        : Data(owner.data_impl()),
+          Size(owner.size()),
+          State(owner.mutation_state_impl()) {
+    }
+
+ private:
+    BitsetWriteView(data_type* data,
+                    size_t offset,
+                    size_t size,
+                    detail::BitsetMutationState* state)
+        : Data(data), Size(size), Offset(offset), State(state) {
+    }
+
+    data_type* Data = nullptr;
+    size_t Size = 0;
+    size_t Offset = 0;
+    detail::BitsetMutationState* State = nullptr;
+
+    data_type*
+    data_impl() {
+        return Data;
+    }
+    const data_type*
+    data_impl() const {
+        return Data;
+    }
+    size_t
+    size_impl() const {
+        return Size;
+    }
+    size_t
+    offset_impl() const {
+        return Offset;
+    }
+    detail::BitsetMutationState*
+    mutation_state_impl() {
+        return State;
+    }
+    const detail::BitsetMutationState*
+    mutation_state_impl() const {
+        return State;
+    }
+    void
+    modified_impl() {
+        if (State)
+            State->Modified();
+    }
+    void
+    escape_data_impl() {
+        if (State)
+            State->Escape();
+    }
+};
+
 // Non-owning read-only view. Owner writes remain observable. The backing
 // storage and the referenced range must remain alive and valid; operations
 // such as resize, reserve, clear, append, move assignment, and destruction can
@@ -1567,6 +1691,8 @@ class Bitset : public detail::BitsetMutatingBase<
         PolicyT,
         Bitset<PolicyT, ContainerT, IsRangeCheckEnabled>,
         IsRangeCheckEnabled>;
+    template <typename, bool>
+    friend class BitsetWriteView;
 
  public:
     using policy_type = PolicyT;
@@ -1575,6 +1701,8 @@ class Bitset : public detail::BitsetMutatingBase<
     using const_proxy_type = typename policy_type::const_proxy_type;
 
     using view_type = BitsetView<PolicyT, IsRangeCheckEnabled>;
+    using read_view_type = BitsetReadView<PolicyT, IsRangeCheckEnabled>;
+    using write_view_type = BitsetWriteView<PolicyT, IsRangeCheckEnabled>;
 
     // This is the container type.
     using container_type = ContainerT;
@@ -1585,13 +1713,6 @@ class Bitset : public detail::BitsetMutatingBase<
     using container_data_type = typename container_type::value_type;
 
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
-
-    // The owner and its storage must outlive the scope; do not replace/resize
-    // the owner while the scope is active. Concurrent readers are unsupported.
-    detail::BitsetWriteScope
-    scoped_write() {
-        return detail::BitsetWriteScope(State.get(), data_impl());
-    }
 
     // Allocate an empty one.
     Bitset() = default;

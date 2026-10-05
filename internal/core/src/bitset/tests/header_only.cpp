@@ -21,6 +21,20 @@
 #include "bitset/bitset.h"
 #include "bitset/detail/element_wise.h"
 
+template <typename T, typename = void>
+struct WritableView : std::false_type {};
+template <typename T>
+struct WritableView<T,
+                    std::void_t<decltype(std::declval<T&>().write_view()),
+                                decltype(std::declval<T&>().set())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct Resizable : std::false_type {};
+template <typename T>
+struct Resizable<T, std::void_t<decltype(std::declval<T&>().resize(1))>>
+    : std::true_type {};
+
 int
 main() {
     using Policy = milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t>;
@@ -40,5 +54,16 @@ main() {
     bits.flip(13, 130);
     if (!view.view(13, 130).all())
         return 4;
+    auto write = bits.write_view(13, 130);
+    static_assert(
+        !std::is_constructible_v<Owner::write_view_type, const Owner&>);
+    static_assert(!std::is_constructible_v<Owner::write_view_type,
+                                           Owner::read_view_type>);
+    static_assert(!WritableView<Owner::read_view_type>::value);
+    static_assert(WritableView<Owner::write_view_type>::value);
+    static_assert(!Resizable<Owner::write_view_type>::value);
+    write.reset();
+    if (!write.read_view().none() || !view[12] || !view[143])
+        return 5;
     return 0;
 }

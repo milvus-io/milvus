@@ -207,10 +207,8 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                           int64_t chunk_id,
                           int64_t offset,
                           int64_t size,
-                          TargetBitmap& valid_result,
-                          const size_t valid_result_offset = 0) const {
+                          TargetBitmapWriteView valid_result) const {
         auto valid_result_write_scope = valid_result.scoped_write();
-
         if (!IsNullable() || size == 0) {
             return;
         }
@@ -226,8 +224,7 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                    offset,
                    size,
                    chunk->RowNums());
-        chunk->ApplyValidityMask(
-            offset, size, valid_result, valid_result_offset);
+        chunk->ApplyValidityMask(offset, size, valid_result);
     }
 
     virtual ScanResult

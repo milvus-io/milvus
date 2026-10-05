@@ -120,7 +120,7 @@ PhyElementFilterBitsNode::GetOutput() {
     auto col_input = GetColumnVector(input_);
     const auto& doc_bitset = col_input->GetBitmap();
     const auto& doc_bitset_valid = col_input->GetValidBitmap();
-    col_input->GetMutableBitmap().flip();
+    col_input->GetBitmapWriteView().flip();
 
     // Step 3: Evaluate element expression
     // Use offset mode or full mode based on selectivity

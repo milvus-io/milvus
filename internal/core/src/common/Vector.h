@@ -207,12 +207,12 @@ class ColumnVector final : public SimpleVector {
             .GetBitmap();
     }
 
-    // Bit writes only: keep the column shape and owner identity unchanged.
-    TargetBitmap&
-    GetMutableBitmap() {
-        AssertInfo(is_bitmap_, "GetMutableBitmap requires a bitmap column");
+    // Fixed-size borrowed output; storage growth stays inside the column API.
+    TargetBitmapWriteView
+    GetBitmapWriteView() {
+        AssertInfo(is_bitmap_, "GetBitmapWriteView requires a bitmap column");
         return static_cast<FieldBitsetImpl<uint8_t>&>(*values_)
-            .GetMutableBitmap();
+            .GetBitmapWriteView();
     }
 
     const TargetBitmapView&
@@ -220,10 +220,9 @@ class ColumnVector final : public SimpleVector {
         return valid_view_;
     }
 
-    // Bit writes only: use ColumnVector::resize to change the shape.
-    TargetBitmap&
-    GetMutableValidBitmap() {
-        return valid_values_;
+    TargetBitmapWriteView
+    GetValidBitmapWriteView() {
+        return valid_values_.write_view();
     }
 
     bool

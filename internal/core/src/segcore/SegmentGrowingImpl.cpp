@@ -476,7 +476,7 @@ SegmentGrowingImpl::PreInsert(int64_t size) {
 }
 
 void
-SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
+SegmentGrowingImpl::mask_with_delete(BitsetTypeWriteView bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
     deleted_record_.Query(bitset, ins_barrier, timestamp);
@@ -1528,10 +1528,8 @@ SegmentGrowingImpl::ApplyFieldValidData(
     int64_t chunk_id,
     int64_t offset,
     int64_t size,
-    TargetBitmap& valid_result,
-    const size_t valid_result_offset) const {
+    TargetBitmapWriteView valid_result) const {
     auto valid_result_write_scope = valid_result.scoped_write();
-
     (void)op_ctx;
     if (size == 0) {
         return;
@@ -1548,7 +1546,7 @@ SegmentGrowingImpl::ApplyFieldValidData(
     auto valid_data = valid_vec_ptr->get_chunk_data(row_offset);
     for (int64_t i = 0; i < size; ++i) {
         if (!valid_data[i]) {
-            valid_result[valid_result_offset + i] = false;
+            valid_result[i] = false;
         }
     }
 }
@@ -1559,10 +1557,8 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     FieldId field_id,
     const int64_t* offsets,
     int64_t count,
-    TargetBitmap& valid_result,
-    const size_t valid_result_offset) const {
+    TargetBitmapWriteView valid_result) const {
     auto valid_result_write_scope = valid_result.scoped_write();
-
     (void)op_ctx;
     if (count == 0) {
         return;
@@ -1576,7 +1572,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
     for (int64_t i = 0; i < count; ++i) {
         if (!valid_vec_ptr->is_valid(offsets[i])) {
-            valid_result[valid_result_offset + i] = false;
+            valid_result[i] = false;
         }
     }
 }
@@ -2682,7 +2678,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 }
 
 void
-SegmentGrowingImpl::search_ids(BitsetType& bitset,
+SegmentGrowingImpl::search_ids(BitsetTypeWriteView bitset,
                                const IdArray& id_array) const {
     auto schema = get_schema_snapshot();
     auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
@@ -2711,7 +2707,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
+SegmentGrowingImpl::mask_with_timestamps(BitsetTypeWriteView bitset_chunk,
                                          Timestamp timestamp,
                                          Timestamp collection_ttl) const {
     if (collection_ttl > 0) {
