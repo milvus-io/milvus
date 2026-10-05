@@ -334,6 +334,27 @@ func (info *VChannelView) CreateSegmentSchema(partitionID int64, timetick uint64
 	return schema
 }
 
+// restoreSegmentSchema resolves the persisted encoding version without changing
+// the collection and partition lifetime filters used by CreateSegmentSchema.
+// Version zero is a real encoding version, not a request for the latest schema.
+func (info *VChannelView) restoreSegmentSchema(partitionID int64, timetick uint64, schemaVersion int32) *schemapb.CollectionSchema {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if !info.canObserveAtLocked(timetick) || !info.canObservePartitionAtLocked(partitionID, timetick) {
+		return nil
+	}
+	if !info.hasPartitionMetaLocked(partitionID) {
+		return nil
+	}
+	for _, version := range info.meta.GetCollectionInfo().GetSchemas() {
+		if version.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+			version.GetSchema() != nil && version.GetSchema().GetVersion() == schemaVersion {
+			return version.GetSchema()
+		}
+	}
+	return nil
+}
+
 func (info *VChannelView) TombstonedCleanupPlan(
 	physicalTimeTick uint64,
 	persistedMaterializedTimeTick uint64,

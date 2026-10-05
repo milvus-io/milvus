@@ -123,6 +123,10 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 				if schema == nil {
 					return nil, merr.WrapErrDataIntegrityMsg("missing schema version %d for sealed segment %d", meta.GetSchemaVersion(), id)
 				}
+			} else if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+				// Migration may recover the encoding version even when the schema
+				// at the original allocation timetick is no longer retained.
+				schema = module.vchannelView.restoreSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick(), meta.GetSchemaVersion())
 			} else {
 				schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
 			}
