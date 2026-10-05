@@ -909,14 +909,23 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		}
 	}
 
+	dmlTs := segmentEffectiveDmlTs(segment.SegmentInfo)
+	if dmlTs <= cpTimestamp {
+		return true
+	}
+
+	// A removed channel no longer needs checkpoint protection. Its checkpoint
+	// may stop advancing, while collection cleanup waits for segment GC.
 	segInsertChannel := segment.GetInsertChannel()
-	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
-	// We do this because collection meta drop relies on all segment being GCed.
-	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
-		// segment gc shall only happen when channel cp is after segment dml cp.
+	channelExists, err := gc.meta.catalog.ChannelExists(gc.ctx, segInsertChannel)
+	if err != nil {
+		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
+			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
+		return false
+	}
+	if channelExists {
 		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
+			mlog.Uint64("dmlPosTs", dmlTs),
 			mlog.Uint64("channelCpTs", cpTimestamp),
 		)
 		return false
