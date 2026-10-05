@@ -1033,14 +1033,13 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	}
 }
 
-// recycleDroppedSegment deletes a single dropped segment's object and
-// segment-index files, then its segment-index meta, then its segment meta.
+// recycleDroppedSegment marks its index tasks deleted before removing a
+// dropped segment's files, segment-index records, and finally segment record.
 //
-// The ordering matters: files first so a meta-only retry after partial
-// file deletion can still observe the leftover keys; segment-index meta
-// next so segment meta deletion (the final marker) is the only step that
-// commits the GC; if any step fails the later state is preserved for the
-// next GC cycle to retry.
+// Persisted task markers keep a retained compaction ancestor from appearing
+// ready after partial file cleanup or a failed catalog deletion, including
+// across restart. Keep the marked records and their file keys until cleanup
+// completes so subsequent GC cycles can retry the same files.
 //
 // This path can race with recycleUnusedSegIndexes on the same BuildID
 // whenever a dropped segment's parent field index has also been marked
@@ -1075,6 +1074,11 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	case gcBlockedByManifest:
 		// The class-specific message (transient read failure vs invalid
 		// entry) is logged where the manifest error is classified.
+		return
+	}
+
+	if err := gc.markSegmentIndexesDeleted(ctx, segIndexes); err != nil {
+		log.Warn(ctx, "GC segment index tasks failed to mark deleted, wait to retry", mlog.Err(err))
 		return
 	}
 
@@ -1234,6 +1238,23 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *
 		}
 	}
 	return files, false, nil
+}
+
+// markSegmentIndexesDeleted persists every task's deletion marker before any
+// segment artifacts are removed. A failure leaves all files for the next GC
+// cycle; markers already persisted remain authoritative and are idempotent.
+func (gc *garbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+	for _, segIdx := range segIndexes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := gc.meta.indexMeta.DeleteTask(segIdx.BuildID); err != nil {
+			mlog.Warn(ctx, "failed to mark segment index task deleted before GC",
+				mlog.FieldSegmentID(segIdx.SegmentID), mlog.FieldBuildID(segIdx.BuildID), mlog.Err(err))
+			return err
+		}
+	}
+	return nil
 }
 
 // getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
