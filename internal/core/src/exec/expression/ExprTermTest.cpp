@@ -131,7 +131,7 @@ TEST_P(ExprTest, TestTermJson) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -233,7 +233,7 @@ TEST_P(ExprTest, TestTermJsonNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -317,7 +317,7 @@ TEST_P(ExprTest, TestTerm) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -440,7 +440,7 @@ TEST_P(ExprTest, TestTermNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {

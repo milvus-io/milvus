@@ -143,7 +143,8 @@ class IArrayOffsets {
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
                                 int64_t elem_offset,
                                 int64_t row_start,
-                                TargetBitmapView row_result) const = 0;
+                                TargetBitmap& row_result,
+                                size_t result_offset = 0) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -230,7 +231,8 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
                                 int64_t elem_offset,
                                 int64_t row_start,
-                                TargetBitmapView row_result) const override;
+                                TargetBitmap& row_result,
+                                size_t result_offset = 0) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,
@@ -330,7 +332,8 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ElementBitsetToRowBitsetAny(const TargetBitmapView& elem_bitset,
                                 int64_t elem_offset,
                                 int64_t row_start,
-                                TargetBitmapView row_result) const override;
+                                TargetBitmap& row_result,
+                                size_t result_offset = 0) const override;
 
  private:
     struct PendingRow {

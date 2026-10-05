@@ -1535,7 +1535,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
     auto shredding_fields = index_->GetShreddingFields(path);
     for (const auto& field : shredding_fields) {
         auto processed_size =
-            index_->ExecutorForGettingValid(nullptr, field, valid_res_view);
+            index_->ExecutorForGettingValid(nullptr, field, valid_res, 0);
         EXPECT_EQ(processed_size, size_);
     }
     std::cout << "can not skip shared" << std::endl;
@@ -1565,12 +1565,17 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     auto func = [](const int64_t* data,
                    ValidityView valid_data,
                    const int size,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res) {
+                   TargetBitmap& res,
+                   TargetBitmap& valid_res,
+                   const size_t res_offset,
+                   const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (int i = 0; i < size; i++) {
             if (valid_data[i]) {
-                res[i] = true;
-                valid_res[i] = true;
+                res[res_offset + i] = true;
+                valid_res[valid_res_offset + i] = true;
             }
         }
     };
@@ -1578,7 +1583,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     auto field_name = *(index_->GetShreddingFields(path).begin());
     std::cout << "field_name: " << field_name << std::endl;
     int processed_size = index_->ExecutorForShreddingData<int64_t>(
-        nullptr, field_name, func, nullptr, res_view, valid_res_view);
+        nullptr, field_name, func, nullptr, res_view, valid_res_view, 0, 0);
     std::cout << "processed_size: " << processed_size << std::endl;
     EXPECT_EQ(processed_size, size_);
 
@@ -1595,8 +1600,10 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
         field_name,
         func,
         [](const SkipIndex&, std::string, int) { return true; },
-        TargetBitmapView(skipped_res),
-        TargetBitmapView(skipped_valid_res));
+        skipped_res,
+        skipped_valid_res,
+        0,
+        0);
     EXPECT_EQ(processed_size, size_);
     const auto expected_valid_count = nullable_ ? 400 : 800;
     EXPECT_EQ(skipped_res.count(), expected_valid_count);
@@ -1853,7 +1860,7 @@ TEST_P(JsonKeyStatsAsyncLoadTest, HonorsRolloutForMmapEagerAndLazyLoad) {
                                    TargetBitmap valid_res(data_.size(), true);
                                    TargetBitmapView valid_res_view(valid_res);
                                    return load_index_->ExecutorForGettingValid(
-                                       nullptr, lazy_field, valid_res_view);
+                                       nullptr, lazy_field, valid_res, 0);
                                });
     }
 

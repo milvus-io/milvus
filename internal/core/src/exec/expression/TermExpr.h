@@ -177,8 +177,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     // Type-safe cached FilterChunk dispatch (avoids per-call dynamic_cast).
     // Set once during arg_inited_; empty when arg_set_ is not SimdBatch.
     // Captures a typed SimdBatchElement<T>* inside the lambda at init time.
-    using FilterChunkFn =
-        std::function<void(const void* data, int size, TargetBitmapView res)>;
+    using FilterChunkFn = std::function<void(const void* data,
+                                             int size,
+                                             TargetBitmap& res,
+                                             const size_t res_offset)>;
     FilterChunkFn cached_filter_chunk_;
     // Cached SetElement<string> pointer for per-row string lookup without
     // variant construction. Set once during init; nullptr when arg_set_ is not

@@ -45,7 +45,7 @@ class SegmentGrowing : public SegmentInternalInterface {
                     bool lower_inclusive,
                     const PkType& upper_pk,
                     bool upper_inclusive,
-                    BitsetTypeView& bitset) const override {
+                    BitsetType& bitset) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "pk_binary_range is not supported for growing segment");
     }

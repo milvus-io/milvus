@@ -87,10 +87,10 @@ PhyMvccNode::GetOutput() {
         query_timestamp_ >= segment_->get_max_timestamp()) {
         auto col_input = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
-        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        auto& data = col_input->GetMutableBitmap();
         segment_->mask_with_delete(data, active_count_, query_timestamp_);
 
-        if (data.none()) {
+        if (col_input->GetBitmap().none()) {
             query_context->set_all_rows_visible(true);
         }
 
@@ -106,7 +106,7 @@ PhyMvccNode::GetOutput() {
                                            TargetBitmap(active_count_))
                                      : GetColumnVector(input_);
 
-    TargetBitmapView data(col_input->GetRawData(), col_input->size());
+    auto& data = col_input->GetMutableBitmap();
     segment_->mask_with_timestamps(
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);

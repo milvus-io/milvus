@@ -451,12 +451,10 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
         ASSERT_NE(actual, nullptr);
         ASSERT_NE(expected, nullptr);
         ASSERT_EQ(actual->size(), expected->size());
-        BitsetTypeView actual_result(actual->GetRawData(), actual->size());
-        BitsetTypeView actual_valid(actual->GetValidRawData(), actual->size());
-        BitsetTypeView expected_result(expected->GetRawData(),
-                                       expected->size());
-        BitsetTypeView expected_valid(expected->GetValidRawData(),
-                                      expected->size());
+        const auto& actual_result = actual->GetBitmap();
+        const auto& actual_valid = actual->GetValidBitmap();
+        const auto& expected_result = expected->GetBitmap();
+        const auto& expected_valid = expected->GetValidBitmap();
         for (size_t i = 0; i < actual->size(); ++i) {
             EXPECT_EQ(actual_result[i], expected_result[i]) << "position " << i;
             EXPECT_EQ(actual_valid[i], expected_valid[i]) << "position " << i;
@@ -482,8 +480,8 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
         ASSERT_NE(column, nullptr);
         ASSERT_EQ(column->size(), N);
 
-        BitsetTypeView result(column->GetRawData(), N);
-        BitsetTypeView valid(column->GetValidRawData(), N);
+        const auto& result = column->GetBitmap();
+        const auto& valid = column->GetValidBitmap();
         for (size_t i = 0; i < N; ++i) {
             const bool expected =
                 validity_[i] &&
@@ -594,15 +592,15 @@ TEST_F(RoaringFilterExprEvalTest, NullableAndNotPreserveThreeValuedLogic) {
         auto logical = MakeLogical(i64_fid_, DataType::INT64, members);
         auto direct = EvalPredicate(segment, logical);
         ASSERT_NE(direct, nullptr);
-        BitsetTypeView direct_result(direct->GetRawData(), N);
-        BitsetTypeView direct_valid(direct->GetValidRawData(), N);
+        const auto& direct_result = direct->GetBitmap();
+        const auto& direct_valid = direct->GetValidBitmap();
 
         auto negated = std::make_shared<expr::LogicalUnaryExpr>(
             expr::LogicalUnaryExpr::OpType::LogicalNot, logical);
         auto inverse = EvalPredicate(segment, negated);
         ASSERT_NE(inverse, nullptr);
-        BitsetTypeView inverse_result(inverse->GetRawData(), N);
-        BitsetTypeView inverse_valid(inverse->GetValidRawData(), N);
+        const auto& inverse_result = inverse->GetBitmap();
+        const auto& inverse_valid = inverse->GetValidBitmap();
 
         const std::unordered_set<int64_t> member_set(members.begin(),
                                                      members.end());
@@ -648,8 +646,8 @@ TEST_F(RoaringFilterExprEvalTest, NonContiguousOffsetInputGrowingAndSealed) {
             segment, MakeLogical(i64_fid_, DataType::INT64, members), &offsets);
         ASSERT_NE(result, nullptr);
         ASSERT_EQ(result->size(), offsets.size());
-        BitsetTypeView bits(result->GetRawData(), result->size());
-        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        const auto& bits = result->GetBitmap();
+        const auto& valid = result->GetValidBitmap();
 
         bool differs_from_first_n = false;
         for (size_t i = 0; i < offsets.size(); ++i) {
@@ -752,8 +750,8 @@ TEST_F(RoaringFilterExprEvalTest, BitmapInputPrunesByCandidatePosition) {
     auto contiguous =
         EvalPhysical(growing.get(), logical, std::move(contiguous_mask));
     ASSERT_NE(contiguous, nullptr);
-    BitsetTypeView contiguous_result(contiguous->GetRawData(), N);
-    BitsetTypeView contiguous_valid(contiguous->GetValidRawData(), N);
+    const auto& contiguous_result = contiguous->GetBitmap();
+    const auto& contiguous_valid = contiguous->GetValidBitmap();
     for (size_t i = 0; i < N; ++i) {
         const bool active = i % 3 != 1;
         EXPECT_EQ(contiguous_valid[i], active ? validity_[i] : true)
@@ -774,9 +772,8 @@ TEST_F(RoaringFilterExprEvalTest, BitmapInputPrunesByCandidatePosition) {
         EvalPhysical(growing.get(), logical, std::move(offset_mask), &offsets);
     ASSERT_NE(by_offset, nullptr);
     ASSERT_EQ(by_offset->size(), offsets.size());
-    BitsetTypeView offset_result(by_offset->GetRawData(), by_offset->size());
-    BitsetTypeView offset_valid(by_offset->GetValidRawData(),
-                                by_offset->size());
+    const auto& offset_result = by_offset->GetBitmap();
+    const auto& offset_valid = by_offset->GetValidBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         const auto row = static_cast<size_t>(offsets[i]);
         const bool active = i % 2 == 0;
@@ -884,8 +881,8 @@ TEST_F(RoaringFilterExprEvalTest,
     ASSERT_EQ(result->size(), offsets.size());
     EXPECT_EQ(g_roaring_reverse_lookup_calls.load(), expected_lookup_count);
 
-    BitsetTypeView bits(result->GetRawData(), result->size());
-    BitsetTypeView valid(result->GetValidRawData(), result->size());
+    const auto& bits = result->GetBitmap();
+    const auto& valid = result->GetValidBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         const bool active = i == 1 || i == 4 || i == 6;
         const auto row = static_cast<size_t>(offsets[i]);
@@ -945,8 +942,8 @@ TEST_F(RoaringFilterExprEvalTest,
         auto column = AsColumnVector(result);
         ASSERT_NE(column, nullptr);
         ASSERT_EQ(column->size(), expected_size);
-        BitsetTypeView bits(column->GetRawData(), column->size());
-        BitsetTypeView valid(column->GetValidRawData(), column->size());
+        const auto& bits = column->GetBitmap();
+        const auto& valid = column->GetValidBitmap();
         for (size_t i = 0; i < column->size(); ++i) {
             all_result.push_back(bits[i]);
             all_valid.push_back(valid[i]);

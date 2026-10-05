@@ -556,14 +556,11 @@ TEST(ArrayInvertedIndexRegression,
                                          row_count,
                                          MAX_TIMESTAMP,
                                          &offsets);
-        TargetBitmapView raw_offset_values(raw_offset_result->GetRawData(),
-                                           offsets.size());
-        TargetBitmapView raw_offset_validity(
-            raw_offset_result->GetValidRawData(), offsets.size());
-        TargetBitmapView indexed_offset_values(
-            indexed_offset_result->GetRawData(), offsets.size());
-        TargetBitmapView indexed_offset_validity(
-            indexed_offset_result->GetValidRawData(), offsets.size());
+        const auto& raw_offset_values = raw_offset_result->GetBitmap();
+        const auto& raw_offset_validity = raw_offset_result->GetValidBitmap();
+        const auto& indexed_offset_values = indexed_offset_result->GetBitmap();
+        const auto& indexed_offset_validity =
+            indexed_offset_result->GetValidBitmap();
         for (size_t i = 0; i < offsets.size(); ++i) {
             const auto row = offsets[i];
             EXPECT_EQ(indexed_offset_validity[i], expected_validity[row])

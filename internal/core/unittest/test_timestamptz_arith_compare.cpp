@@ -189,7 +189,7 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
             DEFAULT_PLANNODE_ID, typed_expr);
         auto col_vec = milvus::test::gen_filter_res(
             filter_node.get(), segment, N, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        const auto& res = col_vec->GetBitmap();
         ASSERT_EQ(res.size(), offsets.size());
 
         for (size_t k = 0; k < offsets.size(); ++k) {
@@ -361,7 +361,7 @@ TEST(TimestamptzArithCompareOffsetScanTest,
     auto col_vec = milvus::test::gen_filter_res(
         filter_node.get(), segment.get(), kRowCount, MAX_TIMESTAMP, &offsets);
     {
-        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        const auto& res = col_vec->GetBitmap();
         ASSERT_EQ(res.size(), offsets.size());
         EXPECT_TRUE(res[0]);
         EXPECT_FALSE(res[1]);
@@ -374,7 +374,7 @@ TEST(TimestamptzArithCompareOffsetScanTest,
                                            kRowCount,
                                            MAX_TIMESTAMP,
                                            &duplicate_offsets);
-    BitsetTypeView duplicate_res(col_vec->GetRawData(), col_vec->size());
+    const auto& duplicate_res = col_vec->GetBitmap();
     ASSERT_EQ(duplicate_res.size(), duplicate_offsets.size());
     EXPECT_TRUE(duplicate_res[0]);
     EXPECT_TRUE(duplicate_res[1]);

@@ -21,6 +21,7 @@
 #include <random>
 #include <string>
 #include <tuple>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -3267,7 +3268,7 @@ static_assert(
     std::is_same_v<decltype(std::declval<ReadOnlyOwner&>().data()), uint64_t*>);
 static_assert(std::is_constructible_v<ReadOnlyView, const ReadOnlyOwner&>);
 static_assert(std::is_constructible_v<ReadOnlyView, const void*, size_t>);
-static_assert(std::is_trivially_copyable_v<ReadOnlyView>);
+static_assert(std::is_copy_constructible_v<ReadOnlyView>);
 
 #define BITSET_WRITE_TRAIT(Name, ...)                                       \
     template <typename T, typename = void>                                  \
@@ -3638,6 +3639,228 @@ TEST(ReadOnlyBitsetViewTest, MultipleSourcesUseIndependentWindows) {
         VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedRef>>();
     TestOwnerMultipleWindows<
         VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
+}
+
+}  // namespace
+
+namespace {
+struct CountingStatsPolicy
+    : milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t> {
+    using Base = milvus::bitset::detail::ElementWiseBitsetPolicy<uint64_t>;
+    static inline std::atomic<int> count_calls{0}, all_calls{0}, none_calls{0};
+    static size_t
+    op_count(const uint64_t* data, size_t offset, size_t size) {
+        ++count_calls;
+        return Base::op_count(data, offset, size);
+    }
+    static bool
+    op_all(const uint64_t* data, size_t offset, size_t size) {
+        ++all_calls;
+        return Base::op_all(data, offset, size);
+    }
+    static bool
+    op_none(const uint64_t* data, size_t offset, size_t size) {
+        ++none_calls;
+        return Base::op_none(data, offset, size);
+    }
+    static void
+    ResetCalls() {
+        count_calls = 0;
+        all_calls = 0;
+        none_calls = 0;
+    }
+};
+using StatsOwner = Bitset<CountingStatsPolicy, std::vector<uint8_t>, true>;
+
+TEST(BitsetViewStatsTest, CountCachesAndInvalidatesLiveViews) {
+    StatsOwner bits(193, false);
+    bits.set(7);
+    bits.set(136);
+    auto view = bits.view();
+    auto window = view.view(7, 130);
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(view.count(), 2);
+    EXPECT_EQ(view.count(), 2);
+    EXPECT_FALSE(view.all());
+    EXPECT_FALSE(view.none());
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::all_calls, 0);
+    EXPECT_EQ(CountingStatsPolicy::none_calls, 0);
+    EXPECT_EQ(window.count(), 2);
+    auto copied = window;
+    EXPECT_EQ(copied.count(), 2);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 2);
+    auto retained = bits[136];
+    retained = false;
+    EXPECT_EQ(view.count(), 1);
+    EXPECT_EQ(window.count(), 1);
+    EXPECT_EQ(copied.count(), 1);
+    bits.flip(7, 130);
+    EXPECT_EQ(window.count(), 129);
+    bits.reset();
+    EXPECT_TRUE(view.none());
+    EXPECT_EQ(view.count(), 0);
+    bits.set();
+    EXPECT_TRUE(view.all());
+    EXPECT_EQ(view.count(), 193);
+    StatsOwner moved(std::move(bits));
+    retained = false;
+    EXPECT_EQ(view.count(), 192);
+    EXPECT_TRUE(bits.empty());
+    moved.reset(136);
+    EXPECT_EQ(view.count(), 192);
+}
+
+TEST(BitsetViewStatsTest, PredicatesCacheEarlyResultsWithoutFullCount) {
+    StatsOwner bits(1027, false);
+    bits.set(2);
+    auto view = bits.view();
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_FALSE(view.all());
+    EXPECT_FALSE(view.all());
+    EXPECT_FALSE(view.none());
+    EXPECT_FALSE(view.none());
+    EXPECT_EQ(CountingStatsPolicy::all_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::none_calls, 1);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 0);
+    bits.set();
+    EXPECT_TRUE(view.all());
+    EXPECT_EQ(view.count(), 1027);
+    EXPECT_FALSE(view.none());
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 0);
+}
+
+TEST(BitsetViewStatsTest, RawPointersAndRawBorrowedBuffersStayUncached) {
+    StatsOwner bits(129, false);
+    auto view = bits.view();
+    EXPECT_EQ(view.count(), 0);
+    auto* raw = bits.data();
+    raw[0] = 1;
+    EXPECT_EQ(view.count(), 1);
+    raw[0] = 3;
+    EXPECT_EQ(view.count(), 2);
+    uint64_t buffer[2] = {};
+    StatsOwner::view_type borrowed(buffer, 128);
+    EXPECT_TRUE(borrowed.none());
+    buffer[1] = 7;
+    EXPECT_EQ(borrowed.count(), 3);
+    EXPECT_FALSE(borrowed.none());
+}
+
+TEST(BitsetViewStatsTest, ScopedWritesNestedAliasingAndUnwinding) {
+    StatsOwner bits(257, false);
+    auto view = bits.view();
+    EXPECT_EQ(view.count(), 0);
+    {
+        auto outer = bits.scoped_write();
+        bits.set(2);
+        EXPECT_EQ(view.count(), 1);
+        {
+            auto inner = bits.scoped_write();
+            auto* words = static_cast<uint64_t*>(inner.data());
+            words[0] = 7;
+            EXPECT_EQ(view.count(), 3);
+        }
+        bits.set(5);
+        EXPECT_EQ(view.count(), 4);
+    }
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(view.count(), 4);
+    EXPECT_EQ(view.count(), 4);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 1);
+    try {
+        auto write = bits.scoped_write();
+        bits.reset();
+        throw 1;
+    } catch (int) {
+    }
+    EXPECT_TRUE(view.none());
+    CountingStatsPolicy::ResetCalls();
+    EXPECT_EQ(view.count(), 0);
+    EXPECT_EQ(CountingStatsPolicy::count_calls, 0);
+}
+
+TEST(BitsetViewStatsTest, ConcurrentReadOnlyQueries) {
+    StatsOwner bits(32771, false);
+    bits.set(3, 17005, true);
+    auto view = bits.view();
+    std::atomic<int> errors{0};
+    std::vector<std::thread> readers;
+    for (int phase = 0; phase < 4; ++phase) {
+        const size_t expected = phase % 2 ? 32771 - 17005 : 17005;
+        for (int t = 0; t < 8; ++t)
+            readers.emplace_back([&] {
+                for (int i = 0; i < 1000; ++i) {
+                    auto copied = view;
+                    if (view.count() != expected || view.all() || view.none() ||
+                        copied.count() != expected || copied.all() ||
+                        copied.none())
+                        ++errors;
+                }
+            });
+        for (auto& reader : readers) reader.join();
+        readers.clear();
+        bits.flip();  // externally synchronized writes between reader batches
+    }
+    EXPECT_EQ(errors, 0);
+}
+
+TEST(BitsetViewStatsTest, AliasedAppendSurvivesStorageGrowth) {
+    StatsOwner bits(67, false);
+    bits.set(1);
+    bits.set(65);
+    const auto source = bits.view(1, 65);
+    EXPECT_EQ(source.count(), 2);
+    bits.append(source);
+    auto result = bits.view();
+    EXPECT_EQ(result.size(), 132);
+    EXPECT_EQ(result.count(), 4);
+    EXPECT_TRUE(result[67]);
+    EXPECT_TRUE(result[131]);
+    bits.append(bits);
+    EXPECT_EQ(bits.view().count(), 8);
+    EXPECT_EQ(bits.size(), 264);
+}
+
+TEST(BitsetViewStatsTest, GenerationOverflowDisablesCaching) {
+    struct Owner : StatsOwner {
+        using StatsOwner::StatsOwner;
+        void
+        SetLastGeneration() {
+            mutation_state_impl()->generation =
+                std::numeric_limits<uint64_t>::max();
+        }
+    };
+    Owner bits(65, false);
+    auto view = bits.view();
+    EXPECT_EQ(view.count(), 0);
+    bits.SetLastGeneration();
+    EXPECT_EQ(view.count(), 0);
+    bits.set(64);
+    EXPECT_EQ(view.count(), 1);
+    bits.set(0);
+    EXPECT_EQ(view.count(), 2);
+}
+
+TEST(BitsetViewStatsTest, BulkWritersInvalidateCachedWindows) {
+    StatsOwner bits(193, false), rhs(65, true);
+    auto whole = bits.view();
+    auto window = bits.view(7, 65);
+    EXPECT_EQ(whole.count(), 0);
+    EXPECT_TRUE(window.none());
+    bits.inplace_or(rhs.view(), 65, 7);
+    EXPECT_EQ(whole.count(), 65);
+    EXPECT_TRUE(window.all());
+    bits.inplace_and_flip(rhs.view(), 65, 7);
+    EXPECT_TRUE(whole.none());
+    EXPECT_EQ(window.count(), 0);
+    const int64_t data[] = {1, 3, 0, 5};
+    bits.inplace_compare_val<int64_t, milvus::bitset::CompareOpType::GT>(
+        data, 4, 2, 7);
+    EXPECT_EQ(whole.count(), 2);
+    EXPECT_EQ(window.count(), 2);
+    EXPECT_TRUE(window[1]);
+    EXPECT_TRUE(window[3]);
 }
 
 }  // namespace

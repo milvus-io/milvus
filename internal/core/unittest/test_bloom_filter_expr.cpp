@@ -1274,7 +1274,7 @@ TEST_F(BloomFilterExprEvalTest, JsonPathOffsetInput) {
             DEFAULT_PLANNODE_ID, typed_expr);
         auto col_vec = milvus::test::gen_filter_res(
             filter_node.get(), segment, N, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        const auto& res = col_vec->GetBitmap();
         ASSERT_EQ(res.size(), offsets.size());
 
         for (size_t k = 0; k < offsets.size(); ++k) {
@@ -1359,7 +1359,7 @@ TEST_F(BloomFilterExprEvalTest, Int64OffsetInputIterativeFilter) {
             DEFAULT_PLANNODE_ID, typed_expr);
         auto col_vec = milvus::test::gen_filter_res(
             filter_node.get(), segment, N, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        const auto& res = col_vec->GetBitmap();
         // Result size must equal the number of candidate offsets, one bit per
         // candidate, NOT the first offsets.size() rows.
         ASSERT_EQ(res.size(), offsets.size());
@@ -1449,8 +1449,8 @@ TEST_F(BloomFilterExprEvalTest,
         auto result =
             EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
         ASSERT_NE(result, nullptr);
-        BitsetTypeView bits(result->GetRawData(), result->size());
-        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        const auto& bits = result->GetBitmap();
+        const auto& valid = result->GetValidBitmap();
         ASSERT_EQ(result->size(), offsets.size());
 
         EXPECT_FALSE(bits[0]);
@@ -1501,8 +1501,8 @@ TEST_F(BloomFilterExprEvalTest,
         auto result =
             EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
         ASSERT_NE(result, nullptr);
-        BitsetTypeView bits(result->GetRawData(), result->size());
-        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        const auto& bits = result->GetBitmap();
+        const auto& valid = result->GetValidBitmap();
         ASSERT_EQ(result->size(), offsets.size());
 
         EXPECT_FALSE(bits[0]);
@@ -1547,8 +1547,8 @@ TEST_F(BloomFilterExprEvalTest,
         auto result =
             EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
         ASSERT_NE(result, nullptr);
-        BitsetTypeView bits(result->GetRawData(), result->size());
-        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        const auto& bits = result->GetBitmap();
+        const auto& valid = result->GetValidBitmap();
 
         EXPECT_FALSE(bits[0]);
         EXPECT_TRUE(valid[0])
@@ -1602,8 +1602,8 @@ TEST_F(BloomFilterExprEvalTest,
     ASSERT_NE(result, nullptr);
     EXPECT_EQ(g_bloom_reverse_lookup_calls.load(), 3);
 
-    BitsetTypeView bits(result->GetRawData(), result->size());
-    BitsetTypeView valid(result->GetValidRawData(), result->size());
+    const auto& bits = result->GetBitmap();
+    const auto& valid = result->GetValidBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         const bool active = i == 1 || i == 4 || i == 6;
         const auto row = static_cast<size_t>(offsets[i]);
@@ -1711,7 +1711,7 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedScalarIndexOnly) {
         DEFAULT_PLANNODE_ID, typed_expr);
     auto col_vec = milvus::test::gen_filter_res(
         filter_node.get(), sealed.get(), N, MAX_TIMESTAMP, &offsets);
-    BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+    const auto& res = col_vec->GetBitmap();
     ASSERT_EQ(res.size(), offsets.size());
     for (size_t k = 0; k < offsets.size(); ++k) {
         const int32_t row = offsets[k];
@@ -1809,8 +1809,8 @@ TEST_F(BloomFilterExprEvalTest,
     ASSERT_EQ(column_result->size(), N);
 
     const auto filter = SplitBlockBloomFilterView::Parse(blob);
-    BitsetTypeView result_bits(column_result->GetRawData(), N);
-    BitsetTypeView valid_bits(column_result->GetValidRawData(), N);
+    const auto& result_bits = column_result->GetBitmap();
+    const auto& valid_bits = column_result->GetValidBitmap();
     for (size_t i = 0; i < N; ++i) {
         const bool expected_valid = i64_valid_[i];
         const bool expected_match =

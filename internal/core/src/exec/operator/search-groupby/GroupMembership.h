@@ -35,6 +35,6 @@ BuildGroupMembership(milvus::OpContext* op_ctx,
                      FieldId field_id,
                      int64_t row_count,
                      const std::vector<std::optional<T>>& groups,
-                     const TargetBitmap* base_filter);
+                     const TargetBitmapView* base_filter);
 
 }  // namespace milvus::exec

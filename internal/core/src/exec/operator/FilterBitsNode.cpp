@@ -56,23 +56,31 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
 }  // namespace
 
 bool
-ConvertPredicateToFilteredBitset(TargetBitmapView data,
-                                 TargetBitmapView valid,
+ConvertPredicateToFilteredBitset(TargetBitmap& data,
+                                 TargetBitmap& valid,
                                  const size_t size) {
-    // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
-    // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
-    // excluded together with FALSE.
-    if (valid.all()) {
-        data.flip();
+    return ConvertPredicateToFilteredBitset(
+        data, valid, size, 0, 0, data.size());
+}
+
+bool
+ConvertPredicateToFilteredBitset(TargetBitmap& data,
+                                 TargetBitmap& valid,
+                                 const size_t size,
+                                 const size_t data_offset,
+                                 const size_t valid_offset,
+                                 const size_t window_size) {
+    // 1 means excluded: only definite TRUE predicates pass the filter.
+    AssertInfo(size <= window_size, "predicate size exceeds output window");
+    const auto validity = valid.view(valid_offset, window_size);
+    if (validity.all()) {
+        data.flip(data_offset, window_size);
         return true;
     }
-
-    data.inplace_and_flip(valid, size);
-    // Keep the original full-view FLIP behavior if size is a prefix.
-    if (size < data.size()) {
-        data.view(size).flip();
-    }
-    valid.set();
+    data.inplace_and_flip(validity, size, data_offset);
+    // Preserve the original FLIP over the entire destination view for a prefix.
+    data.flip(data_offset + size, window_size - size);
+    valid.set(valid_offset, window_size, true);
     return false;
 }
 
@@ -200,8 +208,8 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result should be bitmap ColumnVector");
 
         auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
+        auto& view = col_vec->GetMutableBitmap();
+        auto& valid_view = col_vec->GetMutableValidBitmap();
         ConvertPredicateToFilteredBitset(view, valid_view, col_vec_size);
         num_processed_rows_ = col_vec_size;
 
@@ -214,8 +222,8 @@ PhyFilterBitsNode::GetOutput() {
             ExprResCacheManager::Key key{cache_segment->get_segment_id(),
                                          expr_cache_key_};
             ExprResCacheManager::Value v;
-            v.result = std::make_shared<TargetBitmap>(view);
-            v.valid_result = std::make_shared<TargetBitmap>(valid_view);
+            v.result = std::make_shared<TargetBitmap>(view.view());
+            v.valid_result = std::make_shared<TargetBitmap>(valid_view.view());
             v.active_count = need_process_rows_;
             ExprResCacheManager::Instance().Put(key, v);
         }
@@ -245,10 +253,9 @@ PhyFilterBitsNode::GetOutput() {
                 std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
-                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+                const auto& view = col_vec->GetBitmap();
                 bitset.append(view);
-                TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                            col_vec_size);
+                const auto& valid_view = col_vec->GetValidBitmap();
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
@@ -260,8 +267,8 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
-    TargetBitmapView bitset_view(bitset);
-    TargetBitmapView valid_bitset_view(valid_bitset);
+    auto& bitset_view = bitset;
+    auto& valid_bitset_view = valid_bitset;
     ConvertPredicateToFilteredBitset(
         bitset_view, valid_bitset_view, bitset.size());
 

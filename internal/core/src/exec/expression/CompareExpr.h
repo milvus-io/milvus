@@ -94,16 +94,19 @@ struct CompareElementFunc {
     operator()(const T* left,
                const U* right,
                size_t size,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmap& res,
+               const size_t res_offset,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
+
         // This is the original code, kept here for the documentation purposes
         // also, used for iterative filter
         if constexpr (filter_type == FilterType::random) {
             for (int i = 0; i < size; ++i) {
                 auto offset = (offsets != nullptr) ? offsets[i] : i;
-                res[i] =
+                res[res_offset + i] =
                     CompareColumnValues<T, U, op>(left[offset], right[offset]);
             }
             return;
@@ -114,7 +117,8 @@ struct CompareElementFunc {
                 if (!bitmap_input[start_cursor + i]) {
                     continue;
                 }
-                res[i] = CompareColumnValues<T, U, op>(left[i], right[i]);
+                res[res_offset + i] =
+                    CompareColumnValues<T, U, op>(left[i], right[i]);
             }
             return;
         }
@@ -122,7 +126,8 @@ struct CompareElementFunc {
         if constexpr (IsCompareStringViewType<T> ||
                       IsCompareStringViewType<U>) {
             for (int i = 0; i < size; ++i) {
-                res[i] = CompareColumnValues<T, U, op>(left[i], right[i]);
+                res[res_offset + i] =
+                    CompareColumnValues<T, U, op>(left[i], right[i]);
             }
             return;
         } else {
@@ -130,32 +135,32 @@ struct CompareElementFunc {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::EQ>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::NE>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::GT>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else if constexpr (op == proto::plan::OpType::LessThan) {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::LT>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::GE>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
                 res.inplace_compare_column<T,
                                            U,
                                            milvus::bitset::CompareOpType::LE>(
-                    left, right, size);
+                    left, right, size, res_offset);
             } else {
                 ThrowInfo(
                     OpTypeInvalid,
@@ -347,27 +352,37 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunks(FUNC func,
-                          TargetBitmapView res,
-                          TargetBitmapView valid_res,
+                          TargetBitmap& res,
+                          TargetBitmap& valid_res,
+                          const size_t res_offset,
+                          const size_t valid_res_offset,
                           const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
                                                          FUNC,
                                                          ValTypes...>(
-                func, res, valid_res, values...);
+                func, res, valid_res, res_offset, valid_res_offset, values...);
         }
         return ProcessBothDataChunksForSingleChunk<T, U, FUNC, ValTypes...>(
-            func, res, valid_res, values...);
+            func, res, valid_res, res_offset, valid_res_offset, values...);
     }
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataByOffsetsByTake(FUNC func,
                                    OffsetVector* input,
-                                   TargetBitmapView res,
-                                   TargetBitmapView valid_res,
+                                   TargetBitmap& res,
+                                   TargetBitmap& valid_res,
+                                   const size_t res_offset,
+                                   const size_t valid_res_offset,
                                    const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         auto left_column = CaptureDataColumn(left_field_);
         auto right_column = CaptureDataColumn(right_field_);
         if (left_column == nullptr || right_column == nullptr) {
@@ -406,8 +421,13 @@ class PhyCompareFilterExpr : public Expr {
             const auto left_data = left_owned.values.data_as<T>();
             const auto right_data = right_owned.values.data_as<U>();
             if (!left_owned.validity && !right_owned.validity) {
-                func.template operator()<FilterType::sequential>(
-                    left_data, right_data, nullptr, size, res, values...);
+                func.template operator()<FilterType::sequential>(left_data,
+                                                                 right_data,
+                                                                 nullptr,
+                                                                 size,
+                                                                 res,
+                                                                 res_offset,
+                                                                 values...);
                 return size;
             }
             for (int64_t i = 0; i < size; ++i) {
@@ -416,15 +436,16 @@ class PhyCompareFilterExpr : public Expr {
                 const auto right_valid =
                     !right_owned.validity || right_owned.validity[i];
                 if (!left_valid || !right_valid) {
-                    res[i] = false;
-                    valid_res[i] = false;
+                    res[res_offset + i] = false;
+                    valid_res[valid_res_offset + i] = false;
                     continue;
                 }
                 func.template operator()<FilterType::random>(left_data + i,
                                                              right_data + i,
                                                              nullptr,
                                                              1,
-                                                             res + i,
+                                                             res,
+                                                             (res_offset + i),
                                                              values...);
             }
         } else {
@@ -434,14 +455,19 @@ class PhyCompareFilterExpr : public Expr {
                 const auto left_item = left_items[i];
                 const auto right_item = right_items[i];
                 if (!left_item.is_valid || !right_item.is_valid) {
-                    res[i] = false;
-                    valid_res[i] = false;
+                    res[res_offset + i] = false;
+                    valid_res[valid_res_offset + i] = false;
                     continue;
                 }
                 const auto& left = *left_item.value;
                 const auto& right = *right_item.value;
-                func.template operator()<FilterType::random>(
-                    &left, &right, nullptr, 1, res + i, values...);
+                func.template operator()<FilterType::random>(&left,
+                                                             &right,
+                                                             nullptr,
+                                                             1,
+                                                             res,
+                                                             (res_offset + i),
+                                                             values...);
             }
         }
         return size;
@@ -451,9 +477,14 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsetsByChunkFallback(FUNC func,
                                             OffsetVector* input,
-                                            TargetBitmapView res,
-                                            TargetBitmapView valid_res,
+                                            TargetBitmap& res,
+                                            TargetBitmap& valid_res,
+                                            const size_t res_offset,
+                                            const size_t valid_res_offset,
                                             const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t size = input->size();
         int64_t processed_size = 0;
         if (segment_chunk_reader_.segment_->is_chunked() ||
@@ -511,14 +542,14 @@ class PhyCompareFilterExpr : public Expr {
                     cached_right_chunk_id = right_chunk_id;
                 }
                 if (left_validity && !left_validity[left_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
+                    res[res_offset + processed_size] = false;
+                    valid_res[valid_res_offset + processed_size] = false;
                     processed_size++;
                     continue;
                 }
                 if (right_validity && !right_validity[right_chunk_offset]) {
-                    res[processed_size] = false;
-                    valid_res[processed_size] = false;
+                    res[res_offset + processed_size] = false;
+                    valid_res[valid_res_offset + processed_size] = false;
                     processed_size++;
                     continue;
                 }
@@ -529,7 +560,8 @@ class PhyCompareFilterExpr : public Expr {
                     right_data,
                     nullptr,
                     1,
-                    res + processed_size,
+                    res,
+                    (res_offset + processed_size),
                     values...);
                 processed_size++;
             }
@@ -550,13 +582,13 @@ class PhyCompareFilterExpr : public Expr {
             for (int i = 0; i < size; ++i) {
                 auto offset = (*input)[i];
                 if (left_validity && !left_validity[offset]) {
-                    res[i] = false;
-                    valid_res[i] = false;
+                    res[res_offset + i] = false;
+                    valid_res[valid_res_offset + i] = false;
                     continue;
                 }
                 if (right_validity && !right_validity[offset]) {
-                    res[i] = false;
-                    valid_res[i] = false;
+                    res[res_offset + i] = false;
+                    valid_res[valid_res_offset + i] = false;
                     continue;
                 }
                 func.template operator()<FilterType::random>(
@@ -564,13 +596,19 @@ class PhyCompareFilterExpr : public Expr {
                     right_data + offset,
                     nullptr,
                     1,
-                    res + i,
+                    res,
+                    (res_offset + i),
                     values...);
             }
             return size;
         }
-        func.template operator()<FilterType::random>(
-            left_data, right_data, input->data(), size, res, values...);
+        func.template operator()<FilterType::random>(left_data,
+                                                     right_data,
+                                                     input->data(),
+                                                     size,
+                                                     res,
+                                                     res_offset,
+                                                     values...);
         return size;
     }
 
@@ -578,11 +616,22 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsets(FUNC func,
                              OffsetVector* input,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmap& res,
+                             TargetBitmap& valid_res,
+                             const size_t res_offset,
+                             const size_t valid_res_offset,
                              const ValTypes&... values) {
-        const auto processed_size = ProcessBothDataByOffsetsByTake<T, U>(
-            func, input, res, valid_res, values...);
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
+        const auto processed_size =
+            ProcessBothDataByOffsetsByTake<T, U>(func,
+                                                 input,
+                                                 res,
+                                                 valid_res,
+                                                 res_offset,
+                                                 valid_res_offset,
+                                                 values...);
         if (processed_size >= 0) {
             return processed_size;
         }
@@ -601,16 +650,27 @@ class PhyCompareFilterExpr : public Expr {
                 left_field_.get(),
                 right_field_.get());
             return ProcessBothDataByOffsetsByChunkFallback<T, U>(
-                func, input, res, valid_res, values...);
+                func,
+                input,
+                res,
+                valid_res,
+                res_offset,
+                valid_res_offset,
+                values...);
         }
     }
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForSingleChunk(FUNC func,
-                                        TargetBitmapView res,
-                                        TargetBitmapView valid_res,
+                                        TargetBitmap& res,
+                                        TargetBitmap& valid_res,
+                                        const size_t res_offset,
+                                        const size_t valid_res_offset,
                                         const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t processed_size = 0;
 
         const auto active_count = segment_chunk_reader_.active_count_;
@@ -647,15 +707,20 @@ class PhyCompareFilterExpr : public Expr {
                  right_data,
                  nullptr,
                  size,
-                 res + processed_size,
+                 res,
+                 (res_offset + processed_size),
                  values...);
             ApplyValidMask(left_chunk.validity().Subview(data_pos),
-                           res + processed_size,
-                           valid_res + processed_size,
+                           res,
+                           valid_res,
+                           (res_offset + processed_size),
+                           (valid_res_offset + processed_size),
                            size);
             ApplyValidMask(right_chunk.validity().Subview(data_pos),
-                           res + processed_size,
-                           valid_res + processed_size,
+                           res,
+                           valid_res,
+                           (res_offset + processed_size),
+                           (valid_res_offset + processed_size),
                            size);
             processed_size += size;
 
@@ -672,9 +737,14 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForMultipleChunk(FUNC func,
-                                          TargetBitmapView res,
-                                          TargetBitmapView valid_res,
+                                          TargetBitmap& res,
+                                          TargetBitmap& valid_res,
+                                          const size_t res_offset,
+                                          const size_t valid_res_offset,
                                           const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t processed_size = 0;
         while (processed_size < batch_size_ &&
                left_current_chunk_id_ < left_num_chunk_ &&
@@ -728,17 +798,22 @@ class PhyCompareFilterExpr : public Expr {
                  right_data,
                  nullptr,
                  size,
-                 res + processed_size,
+                 res,
+                 (res_offset + processed_size),
                  values...);
             ApplyValidMask(
                 left_chunk.validity().Subview(left_current_chunk_pos_),
-                res + processed_size,
-                valid_res + processed_size,
+                res,
+                valid_res,
+                (res_offset + processed_size),
+                (valid_res_offset + processed_size),
                 size);
             ApplyValidMask(
                 right_chunk.validity().Subview(right_current_chunk_pos_),
-                res + processed_size,
-                valid_res + processed_size,
+                res,
+                valid_res,
+                (res_offset + processed_size),
+                (valid_res_offset + processed_size),
                 size);
             processed_size += size;
             left_current_chunk_pos_ += size;
@@ -760,10 +835,15 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     TryProcessBothDataByScan(FUNC func,
                              int64_t real_batch_size,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmap& res,
+                             TargetBitmap& valid_res,
+                             const size_t res_offset,
+                             const size_t valid_res_offset,
                              size_t& processed_cursor,
                              const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (!data_scan_initialized_) {
             data_scan_initialized_ = true;
             left_data_column_ = CaptureDataColumn(left_field_);
@@ -865,7 +945,8 @@ class PhyCompareFilterExpr : public Expr {
                              right_data,
                              nullptr,
                              size,
-                             res + processed_size,
+                             res,
+                             (res_offset + processed_size),
                              values...);
                     } else {
                         const auto is_valid = [&](int64_t i) {
@@ -883,12 +964,14 @@ class PhyCompareFilterExpr : public Expr {
                                      right_data + run_start,
                                      nullptr,
                                      row - run_start,
-                                     res + processed_size + run_start,
+                                     res,
+                                     (res_offset + processed_size + run_start),
                                      values...);
                                 continue;
                             }
-                            res[processed_size + row] = false;
-                            valid_res[processed_size + row] = false;
+                            res[res_offset + processed_size + row] = false;
+                            valid_res[valid_res_offset + processed_size + row] =
+                                false;
                             ++processed_cursor;
                             ++row;
                         }
@@ -898,15 +981,20 @@ class PhyCompareFilterExpr : public Expr {
                          right_data,
                          nullptr,
                          size,
-                         res + processed_size,
+                         res,
+                         (res_offset + processed_size),
                          values...);
                     ApplyValidMask(left_validity,
-                                   res + processed_size,
-                                   valid_res + processed_size,
+                                   res,
+                                   valid_res,
+                                   (res_offset + processed_size),
+                                   (valid_res_offset + processed_size),
                                    size);
                     ApplyValidMask(right_validity,
-                                   res + processed_size,
-                                   valid_res + processed_size,
+                                   res,
+                                   valid_res,
+                                   (res_offset + processed_size),
+                                   (valid_res_offset + processed_size),
                                    size);
                 }
 

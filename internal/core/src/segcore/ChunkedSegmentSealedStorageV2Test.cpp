@@ -1573,7 +1573,7 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         BitsetType timestamp_mask(kNumRows);
         BitsetTypeView timestamp_mask_view(timestamp_mask);
         static_cast<SegmentInternalInterface*>(manifest_segment.get())
-            ->mask_with_timestamps(timestamp_mask_view, 31, 0);
+            ->mask_with_timestamps(timestamp_mask, 31, 0);
         for (int64_t i = 0; i < kNumRows; ++i) {
             EXPECT_EQ(timestamp_mask[i], i >= kNumRows / 2);
         }
@@ -1601,7 +1601,7 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         BitsetType delete_mask(kNumRows);
         BitsetTypeView delete_mask_view(delete_mask);
         segment_internal->mask_with_delete(
-            delete_mask_view, kNumRows, MAX_TIMESTAMP);
+            delete_mask, kNumRows, MAX_TIMESTAMP);
         EXPECT_EQ(delete_mask.count(), 1);
         EXPECT_TRUE(delete_mask[0]);
         EXPECT_GT(pk_column->DataByteSize(), 0);
@@ -1700,7 +1700,7 @@ TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
         ASSERT_NE(internal, nullptr);
         BitsetType delete_mask(kNumRows);
         BitsetTypeView delete_mask_view(delete_mask);
-        internal->mask_with_delete(delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        internal->mask_with_delete(delete_mask, kNumRows, MAX_TIMESTAMP);
         EXPECT_EQ(delete_mask.count(), 1);
         EXPECT_TRUE(delete_mask[0]);
     }
@@ -2631,7 +2631,7 @@ TEST_P(TestChunkSegmentStorageV2,
             ASSERT_NE(matches, nullptr);
             const auto count = std::min<int64_t>(17, RowCount() - offset);
             ASSERT_EQ(values->size(), count);
-            TargetBitmapView bits(matches->GetRawData(), count);
+            const auto& bits = matches->GetBitmap();
             for (int64_t i = 0; i < count; ++i) {
                 ASSERT_TRUE(values->ValidAt(i));
                 EXPECT_EQ(values->RawAsValues<std::string>()[i],
@@ -2654,7 +2654,7 @@ TEST_P(TestChunkSegmentStorageV2,
         auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
         ASSERT_NE(values, nullptr);
         ASSERT_NE(matches, nullptr);
-        TargetBitmapView bits(matches->GetRawData(), offsets.size());
+        const auto& bits = matches->GetBitmap();
         ASSERT_EQ(values->size(), offsets.size());
         for (int64_t i = 0; i < offsets.size(); ++i) {
             EXPECT_EQ(values->RawAsValues<std::string>()[i],
@@ -2847,7 +2847,7 @@ TEST_P(TestChunkSegmentStorageV2,
     ASSERT_EQ(row->childrens().size(), 1);
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
     ASSERT_NE(col_vec, nullptr);
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
     BitsetType final(view);
     final.flip();
     ASSERT_EQ(RowCount() - threshold.int64_val(), final.count());
@@ -2990,19 +2990,19 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnUnsortedSegment) {
 
     BitsetType timestamp_mask(chunk_num * test_data_count);
     BitsetTypeView timestamp_mask_view(timestamp_mask);
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 41, 0);
     ASSERT_FALSE(timestamp_mask[41]);
     ASSERT_TRUE(timestamp_mask[42]);
 
     timestamp_mask.reset();
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 42, 0);
     ASSERT_FALSE(timestamp_mask[42]);
     ASSERT_TRUE(timestamp_mask[43]);
 
     BitsetType delete_mask(chunk_num * test_data_count);
     BitsetTypeView delete_mask_view(delete_mask);
     segment_internal->mask_with_delete(
-        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+        delete_mask, chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(1, delete_mask.count());
     ASSERT_EQ(1, unsorted_segment->get_deleted_count());
     ASSERT_EQ(chunk_num * test_data_count - 1,
@@ -3064,19 +3064,19 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
 
     BitsetType timestamp_mask(chunk_num * test_data_count);
     BitsetTypeView timestamp_mask_view(timestamp_mask);
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 41, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 41, 0);
     ASSERT_FALSE(timestamp_mask[41]);
     ASSERT_TRUE(timestamp_mask[42]);
 
     timestamp_mask.reset();
-    segment_internal->mask_with_timestamps(timestamp_mask_view, 42, 0);
+    segment_internal->mask_with_timestamps(timestamp_mask, 42, 0);
     ASSERT_FALSE(timestamp_mask[42]);
     ASSERT_TRUE(timestamp_mask[43]);
 
     BitsetType delete_mask(chunk_num * test_data_count);
     BitsetTypeView delete_mask_view(delete_mask);
     segment_internal->mask_with_delete(
-        delete_mask_view, chunk_num * test_data_count, MAX_TIMESTAMP);
+        delete_mask, chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(1, delete_mask.count());
     ASSERT_EQ(1, sorted_segment->get_deleted_count());
     ASSERT_EQ(chunk_num * test_data_count - 1,
@@ -3463,7 +3463,7 @@ RunByOffsetsWithStorageUsage(
     milvus::exec::EvalCtx eval_context(exec_context.get(), &offsets);
     expressions->Eval(0, 1, true, eval_context, results);
     auto column = milvus::query::GetColumnVectorForTest(results[0]);
-    BitsetTypeView selected(column->GetRawData(), column->size());
+    const auto& selected = column->GetBitmap();
     return {static_cast<int64_t>(selected.count()),
             op_context.storage_usage.scanned_total_bytes.load()};
 }

@@ -985,9 +985,9 @@ EvalExprSetOverAllBatches(ExprSet& expr_set,
                    what,
                    bitset.size(),
                    total_rows);
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+        const auto& view = col_vec->GetBitmap();
         bitset.append(view);
-        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
+        const auto& valid_view = col_vec->GetValidBitmap();
         valid_bitset.append(valid_view);
     }
     AssertInfo(static_cast<int64_t>(bitset.size()) == total_rows,

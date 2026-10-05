@@ -145,10 +145,12 @@ class FieldBitsetImpl : public FieldDataBase {
     operator=(const FieldBitsetImpl&) = delete;
 
     explicit FieldBitsetImpl(DataType data_type, TargetBitmap&& bitmap)
-        : FieldDataBase(data_type, false), length_(bitmap.size()) {
-        data_ = std::move(bitmap).into();
-        cap_ = data_.size() * sizeof(Type) * 8;
+        : FieldDataBase(data_type, false),
+          bitmap_(std::move(bitmap)),
+          length_(bitmap_.size()) {
+        cap_ = bitmap_.size_in_bytes() * 8;
         Assert(cap_ >= length_);
+        bitmap_view_ = bitmap_.view(0, length_);
     }
 
     // FillFieldData used for read and write with storage,
@@ -207,7 +209,17 @@ class FieldBitsetImpl : public FieldDataBase {
 
     void*
     Data() override {
-        return data_.data();
+        return bitmap_.data();
+    }
+
+    const TargetBitmapView&
+    GetBitmap() const {
+        return bitmap_view_;
+    }
+
+    TargetBitmap&
+    GetMutableBitmap() {
+        return bitmap_;
     }
 
     uint8_t*
@@ -265,7 +277,8 @@ class FieldBitsetImpl : public FieldDataBase {
                    "Reverse bitset size must be a multiple of {}",
                    8 * sizeof(Type));
         if (cap > cap_) {
-            data_.resize(cap / (8 * sizeof(Type)));
+            bitmap_.reserve(cap);
+            bitmap_view_ = bitmap_.view(0, length_);
             cap_ = cap;
         }
     }
@@ -307,7 +320,8 @@ class FieldBitsetImpl : public FieldDataBase {
     }
 
  private:
-    FixedVector<Type> data_{};
+    TargetBitmap bitmap_;
+    mutable TargetBitmapView bitmap_view_;
     // capacity that data_ can store
     int64_t cap_;
     mutable std::shared_mutex cap_mutex_;

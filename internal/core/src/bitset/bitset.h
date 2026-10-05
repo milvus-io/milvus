@@ -16,10 +16,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <limits>
 #include <type_traits>
 
 #include "common.h"
@@ -87,6 +90,135 @@ struct RangeChecker<true> {
 };
 
 }  // namespace
+
+namespace detail {
+// Only invalidation metadata lives on the owner. Statistics live on views.
+// Owner mutation and readers must be externally synchronized. Concurrent
+// readers may activate/cache statistics, hence the atomic activation flags.
+struct BitsetMutationState {
+    static constexpr uint8_t kTracked = 1;
+    static constexpr uint8_t kEscaped = 2;
+    static constexpr uint8_t kWriting = 4;
+    size_t write_depth = 0;
+    mutable std::atomic<uint8_t> flags{0};
+    uint64_t generation = 0;
+
+    void
+    Modified() {
+        if (write_depth == 0 &&
+            flags.load(std::memory_order_relaxed) == kTracked) {
+            if (generation == std::numeric_limits<uint64_t>::max()) {
+                Escape();
+            } else {
+                ++generation;
+            }
+        }
+    }
+    void
+    Escape() {
+        flags.fetch_or(kEscaped, std::memory_order_relaxed);
+    }
+    bool
+    Track() const {
+        const auto current = flags.load(std::memory_order_relaxed);
+        if (current & (kEscaped | kWriting))
+            return false;
+        if (!(current & kTracked))
+            flags.fetch_or(kTracked, std::memory_order_relaxed);
+        return true;
+    }
+};
+
+// Suppress per-bit version updates in a batch; statistics are uncached until
+// the batch closes. Nested scopes on the same owner are supported.
+class BitsetWriteScope {
+    BitsetMutationState* state_;
+    void* data_;
+
+ public:
+    BitsetWriteScope(BitsetMutationState* state, void* data)
+        : state_(state), data_(data) {
+        if (state_ && state_->write_depth++ == 0) {
+            state_->flags.fetch_or(BitsetMutationState::kWriting,
+                                   std::memory_order_relaxed);
+        }
+    }
+    void*
+    data() const {
+        return data_;
+    }
+    BitsetWriteScope(const BitsetWriteScope&) = delete;
+    BitsetWriteScope&
+    operator=(const BitsetWriteScope&) = delete;
+    ~BitsetWriteScope() {
+        if (state_ && --state_->write_depth == 0) {
+            state_->flags.fetch_and(uint8_t(~BitsetMutationState::kWriting),
+                                    std::memory_order_relaxed);
+            state_->Modified();
+        }
+    }
+};
+
+template <typename PolicyT>
+class TrackedBitProxy {
+    typename PolicyT::proxy_type proxy_;
+    BitsetMutationState* state_;
+
+ public:
+    TrackedBitProxy(typename PolicyT::proxy_type proxy,
+                    BitsetMutationState* state)
+        : proxy_(proxy), state_(state) {
+    }
+    operator bool() const {
+        return bool(proxy_);
+    }
+    bool
+    operator~() const {
+        return ~proxy_;
+    }
+    TrackedBitProxy&
+    operator=(bool value) {
+        if (state_)
+            state_->Modified();
+        proxy_ = value;
+        return *this;
+    }
+    TrackedBitProxy&
+    operator=(const TrackedBitProxy& other) {
+        return *this = bool(other);
+    }
+    TrackedBitProxy&
+    operator|=(bool value) {
+        if (value)
+            set();
+        return *this;
+    }
+    TrackedBitProxy&
+    operator&=(bool value) {
+        if (!value)
+            reset();
+        return *this;
+    }
+    TrackedBitProxy&
+    operator^=(bool value) {
+        if (value)
+            flip();
+        return *this;
+    }
+    void
+    set() {
+        *this = true;
+    }
+    void
+    reset() {
+        *this = false;
+    }
+    void
+    flip() {
+        *this = !bool(proxy_);
+    }
+};
+}  // namespace detail
 
 // CRTP
 
@@ -187,7 +319,10 @@ class BitsetBase {
         range_checker::le(size, this->size() - offset);
 
         return BitsetView<PolicyT, IsRangeCheckEnabled>(
-            this->data(), this->offset() + offset, size);
+            this->data(),
+            this->offset() + offset,
+            size,
+            as_derived().mutation_state_impl());
     }
 
     // Create a const view from the given position, which uses all available size.
@@ -196,7 +331,10 @@ class BitsetBase {
         range_checker::le(offset, this->size());
 
         return BitsetView<PolicyT, IsRangeCheckEnabled>(
-            this->data(), this->offset() + offset, this->size() - offset);
+            this->data(),
+            this->offset() + offset,
+            this->size() - offset,
+            as_derived().mutation_state_impl());
     }
 
     // Create a const view.
@@ -276,6 +414,12 @@ class BitsetBase {
         return as_derived().offset_impl();
     }
 
+ protected:
+    const detail::BitsetMutationState*
+    mutation_state_impl() const {
+        return as_derived().mutation_state_impl();
+    }
+
  private:
     inline const ImplT&
     as_derived() const {
@@ -295,12 +439,13 @@ class BitsetMutatingBase
     using read_base = BitsetBase<PolicyT, ImplT, IsRangeCheckEnabled>;
     using policy_type = PolicyT;
     using data_type = typename policy_type::data_type;
-    using proxy_type = typename policy_type::proxy_type;
+    using proxy_type = detail::TrackedBitProxy<PolicyT>;
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
     using read_base::data;
     using read_base::operator[];
     inline data_type*
     data() {
+        as_derived().escape_data_impl();
         return as_derived().data_impl();
     }
 
@@ -310,13 +455,15 @@ class BitsetMutatingBase
         range_checker::lt(bit_idx, this->size());
 
         const size_t idx_v = bit_idx + this->offset();
-        return policy_type::get_proxy(this->data(), idx_v);
+        return proxy_type(
+            policy_type::get_proxy(as_derived().data_impl(), idx_v),
+            as_derived().mutation_state_impl());
     }
 
     // Set all bits to true.
     inline void
     set() {
-        policy_type::op_set(this->data(), this->offset(), this->size());
+        policy_type::op_set(write_data(), this->offset(), this->size());
     }
 
     // Set a given bit to a given value.
@@ -333,13 +480,13 @@ class BitsetMutatingBase
         check_range(bit_idx_start, size);
 
         policy_type::op_fill(
-            this->data(), this->offset() + bit_idx_start, size, value);
+            write_data(), this->offset() + bit_idx_start, size, value);
     }
 
     // Set all bits to false.
     inline void
     reset() {
-        policy_type::op_reset(this->data(), this->offset(), this->size());
+        policy_type::op_reset(write_data(), this->offset(), this->size());
     }
 
     // Set a given bit to false.
@@ -363,7 +510,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        policy_type::op_and(this->data(),
+        policy_type::op_and(write_data(),
                             other.data(),
                             this->offset() + dst_offset,
                             other.offset(),
@@ -380,7 +527,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        policy_type::op_and_flip(this->data(),
+        policy_type::op_and_flip(write_data(),
                                  other.data(),
                                  this->offset() + dst_offset,
                                  other.offset(),
@@ -407,7 +554,7 @@ class BitsetMutatingBase
             tmp_offset[i] = others[i].offset();
         }
 
-        policy_type::op_and_multiple(this->data(),
+        policy_type::op_and_multiple(write_data(),
                                      tmp_data.data(),
                                      this->offset() + dst_offset,
                                      tmp_offset.data(),
@@ -442,7 +589,7 @@ class BitsetMutatingBase
             tmp_offset[i] = others[i].offset();
         }
 
-        policy_type::op_and_multiple(this->data(),
+        policy_type::op_and_multiple(write_data(),
                                      tmp_data.data(),
                                      this->offset() + dst_offset,
                                      tmp_offset.data(),
@@ -476,7 +623,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        policy_type::op_or(this->data(),
+        policy_type::op_or(write_data(),
                            other.data(),
                            this->offset() + dst_offset,
                            other.offset(),
@@ -503,7 +650,7 @@ class BitsetMutatingBase
             tmp_offset[i] = others[i].offset();
         }
 
-        policy_type::op_or_multiple(this->data(),
+        policy_type::op_or_multiple(write_data(),
                                     tmp_data.data(),
                                     this->offset() + dst_offset,
                                     tmp_offset.data(),
@@ -538,7 +685,7 @@ class BitsetMutatingBase
             tmp_offset[i] = others[i].offset();
         }
 
-        policy_type::op_or_multiple(this->data(),
+        policy_type::op_or_multiple(write_data(),
                                     tmp_data.data(),
                                     this->offset() + dst_offset,
                                     tmp_offset.data(),
@@ -573,7 +720,7 @@ class BitsetMutatingBase
     inline void
     flip(const size_t begin, const size_t size) {
         check_range(begin, size);
-        policy_type::op_flip(this->data(), this->offset() + begin, size);
+        policy_type::op_flip(write_data(), this->offset() + begin, size);
     }
 
     // Inplace xor.
@@ -585,7 +732,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        policy_type::op_xor(this->data(),
+        policy_type::op_xor(write_data(),
                             other.data(),
                             this->offset() + dst_offset,
                             other.offset(),
@@ -611,7 +758,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        policy_type::op_sub(this->data(),
+        policy_type::op_sub(write_data(),
                             other.data(),
                             this->offset() + dst_offset,
                             other.offset(),
@@ -668,7 +815,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
 
         policy_type::template op_compare_column<T, U, Op>(
-            this->data(), this->offset() + dst_offset, t, u, size);
+            write_data(), this->offset() + dst_offset, t, u, size);
     }
 
     // Compare elements of an given array with a given value
@@ -711,7 +858,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
 
         policy_type::template op_compare_val<T, Op>(
-            this->data(), this->offset() + dst_offset, t, size, value);
+            write_data(), this->offset() + dst_offset, t, size, value);
     }
 
     //
@@ -750,7 +897,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
 
         policy_type::template op_within_range_column<T, Op>(
-            this->data(),
+            write_data(),
             this->offset() + dst_offset,
             lower,
             upper,
@@ -794,7 +941,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
 
         policy_type::template op_within_range_val<T, Op>(
-            this->data(),
+            write_data(),
             this->offset() + dst_offset,
             lower,
             upper,
@@ -1167,7 +1314,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
 
         policy_type::template op_arith_compare<T, AOp, CmpOp>(
-            this->data(),
+            write_data(),
             this->offset() + dst_offset,
             src,
             right_operand,
@@ -1185,7 +1332,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        return policy_type::op_and_with_count(this->data(),
+        return policy_type::op_and_with_count(write_data(),
                                               other.data(),
                                               this->offset() + dst_offset,
                                               other.offset(),
@@ -1201,7 +1348,7 @@ class BitsetMutatingBase
         check_range(dst_offset, size);
         range_checker::le(size, other.size());
 
-        return policy_type::op_or_with_count(this->data(),
+        return policy_type::op_or_with_count(write_data(),
                                              other.data(),
                                              this->offset() + dst_offset,
                                              other.offset(),
@@ -1209,6 +1356,12 @@ class BitsetMutatingBase
     }
 
  private:
+    inline data_type*
+    write_data() {
+        as_derived().modified_impl();
+        return as_derived().data_impl();
+    }
+
     inline void
     check_range(size_t begin, size_t length) const {
         range_checker::le(begin, this->size());
@@ -1225,15 +1378,15 @@ class BitsetMutatingBase
 // Non-owning read-only view. Owner writes remain observable. The backing
 // storage and the referenced range must remain alive and valid; operations
 // such as resize, reserve, clear, append, move assignment, and destruction can
-// invalidate views. A view is not an immutable snapshot, so count() is not
-// cached here. Concurrent owner writes still require external synchronization.
+// invalidate views. Statistics are cached against the owner's mutation version.
+// Raw borrowed buffers and escaped writable pointers remain uncached. Concurrent
+// owner writes still require external synchronization.
 template <typename PolicyT, bool IsRangeCheckEnabled>
 class BitsetView : public BitsetBase<PolicyT,
                                      BitsetView<PolicyT, IsRangeCheckEnabled>,
                                      IsRangeCheckEnabled> {
-    friend class BitsetBase<PolicyT,
-                            BitsetView<PolicyT, IsRangeCheckEnabled>,
-                            IsRangeCheckEnabled>;
+    template <typename, typename, bool>
+    friend class BitsetBase;
 
  public:
     using policy_type = PolicyT;
@@ -1243,16 +1396,43 @@ class BitsetView : public BitsetBase<PolicyT,
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
 
     BitsetView() = default;
-    BitsetView(const BitsetView&) = default;
-    BitsetView(BitsetView&&) = default;
+    BitsetView(const BitsetView& other) {
+        *this = other;
+    }
+    BitsetView(BitsetView&& other) noexcept {
+        *this = other;
+    }
     BitsetView&
-    operator=(const BitsetView&) = default;
+    operator=(const BitsetView& other) {
+        if (this != &other) {
+            Data = other.Data;
+            Size = other.Size;
+            Offset = other.Offset;
+            State = other.State;
+            // Observe the generation before copying facts. A concurrent first
+            // read can publish a reset for a newer owner generation.
+            const auto generation =
+                other.CachedGeneration.load(std::memory_order_acquire);
+            CachedCount.store(other.CachedCount.load(std::memory_order_relaxed),
+                              std::memory_order_relaxed);
+            CachedPredicates.store(
+                other.CachedPredicates.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
+            CachedGeneration.store(generation, std::memory_order_relaxed);
+        }
+        return *this;
+    }
     BitsetView&
-    operator=(BitsetView&&) = default;
+    operator=(BitsetView&& other) noexcept {
+        return *this = other;
+    }
 
     template <typename ImplT, bool R>
-    explicit BitsetView(const BitsetBase<PolicyT, ImplT, R>& bitset)
-        : Data{bitset.data()}, Size{bitset.size()}, Offset{bitset.offset()} {
+    BitsetView(const BitsetBase<PolicyT, ImplT, R>& bitset)
+        : Data{bitset.data()},
+          Size{bitset.size()},
+          Offset{bitset.offset()},
+          State{bitset.mutation_state_impl()} {
     }
 
     BitsetView(const void* data, const size_t size)
@@ -1265,7 +1445,94 @@ class BitsetView : public BitsetBase<PolicyT,
           Offset{offset} {
     }
 
+    size_t
+    count() const {
+        if (Size == 0)
+            return 0;
+        if (!PrepareCache())
+            return policy_type::op_count(Data, Offset, Size);
+        auto count = CachedCount.load(std::memory_order_relaxed);
+        if (count == kUnknown) {
+            count = policy_type::op_count(Data, Offset, Size);
+            CachedCount.store(count, std::memory_order_relaxed);
+        }
+        return count;
+    }
+
+    bool
+    all() const {
+        return Predicate(true);
+    }
+    bool
+    none() const {
+        return Predicate(false);
+    }
+    bool
+    any() const {
+        return !none();
+    }
+
  private:
+    BitsetView(const void* data,
+               size_t offset,
+               size_t size,
+               const detail::BitsetMutationState* state)
+        : Data{reinterpret_cast<const data_type*>(data)},
+          Size{size},
+          Offset{offset},
+          State{state} {
+    }
+
+    static constexpr size_t kUnknown = std::numeric_limits<size_t>::max();
+    static constexpr uint8_t kAllKnown = 1, kAllTrue = 2, kNoneKnown = 4,
+                             kNoneTrue = 8;
+    const detail::BitsetMutationState* State = nullptr;
+    mutable std::atomic<size_t> CachedCount{kUnknown};
+    mutable std::atomic<uint8_t> CachedPredicates{0};
+    mutable std::atomic<uint64_t> CachedGeneration{
+        std::numeric_limits<uint64_t>::max()};
+
+    bool
+    PrepareCache() const {
+        if (State == nullptr || !State->Track())
+            return false;
+        const auto generation = State->generation;
+        if (CachedGeneration.load(std::memory_order_acquire) != generation) {
+            CachedCount.store(kUnknown, std::memory_order_relaxed);
+            CachedPredicates.store(0, std::memory_order_relaxed);
+            // Publish cleared facts before readers accept this generation.
+            CachedGeneration.store(generation, std::memory_order_release);
+        }
+        return true;
+    }
+    bool
+    Predicate(bool all) const {
+        if (Size == 0)
+            return true;
+        if (!PrepareCache())
+            return all ? policy_type::op_all(Data, Offset, Size)
+                       : policy_type::op_none(Data, Offset, Size);
+        const auto count = CachedCount.load(std::memory_order_relaxed);
+        if (count != kUnknown)
+            return all ? count == Size : count == 0;
+        const auto known = all ? kAllKnown : kNoneKnown;
+        const auto value = all ? kAllTrue : kNoneTrue;
+        const auto flags = CachedPredicates.load(std::memory_order_relaxed);
+        if (flags & known)
+            return flags & value;
+        const bool result = all ? policy_type::op_all(Data, Offset, Size)
+                                : policy_type::op_none(Data, Offset, Size);
+        CachedPredicates.fetch_or(known | (result ? value : 0),
+                                  std::memory_order_relaxed);
+        if (result)
+            CachedCount.store(all ? Size : 0, std::memory_order_relaxed);
+        return result;
+    }
+    const detail::BitsetMutationState*
+    mutation_state_impl() const {
+        return State;
+    }
+
     // the referenced bits are [Offset, Offset + Size)
     const data_type* Data = nullptr;
     // measured in bits
@@ -1304,7 +1571,7 @@ class Bitset : public detail::BitsetMutatingBase<
  public:
     using policy_type = PolicyT;
     using data_type = typename policy_type::data_type;
-    using proxy_type = typename policy_type::proxy_type;
+    using proxy_type = detail::TrackedBitProxy<PolicyT>;
     using const_proxy_type = typename policy_type::const_proxy_type;
 
     using view_type = BitsetView<PolicyT, IsRangeCheckEnabled>;
@@ -1319,39 +1586,68 @@ class Bitset : public detail::BitsetMutatingBase<
 
     using range_checker = RangeChecker<IsRangeCheckEnabled>;
 
+    // The owner and its storage must outlive the scope; do not replace/resize
+    // the owner while the scope is active. Concurrent readers are unsupported.
+    detail::BitsetWriteScope
+    scoped_write() {
+        return detail::BitsetWriteScope(State.get(), data_impl());
+    }
+
     // Allocate an empty one.
     Bitset() = default;
     // Allocate the given number of bits.
     explicit Bitset(const size_t size)
-        : Data(get_required_size_in_container_elements(size)), Size{size} {
+        : Data(get_required_size_in_container_elements(size)),
+          Size{size},
+          State(size ? std::make_unique<detail::BitsetMutationState>()
+                     : nullptr) {
     }
     // Allocate the given number of bits, initialize with a given value.
     Bitset(const size_t size, const bool init)
         : Data(get_required_size_in_container_elements(size),
                init ? static_cast<container_data_type>(data_type(-1))
                     : container_data_type(0)),
-          Size{size} {
+          Size{size},
+          State(size ? std::make_unique<detail::BitsetMutationState>()
+                     : nullptr) {
     }
     // Do not allow implicit copies (Rust style).
     Bitset(const Bitset&) = delete;
     // Allow default move.
-    Bitset(Bitset&&) = default;
+    Bitset(Bitset&& other) noexcept(
+        std::is_nothrow_move_constructible_v<container_type>)
+        : Data(std::move(other.Data)),
+          Size(other.Size),
+          State(std::move(other.State)) {
+        other.Size = 0;
+    }
     // Do not allow implicit copies (Rust style).
     Bitset&
     operator=(const Bitset&) = delete;
     // Allow default move.
     Bitset&
-    operator=(Bitset&&) = default;
+    operator=(Bitset&& other) noexcept(
+        std::is_nothrow_move_assignable_v<container_type>) {
+        if (this != &other) {
+            Data = std::move(other.Data);
+            Size = other.Size;
+            State = std::move(other.State);
+            other.Size = 0;
+        }
+        return *this;
+    }
 
     template <typename C, bool R>
     explicit Bitset(const BitsetBase<PolicyT, C, R>& other) {
         Data = container_type(
             get_required_size_in_container_elements(other.size()));
         Size = other.size();
+        if (Size)
+            State = std::make_unique<detail::BitsetMutationState>();
 
         policy_type::op_copy(other.data(),
                              other.offset(),
-                             this->data(),
+                             this->data_impl(),
                              this->offset(),
                              other.size());
     }
@@ -1362,12 +1658,15 @@ class Bitset : public detail::BitsetMutatingBase<
         Bitset cloned;
         cloned.Data = Data;
         cloned.Size = Size;
+        if (Size)
+            cloned.State = std::make_unique<detail::BitsetMutationState>();
         return cloned;
     }
 
     // Rust style.
     inline container_type
     into() && {
+        escape_data_impl();
         return std::move(this->Data);
     }
 
@@ -1376,6 +1675,9 @@ class Bitset : public detail::BitsetMutatingBase<
     resize(const size_t new_size) {
         const size_t new_size_in_container_elements =
             get_required_size_in_container_elements(new_size);
+        modified_impl();
+        if (new_size && !State)
+            State = std::make_unique<detail::BitsetMutationState>();
         Data.resize(new_size_in_container_elements);
         Size = new_size;
     }
@@ -1388,7 +1690,7 @@ class Bitset : public detail::BitsetMutatingBase<
 
         if (new_size > old_size) {
             policy_type::op_fill(
-                this->data(), old_size, new_size - old_size, init);
+                this->data_impl(), old_size, new_size - old_size, init);
         }
     }
 
@@ -1401,13 +1703,25 @@ class Bitset : public detail::BitsetMutatingBase<
            const size_t starting_bit_idx,
            const size_t count) {
         range_checker::le(starting_bit_idx, other.size());
+        range_checker::le(count, other.size() - starting_bit_idx);
+        if (count == 0)
+            return;
+        // A source view can borrow our buffer, which resize may relocate.
+        const auto source = reinterpret_cast<uintptr_t>(other.data());
+        const auto begin = reinterpret_cast<uintptr_t>(this->data_impl());
+        const auto bytes = Data.size() * sizeof(container_data_type);
+        if (source >= begin && source - begin < bytes) {
+            const Bitset packed(other.view(starting_bit_idx, count));
+            append(packed, 0, count);
+            return;
+        }
 
         const size_t old_size = this->size();
         this->resize(this->size() + count);
 
         policy_type::op_copy(other.data(),
                              other.offset() + starting_bit_idx,
-                             this->data(),
+                             this->data_impl(),
                              this->offset() + old_size,
                              count);
     }
@@ -1423,6 +1737,7 @@ class Bitset : public detail::BitsetMutatingBase<
     // Make bitset empty.
     inline void
     clear() {
+        modified_impl();
         Data.clear();
         Size = 0;
     }
@@ -1432,6 +1747,7 @@ class Bitset : public detail::BitsetMutatingBase<
     reserve(const size_t capacity) {
         const size_t capacity_in_container_elements =
             get_required_size_in_container_elements(capacity);
+        modified_impl();
         Data.reserve(capacity_in_container_elements);
     }
 
@@ -1458,6 +1774,26 @@ class Bitset : public detail::BitsetMutatingBase<
     container_type Data;
     // the actual number of bits
     size_t Size = 0;
+    std::unique_ptr<detail::BitsetMutationState> State;
+
+    detail::BitsetMutationState*
+    mutation_state_impl() {
+        return State.get();
+    }
+    const detail::BitsetMutationState*
+    mutation_state_impl() const {
+        return State.get();
+    }
+    void
+    modified_impl() {
+        if (State)
+            State->Modified();
+    }
+    void
+    escape_data_impl() {
+        if (State)
+            State->Escape();
+    }
 
     inline data_type*
     data_impl() {

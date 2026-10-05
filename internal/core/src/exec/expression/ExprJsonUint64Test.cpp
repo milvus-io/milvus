@@ -198,8 +198,10 @@ TEST(JsonNumericTest, BinaryRangeUint64OutsideSmallRange) {
          col.data(),
          nullptr,
          N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
+         res_bm,
+         valid_res_bm,
+         0,
+         0,
          empty_bitmap,
          0);
 
@@ -234,8 +236,10 @@ TEST(JsonNumericTest, BinaryRangeUint64WithMaxRange) {
          col.data(),
          nullptr,
          N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
+         res_bm,
+         valid_res_bm,
+         0,
+         0,
          empty_bitmap,
          0);
 
@@ -266,8 +270,10 @@ TEST(JsonNumericTest, DoubleValuesStillWorkInBinaryRange) {
          col.data(),
          nullptr,
          N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
+         res_bm,
+         valid_res_bm,
+         0,
+         0,
          empty_bitmap,
          0);
 
@@ -300,8 +306,10 @@ TEST(JsonNumericTest, MixedTypeBinaryRange) {
          col.data(),
          nullptr,
          N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
+         res_bm,
+         valid_res_bm,
+         0,
+         0,
          empty_bitmap,
          0);
 
@@ -347,8 +355,10 @@ TEST(JsonNumericTest, Int64PrecisionPreservedInBinaryRange) {
          col.data(),
          nullptr,
          N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
+         res_bm,
+         valid_res_bm,
+         0,
+         0,
          empty_bitmap,
          0);
 

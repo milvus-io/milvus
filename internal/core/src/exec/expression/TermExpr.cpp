@@ -307,8 +307,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -326,9 +326,14 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             const ValueType& target_val) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -351,13 +356,13 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[i] = executor(offset);
+            res[res_offset + i] = executor(offset);
         }
         processed_cursor += size;
     };
@@ -370,10 +375,17 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
+                                                    0,
+                                                    0,
                                                     target_val);
     } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, target_val);
+        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
+                                                              std::nullptr_t{},
+                                                              res,
+                                                              valid_res,
+                                                              0,
+                                                              0,
+                                                              target_val);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -401,8 +413,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -427,10 +439,15 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (!term_set->Empty()) {
             AssertInfo(index >= 0,
                        "array element term predicate requires nested path");
@@ -448,23 +465,23 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (term_set->Empty()) {
-                res[i] = false;
+                res[res_offset + i] = false;
                 continue;
             }
             if (index >= data[offset].length()) {
-                res[i] = false;
-                valid_res[i] = false;
+                res[res_offset + i] = false;
+                valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
             auto value = data[offset].get_data_unchecked<GetType>(index);
-            res[i] = term_set->In(ValueType(value));
+            res[res_offset + i] = term_set->In(ValueType(value));
         }
         processed_cursor += size;
     };
@@ -477,6 +494,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
+                                                    0,
+                                                    0,
                                                     index,
                                                     arg_set_);
     } else {
@@ -484,6 +503,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                                                               std::nullptr_t{},
                                                               res,
                                                               valid_res,
+                                                              0,
+                                                              0,
                                                               index,
                                                               arg_set_);
     }
@@ -512,8 +533,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -533,10 +554,15 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             const std::string& pointer,
             const ValueType& target_val) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -567,7 +593,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
@@ -575,10 +601,10 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             }
             auto [valid, matched] = executor(offset);
             if (!valid) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
-            res[i] = matched;
+            res[res_offset + i] = matched;
         }
         processed_cursor += size;
     };
@@ -589,11 +615,19 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
                                                             input,
                                                             res,
                                                             valid_res,
+                                                            0,
+                                                            0,
                                                             pointer,
                                                             val);
     } else {
-        processed_size = ProcessDataChunks<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer, val);
+        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         res,
+                                                         valid_res,
+                                                         0,
+                                                         0,
+                                                         pointer,
+                                                         val);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -637,8 +671,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data
         auto try_execute = [&](milvus::index::JSONType json_type,
@@ -647,27 +681,34 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             if (!target_field.empty()) {
                 using ColType = decltype(get_type);
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
-                auto shredding_executor = [this](const ColType* src,
-                                                 ValidityView valid,
-                                                 size_t size,
-                                                 TargetBitmapView res,
-                                                 TargetBitmapView valid_res) {
+                auto& target_valid_view = target_valid;
+                auto shredding_executor = [this](
+                                              const ColType* src,
+                                              ValidityView valid,
+                                              size_t size,
+                                              TargetBitmap& res,
+                                              TargetBitmap& valid_res,
+                                              const size_t res_offset,
+                                              const size_t valid_res_offset) {
+                    auto res_write_scope = res.scoped_write();
+                    auto valid_res_write_scope = valid_res.scoped_write();
+
                     for (size_t i = 0; i < size; ++i) {
                         if (valid && !valid[i]) {
-                            res[i] = valid_res[i] = false;
+                            res[res_offset + i] =
+                                valid_res[valid_res_offset + i] = false;
                             continue;
                         }
                         if constexpr (std::is_same_v<GetType, int64_t> ||
                                       std::is_same_v<GetType, double>) {
                             auto value =
                                 ConvertJsonNumberExact<GetType>(src[i]);
-                            res[i] =
+                            res[res_offset + i] =
                                 value.has_value() && this->arg_set_->In(*value);
                         } else {
-                            res[i] = this->arg_set_->In(src[i]);
+                            res[res_offset + i] = this->arg_set_->In(src[i]);
                         }
                     }
                 };
@@ -676,13 +717,15 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                                                          shredding_executor,
                                                          nullptr,
                                                          target_res_view,
-                                                         target_valid_view);
+                                                         target_valid_view,
+                                                         0,
+                                                         0);
                 res_view.inplace_or_with_count(target_res_view, active_count_);
                 valid_res_view.inplace_or_with_count(target_valid_view,
                                                      active_count_);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
-                          res_view.count());
+                          res_view.view().count());
             }
         };
 
@@ -803,8 +846,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
@@ -826,10 +869,15 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             const std::string& pointer,
             const std::shared_ptr<MultiElement>& terms) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -871,11 +919,11 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (terms->Empty()) {
-                res[i] = false;
+                res[res_offset + i] = false;
                 continue;
             }
 
@@ -884,10 +932,10 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             }
             auto [valid, matched] = executor(offset);
             if (!valid) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
-            res[i] = matched;
+            res[res_offset + i] = matched;
         }
         processed_cursor += size;
     };
@@ -898,6 +946,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                                                             input,
                                                             res,
                                                             valid_res,
+                                                            0,
+                                                            0,
                                                             pointer,
                                                             arg_set_);
     } else {
@@ -905,6 +955,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                                                          std::nullptr_t{},
                                                          res,
                                                          valid_res,
+                                                         0,
+                                                         0,
                                                          pointer,
                                                          arg_set_);
     }
@@ -1047,8 +1099,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     if (!arg_inited_) {
         std::vector<T> vals;
@@ -1109,9 +1161,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                     std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
                 cached_filter_chunk_ = [simd_elem](const void* data,
                                                    int size,
-                                                   TargetBitmapView res) {
+                                                   TargetBitmap& res,
+                                                   const size_t res_offset) {
+                    auto res_write_scope = res.scoped_write();
+
                     simd_elem->FilterChunk(
-                        static_cast<const T*>(data), size, res);
+                        static_cast<const T*>(data), size, res, res_offset);
                 };
             }
         }
@@ -1135,9 +1190,14 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             const std::shared_ptr<MultiElement>& vals) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -1147,13 +1207,18 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         // ── Path 1: SIMD batch (numeric, sequential, within threshold) ──
         if constexpr (filter_type == FilterType::sequential) {
             if (simd_filter_fn) {
-                simd_filter_fn(data, size, res);
-                ApplyValidMask(valid_data, res, valid_res, size);
+                simd_filter_fn(data, size, res, res_offset);
+                ApplyValidMask(valid_data,
+                               res,
+                               valid_res,
+                               res_offset,
+                               valid_res_offset,
+                               size);
                 // Apply bitmap mask
                 if (has_bitmap_input) {
                     for (int i = 0; i < size; ++i) {
                         if (!bitmap_input[i + processed_cursor]) {
-                            res[i] = false;
+                            res[res_offset + i] = false;
                         }
                     }
                 }
@@ -1170,7 +1235,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
@@ -1181,16 +1246,17 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                           std::is_same_v<T, std::string_view>) {
                 if (str_set_elem) {
                     // Hash lookup via string_view (zero copy)
-                    res[i] = str_set_elem->values_.find(std::string_view(
-                                 data[offset])) != str_set_elem->values_.end();
+                    res[res_offset + i] = str_set_elem->values_.find(
+                                              std::string_view(data[offset])) !=
+                                          str_set_elem->values_.end();
                 } else {
                     // FlatVectorElement path (small IN ≤4)
-                    res[i] = vals->In(MultiElement::ValueType(
+                    res[res_offset + i] = vals->In(MultiElement::ValueType(
                         std::string_view(data[offset])));
                 }
             } else {
-                res[i] = vals->In(MultiElement::ValueType(std::in_place_type<T>,
-                                                          data[offset]));
+                res[res_offset + i] = vals->In(MultiElement::ValueType(
+                    std::in_place_type<T>, data[offset]));
             }
         }
         processed_cursor += size;
@@ -1215,6 +1281,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                                                              input,
                                                              res,
                                                              valid_res,
+                                                             0,
+                                                             0,
                                                              arg_set_);
         } else {
             processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
@@ -1222,16 +1290,29 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                                                      input,
                                                      res,
                                                      valid_res,
+                                                     0,
+                                                     0,
                                                      arg_set_);
         }
     } else {
         if (expr_->column_.element_level_) {
             // For element-level filtering without offset input (brute force)
-            processed_size = ProcessDataChunksForElementLevel<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
+            processed_size =
+                ProcessDataChunksForElementLevel<T>(execute_sub_batch,
+                                                    skip_index_func,
+                                                    res,
+                                                    valid_res,
+                                                    0,
+                                                    0,
+                                                    arg_set_);
         } else {
-            processed_size = ProcessDataChunks<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
+            processed_size = ProcessDataChunks<T>(execute_sub_batch,
+                                                  skip_index_func,
+                                                  res,
+                                                  valid_res,
+                                                  0,
+                                                  0,
+                                                  arg_set_);
         }
     }
     AssertInfo(processed_size == real_batch_size,

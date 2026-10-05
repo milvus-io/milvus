@@ -22,8 +22,8 @@ class ThreeValuedLogicOp {
     // and store the result in the left column vector
     static void
     Not(const ColumnVectorPtr& left) {
-        TargetBitmapView data(left->GetRawData(), left->size());
-        TargetBitmapView valid_data(left->GetValidRawData(), left->size());
+        auto& data = left->GetMutableBitmap();
+        const auto& valid_data = left->GetValidBitmap();
 
         data.flip();
         data.inplace_and(valid_data, left->size());
@@ -54,10 +54,10 @@ class ThreeValuedLogicOp {
     static void
     And(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
-        TargetBitmapView left_data(left->GetRawData(), size);
-        TargetBitmapView left_valid(left->GetValidRawData(), size);
-        TargetBitmapView right_data(right->GetRawData(), size);
-        TargetBitmapView right_valid(right->GetValidRawData(), size);
+        auto& left_data = left->GetMutableBitmap();
+        auto& left_valid = left->GetMutableValidBitmap();
+        const auto& right_data = right->GetBitmap();
+        const auto& right_valid = right->GetValidBitmap();
 
         // tmp = ~left_data | right_valid
         TargetBitmap tmp(size, true);
@@ -104,10 +104,10 @@ class ThreeValuedLogicOp {
     static void
     Or(const ColumnVectorPtr& left, const ColumnVectorPtr& right) {
         const size_t size = left->size();
-        TargetBitmapView left_data(left->GetRawData(), size);
-        TargetBitmapView left_valid(left->GetValidRawData(), size);
-        TargetBitmapView right_data(right->GetRawData(), size);
-        TargetBitmapView right_valid(right->GetValidRawData(), size);
+        auto& left_data = left->GetMutableBitmap();
+        auto& left_valid = left->GetMutableValidBitmap();
+        const auto& right_data = right->GetBitmap();
+        const auto& right_valid = right->GetValidBitmap();
 
         // tmp = left_data | right_valid
         TargetBitmap tmp(size);

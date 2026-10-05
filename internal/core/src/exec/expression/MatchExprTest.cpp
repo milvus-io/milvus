@@ -483,8 +483,8 @@ class FixedBitmapExpr : public exec::Expr {
 bool
 MatchSingleRowReference(int64_t bitset_start,
                         int64_t row_elem_count,
-                        const TargetBitmap& match_bitmap,
-                        const TargetBitmap& valid_bitmap,
+                        const TargetBitmapView& match_bitmap,
+                        const TargetBitmapView& valid_bitmap,
                         expr::MatchType match_type,
                         int64_t threshold) {
     int64_t hit_count = 0;
@@ -658,10 +658,8 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
                 auto output = std::dynamic_pointer_cast<ColumnVector>(result);
                 ASSERT_NE(output, nullptr);
                 ASSERT_EQ(output->size(), offsets.size());
-                TargetBitmapView output_data(output->GetRawData(),
-                                             output->size());
-                TargetBitmapView output_valid(output->GetValidRawData(),
-                                              output->size());
+                const auto& output_data = output->GetBitmap();
+                const auto& output_valid = output->GetValidBitmap();
                 for (size_t output_row = 0; output_row < offsets.size();
                      ++output_row) {
                     const bool expected = MatchSingleRowReference(
@@ -986,7 +984,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
         auto output = test::gen_filter_res(
             filter_node, segment, row_count, MAX_TIMESTAMP, &offsets);
         ASSERT_EQ(output->size(), offsets.size());
-        TargetBitmapView output_data(output->GetRawData(), output->size());
+        const auto& output_data = output->GetBitmap();
         EXPECT_TRUE(output_data[0]);
         EXPECT_FALSE(output_data[1]);
         EXPECT_FALSE(output_data[2]);
@@ -1011,8 +1009,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
                                                   MAX_TIMESTAMP,
                                                   &length_offsets);
         ASSERT_EQ(length_output->size(), length_offsets.size());
-        TargetBitmapView length_output_data(length_output->GetRawData(),
-                                            length_output->size());
+        const auto& length_output_data = length_output->GetBitmap();
         EXPECT_FALSE(length_output_data[0]);
         EXPECT_FALSE(length_output_data[1]);
         EXPECT_TRUE(length_output_data[2]);
@@ -1036,8 +1033,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
                                                       MAX_TIMESTAMP,
                                                       &row_length_offsets);
         ASSERT_EQ(row_length_output->size(), row_length_offsets.size());
-        TargetBitmapView row_length_output_data(row_length_output->GetRawData(),
-                                                row_length_output->size());
+        const auto& row_length_output_data = row_length_output->GetBitmap();
         EXPECT_FALSE(row_length_output_data[0]);
         EXPECT_TRUE(row_length_output_data[1]);
         EXPECT_TRUE(row_length_output_data[2]);
@@ -2737,8 +2733,7 @@ TEST_F(SealedMatchExprTestNoIndex, OverflowShortcutWithOffsetInput) {
     auto equal_overflow =
         evaluate("match_any(struct_array, $[sub_int] == 2147483648)");
     ASSERT_EQ(equal_overflow->size(), offsets.size());
-    TargetBitmapView equal_view(equal_overflow->GetRawData(),
-                                equal_overflow->size());
+    const auto& equal_view = equal_overflow->GetBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_FALSE(equal_view[i]);
         EXPECT_TRUE(equal_overflow->ValidAt(i));
@@ -2747,8 +2742,7 @@ TEST_F(SealedMatchExprTestNoIndex, OverflowShortcutWithOffsetInput) {
     auto not_equal_overflow =
         evaluate("match_all(struct_array, $[sub_int] != 2147483648)");
     ASSERT_EQ(not_equal_overflow->size(), offsets.size());
-    TargetBitmapView not_equal_view(not_equal_overflow->GetRawData(),
-                                    not_equal_overflow->size());
+    const auto& not_equal_view = not_equal_overflow->GetBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_TRUE(not_equal_view[i]);
         EXPECT_TRUE(not_equal_overflow->ValidAt(i));
@@ -2757,8 +2751,7 @@ TEST_F(SealedMatchExprTestNoIndex, OverflowShortcutWithOffsetInput) {
     auto range_overflow = evaluate(
         "match_any(struct_array, 2147483648 < $[sub_int] < 2147483649)");
     ASSERT_EQ(range_overflow->size(), offsets.size());
-    TargetBitmapView range_view(range_overflow->GetRawData(),
-                                range_overflow->size());
+    const auto& range_view = range_overflow->GetBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_FALSE(range_view[i]);
         EXPECT_TRUE(range_overflow->ValidAt(i));

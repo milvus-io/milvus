@@ -861,18 +861,22 @@ template <typename T, typename Predicate>
 inline void
 apply_predicate_on_batch(const T* data,
                          const int64_t size,
-                         TargetBitmapView res,
+                         TargetBitmap& res,
+                         const size_t res_offset,
                          Predicate&& predicate) {
-    auto next_off_option = res.find_first();
+    auto res_write_scope = res.scoped_write();
+
+    const auto candidates = res.view(res_offset, size);
+    auto next_off_option = candidates.find_first();
     while (next_off_option.has_value()) {
         auto next_off = next_off_option.value();
         if (next_off >= static_cast<size_t>(size)) {
             return;
         }
         if (!predicate(data[next_off])) {
-            res[next_off] = false;
+            res[res_offset + next_off] = false;
         }
-        next_off_option = res.find_next(next_off);
+        next_off_option = candidates.find_next(next_off);
     }
 }
 
@@ -881,6 +885,7 @@ NgramInvertedIndex::ApplyIterativeNgramFilter(
     const std::vector<std::string>& sorted_terms,
     size_t total_count,
     TargetBitmap& bitset) {
+    const auto bitset_view = bitset.view();
     auto max_iterations = kMaxIterations;
     if (avg_row_size_ < kSmallRowThreshold) {
         max_iterations = kMaxIterationsForSmallRow;
@@ -893,7 +898,7 @@ NgramInvertedIndex::ApplyIterativeNgramFilter(
         wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
         bitset &= term_bitset;
 
-        double current_hit_rate = 1.0 * bitset.count() / total_count;
+        double current_hit_rate = 1.0 * bitset_view.count() / total_count;
         if (current_hit_rate < kBreakThreshold) {
             break;
         }
@@ -925,6 +930,7 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecutePhase1", tracer::GetRootSpan(), true);
 
+    const auto candidates_view = candidates.view();
     auto total_count = static_cast<size_t>(Count());
     AssertInfo(total_count > 0, "ExecutePhase1: total_count must be > 0");
     AssertInfo(!candidates.empty(),
@@ -935,12 +941,12 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
                total_count);
 
     // If candidates has no bits set, return immediately
-    if (candidates.none()) {
+    if (candidates_view.none()) {
         return;
     }
 
     // Use candidates for strategy selection
-    size_t pre_count = candidates.count();
+    size_t pre_count = candidates_view.count();
     double candidates_hit_rate = 1.0 * pre_count / total_count;
 
     // Get literals to query
@@ -995,7 +1001,7 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
 
     // Set tracing attributes
     if (auto root_span = tracer::GetRootSpan()) {
-        size_t post_count = candidates.count();
+        size_t post_count = candidates_view.count();
         double pre_hit_rate = 1.0 * pre_count / total_count;
         double post_hit_rate = 1.0 * post_count / total_count;
         root_span->SetAttribute("phase1_op_type", static_cast<int>(op_type));
@@ -1017,13 +1023,14 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                                   TargetBitmap& candidates,
                                   int64_t segment_offset,
                                   int64_t batch_size) {
+    const auto candidates_view = candidates.view();
     // InnerMatch with short literal doesn't need post-filter
     if (op_type == proto::plan::OpType::InnerMatch &&
         literal.length() <= max_gram_) {
         return;
     }
 
-    if (candidates.none()) {
+    if (candidates_view.none()) {
         return;
     }
 
@@ -1032,19 +1039,22 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                candidates.size(),
                batch_size);
 
-    TargetBitmapView res(candidates);
+    auto& res = candidates;
 
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         // JSON type handling
         auto apply_predicate = [&](auto&& predicate) {
             auto execute_batch = [&predicate](const milvus::Json* data,
                                               const int64_t size,
-                                              TargetBitmapView res) {
+                                              TargetBitmap& res,
+                                              const size_t res_offset) {
+                auto res_write_scope = res.scoped_write();
+
                 apply_predicate_on_batch<milvus::Json>(
-                    data, size, res, predicate);
+                    data, size, res, res_offset, predicate);
             };
             segment->template ProcessDataChunkForRange<milvus::Json>(
-                execute_batch, res, segment_offset, batch_size);
+                execute_batch, res, 0, segment_offset, batch_size);
         };
 
         switch (op_type) {
@@ -1122,12 +1132,15 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
         auto apply_predicate = [&](auto&& predicate) {
             auto execute_batch = [&predicate](const std::string_view* data,
                                               const int64_t size,
-                                              TargetBitmapView res) {
+                                              TargetBitmap& res,
+                                              const size_t res_offset) {
+                auto res_write_scope = res.scoped_write();
+
                 apply_predicate_on_batch<std::string_view>(
-                    data, size, res, predicate);
+                    data, size, res, res_offset, predicate);
             };
             segment->template ProcessDataChunkForRange<std::string_view>(
-                execute_batch, res, segment_offset, batch_size);
+                execute_batch, res, 0, segment_offset, batch_size);
         };
 
         switch (op_type) {
@@ -1178,7 +1191,7 @@ std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
                                       proto::plan::OpType op_type,
                                       exec::SegmentExpr* segment,
-                                      const TargetBitmap* pre_filter) {
+                                      const TargetBitmapView* pre_filter) {
     if (!CanHandleLiteral(literal, op_type)) {
         return std::nullopt;
     }
@@ -1190,9 +1203,10 @@ NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
 
     // Initialize candidates: start with all-true, then AND with pre_filter
     TargetBitmap candidates(total_count, true);
+    const auto candidates_view = candidates.view();
     if (pre_filter != nullptr) {
         candidates &= *pre_filter;
-        if (candidates.none()) {
+        if (candidates_view.none()) {
             return candidates;
         }
     }
@@ -1200,7 +1214,7 @@ NgramInvertedIndex::ExecuteQueryForUT(const std::string& literal,
     // Phase 1: ngram index query
     ExecutePhase1(literal, op_type, candidates);
 
-    if (candidates.none()) {
+    if (candidates_view.none()) {
         return candidates;
     }
 

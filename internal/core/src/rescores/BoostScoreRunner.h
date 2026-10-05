@@ -68,7 +68,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     const std::shared_ptr<Scorer>& scorer,
                     FixedVector<int32_t>& offsets,
                     std::vector<std::optional<float>>& output_scores,
-                    const TargetBitmap* filter_bitset = nullptr,
+                    const TargetBitmapView* filter_bitset = nullptr,
                     exec::ExprSet* prepared_expr_set = nullptr);
 
 void
@@ -79,7 +79,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     FixedVector<int32_t>& offsets,
                     float* output_scores,
                     bool* output_has_score,
-                    const TargetBitmap* filter_bitset = nullptr,
+                    const TargetBitmapView* filter_bitset = nullptr,
                     exec::ExprSet* prepared_expr_set = nullptr);
 
 void

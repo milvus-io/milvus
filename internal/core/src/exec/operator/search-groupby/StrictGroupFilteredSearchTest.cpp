@@ -932,13 +932,22 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
     base_filter[1] = true;  // filtered null
     base_filter[4] = true;  // filtered value group
     base_filter[117] = true;
+    const auto base_filter_view = base_filter.view();
     std::vector<std::optional<int64_t>> groups{
         std::nullopt, values[0], values[4], values[20]};
 
-    auto raw = BuildGroupMembership<int64_t>(
-        nullptr, *raw_segment, group_field, kRowCount, groups, &base_filter);
-    auto indexed = BuildGroupMembership<int64_t>(
-        nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
+    auto raw = BuildGroupMembership<int64_t>(nullptr,
+                                             *raw_segment,
+                                             group_field,
+                                             kRowCount,
+                                             groups,
+                                             &base_filter_view);
+    auto indexed = BuildGroupMembership<int64_t>(nullptr,
+                                                 *index_segment,
+                                                 group_field,
+                                                 kRowCount,
+                                                 groups,
+                                                 &base_filter_view);
     ASSERT_TRUE(raw.has_value());
     ASSERT_TRUE(indexed.has_value());
     EXPECT_EQ(counters->in_calls, 1);
@@ -951,8 +960,12 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
         false,
         {pk_field.get(), RowFieldID.get(), TimestampFieldID.get()});
     ASSERT_TRUE(index_segment->HasFieldData(group_field));
-    auto both = BuildGroupMembership<int64_t>(
-        nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
+    auto both = BuildGroupMembership<int64_t>(nullptr,
+                                              *index_segment,
+                                              group_field,
+                                              kRowCount,
+                                              groups,
+                                              &base_filter_view);
     ASSERT_TRUE(both.has_value());
     EXPECT_EQ(counters->in_calls, 1);
     EXPECT_EQ(counters->null_calls, 1);
@@ -990,17 +1003,19 @@ TEST(GroupMembershipTest, RawStringBoolAndNullGroupsRespectBaseFilter) {
     base_filter[0] = true;
     base_filter[3] = true;
     base_filter[10] = true;
+    const auto base_filter_view = base_filter.view();
 
     auto strings = data.get_col<std::string>(string_field);
     auto valid = data.get_col_valid(string_field);
     std::vector<std::optional<std::string>> string_groups{
         std::nullopt, strings[0], strings[8]};
-    auto string_membership = BuildGroupMembership<std::string>(nullptr,
-                                                               *segment,
-                                                               string_field,
-                                                               kRowCount,
-                                                               string_groups,
-                                                               &base_filter);
+    auto string_membership =
+        BuildGroupMembership<std::string>(nullptr,
+                                          *segment,
+                                          string_field,
+                                          kRowCount,
+                                          string_groups,
+                                          &base_filter_view);
     ASSERT_TRUE(string_membership.has_value());
     auto string_bitmap = std::move(string_membership);
     ASSERT_TRUE(string_bitmap.has_value());
@@ -1015,8 +1030,12 @@ TEST(GroupMembershipTest, RawStringBoolAndNullGroupsRespectBaseFilter) {
     }
 
     std::vector<std::optional<bool>> bool_groups{false, true};
-    auto bool_membership = BuildGroupMembership<bool>(
-        nullptr, *segment, bool_field, kRowCount, bool_groups, &base_filter);
+    auto bool_membership = BuildGroupMembership<bool>(nullptr,
+                                                      *segment,
+                                                      bool_field,
+                                                      kRowCount,
+                                                      bool_groups,
+                                                      &base_filter_view);
     ASSERT_TRUE(bool_membership.has_value());
     auto bool_bitmap = std::move(bool_membership);
     ASSERT_TRUE(bool_bitmap.has_value());
@@ -1031,9 +1050,10 @@ TEST(GroupMembershipTest, RejectsMismatchedFilterSize) {
     auto data = segcore::DataGen(schema, 10);
     auto segment = CreateSealedWithFieldDataLoaded(schema, data);
     TargetBitmap wrong_size(9, false);
+    const auto wrong_size_view = wrong_size.view();
 
     auto membership = BuildGroupMembership<int64_t>(
-        nullptr, *segment, group_field, 10, {0}, &wrong_size);
+        nullptr, *segment, group_field, 10, {0}, &wrong_size_view);
     EXPECT_FALSE(membership.has_value());
 }
 

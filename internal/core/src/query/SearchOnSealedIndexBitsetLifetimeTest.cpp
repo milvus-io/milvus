@@ -89,8 +89,8 @@ IsFiltered(const std::vector<uint8_t>& bitset_bytes, int64_t offset) {
 
 TargetBitmap
 MakeCombinedFilter(const std::vector<uint8_t>& base_filter,
-                   const TargetBitmap& additional_filter) {
-    auto combined_filter = additional_filter.clone();
+                   const TargetBitmapView& additional_filter) {
+    TargetBitmap combined_filter(additional_filter);
     for (size_t i = 0; i < combined_filter.size(); ++i) {
         if (IsFiltered(base_filter, i)) {
             combined_filter[i] = true;
@@ -128,15 +128,15 @@ void
 AssertRecreatedIteratorUsesCombinedLogicalFilter(
     SearchResult& search_result,
     const std::vector<uint8_t>& base_filter,
-    const TargetBitmap& additional_filter,
+    const TargetBitmapView& additional_filter,
     IsValid&& is_valid,
     IteratorResults& observed_results) {
     ASSERT_TRUE(search_result.CanRecreateVectorIterator());
     auto original_pinned_bitsets = search_result.pinned_bitsets_.size();
     auto original_chunk_buffers = search_result.chunk_buffers_.size();
     {
-        auto recreated =
-            search_result.RecreateVectorIterators(additional_filter.clone());
+        auto recreated = search_result.RecreateVectorIterators(
+            TargetBitmap(additional_filter));
         ASSERT_TRUE(recreated.has_value());
         auto& batch_result = **recreated;
         EXPECT_FALSE(batch_result.CanRecreateVectorIterator());

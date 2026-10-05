@@ -51,7 +51,7 @@ constexpr double kRawDensityMax = 0.70;
 // ---- Roaring V2 zero-copy encode ----
 
 std::vector<char>
-CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
+CacheCompressor::CompressRoaring(const TargetBitmapView& bset) {
     using namespace roaring::internal;
 
     const uint64_t* words = reinterpret_cast<const uint64_t*>(bset.data());
@@ -144,7 +144,8 @@ CacheCompressor::DecompressRoaring(const char* data,
         std::vector<uint32_t> positions(card);
         roaring_bitmap_to_uint32_array(r.get(), positions.data());
 
-        uint64_t* words = reinterpret_cast<uint64_t*>(result.data());
+        auto write_scope = result.scoped_write();
+        auto* words = static_cast<uint64_t*>(write_scope.data());
         for (uint32_t pos : positions) {
             if (pos < num_bits) {
                 words[pos / 64] |= (uint64_t{1} << (pos % 64));
@@ -158,9 +159,18 @@ CacheCompressor::DecompressRoaring(const char* data,
 // ---- Public API ----
 
 CompressedData
-CacheCompressor::Compress(const TargetBitmap& result,
-                          const TargetBitmap& valid,
+CacheCompressor::Compress(const TargetBitmapView& result,
+                          const TargetBitmapView& valid,
                           bool compression_enabled) {
+    if (result.offset() != 0 || valid.offset() != 0) {
+        auto packed_result = std::make_shared<TargetBitmap>(result);
+        auto packed_valid = std::make_shared<TargetBitmap>(valid);
+        auto out = Compress(
+            packed_result->view(), packed_valid->view(), compression_enabled);
+        out.packed_result_owner = std::move(packed_result);
+        out.packed_valid_owner = std::move(packed_valid);
+        return out;
+    }
     CompressedData out;
     const uint32_t result_bits = static_cast<uint32_t>(result.size());
     const uint32_t valid_bits = static_cast<uint32_t>(valid.size());
@@ -252,8 +262,8 @@ CacheCompressor::Compress(const TargetBitmap& result,
 
 // Backward-compat wrapper: flatten CompressedData into a single buffer
 std::vector<char>
-CacheCompressor::Compress(const TargetBitmap& result,
-                          const TargetBitmap& valid,
+CacheCompressor::Compress(const TargetBitmapView& result,
+                          const TargetBitmapView& valid,
                           bool compression_enabled,
                           uint8_t& out_comp_type) {
     auto cd = Compress(result, valid, compression_enabled);
@@ -375,8 +385,8 @@ CacheCompressor::Decompress(const char* data,
 
     out_result = TargetBitmap(result_bits, false);
     if (result_bytes > 0) {
-        std::memcpy(
-            reinterpret_cast<char*>(out_result.data()), raw, result_bytes);
+        auto write_scope = out_result.scoped_write();
+        std::memcpy(write_scope.data(), raw, result_bytes);
     }
 
     if (valid_all_ones) {
@@ -387,9 +397,8 @@ CacheCompressor::Decompress(const char* data,
     } else {
         out_valid = TargetBitmap(valid_bits, false);
         if (valid_bytes > 0) {
-            std::memcpy(reinterpret_cast<char*>(out_valid.data()),
-                        raw + result_bytes,
-                        valid_bytes);
+            auto write_scope = out_valid.scoped_write();
+            std::memcpy(write_scope.data(), raw + result_bytes, valid_bytes);
         }
     }
     return true;

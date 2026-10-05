@@ -269,25 +269,38 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t
     ExecutorForGettingValid(milvus::OpContext* op_ctx,
                             const std::string& path,
-                            TargetBitmapView valid_res) {
+                            TargetBitmap& valid_res,
+                            const size_t valid_res_offset = 0) {
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         size_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
             return processed_size;
         }
         auto column = shredding_columns_[path];
+        AssertInfo(
+            valid_res_offset <= valid_res.size() &&
+                column->NumRows() <= valid_res.size() - valid_res_offset,
+            "Shredding validity output is shorter than column {} rows {}",
+            path,
+            column->NumRows());
         auto num_data_chunk = column->num_chunks();
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
-            column->ApplyValidDataInChunk(
-                op_ctx, i, 0, chunk_size, valid_res + processed_size);
+            column->ApplyValidDataInChunk(op_ctx,
+                                          i,
+                                          0,
+                                          chunk_size,
+                                          valid_res,
+                                          (valid_res_offset + processed_size));
             processed_size += chunk_size;
         }
-        AssertInfo(processed_size == valid_res.size(),
+        AssertInfo(processed_size == column->NumRows(),
                    "Processed size {} is not equal to num_rows {}",
                    processed_size,
-                   valid_res.size());
+                   column->NumRows());
         return processed_size;
     }
 
@@ -300,9 +313,14 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, std::string, int)>
             skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
+        TargetBitmap& res,
+        TargetBitmap& valid_res,
+        const size_t res_offset,
+        const size_t valid_res_offset,
         ValTypes... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
@@ -310,7 +328,10 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         }
         const auto& column = shredding_columns_.at(path);
         const auto num_rows = column->NumRows();
-        AssertInfo(res.size() >= num_rows && valid_res.size() >= num_rows,
+        AssertInfo(res_offset <= res.size() &&
+                       num_rows <= res.size() - res_offset &&
+                       valid_res_offset <= valid_res.size() &&
+                       num_rows <= valid_res.size() - valid_res_offset,
                    "Shredding scan output is shorter than column {} rows {}",
                    path,
                    num_rows);
@@ -351,22 +372,23 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                        processed_size,
                        batch.row_id_start,
                        batch.size);
-            auto batch_res = res + processed_size;
-            auto batch_valid_res = valid_res + processed_size;
             if (!batch.data_skipped) {
                 func(batch.values.template data_as<T>(),
                      batch.validity,
                      batch.size,
-                     batch_res,
-                     batch_valid_res,
+                     res,
+                     valid_res,
+                     res_offset + processed_size,
+                     valid_res_offset + processed_size,
                      values...);
             } else if (batch.validity) {
                 // Skipping data must preserve both incoming bits for valid
                 // rows and the stats column's real NULLs (not raw JSON's).
                 for (int64_t i = 0; i < batch.size; ++i) {
                     if (!batch.validity[i]) {
-                        batch_res[i] = false;
-                        batch_valid_res[i] = false;
+                        res[res_offset + processed_size + i] = false;
+                        valid_res[valid_res_offset + processed_size + i] =
+                            false;
                     }
                 }
             }

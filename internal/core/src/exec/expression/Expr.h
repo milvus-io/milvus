@@ -118,9 +118,14 @@ PinIndex(milvus::OpContext* op_ctx,
 // (valid_data[offsets[i]]) is a gather and must keep its own per-row loop.
 inline void
 ApplyValidMask(const bool* valid_data,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset,
                const int size) {
+    auto res_write_scope = res.scoped_write();
+    auto valid_res_write_scope = valid_res.scoped_write();
+
     if (valid_data == nullptr) {
         return;
     }
@@ -128,7 +133,8 @@ ApplyValidMask(const bool* valid_data,
     // validity-only scan passes one bitmap for result and validity), each NULL
     // only needs a single write.
     const bool valid_res_aliases_res =
-        res.data() == valid_res.data() && res.offset() == valid_res.offset();
+        std::as_const(res).data() == std::as_const(valid_res).data() &&
+        res_offset == valid_res_offset;
     int i = 0;
     for (; i + 64 <= size; i += 64) {
         uint64_t m = 0;
@@ -137,17 +143,17 @@ ApplyValidMask(const bool* valid_data,
         }
         for (uint64_t nulls = ~m; nulls != 0; nulls &= nulls - 1) {
             const int k = std::countr_zero(nulls);
-            res[i + k] = false;
+            res[res_offset + i + k] = false;
             if (!valid_res_aliases_res) {
-                valid_res[i + k] = false;
+                valid_res[valid_res_offset + i + k] = false;
             }
         }
     }
     for (; i < size; i++) {
         if (!valid_data[i]) {
-            res[i] = false;
+            res[res_offset + i] = false;
             if (!valid_res_aliases_res) {
-                valid_res[i] = false;
+                valid_res[valid_res_offset + i] = false;
             }
         }
     }
@@ -155,9 +161,14 @@ ApplyValidMask(const bool* valid_data,
 
 inline void
 ApplyValidMask(ValidityView validity,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset,
                const int size) {
+    auto res_write_scope = res.scoped_write();
+    auto valid_res_write_scope = valid_res.scoped_write();
+
     if (!validity) {
         return;
     }
@@ -165,10 +176,12 @@ ApplyValidMask(ValidityView validity,
     // validity-only scan passes one bitmap for result and validity), each NULL
     // only needs a single AND.
     const bool valid_res_aliases_res =
-        res.data() == valid_res.data() && res.offset() == valid_res.offset();
+        std::as_const(res).data() == std::as_const(valid_res).data() &&
+        res_offset == valid_res_offset;
 
     if (const auto* expanded = validity.expanded_data(); expanded != nullptr) {
-        ApplyValidMask(expanded, res, valid_res, size);
+        ApplyValidMask(
+            expanded, res, valid_res, res_offset, valid_res_offset, size);
         return;
     }
 
@@ -198,27 +211,36 @@ ApplyValidMask(ValidityView validity,
         const auto bit_count = std::min(size - i, 64);
         auto word = read_word(validity.bit_offset() + i, bit_count);
         TargetBitmapView validity_word(&word, bit_count);
-        auto res_block = res.view(i);
-        res_block.inplace_and(validity_word, bit_count);
+        res.inplace_and(validity_word, bit_count, res_offset + i);
         if (!valid_res_aliases_res) {
-            auto valid_res_block = valid_res.view(i);
-            valid_res_block.inplace_and(validity_word, bit_count);
+            valid_res.inplace_and(
+                validity_word, bit_count, valid_res_offset + i);
         }
     }
 }
 
 inline void
 ApplyValidMaskForCandidates(ValidityView validity,
-                            TargetBitmapView res,
-                            TargetBitmapView valid_res,
+                            TargetBitmap& res,
+                            TargetBitmap& valid_res,
+                            const size_t res_offset,
+                            const size_t valid_res_offset,
                             int64_t size,
-                            const TargetBitmap* candidate_mask,
+                            const TargetBitmapView* candidate_mask,
                             int64_t candidate_pos) {
+    auto res_write_scope = res.scoped_write();
+    auto valid_res_write_scope = valid_res.scoped_write();
+
     if (!validity) {
         return;
     }
     if (candidate_mask == nullptr || candidate_mask->empty()) {
-        ApplyValidMask(validity, res, valid_res, static_cast<int>(size));
+        ApplyValidMask(validity,
+                       res,
+                       valid_res,
+                       res_offset,
+                       valid_res_offset,
+                       static_cast<int>(size));
         return;
     }
     AssertInfo(
@@ -230,7 +252,8 @@ ApplyValidMaskForCandidates(ValidityView validity,
         candidate_mask->size());
 
     const bool valid_res_aliases_res =
-        res.data() == valid_res.data() && res.offset() == valid_res.offset();
+        std::as_const(res).data() == std::as_const(valid_res).data() &&
+        res_offset == valid_res_offset;
     const auto* expanded = validity.expanded_data();
     const auto* packed = validity.packed_data();
     AssertInfo(expanded != nullptr || packed != nullptr,
@@ -267,15 +290,12 @@ ApplyValidMaskForCandidates(ValidityView validity,
     for (int64_t i = 0; i < size; i += 64) {
         const auto bit_count =
             static_cast<int>(std::min<int64_t>(size - i, 64));
-        const auto candidate_word = CandidatePolicy::op_read(
-            candidate_mask->data(), candidate_pos + i, bit_count);
+        const auto candidate_word = candidate_mask->read(candidate_pos + i, bit_count);
         auto keep_word = ~candidate_word | read_validity_word(i, bit_count);
         TargetBitmapView keep(&keep_word, bit_count);
-        auto res_block = res.view(i);
-        res_block.inplace_and(keep, bit_count);
+        res.inplace_and(keep, bit_count, res_offset + i);
         if (!valid_res_aliases_res) {
-            auto valid_res_block = valid_res.view(i);
-            valid_res_block.inplace_and(keep, bit_count);
+            valid_res.inplace_and(keep, bit_count, valid_res_offset + i);
         }
     }
 }
@@ -660,7 +680,10 @@ class SegmentExpr : public Expr {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmapView valid_result) const {
+                        TargetBitmap& valid_result,
+                        const size_t valid_result_offset = 0) const {
+        auto valid_result_write_scope = valid_result.scoped_write();
+
         if (size == 0) {
             return;
         }
@@ -669,11 +692,20 @@ class SegmentExpr : public Expr {
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
-            column->ApplyValidDataInChunk(
-                op_ctx, chunk_id, offset, size, valid_result);
+            column->ApplyValidDataInChunk(op_ctx,
+                                          chunk_id,
+                                          offset,
+                                          size,
+                                          valid_result,
+                                          valid_result_offset);
         } else {
-            segment_->ApplyFieldValidData(
-                op_ctx, field_id, chunk_id, offset, size, valid_result);
+            segment_->ApplyFieldValidData(op_ctx,
+                                          field_id,
+                                          chunk_id,
+                                          offset,
+                                          size,
+                                          valid_result,
+                                          valid_result_offset);
         }
     }
 
@@ -684,7 +716,10 @@ class SegmentExpr : public Expr {
                                  FieldId field_id,
                                  const int64_t* offsets,
                                  int64_t count,
-                                 TargetBitmapView valid_result) const {
+                                 TargetBitmap& valid_result,
+                                 const size_t valid_result_offset = 0) const {
+        auto valid_result_write_scope = valid_result.scoped_write();
+
         if (count == 0) {
             return;
         }
@@ -698,16 +733,20 @@ class SegmentExpr : public Expr {
             }
             column->BulkIsValid(
                 op_ctx,
-                [&valid_result](bool is_valid, size_t i) {
+                [&valid_result, valid_result_offset](bool is_valid, size_t i) {
                     if (!is_valid) {
-                        valid_result[i] = false;
+                        valid_result[valid_result_offset + i] = false;
                     }
                 },
                 offsets,
                 count);
         } else {
-            segment_->ApplyFieldValidDataByOffsets(
-                op_ctx, field_id, offsets, count, valid_result);
+            segment_->ApplyFieldValidDataByOffsets(op_ctx,
+                                                   field_id,
+                                                   offsets,
+                                                   count,
+                                                   valid_result,
+                                                   valid_result_offset);
         }
     }
 
@@ -885,17 +924,24 @@ class SegmentExpr : public Expr {
     static void
     ApplyScanValidity(const ChunkedColumnInterface::ScanBatch& batch,
                       int64_t batch_pos,
-                      TargetBitmapView res,
-                      TargetBitmapView valid_res,
+                      TargetBitmap& res,
+                      TargetBitmap& valid_res,
+                      const size_t res_offset,
+                      const size_t valid_res_offset,
                       int64_t size,
-                      const TargetBitmap* candidate_mask = nullptr,
+                      const TargetBitmapView* candidate_mask = nullptr,
                       int64_t candidate_pos = 0) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (!batch.validity) {
             return;
         }
         ApplyValidMaskForCandidates(batch.validity.Subview(batch_pos),
                                     res,
                                     valid_res,
+                                    res_offset,
+                                    valid_res_offset,
                                     size,
                                     candidate_mask,
                                     candidate_pos);
@@ -903,10 +949,16 @@ class SegmentExpr : public Expr {
 
     void
     ApplyValidData(ValidityView validity,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res,
+                   TargetBitmap& res,
+                   TargetBitmap& valid_res,
+                   const size_t res_offset,
+                   const size_t valid_res_offset,
                    const int size) {
-        ApplyValidMask(validity, res, valid_res, size);
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
+        ApplyValidMask(
+            validity, res, valid_res, res_offset, valid_res_offset, size);
     }
 
     // Try to load the full bitset from ExprResCache.
@@ -972,14 +1024,14 @@ class SegmentExpr : public Expr {
     // call (allocation + fill + AND); per-batch callers must reuse one
     // copy. The all-valid flag short-circuits per-row bitmap reads.
     template <typename Index>
-    const TargetBitmap&
+    const TargetBitmapView&
     GetCachedIndexValidBitmap(Index* index_ptr) {
         if (!cached_index_valid_res_) {
             cached_index_valid_res_ =
                 std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
-            cached_index_all_valid_ = cached_index_valid_res_->all();
+            cached_index_valid_view_ = cached_index_valid_res_->view();
         }
-        return *cached_index_valid_res_;
+        return cached_index_valid_view_;
     }
 
     int64_t
@@ -1081,7 +1133,7 @@ class SegmentExpr : public Expr {
         auto* index_ptr = const_cast<Index*>(scalar_index);
 
         const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
-        if (cached_index_all_valid_) {
+        if (valid_result.all()) {
             valid_res.set();
         } else {
             for (auto i = 0; i < input->size(); ++i) {
@@ -1113,11 +1165,22 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessIndexLookupByOffsets(BatchEvaluator evaluate_batch,
                                 OffsetVector* input,
-                                TargetBitmapView res,
-                                TargetBitmapView valid_res,
+                                TargetBitmap& res,
+                                TargetBitmap& valid_res,
+                                const size_t res_offset,
+                                const size_t valid_res_offset,
                                 const ValTypes&... values) {
-        return ProcessIndexLookupByOffsetsImpl<T>(
-            evaluate_batch, input, res, valid_res, nullptr, values...);
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
+        return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
+                                                  input,
+                                                  res,
+                                                  valid_res,
+                                                  res_offset,
+                                                  valid_res_offset,
+                                                  nullptr,
+                                                  values...);
     }
 
     // Same reverse-lookup path, but candidates cleared by candidate_mask are
@@ -1127,12 +1190,23 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessIndexLookupByOffsetsWithMask(BatchEvaluator evaluate_batch,
                                         OffsetVector* input,
-                                        TargetBitmapView res,
-                                        TargetBitmapView valid_res,
-                                        const TargetBitmap& candidate_mask,
+                                        TargetBitmap& res,
+                                        TargetBitmap& valid_res,
+                                        const size_t res_offset,
+                                        const size_t valid_res_offset,
+                                        const TargetBitmapView& candidate_mask,
                                         const ValTypes&... values) {
-        return ProcessIndexLookupByOffsetsImpl<T>(
-            evaluate_batch, input, res, valid_res, &candidate_mask, values...);
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
+        return ProcessIndexLookupByOffsetsImpl<T>(evaluate_batch,
+                                                  input,
+                                                  res,
+                                                  valid_res,
+                                                  res_offset,
+                                                  valid_res_offset,
+                                                  &candidate_mask,
+                                                  values...);
     }
 
     // Sequential reverse-lookup over the contiguous global row range
@@ -1144,10 +1218,15 @@ class SegmentExpr : public Expr {
     ProcessIndexLookupSequentialWithMask(BatchEvaluator evaluate_batch,
                                          int64_t start_offset,
                                          int64_t batch_size,
-                                         TargetBitmapView res,
-                                         TargetBitmapView valid_res,
-                                         const TargetBitmap& candidate_mask,
+                                         TargetBitmap& res,
+                                         TargetBitmap& valid_res,
+                                         const size_t res_offset,
+                                         const size_t valid_res_offset,
+                                         const TargetBitmapView& candidate_mask,
                                          const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -1155,7 +1234,7 @@ class SegmentExpr : public Expr {
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* index_ptr = const_cast<Index*>(scalar_index);
         const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
-        const bool all_valid = cached_index_all_valid_;
+        const bool all_valid = valid_result.all();
         const bool has_candidate_mask = !candidate_mask.empty();
         AssertInfo(!has_candidate_mask ||
                        candidate_mask.size() == static_cast<size_t>(batch_size),
@@ -1170,22 +1249,26 @@ class SegmentExpr : public Expr {
                     nullptr,
                     nullptr,
                     1,
-                    res + i,
-                    valid_res + i,
+                    res,
+                    valid_res,
+                    (res_offset + i),
+                    (valid_res_offset + i),
                     values...);
                 continue;
             }
             auto offset = start_offset + i;
             auto raw = index_ptr->Reverse_Lookup(offset);
             if (!raw.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 evaluate_batch.template operator()<FilterType::random>(
                     nullptr,
                     ValidityView{},
                     nullptr,
                     1,
-                    res + i,
-                    valid_res + i,
+                    res,
+                    valid_res,
+                    (res_offset + i),
+                    (valid_res_offset + i),
                     values...);
                 continue;
             }
@@ -1196,8 +1279,10 @@ class SegmentExpr : public Expr {
                 ValidityView::FromExpanded(&valid_data),
                 nullptr,
                 1,
-                res + i,
-                valid_res + i,
+                res,
+                valid_res,
+                (res_offset + i),
+                (valid_res_offset + i),
                 values...);
         }
 
@@ -1208,10 +1293,15 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessIndexLookupByOffsetsImpl(BatchEvaluator evaluate_batch,
                                     OffsetVector* input,
-                                    TargetBitmapView res,
-                                    TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    TargetBitmap& res,
+                                    TargetBitmap& valid_res,
+                                    const size_t res_offset,
+                                    const size_t valid_res_offset,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -1219,7 +1309,7 @@ class SegmentExpr : public Expr {
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* index_ptr = const_cast<Index*>(scalar_index);
         const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
-        const bool all_valid = cached_index_all_valid_;
+        const bool all_valid = valid_result.all();
         auto batch_size = input->size();
         const bool has_candidate_mask =
             candidate_mask != nullptr && !candidate_mask->empty();
@@ -1243,22 +1333,26 @@ class SegmentExpr : public Expr {
                     nullptr,
                     nullptr,
                     1,
-                    res + i,
-                    valid_res + i,
+                    res,
+                    valid_res,
+                    (res_offset + i),
+                    (valid_res_offset + i),
                     values...);
                 continue;
             }
             auto offset = (*input)[i];
             auto raw = index_ptr->Reverse_Lookup(offset);
             if (!raw.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 evaluate_batch.template operator()<FilterType::random>(
                     nullptr,
                     ValidityView{},
                     nullptr,
                     1,
-                    res + i,
-                    valid_res + i,
+                    res,
+                    valid_res,
+                    (res_offset + i),
+                    (valid_res_offset + i),
                     values...);
                 continue;
             }
@@ -1269,8 +1363,10 @@ class SegmentExpr : public Expr {
                 ValidityView::FromExpanded(&valid_data),
                 nullptr,
                 1,
-                res + i,
-                valid_res + i,
+                res,
+                valid_res,
+                (res_offset + i),
+                (valid_res_offset + i),
                 values...);
         }
 
@@ -1284,14 +1380,21 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsetsByChunkFallback(BatchEvaluator evaluate_batch,
                                         const SkipChunkFn& skip_func,
                                         OffsetVector* input,
-                                        TargetBitmapView res,
-                                        TargetBitmapView valid_res,
+                                        TargetBitmap& res,
+                                        TargetBitmap& valid_res,
+                                        const size_t res_offset,
+                                        const size_t valid_res_offset,
                                         const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         return ProcessDataByOffsetsImpl<T>(evaluate_batch,
                                            skip_func,
                                            input,
                                            res,
                                            valid_res,
+                                           res_offset,
+                                           valid_res_offset,
                                            nullptr,
                                            values...);
     }
@@ -1304,10 +1407,15 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsetsWithMask(BatchEvaluator evaluate_batch,
                                  const SkipChunkFn& skip_func,
                                  OffsetVector* input,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
-                                 const TargetBitmap& candidate_mask,
+                                 TargetBitmap& res,
+                                 TargetBitmap& valid_res,
+                                 const size_t res_offset,
+                                 const size_t valid_res_offset,
+                                 const TargetBitmapView& candidate_mask,
                                  const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
@@ -1315,6 +1423,8 @@ class SegmentExpr : public Expr {
                                                           input,
                                                           res,
                                                           valid_res,
+                                                          res_offset,
+                                                          valid_res_offset,
                                                           &candidate_mask,
                                                           values...);
             }
@@ -1326,6 +1436,8 @@ class SegmentExpr : public Expr {
                                           input,
                                           res,
                                           valid_res,
+                                          res_offset,
+                                          valid_res_offset,
                                           &candidate_mask,
                                           values...);
         if (processed_size >= 0) {
@@ -1336,6 +1448,8 @@ class SegmentExpr : public Expr {
                                            input,
                                            res,
                                            valid_res,
+                                           res_offset,
+                                           valid_res_offset,
                                            &candidate_mask,
                                            values...);
     }
@@ -1345,10 +1459,15 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsetsImpl(BatchEvaluator evaluate_batch,
                              const SkipChunkFn& skip_func,
                              OffsetVector* input,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
-                             const TargetBitmap* candidate_mask,
+                             TargetBitmap& res,
+                             TargetBitmap& valid_res,
+                             const size_t res_offset,
+                             const size_t valid_res_offset,
+                             const TargetBitmapView* candidate_mask,
                              const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t processed_size = 0;
         const bool has_candidate_mask =
             candidate_mask != nullptr && !candidate_mask->empty();
@@ -1360,8 +1479,12 @@ class SegmentExpr : public Expr {
         auto apply_skipped_validity = [&](ValidityView validity,
                                           int64_t logical_pos) {
             if (!has_candidate_mask || (*candidate_mask)[logical_pos]) {
-                ApplyValidData(
-                    validity, res + logical_pos, valid_res + logical_pos, 1);
+                ApplyValidData(validity,
+                               res,
+                               valid_res,
+                               (res_offset + logical_pos),
+                               (valid_res_offset + logical_pos),
+                               1);
             }
         };
 
@@ -1373,6 +1496,8 @@ class SegmentExpr : public Expr {
                                                           input,
                                                           res,
                                                           valid_res,
+                                                          res_offset,
+                                                          valid_res_offset,
                                                           candidate_mask,
                                                           values...);
             }
@@ -1425,8 +1550,10 @@ class SegmentExpr : public Expr {
                             ValidityView{},
                             nullptr,
                             1,
-                            res + processed_size,
-                            valid_res + processed_size,
+                            res,
+                            valid_res,
+                            (res_offset + processed_size),
+                            (valid_res_offset + processed_size),
                             values...);
                         ++processed_size;
                     }
@@ -1452,8 +1579,10 @@ class SegmentExpr : public Expr {
                             validity,
                             nullptr,
                             1,
-                            res + processed_size,
-                            valid_res + processed_size,
+                            res,
+                            valid_res,
+                            (res_offset + processed_size),
+                            (valid_res_offset + processed_size),
                             values...);
                     } else {
                         apply_skipped_validity(validity, processed_size);
@@ -1464,8 +1593,10 @@ class SegmentExpr : public Expr {
                             ValidityView{},
                             nullptr,
                             1,
-                            res + processed_size,
-                            valid_res + processed_size,
+                            res,
+                            valid_res,
+                            (res_offset + processed_size),
+                            (valid_res_offset + processed_size),
                             values...);
                     }
                     ++processed_size;
@@ -1498,8 +1629,10 @@ class SegmentExpr : public Expr {
                         valid_data,
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 } else {
                     // Chunk skipped by SkipIndex: apply valid mask, then still drive the
@@ -1512,8 +1645,10 @@ class SegmentExpr : public Expr {
                         ValidityView{},
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 }
                 processed_size++;
@@ -1567,8 +1702,10 @@ class SegmentExpr : public Expr {
                         validity,
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 } else {
                     // Chunk skipped by SkipIndex: apply valid mask, then still drive the
@@ -1581,8 +1718,10 @@ class SegmentExpr : public Expr {
                         ValidityView{},
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 }
                 processed_size++;
@@ -1621,8 +1760,10 @@ class SegmentExpr : public Expr {
                         validity,
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 } else {
                     // Chunk skipped by SkipIndex: apply valid mask, then still drive the
@@ -1635,8 +1776,10 @@ class SegmentExpr : public Expr {
                         ValidityView{},
                         nullptr,
                         1,
-                        res + processed_size,
-                        valid_res + processed_size,
+                        res,
+                        valid_res,
+                        (res_offset + processed_size),
+                        (valid_res_offset + processed_size),
                         values...);
                 }
                 processed_size++;
@@ -1650,10 +1793,15 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsetsByTake(FUNC func,
                                const SkipChunkFn& skip_func,
                                OffsetVector* input,
-                               TargetBitmapView res,
-                               TargetBitmapView valid_res,
-                               const TargetBitmap* candidate_mask,
+                               TargetBitmap& res,
+                               TargetBitmap& valid_res,
+                               const size_t res_offset,
+                               const size_t valid_res_offset,
+                               const TargetBitmapView* candidate_mask,
                                const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // VECTOR_ARRAY has a target tag for typed access, but neither Raw nor
         // Vortex implements Take for it. Fall back before building an O(N)
         // Cell plan that the backend must reject.
@@ -1666,6 +1814,8 @@ class SegmentExpr : public Expr {
                                                            input,
                                                            res,
                                                            valid_res,
+                                                           res_offset,
+                                                           valid_res_offset,
                                                            candidate_mask,
                                                            values...);
         }
@@ -1676,10 +1826,15 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsetsByTakeWithTarget(FUNC func,
                                          const SkipChunkFn& skip_func,
                                          OffsetVector* input,
-                                         TargetBitmapView res,
-                                         TargetBitmapView valid_res,
-                                         const TargetBitmap* candidate_mask,
+                                         TargetBitmap& res,
+                                         TargetBitmap& valid_res,
+                                         const size_t res_offset,
+                                         const size_t valid_res_offset,
+                                         const TargetBitmapView* candidate_mask,
                                          const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         static_assert(milvus::HasTargetType<T>);
         if (input->empty()) {
             return 0;
@@ -1722,6 +1877,8 @@ class SegmentExpr : public Expr {
                 static_cast<int>(owned.size),
                 res,
                 valid_res,
+                res_offset,
+                valid_res_offset,
                 values...);
             return owned.size;
         }
@@ -1743,8 +1900,10 @@ class SegmentExpr : public Expr {
                     ValidityView{},
                     nullptr,
                     1,
-                    res + logical_pos,
-                    valid_res + logical_pos,
+                    res,
+                    valid_res,
+                    (res_offset + logical_pos),
+                    (valid_res_offset + logical_pos),
                     values...);
                 continue;
             }
@@ -1754,8 +1913,12 @@ class SegmentExpr : public Expr {
                 const auto validity = nullable
                                           ? ValidityView::FromExpanded(&valid)
                                           : ValidityView{};
-                ApplyValidData(
-                    validity, res + logical_pos, valid_res + logical_pos, 1);
+                ApplyValidData(validity,
+                               res,
+                               valid_res,
+                               (res_offset + logical_pos),
+                               (valid_res_offset + logical_pos),
+                               1);
                 // Keep position-indexed evaluators aligned while leaving the
                 // predicate result false for this skipped logical position.
                 func.template operator()<FilterType::random>(
@@ -1763,8 +1926,10 @@ class SegmentExpr : public Expr {
                     validity,
                     nullptr,
                     1,
-                    res + logical_pos,
-                    valid_res + logical_pos,
+                    res,
+                    valid_res,
+                    (res_offset + logical_pos),
+                    (valid_res_offset + logical_pos),
                     values...);
                 continue;
             }
@@ -1779,8 +1944,10 @@ class SegmentExpr : public Expr {
                     validity,
                     nullptr,
                     1,
-                    res + logical_pos,
-                    valid_res + logical_pos,
+                    res,
+                    valid_res,
+                    (res_offset + logical_pos),
+                    (valid_res_offset + logical_pos),
                     values...);
                 continue;
             }
@@ -1794,8 +1961,10 @@ class SegmentExpr : public Expr {
                 nullable ? ValidityView::FromExpanded(&valid) : ValidityView{},
                 nullptr,
                 1,
-                res + logical_pos,
-                valid_res + logical_pos,
+                res,
+                valid_res,
+                (res_offset + logical_pos),
+                (valid_res_offset + logical_pos),
                 values...);
         }
         return input->size();
@@ -1887,11 +2056,16 @@ class SegmentExpr : public Expr {
         const FixedVector<int32_t>& first_elem_indices,
         const FixedVector<int32_t>& run_lengths,
         BatchEvaluator& evaluate_batch,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
+        TargetBitmap& res,
+        TargetBitmap& valid_res,
+        const size_t res_offset,
+        const size_t valid_res_offset,
         std::vector<ElementType>& value_buffer,
         FixedVector<bool>& valid_buffer,
         const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         size_t batch_pos = 0;
         auto emit_rows = [&](const auto* rows,
                              ValidityView valid_data,
@@ -1916,8 +2090,10 @@ class SegmentExpr : public Expr {
                             valid_data,
                             nullptr,
                             size,
-                            res + batch_pos,
-                            valid_res + batch_pos,
+                            res,
+                            valid_res,
+                            (res_offset + batch_pos),
+                            (valid_res_offset + batch_pos),
                             values...);
                         batch_pos += static_cast<size_t>(size);
                     });
@@ -1968,11 +2144,16 @@ class SegmentExpr : public Expr {
                                   int64_t start_offset,
                                   int64_t length,
                                   BatchEvaluator& evaluate_batch,
-                                  TargetBitmapView res,
-                                  TargetBitmapView valid_res,
+                                  TargetBitmap& res,
+                                  TargetBitmap& valid_res,
+                                  const size_t res_offset,
+                                  const size_t valid_res_offset,
                                   std::vector<ElementType>& value_buffer,
                                   FixedVector<bool>& valid_buffer,
                                   const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         int64_t processed_elems = 0;
         auto emit_rows = [&](const auto* rows, ValidityView valid_data) {
             for (int64_t i = 0; i < length; ++i) {
@@ -1994,8 +2175,10 @@ class SegmentExpr : public Expr {
                                        valid_data,
                                        nullptr,
                                        batch_size,
-                                       res + processed_elems,
-                                       valid_res + processed_elems,
+                                       res,
+                                       valid_res,
+                                       (res_offset + processed_elems),
+                                       (valid_res_offset + processed_elems),
                                        values...);
                         processed_elems += batch_size;
                     });
@@ -2042,25 +2225,49 @@ class SegmentExpr : public Expr {
     ProcessDataByOffsets(FUNC func,
                          const SkipChunkFn& skip_func,
                          OffsetVector* input,
-                         TargetBitmapView res,
-                         TargetBitmapView valid_res,
+                         TargetBitmap& res,
+                         TargetBitmap& valid_res,
+                         const size_t res_offset,
+                         const size_t valid_res_offset,
                          const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
-                return ProcessIndexLookupByOffsets<T>(
-                    func, input, res, valid_res, values...);
+                return ProcessIndexLookupByOffsets<T>(func,
+                                                      input,
+                                                      res,
+                                                      valid_res,
+                                                      res_offset,
+                                                      valid_res_offset,
+                                                      values...);
             }
         }
 
-        const auto processed_size = ProcessDataByOffsetsByTake<T>(
-            func, skip_func, input, res, valid_res, nullptr, values...);
+        const auto processed_size =
+            ProcessDataByOffsetsByTake<T>(func,
+                                          skip_func,
+                                          input,
+                                          res,
+                                          valid_res,
+                                          res_offset,
+                                          valid_res_offset,
+                                          nullptr,
+                                          values...);
         if (processed_size >= 0) {
             return processed_size;
         }
-        return ProcessDataByOffsetsByChunkFallback<T>(
-            func, skip_func, input, res, valid_res, values...);
+        return ProcessDataByOffsetsByChunkFallback<T>(func,
+                                                      skip_func,
+                                                      input,
+                                                      res,
+                                                      valid_res,
+                                                      res_offset,
+                                                      valid_res_offset,
+                                                      values...);
     }
 
     // Process element-level data by element IDs. Consecutive element IDs from
@@ -2073,9 +2280,14 @@ class SegmentExpr : public Expr {
     ProcessElementLevelByOffsets(BatchEvaluator evaluate_batch,
                                  const SkipChunkFn& skip_func,
                                  OffsetVector* element_ids,
-                                 TargetBitmapView res,
-                                 TargetBitmapView valid_res,
+                                 TargetBitmap& res,
+                                 TargetBitmap& valid_res,
+                                 const size_t res_offset,
+                                 const size_t valid_res_offset,
                                  const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (element_ids->empty()) {
             return 0;
         }
@@ -2175,8 +2387,10 @@ class SegmentExpr : public Expr {
                     ValidityView{},
                     nullptr,
                     eval_size,
-                    res + processed_size,
-                    valid_res + processed_size,
+                    res,
+                    valid_res,
+                    (res_offset + processed_size),
+                    (valid_res_offset + processed_size),
                     values...);
                 processed_size += batch_size;
                 continue;
@@ -2191,8 +2405,10 @@ class SegmentExpr : public Expr {
                     first_elem_indices,
                     run_lengths,
                     evaluate_batch,
-                    res + processed_size,
-                    valid_res + processed_size,
+                    res,
+                    valid_res,
+                    (res_offset + processed_size),
+                    (valid_res_offset + processed_size),
                     value_buffer,
                     valid_buffer,
                     values...);
@@ -2217,9 +2433,14 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksForElementLevel(BatchEvaluator evaluate_batch,
                                      const SkipChunkFn& skip_func,
-                                     TargetBitmapView res,
-                                     TargetBitmapView valid_res,
+                                     TargetBitmap& res,
+                                     TargetBitmap& valid_res,
+                                     const size_t res_offset,
+                                     const size_t valid_res_offset,
                                      const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         static_assert(!std::is_same_v<ElementType, Json>,
                       "Json element type is not supported for "
                       "element-level filtering");
@@ -2274,8 +2495,10 @@ class SegmentExpr : public Expr {
                                    ValidityView{},
                                    nullptr,
                                    element_count,
-                                   res + processed_elems,
-                                   valid_res + processed_elems,
+                                   res,
+                                   valid_res,
+                                   (res_offset + processed_elems),
+                                   (valid_res_offset + processed_elems),
                                    values...);
                 }
                 processed_elems += element_count;
@@ -2286,8 +2509,10 @@ class SegmentExpr : public Expr {
                         data_pos,
                         size,
                         evaluate_batch,
-                        res + processed_elems,
-                        valid_res + processed_elems,
+                        res,
+                        valid_res,
+                        (res_offset + processed_elems),
+                        (valid_res_offset + processed_elems),
                         value_buffer,
                         valid_buffer,
                         values...);
@@ -2322,10 +2547,15 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksForSingleChunk(FUNC func,
                                     const SkipChunkFn& skip_func,
-                                    TargetBitmapView res,
-                                    TargetBitmapView valid_res,
-                                    const TargetBitmap* candidate_mask,
+                                    TargetBitmap& res,
+                                    TargetBitmap& valid_res,
+                                    const size_t res_offset,
+                                    const size_t valid_res_offset,
+                                    const TargetBitmapView* candidate_mask,
                                     const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         const auto expected_rows = GetNextBatchSize();
         int64_t processed_size = 0;
 
@@ -2354,16 +2584,20 @@ class SegmentExpr : public Expr {
                              nullptr,
                              segment_offsets_array.data(),
                              size,
-                             res + processed_size,
-                             valid_res + processed_size,
+                             res,
+                             valid_res,
+                             (res_offset + processed_size),
+                             (valid_res_offset + processed_size),
                              values...);
                     } else {
                         func(data,
                              valid_data,
                              nullptr,
                              size,
-                             res + processed_size,
-                             valid_res + processed_size,
+                             res,
+                             valid_res,
+                             (res_offset + processed_size),
+                             (valid_res_offset + processed_size),
                              values...);
                     }
                     return;
@@ -2375,8 +2609,10 @@ class SegmentExpr : public Expr {
                 // 2. Call func with nullptr to update internal cursors
                 //    (e.g., processed_cursor for bitmap_input indexing)
                 ApplyValidMaskForCandidates(valid_data,
-                                            res + processed_size,
-                                            valid_res + processed_size,
+                                            res,
+                                            valid_res,
+                                            (res_offset + processed_size),
+                                            (valid_res_offset + processed_size),
                                             size,
                                             candidate_mask,
                                             processed_size);
@@ -2391,16 +2627,20 @@ class SegmentExpr : public Expr {
                          nullptr,
                          segment_offsets_array.data(),
                          size,
-                         res + processed_size,
-                         valid_res + processed_size,
+                         res,
+                         valid_res,
+                         (res_offset + processed_size),
+                         (valid_res_offset + processed_size),
                          values...);
                 } else {
                     func(nullptr,
                          ValidityView{},
                          nullptr,
                          size,
-                         res + processed_size,
-                         valid_res + processed_size,
+                         res,
+                         valid_res,
+                         (res_offset + processed_size),
+                         (valid_res_offset + processed_size),
                          values...);
                 }
             };
@@ -2443,15 +2683,27 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksByScan(FUNC func,
                             const SkipChunkFn& skip_func,
-                            TargetBitmapView res,
-                            TargetBitmapView valid_res,
-                            const TargetBitmap* candidate_mask,
+                            TargetBitmap& res,
+                            TargetBitmap& valid_res,
+                            const size_t res_offset,
+                            const size_t valid_res_offset,
+                            const TargetBitmapView* candidate_mask,
                             const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if constexpr (!milvus::HasTargetType<T>) {
             return -1;
         } else {
             return ProcessDataChunksByScanWithTarget<T, NeedSegmentOffsets>(
-                func, skip_func, res, valid_res, candidate_mask, values...);
+                func,
+                skip_func,
+                res,
+                valid_res,
+                res_offset,
+                valid_res_offset,
+                candidate_mask,
+                values...);
         }
     }
 
@@ -2462,10 +2714,15 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksByScanWithTarget(FUNC func,
                                       const SkipChunkFn& skip_func,
-                                      TargetBitmapView res,
-                                      TargetBitmapView valid_res,
-                                      const TargetBitmap* candidate_mask,
+                                      TargetBitmap& res,
+                                      TargetBitmap& valid_res,
+                                      const size_t res_offset,
+                                      const size_t valid_res_offset,
+                                      const TargetBitmapView* candidate_mask,
                                       const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         static_assert(milvus::HasTargetType<T>);
         const auto real_batch_size = GetNextBatchSize();
         const auto window_start = current_data_global_pos_;
@@ -2500,16 +2757,20 @@ class SegmentExpr : public Expr {
                      nullptr,
                      segment_offsets_array.data(),
                      size,
-                     res + output_offset,
-                     valid_res + output_offset,
+                     res,
+                     valid_res,
+                     (res_offset + output_offset),
+                     (valid_res_offset + output_offset),
                      values...);
             } else {
                 func(data,
                      valid_data,
                      nullptr,
                      size,
-                     res + output_offset,
-                     valid_res + output_offset,
+                     res,
+                     valid_res,
+                     (res_offset + output_offset),
+                     (valid_res_offset + output_offset),
                      values...);
             }
         };
@@ -2549,8 +2810,10 @@ class SegmentExpr : public Expr {
                 const auto output_offset = batch.row_id_start - window_start;
                 ApplyScanValidity(batch,
                                   0,
-                                  res + output_offset,
-                                  valid_res + output_offset,
+                                  res,
+                                  valid_res,
+                                  (res_offset + output_offset),
+                                  (valid_res_offset + output_offset),
                                   batch.size,
                                   candidate_mask,
                                   output_offset);
@@ -2579,11 +2842,22 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunks(FUNC func,
                       const SkipChunkFn& skip_func,
-                      TargetBitmapView res,
-                      TargetBitmapView valid_res,
+                      TargetBitmap& res,
+                      TargetBitmap& valid_res,
+                      const size_t res_offset,
+                      const size_t valid_res_offset,
                       const ValTypes&... values) {
-        return ProcessDataChunksImpl<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, nullptr, values...);
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
+        return ProcessDataChunksImpl<T, NeedSegmentOffsets>(func,
+                                                            skip_func,
+                                                            res,
+                                                            valid_res,
+                                                            res_offset,
+                                                            valid_res_offset,
+                                                            nullptr,
+                                                            values...);
     }
 
     template <typename T,
@@ -2593,18 +2867,29 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksWithMask(FUNC func,
                               const SkipChunkFn& skip_func,
-                              TargetBitmapView res,
-                              TargetBitmapView valid_res,
-                              const TargetBitmap& candidate_mask,
+                              TargetBitmap& res,
+                              TargetBitmap& valid_res,
+                              const size_t res_offset,
+                              const size_t valid_res_offset,
+                              const TargetBitmapView& candidate_mask,
                               const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         AssertInfo(candidate_mask.empty() ||
                        candidate_mask.size() ==
                            static_cast<size_t>(GetNextBatchSize()),
                    "candidate mask size {} does not match scan batch {}",
                    candidate_mask.size(),
                    GetNextBatchSize());
-        return ProcessDataChunksImpl<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, &candidate_mask, values...);
+        return ProcessDataChunksImpl<T, NeedSegmentOffsets>(func,
+                                                            skip_func,
+                                                            res,
+                                                            valid_res,
+                                                            res_offset,
+                                                            valid_res_offset,
+                                                            &candidate_mask,
+                                                            values...);
     }
 
     template <typename T,
@@ -2614,13 +2899,24 @@ class SegmentExpr : public Expr {
     int64_t
     ProcessDataChunksImpl(FUNC func,
                           const SkipChunkFn& skip_func,
-                          TargetBitmapView res,
-                          TargetBitmapView valid_res,
-                          const TargetBitmap* candidate_mask,
+                          TargetBitmap& res,
+                          TargetBitmap& valid_res,
+                          const size_t res_offset,
+                          const size_t valid_res_offset,
+                          const TargetBitmapView* candidate_mask,
                           const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         const auto processed_size =
-            ProcessDataChunksByScan<T, NeedSegmentOffsets>(
-                func, skip_func, res, valid_res, candidate_mask, values...);
+            ProcessDataChunksByScan<T, NeedSegmentOffsets>(func,
+                                                           skip_func,
+                                                           res,
+                                                           valid_res,
+                                                           res_offset,
+                                                           valid_res_offset,
+                                                           candidate_mask,
+                                                           values...);
         if (processed_size >= 0) {
             return processed_size;
         }
@@ -2628,7 +2924,14 @@ class SegmentExpr : public Expr {
                    "sealed field {} does not provide a data scan cursor",
                    field_id_.get());
         return ProcessDataChunksForSingleChunk<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, candidate_mask, values...);
+            func,
+            skip_func,
+            res,
+            valid_res,
+            res_offset,
+            valid_res_offset,
+            candidate_mask,
+            values...);
     }
 
     // Specialized method for ngram post-filter: processes data in a specific range
@@ -2638,9 +2941,12 @@ class SegmentExpr : public Expr {
     template <typename T, typename FUNC>
     int64_t
     ProcessDataChunkForRange(FUNC func,
-                             TargetBitmapView res,
+                             TargetBitmap& res,
+                             const size_t res_offset,
                              int64_t segment_offset,
                              int64_t size) {
+        auto res_write_scope = res.scoped_write();
+
         static_assert(std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>,
@@ -2672,7 +2978,10 @@ class SegmentExpr : public Expr {
                     op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
                 auto data_vec = std::move(pw.get().first);
 
-                func(data_vec.data(), batch_size, res + processed_size);
+                func(data_vec.data(),
+                     batch_size,
+                     res,
+                     (res_offset + processed_size));
 
                 chunk_offset += batch_size;
                 processed_size += batch_size;
@@ -2744,7 +3053,8 @@ class SegmentExpr : public Expr {
                                 chunk_id,
                                 0,
                                 size,
-                                valid_result.view() + processed_size);
+                                valid_result,
+                                processed_size);
             processed_size += size;
         }
         AssertInfo(processed_size == row_count,
@@ -3043,7 +3353,8 @@ class SegmentExpr : public Expr {
                                          field_id_,
                                          offsets.data(),
                                          batch_size,
-                                         TargetBitmapView(valid_result));
+                                         valid_result,
+                                         0);
         };
 
         if constexpr (std::is_same_v<T, VectorArray>) {
@@ -3105,7 +3416,7 @@ class SegmentExpr : public Expr {
                     dynamic_cast<const Index*>(pinned_index_[0].get());
                 auto* index_ptr = const_cast<Index*>(scalar_index);
                 const auto& res = GetCachedIndexValidBitmap(index_ptr);
-                if (!cached_index_all_valid_) {
+                if (!res.all()) {
                     for (auto i = 0; i < batch_size; ++i) {
                         valid_result[i] = res[input[i]];
                     }
@@ -3137,7 +3448,8 @@ class SegmentExpr : public Expr {
                                 i,
                                 data_pos,
                                 size,
-                                valid_result + processed_size);
+                                valid_result,
+                                (0 + processed_size));
 
             processed_size += size;
             if (processed_size >= expected_rows) {
@@ -3195,8 +3507,10 @@ class SegmentExpr : public Expr {
             const auto size = batch.size;
             ApplyScanValidity(batch,
                               0,
-                              valid_result + processed_size,
-                              valid_result + processed_size,
+                              valid_result,
+                              valid_result,
+                              processed_size,
+                              processed_size,
                               size);
             processed_size += size;
         }
@@ -3581,8 +3895,8 @@ class SegmentExpr : public Expr {
     }
 
     VectorPtr
-    GatherCachedResultByOffsets(const TargetBitmap& cached_res,
-                                const TargetBitmap& cached_valid_res,
+    GatherCachedResultByOffsets(const TargetBitmapView& cached_res,
+                                const TargetBitmapView& cached_valid_res,
                                 const OffsetVector& offsets) const {
         AssertInfo(cached_res.size() == cached_valid_res.size(),
                    "cached result and validity sizes differ: {} vs {}",
@@ -3859,7 +4173,7 @@ class SegmentExpr : public Expr {
     // Cached scalar-index IsNotNull() bitmap for the ByOffsets paths
     // (single-index-chunk only); see GetCachedIndexValidBitmap().
     std::shared_ptr<TargetBitmap> cached_index_valid_res_{nullptr};
-    bool cached_index_all_valid_{false};
+    TargetBitmapView cached_index_valid_view_;
 
     // Legacy cache fields — TODO: remove after all subclasses migrated to cached_result_.
     int64_t cached_index_chunk_id_{-1};

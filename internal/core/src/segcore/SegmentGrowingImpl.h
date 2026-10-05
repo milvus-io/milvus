@@ -478,7 +478,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(BitsetTypeView& bitset_chunk,
+    mask_with_timestamps(BitsetType& bitset_chunk,
                          Timestamp timestamp,
                          Timestamp ttl = 0) const override;
 
@@ -497,7 +497,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     void
-    mask_with_delete(BitsetTypeView& bitset,
+    mask_with_delete(BitsetType& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
@@ -618,7 +618,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
              const PkType& pk,
-             BitsetTypeView& bitset) const override {
+             BitsetType& bitset) const override {
         insert_record_.search_pk_range(pk, op, bitset);
     }
 
@@ -698,14 +698,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmapView valid_result) const override;
+                        TargetBitmap& valid_result,
+                        const size_t valid_result_offset = 0) const override;
 
     void
-    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
-                                 FieldId field_id,
-                                 const int64_t* offsets,
-                                 int64_t count,
-                                 TargetBitmapView valid_result) const override;
+    ApplyFieldValidDataByOffsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* offsets,
+        int64_t count,
+        TargetBitmap& valid_result,
+        const size_t valid_result_offset = 0) const override;
 
  protected:
     int64_t

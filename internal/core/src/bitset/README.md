@@ -1,90 +1,93 @@
-# Bitset ownership and read-only views
+# Bitset ownership, read-only views and statistics
 
-This interface change is staged on top of the dense-kernel optimization. It
-changes the bitset library and its tests only. Milvus/segcore callers that write
-through `TargetBitmapView` or `BitsetTypeView` need a separate migration before
-this interface can be integrated into a full Milvus build.
+`Bitset<Policy, Container, RangeCheck>` owns its storage and exposes writes.
+`BitsetView<Policy, RangeCheck>` borrows a read-only interval: `data()` returns a
+const pointer and indexing returns a bool, even for a non-const descriptor.
+Read-only parameters can borrow an owner through the view constructor; bitmap
+bytes are not copied.
 
-## Storage types
+## Lifetime and statistics
 
-| Type | Owns storage | Reads | Writes |
-| --- | --- | --- | --- |
-| `Bitset<Policy, Container, RangeCheck>` | Yes | Yes | Yes |
-| `BitsetView<Policy, RangeCheck>` | No | Yes | No |
+A view is a live borrowed interval. Its buffer and referenced range must outlive
+it. Resizing, reserving, clearing or replacing backing storage can invalidate
+views. Move transfers an owner's buffer and mutation state together. Owned
+results, shared cache entries and iterator backing storage remain owners.
 
-Both types keep the existing policy-based kernels. The split adds no virtual
-calls, representation switches, bitmap copies, or statistics to a view.
-`BitsetBase` shares read operations; `detail::BitsetMutatingBase` implements owner
-writes. These CRTP helpers are implementation details, not additional storage
-types.
+Count and predicate caches belong to the view. The owner holds only a mutation
+version and write/escape metadata, with a stable address across moves. A count
+result also answers all/none. A cold all/none keeps the existing early-exit
+kernel and caches the predicate result; it does not force a full population
+count. A positive all/none additionally establishes the count as size/zero.
+Nested subviews have their own interval statistics. Copied descriptors can reuse
+computed statistics, then invalidate them independently when the owner changes.
 
-A view returns `const data_type*` from `data()` and a `bool` from `operator[]`,
-including when the view descriptor itself is non-const. It can be constructed
-from a const owner or a const external buffer. It supports `size`, `empty`,
-`count`, `all`, `any`, `none`, equality, `read`, `find_first`, `find_next`, and
-nested `view` operations. Existing bit ordering, empty-range semantics and
-policy-dependent storage requirements are unchanged. `empty()` means zero bits;
-it does not mean zero set bits.
+All supported owner writes invalidate view statistics. A retained bit proxy
+also tracks writes. Cache updates use atomic fields so concurrent read-only
+queries can share a view; mutation of the bitmap requires external
+synchronization. This does not make concurrent read/write bitmap access safe.
 
-A view is a live borrowed range, not a frozen snapshot. Owner changes are visible
-through existing views. Callers must keep the buffer and referenced range valid;
-resize, reserve, clear, append, move assignment, storage extraction and owner
-destruction may invalidate views. Concurrent reads and writes require external
-synchronization. There is no lazy count cache in this change because the owner
-can still mutate its bytes, including through `data()`.
+Raw-buffer views remain uncached because no owner can report modifications.
+Obtaining an owner's public writable `data()` permanently disables caching for
+that backing buffer: a retained pointer may write at any later time. Read bytes
+through a const owner or a view instead.
 
 ## Writing a window
 
-Source windows are read-only views. Write into the owning destination and pass its
-bit offset as the last argument:
+Write into the owner, and pass the destination bit offset as the final argument:
 
 ```cpp
-auto src_window = src.view(src_begin, length);
-dst.inplace_and(src_window, length, dst_begin);
-dst.inplace_or(src_window, length, dst_begin);
-dst.inplace_xor(src_window, length, dst_begin);
-dst.inplace_sub(src_window, length, dst_begin);       // dst & ~src
-dst.inplace_and_flip(src_window, length, dst_begin);  // ~(dst & src)
-
+dst.inplace_and(src.view(src_begin, length), length, dst_begin);
+dst.inplace_or(src.view(src_begin, length), length, dst_begin);
+dst.inplace_xor(src.view(src_begin, length), length, dst_begin);
+dst.inplace_sub(src.view(src_begin, length), length, dst_begin);
+dst.inplace_and_flip(src.view(src_begin, length), length, dst_begin);
 dst.set(dst_begin, length, true);
 dst.reset(dst_begin, length);
 dst.flip(dst_begin, length);
 ```
 
-The destination interval is `[dst_begin, dst_begin + length)`. Source positions
-are relative to the supplied source view. Adjacent bits are preserved, including
-unaligned boundary bits. Existing calls without the final destination offset
-still write from bit zero. `flip()` still flips the whole owner.
+The destination interval is `[dst_begin, dst_begin + length)`. Adjacent bits are
+preserved. Existing zero-offset owner calls and whole-owner `flip()` remain
+available. Comparisons and arithmetic comparisons accept the same optional final
+destination offset, for runtime and compile-time operation selection.
 
-Multi-input AND/OR accept arrays of read-only views or owners, followed by the
-number of inputs, length and optional destination offset. Counted AND/OR use the
-same offset convention. Their existing return meanings are preserved:
-`inplace_and_with_count` returns set bits in the destination interval;
-`inplace_or_with_count` returns **unset** bits in that interval.
+Multi-input AND/OR accept read-only views or owners. Their aligned fast path
+requires both destination and sources to be aligned. Counted AND returns set
+bits in the modified interval; counted OR returns **unset** bits there. Existing
+kernel traversal behavior for overlapping operands is preserved.
 
-Column/value comparisons, range comparisons and arithmetic comparisons also
-accept the optional final destination offset, for both runtime dispatch and
-compile-time operation parameters:
+For per-row output loops, use a scope to invalidate once per batch:
 
 ```cpp
-dst.inplace_compare_val(values, length, threshold, CompareOpType::GT, dst_begin);
-dst.template inplace_compare_val<int32_t, CompareOpType::GT>(
-    values, length, threshold, dst_begin);
+{
+    auto write = dst.scoped_write();
+    for (size_t i = 0; i < length; ++i) dst[dst_begin + i] = predicate(i);
+}
 ```
 
-The multi-input AND/OR fast path now requires the destination to be aligned as
-well as all sources. An unaligned destination with aligned sources uses the
-existing general path to preserve bit positions and adjacent bits. The kernels'
-aliasing and traversal behavior remains unchanged. This
-interface does not introduce snapshot semantics for overlapping binary operands.
-External writable buffers need an owning destination in the subsequent caller
-migration; a view cannot write to them.
+Nested scopes are supported. Statistics remain uncached while a scope is open;
+closing the outer scope invalidates older cached values. `write.data()` permits
+scoped raw kernel writes. Its pointer must not escape the scope. The owner and
+storage must outlive the scope, and must not be resized or replaced within it.
+
+## Milvus use
+
+Bitmap columns retain owning bitsets. `GetBitmap()`/`GetValidBitmap()` return
+persistent read-only views; `GetMutableBitmap()`/`GetMutableValidBitmap()` return
+owners for bit writes. Column dimensions and storage identity must not be changed
+through the mutable references. Scalar column resizing uses the column API.
+Null counts derive from validity view counts. Expression result cache ownership,
+admission and eviction remain in the query cache manager.
+
+The search-side `milvus::BitsetView`/Knowhere view uses a backend ID domain that
+may include mappings, windows and validity filtering. Its prepared counters are
+not interchangeable with a plain dense row view's population count. Position
+based and offset based scorer APIs remain distinct.
 
 ## Library-only verification
 
-The standalone entry point builds the actual library kernels and the existing
-bitset tests without Milvus/segcore dependencies. GoogleTest must already be
-installed; no dependency downloads occur.
+GoogleTest must already be installed. The standalone entry builds the actual
+kernels, tests and a header-only smoke check without downloading dependencies:
 
 ```sh
 cmake -S internal/core/src/bitset/tests -B /tmp/bitset-tests \
@@ -93,10 +96,6 @@ cmake --build /tmp/bitset-tests -j 6
 ctest --test-dir /tmp/bitset-tests --output-on-failure
 ```
 
-For ASan/UBSan, use a separate build directory and add `-DSANITIZE=ON` and
-`-DSANITIZER_TEST_O1=ON`. The latter reduces compiler memory usage for the large
-template-heavy test translation unit; it does not reduce optimization of library
-kernels. Tests cover the read-only API at compile time, owner writes with source
-and destination offsets, preserved adjacent bits, empty ranges, runtime and
-compile-time comparison dispatch, existing alias regressions, and header-only
-use.
+Use a separate directory with `-DSANITIZE=ON -DSANITIZER_TEST_O1=ON` for
+ASan/UBSan. O1 applies to the large test translation unit, not library kernels.
+Library-only checks do not replace Milvus expression, MVCC and query tests.

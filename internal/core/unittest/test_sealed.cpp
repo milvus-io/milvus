@@ -114,7 +114,7 @@ using milvus::segcore::LoadIndexInfo;
 namespace {
 
 bool
-GetFieldBit(const BitsetType& bitset, FieldId field_id) {
+GetFieldBit(const BitsetTypeView& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
     return bitset[pos];
@@ -1543,8 +1543,7 @@ TEST(Sealed, Delete) {
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
-    auto bitset_view = BitsetTypeView(bitset);
-    segment->mask_with_delete(bitset_view, 10, 11);
+    segment->mask_with_delete(bitset, 10, 11);
     ASSERT_EQ(bitset.count(), pks.size());
 
     int64_t new_count = 3;
@@ -1621,8 +1620,7 @@ TEST(Sealed, OverlapDelete) {
         << "deleted_count=" << segment->get_deleted_count()
         << " pks_count=" << pks.size() << std::endl;
     BitsetType bitset(N, false);
-    auto bitset_view = BitsetTypeView(bitset);
-    segment->mask_with_delete(bitset_view, 10, 12);
+    segment->mask_with_delete(bitset, 10, 12);
     ASSERT_EQ(bitset.count(), pks.size())
         << "bitset_count=" << bitset.count() << " pks_count=" << pks.size()
         << std::endl;
@@ -1879,18 +1877,16 @@ TEST(Sealed, DeleteSnapshotOptimizationFastPath) {
 
     // Query with timestamp >= max_delete_ts should use fast path
     BitsetType bitset1(N, false);
-    auto bitset_view1 = BitsetTypeView(bitset1);
     Timestamp query_ts_fast =
         delete_ts + delete_count + 100;  // >= max_delete_ts
-    segment->mask_with_delete(bitset_view1, N, query_ts_fast);
+    segment->mask_with_delete(bitset1, N, query_ts_fast);
     ASSERT_EQ(bitset1.count(), delete_count);
 
     // Query with timestamp < max_delete_ts should use slow path
     BitsetType bitset2(N, false);
-    auto bitset_view2 = BitsetTypeView(bitset2);
     Timestamp query_ts_slow =
         delete_ts + 5;  // < max_delete_ts, covers some but not all
-    segment->mask_with_delete(bitset_view2, N, query_ts_slow);
+    segment->mask_with_delete(bitset2, N, query_ts_slow);
     // Should have fewer deletions visible since query_ts is in the middle
     ASSERT_LT(bitset2.count(), delete_count);
     ASSERT_GT(bitset2.count(), 0);
@@ -1924,9 +1920,8 @@ TEST(Sealed, DeleteSnapshotOptimizationDisabled) {
 
     // Query should still work correctly via slow path
     BitsetType bitset(N, false);
-    auto bitset_view = BitsetTypeView(bitset);
     Timestamp query_ts = delete_ts + delete_count + 100;
-    segment->mask_with_delete(bitset_view, N, query_ts);
+    segment->mask_with_delete(bitset, N, query_ts);
     ASSERT_EQ(bitset.count(), delete_count);
 
     // Restore original value
@@ -1958,9 +1953,8 @@ TEST(Sealed, DeleteSnapshotMultipleDeletes) {
 
     // Query after first delete batch
     BitsetType bitset1(N, false);
-    auto bitset_view1 = BitsetTypeView(bitset1);
     Timestamp query_ts1 = delete_ts1 + delete_count1 + 100;
-    segment->mask_with_delete(bitset_view1, N, query_ts1);
+    segment->mask_with_delete(bitset1, N, query_ts1);
     ASSERT_EQ(bitset1.count(), delete_count1);
 
     // Second batch of deletes
@@ -1974,17 +1968,15 @@ TEST(Sealed, DeleteSnapshotMultipleDeletes) {
 
     // Query after second delete batch - should see all deletes
     BitsetType bitset2(N, false);
-    auto bitset_view2 = BitsetTypeView(bitset2);
     Timestamp query_ts2 = delete_ts2 + delete_count2 + 100;
-    segment->mask_with_delete(bitset_view2, N, query_ts2);
+    segment->mask_with_delete(bitset2, N, query_ts2);
     ASSERT_EQ(bitset2.count(), delete_count1 + delete_count2);
 
     // Query with timestamp between batches - should only see first batch
     BitsetType bitset3(N, false);
-    auto bitset_view3 = BitsetTypeView(bitset3);
     Timestamp query_ts_between =
         delete_ts1 + delete_count1 + 50;  // Between batch1 and batch2
-    segment->mask_with_delete(bitset_view3, N, query_ts_between);
+    segment->mask_with_delete(bitset3, N, query_ts_between);
     ASSERT_EQ(bitset3.count(), delete_count1);
 
     ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);

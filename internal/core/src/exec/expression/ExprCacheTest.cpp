@@ -355,7 +355,8 @@ MakeRandomBits(size_t n, double density, uint32_t seed = 42) {
 
 // Helper: compare two bitsets bit-by-bit.
 void
-AssertBitsEqual(const milvus::TargetBitmap& a, const milvus::TargetBitmap& b) {
+AssertBitsEqual(const milvus::TargetBitmapView& a,
+                const milvus::TargetBitmapView& b) {
     ASSERT_EQ(a.size(), b.size());
     for (size_t i = 0; i < a.size(); ++i) {
         ASSERT_EQ(bool(a[i]), bool(b[i])) << "bit " << i << " differs";
@@ -1117,7 +1118,7 @@ namespace {
 
 // V1 Optimized: dense TargetBitmap → Roaring via word-level bit extraction + addMany
 roaring::Roaring
-DenseBitsetToRoaring(const milvus::TargetBitmap& bset) {
+DenseBitsetToRoaring(const milvus::TargetBitmapView& bset) {
     const uint64_t* words = reinterpret_cast<const uint64_t*>(bset.data());
     size_t num_words = bset.size_in_bytes() / 8;
 
@@ -1142,7 +1143,7 @@ DenseBitsetToRoaring(const milvus::TargetBitmap& bset) {
 // V2: dense bitset → Roaring via per-container popcount + memcpy/extract
 // Wraps C API to construct roaring_bitmap_t directly, bypassing per-bit iteration.
 roaring::Roaring
-DenseBitsetToRoaringZeroCopy(const milvus::TargetBitmap& bset) {
+DenseBitsetToRoaringZeroCopy(const milvus::TargetBitmapView& bset) {
     using namespace roaring::internal;
     const uint64_t* words = reinterpret_cast<const uint64_t*>(bset.data());
     size_t total_bits = bset.size();
@@ -2853,5 +2854,87 @@ TEST(ExprResCacheV2PerfTest, EndToEndBothModes) {
         ExprResCacheManager::SetEnabled(false);
     }
 
+    std::filesystem::remove_all(tmpdir);
+}
+
+TEST(CacheCompressorTest, BorrowedWindowsRoundTripAndOwnRawPayload) {
+    for (const bool compress : {false, true}) {
+        for (const size_t stride : {size_t(1), size_t(2), size_t(100)}) {
+            milvus::TargetBitmap result(270, false), valid(270, true);
+            for (size_t i = 3; i < 196; i += stride) result.set(i);
+            valid.reset(11);
+            const auto source_result = result.view(3, 193);
+            const auto source_valid = valid.view(5, 193);
+            auto out = milvus::exec::CacheCompressor::Compress(
+                source_result, source_valid, compress);
+            std::vector<char> encoded(out.header, out.header + 8);
+            if (out.comp_type == milvus::exec::kCompTypeRaw) {
+                ASSERT_TRUE(out.packed_result_owner);
+                ASSERT_TRUE(out.packed_valid_owner);
+                // Packed Raw payload must survive mutation/destruction of the source.
+                result.reset();
+                valid.reset();
+                encoded.insert(encoded.end(),
+                               out.raw_result_ptr,
+                               out.raw_result_ptr + out.raw_result_size);
+                encoded.insert(encoded.end(),
+                               out.raw_valid_ptr,
+                               out.raw_valid_ptr + out.raw_valid_size);
+            } else {
+                encoded.insert(
+                    encoded.end(), out.payload.begin(), out.payload.end());
+            }
+            milvus::TargetBitmap decoded_result, decoded_valid;
+            ASSERT_TRUE(
+                milvus::exec::CacheCompressor::Decompress(encoded.data(),
+                                                          encoded.size(),
+                                                          out.comp_type,
+                                                          decoded_result,
+                                                          decoded_valid));
+            ASSERT_EQ(decoded_result.size(), 193);
+            ASSERT_EQ(decoded_valid.size(), 193);
+            for (size_t i = 0; i < 193; ++i) {
+                EXPECT_EQ(bool(decoded_result[i]), i % stride == 0);
+                EXPECT_EQ(bool(decoded_valid[i]), i != 6);
+            }
+        }
+    }
+}
+
+TEST(DiskSlotFileTest, BorrowedWindowsAndAliasedOutputsRoundTrip) {
+    auto tmpdir = std::filesystem::temp_directory_path() /
+                  ("disk_slot_windows_" + std::to_string(getpid()) + "_" +
+                   std::to_string(rand()));
+    std::filesystem::create_directories(tmpdir);
+    {
+        milvus::exec::DiskSlotFile dsf(
+            700, (tmpdir / "seg.excr").string(), 193, 1ULL << 20);
+        milvus::TargetBitmap result(270, false), valid(270, true);
+        result.set(3);
+        result.set(195);
+        valid.reset(11);
+        dsf.Put("window", 193, result.view(3, 193), valid.view(5, 193));
+        result.reset();
+        valid.reset();
+
+        milvus::TargetBitmap decoded_result, decoded_valid;
+        ASSERT_TRUE(dsf.Get("window", 193, decoded_result, decoded_valid));
+        const auto result_view = decoded_result.view();
+        const auto valid_view = decoded_valid.view();
+        ASSERT_EQ(result_view.size(), 193);
+        ASSERT_EQ(valid_view.size(), 193);
+        for (size_t i = 0; i < 193; ++i) {
+            EXPECT_EQ(result_view[i], i == 0 || i == 192);
+            EXPECT_EQ(valid_view[i], i != 6);
+        }
+        EXPECT_EQ(result_view.count(), 2);
+        decoded_result.reset(192);
+        EXPECT_EQ(result_view.count(), 1);
+
+        // Output replacement must close the earlier write scope first.
+        milvus::TargetBitmap aliased;
+        ASSERT_TRUE(dsf.Get("window", 193, aliased, aliased));
+        AssertBitsEqual(aliased.view(), valid_view);
+    }
     std::filesystem::remove_all(tmpdir);
 }

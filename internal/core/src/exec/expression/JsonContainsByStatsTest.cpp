@@ -525,22 +525,25 @@ ReadJsonStatsInt64Equal(JsonKeyStats& stats,
                         size_t size) {
     TargetBitmap res(size);
     TargetBitmap valid_res(size);
-    TargetBitmapView res_view(res);
-    TargetBitmapView valid_res_view(valid_res);
 
     auto func = [expected](const int64_t* data,
                            ValidityView valid_data,
                            const int chunk_size,
-                           TargetBitmapView res,
-                           TargetBitmapView valid_res) {
+                           TargetBitmap& res,
+                           TargetBitmap& valid_res,
+                           const size_t res_offset,
+                           const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (int i = 0; i < chunk_size; ++i) {
-            valid_res[i] = valid_data[i];
-            res[i] = valid_data[i] && data[i] == expected;
+            valid_res[valid_res_offset + i] = valid_data[i];
+            res[res_offset + i] = valid_data[i] && data[i] == expected;
         }
     };
 
     auto processed_size = stats.ExecutorForShreddingData<int64_t>(
-        nullptr, field_name, func, nullptr, res_view, valid_res_view);
+        nullptr, field_name, func, nullptr, res, valid_res, 0, 0);
     AssertInfo(processed_size == size,
                "processed json stats rows {} != {}",
                processed_size,
@@ -1078,8 +1081,8 @@ TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
     EXPECT_TRUE(counted.slot->IsCached(0));
     EXPECT_EQ(counted.translator->LoadCount(), 1);
 
-    TargetBitmapView result_view(result->GetRawData(), result->size());
-    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    const auto& result_view = result->GetBitmap();
+    const auto& valid_view = result->GetValidBitmap();
     ASSERT_EQ(result->size(), json_raw_data.size());
 
     EXPECT_TRUE(valid_view[0]);
@@ -1147,8 +1150,8 @@ TEST(JsonStatsThreeValuedAuditTest,
     auto check = [](const ColumnVectorPtr& result,
                     const std::vector<bool>& expected_result,
                     const std::vector<bool>& expected_valid) {
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
             if (expected_valid[i]) {
@@ -1285,12 +1288,10 @@ TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
     auto expect_same = [](const ColumnVectorPtr& raw,
                           const ColumnVectorPtr& shredded) {
         ASSERT_EQ(raw->size(), shredded->size());
-        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
-        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
-        TargetBitmapView shredded_result(shredded->GetRawData(),
-                                         shredded->size());
-        TargetBitmapView shredded_valid(shredded->GetValidRawData(),
-                                        shredded->size());
+        const auto& raw_result = raw->GetBitmap();
+        const auto& raw_valid = raw->GetValidBitmap();
+        const auto& shredded_result = shredded->GetBitmap();
+        const auto& shredded_valid = shredded->GetValidBitmap();
         for (size_t i = 0; i < raw->size(); ++i) {
             EXPECT_EQ(shredded_valid[i], raw_valid[i]) << "row " << i;
             EXPECT_EQ(shredded_result[i], raw_result[i]) << "row " << i;
@@ -1359,10 +1360,8 @@ TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
     expect_same(raw_precise, shredded_precise);
     expect_same(evaluate(precise_expr, raw_segment.get(), &offsets),
                 evaluate(precise_expr, stats_segment.get(), &offsets));
-    TargetBitmapView precise_result(raw_precise->GetRawData(),
-                                    raw_precise->size());
-    TargetBitmapView precise_valid(raw_precise->GetValidRawData(),
-                                   raw_precise->size());
+    const auto& precise_result = raw_precise->GetBitmap();
+    const auto& precise_valid = raw_precise->GetValidBitmap();
     EXPECT_TRUE(precise_valid[1]);
     EXPECT_TRUE(precise_result[1]);
 
@@ -1379,10 +1378,8 @@ TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
     expect_same(raw_uint64, stats_uint64);
     expect_same(evaluate(uint64_expr, raw_segment.get(), &offsets),
                 evaluate(uint64_expr, stats_segment.get(), &offsets));
-    TargetBitmapView uint64_result(raw_uint64->GetRawData(),
-                                   raw_uint64->size());
-    TargetBitmapView uint64_valid(raw_uint64->GetValidRawData(),
-                                  raw_uint64->size());
+    const auto& uint64_result = raw_uint64->GetBitmap();
+    const auto& uint64_valid = raw_uint64->GetValidBitmap();
     EXPECT_TRUE(uint64_valid[0]);
     EXPECT_TRUE(uint64_result[0]);
 }
@@ -1435,8 +1432,8 @@ TEST(JsonStatsThreeValuedAuditTest,
             plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
     };
     auto check_non_matches_are_known = [](const ColumnVectorPtr& result) {
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i : {0, 1}) {
             EXPECT_TRUE(valid_view[i]) << "row " << i;
             EXPECT_FALSE(result_view[i]) << "row " << i;

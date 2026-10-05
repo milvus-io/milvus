@@ -32,12 +32,12 @@ template <typename T>
 using GroupKey = std::optional<T>;
 
 bool
-IsEligible(const TargetBitmap* base_filter, size_t offset) {
+IsEligible(const TargetBitmapView* base_filter, size_t offset) {
     return base_filter == nullptr || !(*base_filter)[offset];
 }
 
 void
-ApplyBaseFilter(TargetBitmap& membership, const TargetBitmap* base_filter) {
+ApplyBaseFilter(TargetBitmap& membership, const TargetBitmapView* base_filter) {
     if (base_filter == nullptr) {
         return;
     }
@@ -49,7 +49,7 @@ std::optional<TargetBitmap>
 BuildIndexMembership(const segcore::PinnedIndexView& pinned_indexes,
                      size_t row_count,
                      const std::vector<GroupKey<T>>& groups,
-                     const TargetBitmap* base_filter) {
+                     const TargetBitmapView* base_filter) {
     if (pinned_indexes.empty()) {
         return std::nullopt;
     }
@@ -196,7 +196,7 @@ BuildGroupMembership(milvus::OpContext* op_ctx,
                      FieldId field_id,
                      int64_t row_count,
                      const std::vector<GroupKey<T>>& groups,
-                     const TargetBitmap* base_filter) {
+                     const TargetBitmapView* base_filter) {
     if (row_count < 0 ||
         (base_filter != nullptr &&
          base_filter->size() != static_cast<size_t>(row_count))) {
@@ -229,35 +229,35 @@ BuildGroupMembership<bool>(milvus::OpContext*,
                            FieldId,
                            int64_t,
                            const std::vector<std::optional<bool>>&,
-                           const TargetBitmap*);
+                           const TargetBitmapView*);
 template std::optional<TargetBitmap>
 BuildGroupMembership<int8_t>(milvus::OpContext*,
                              const segcore::SegmentInternalInterface&,
                              FieldId,
                              int64_t,
                              const std::vector<std::optional<int8_t>>&,
-                             const TargetBitmap*);
+                             const TargetBitmapView*);
 template std::optional<TargetBitmap>
 BuildGroupMembership<int16_t>(milvus::OpContext*,
                               const segcore::SegmentInternalInterface&,
                               FieldId,
                               int64_t,
                               const std::vector<std::optional<int16_t>>&,
-                              const TargetBitmap*);
+                              const TargetBitmapView*);
 template std::optional<TargetBitmap>
 BuildGroupMembership<int32_t>(milvus::OpContext*,
                               const segcore::SegmentInternalInterface&,
                               FieldId,
                               int64_t,
                               const std::vector<std::optional<int32_t>>&,
-                              const TargetBitmap*);
+                              const TargetBitmapView*);
 template std::optional<TargetBitmap>
 BuildGroupMembership<int64_t>(milvus::OpContext*,
                               const segcore::SegmentInternalInterface&,
                               FieldId,
                               int64_t,
                               const std::vector<std::optional<int64_t>>&,
-                              const TargetBitmap*);
+                              const TargetBitmapView*);
 template std::optional<TargetBitmap>
 BuildGroupMembership<std::string>(
     milvus::OpContext*,
@@ -265,6 +265,6 @@ BuildGroupMembership<std::string>(
     FieldId,
     int64_t,
     const std::vector<std::optional<std::string>>&,
-    const TargetBitmap*);
+    const TargetBitmapView*);
 
 }  // namespace milvus::exec

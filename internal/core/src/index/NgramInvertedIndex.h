@@ -69,7 +69,7 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     ExecuteQueryForUT(const std::string& literal,
                       proto::plan::OpType op_type,
                       exec::SegmentExpr* segment,
-                      const TargetBitmap* pre_filter = nullptr);
+                      const TargetBitmapView* pre_filter = nullptr);
 
     // Check if literal can be handled by ngram index (length >= min_gram)
     bool

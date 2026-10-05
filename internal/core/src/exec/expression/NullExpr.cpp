@@ -175,8 +175,8 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
 
     auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                   TargetBitmap(batch_size));
-    TargetBitmapView res(res_vec->GetRawData(), batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
     valid_res.set();
     switch (expr_->op_) {
         case proto::plan::NullExpr_NullOp_IsNull: {

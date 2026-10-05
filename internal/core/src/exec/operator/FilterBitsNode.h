@@ -30,9 +30,18 @@ namespace milvus {
 namespace exec {
 
 bool
-ConvertPredicateToFilteredBitset(TargetBitmapView data,
-                                 TargetBitmapView valid,
+ConvertPredicateToFilteredBitset(TargetBitmap& data,
+                                 TargetBitmap& valid,
                                  size_t size);
+
+// A writable destination window is expressed by its owner, offset and length.
+bool
+ConvertPredicateToFilteredBitset(TargetBitmap& data,
+                                 TargetBitmap& valid,
+                                 size_t size,
+                                 size_t data_offset,
+                                 size_t valid_offset,
+                                 size_t window_size);
 
 class PhyFilterBitsNode : public Operator {
  public:

@@ -46,18 +46,23 @@ class ShreddingArrayBsonContainsArrayExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array_view = bson.ParseAsArrayAtOffset(0);
             if (!array_view.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             bool matched = false;
@@ -75,7 +80,7 @@ class ShreddingArrayBsonContainsArrayExecutor {
                 if (matched)
                     break;
             }
-            res[i] = matched;
+            res[res_offset + i] = matched;
         }
     }
 
@@ -94,18 +99,23 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array_view = bson.ParseAsArrayAtOffset(0);
             if (!array_view.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             std::set<int> exist_elements_index;
@@ -126,7 +136,8 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
                     break;
                 }
             }
-            res[i] = exist_elements_index.size() == elements_.size();
+            res[res_offset + i] =
+                exist_elements_index.size() == elements_.size();
         }
     }
 
@@ -146,18 +157,23 @@ class ShreddingArrayBsonContainsAnyExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array_view = bson.ParseAsArrayAtOffset(0);
             if (!array_view.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             bool matched = false;
@@ -180,7 +196,7 @@ class ShreddingArrayBsonContainsAnyExecutor {
                     }
                 }
             }
-            res[i] = matched;
+            res[res_offset + i] = matched;
         }
     }
 
@@ -200,18 +216,23 @@ class ShreddingArrayBsonContainsAllExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array_view = bson.ParseAsArrayAtOffset(0);
             if (!array_view.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             std::set<GetType> tmp_elements(elements_);
@@ -233,7 +254,7 @@ class ShreddingArrayBsonContainsAllExecutor {
                     break;
                 }
             }
-            res[i] = tmp_elements.empty();
+            res[res_offset + i] = tmp_elements.empty();
         }
     }
 
@@ -254,18 +275,23 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array = bson.ParseAsArrayAtOffset(0);
             if (!array.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             std::set<int> tmp_elements_index(elements_index_);
@@ -339,7 +365,7 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
                     break;
                 }
             }
-            res[i] = tmp_elements_index.size() == 0;
+            res[res_offset + i] = tmp_elements_index.size() == 0;
         }
     }
 
@@ -359,18 +385,23 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmap& res,
+               TargetBitmap& valid_res,
+               const size_t res_offset,
+               const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             milvus::BsonView bson(
                 reinterpret_cast<const uint8_t*>(src[i].data()), src[i].size());
             auto array = bson.ParseAsArrayAtOffset(0);
             if (!array.has_value()) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
             bool matched = false;
@@ -434,7 +465,7 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
                 if (matched)
                     break;
             }
-            res[i] = matched;
+            res[res_offset + i] = matched;
         }
     }
 

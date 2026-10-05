@@ -218,8 +218,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->value_);
@@ -257,36 +257,36 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                 offset = (offsets) ? offsets[i] : i;                        \
             }                                                               \
             if (valid_data && !valid_data[offset]) {                        \
-                res[i] = false;                                             \
-                valid_res[i] = false;                                       \
+                res[res_offset + i] = false;                                \
+                valid_res[valid_res_offset + i] = false;                    \
                 continue;                                                   \
             }                                                               \
             if constexpr (std::is_same_v<GetType, int64_t>) {               \
                 auto x_num = data[offset].at_numeric(pointer);              \
                 if (x_num.error()) {                                        \
-                    res[i] = false;                                         \
-                    valid_res[i] = false;                                   \
+                    res[res_offset + i] = false;                            \
+                    valid_res[valid_res_offset + i] = false;                \
                     continue;                                               \
                 }                                                           \
                 auto n = x_num.value();                                     \
                 if (n.is_int64()) {                                         \
                     auto json_v = n.get_int64();                            \
-                    res[i] = (cmp);                                         \
+                    res[res_offset + i] = (cmp);                            \
                 } else {                                                    \
                     auto json_v = n.is_uint64()                             \
                                       ? static_cast<double>(n.get_uint64()) \
                                       : n.get_double();                     \
-                    res[i] = (cmp);                                         \
+                    res[res_offset + i] = (cmp);                            \
                 }                                                           \
             } else {                                                        \
                 auto x = data[offset].template at<GetType>(pointer);        \
                 if (x.error()) {                                            \
-                    res[i] = false;                                         \
-                    valid_res[i] = false;                                   \
+                    res[res_offset + i] = false;                            \
+                    valid_res[valid_res_offset + i] = false;                \
                     continue;                                               \
                 }                                                           \
                 auto json_v = x.value();                                    \
-                res[i] = (cmp);                                             \
+                res[res_offset + i] = (cmp);                                \
             }                                                               \
         }                                                                   \
     } while (false)
@@ -299,20 +299,20 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                 offset = (offsets) ? offsets[i] : i;           \
             }                                                  \
             if (valid_data && !valid_data[offset]) {           \
-                res[i] = false;                                \
-                valid_res[i] = false;                          \
+                res[res_offset + i] = false;                   \
+                valid_res[valid_res_offset + i] = false;       \
                 continue;                                      \
             }                                                  \
             int array_length = 0;                              \
             auto doc = data[offset].doc();                     \
             auto array = doc.at_pointer(pointer).get_array();  \
             if (array.error()) {                               \
-                res[i] = false;                                \
-                valid_res[i] = false;                          \
+                res[res_offset + i] = false;                   \
+                valid_res[valid_res_offset + i] = false;       \
                 continue;                                      \
             }                                                  \
             array_length = array.count_elements();             \
-            res[i] = (cmp);                                    \
+            res[res_offset + i] = (cmp);                       \
         }                                                      \
     } while (false)
 
@@ -323,11 +323,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             ValueType val,
             ValueType right_operand,
             const std::string& pointer) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
@@ -744,6 +749,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                                                             input,
                                                             res,
                                                             valid_res,
+                                                            0,
+                                                            0,
                                                             value,
                                                             right_operand,
                                                             pointer);
@@ -752,6 +759,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                                                          std::nullptr_t{},
                                                          res,
                                                          valid_res,
+                                                         0,
+                                                         0,
                                                          value,
                                                          right_operand,
                                                          pointer);
@@ -788,8 +797,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -817,17 +826,17 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 offset = (offsets) ? offsets[i] : i;                      \
             }                                                             \
             if (valid_data && !valid_data[offset]) {                      \
-                res[i] = false;                                           \
-                valid_res[i] = false;                                     \
+                res[res_offset + i] = false;                              \
+                valid_res[valid_res_offset + i] = false;                  \
                 continue;                                                 \
             }                                                             \
             if (index >= data[offset].length()) {                         \
-                res[i] = false;                                           \
-                valid_res[i] = false;                                     \
+                res[res_offset + i] = false;                              \
+                valid_res[valid_res_offset + i] = false;                  \
                 continue;                                                 \
             }                                                             \
             auto value = data[offset].get_data_unchecked<GetType>(index); \
-            res[i] = (cmp);                                               \
+            res[res_offset + i] = (cmp);                                  \
         }                                                                 \
     } while (false)
 
@@ -838,11 +847,16 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             ValueType val,
             ValueType right_operand,
             int index) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         AssertInfo(index >= 0,
                    "array arithmetic predicate requires nested path");
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -1234,6 +1248,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                                     input,
                                                     res,
                                                     valid_res,
+                                                    0,
+                                                    0,
                                                     value,
                                                     right_operand,
                                                     index);
@@ -1242,6 +1258,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                                                               std::nullptr_t{},
                                                               res,
                                                               valid_res,
+                                                              0,
+                                                              0,
                                                               value,
                                                               right_operand,
                                                               index);
@@ -1289,8 +1307,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     auto op_type = expr_->op_type_;
     auto value = value_arg_.GetValue<ValueType>();
@@ -1324,8 +1342,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmap& res,
+        TargetBitmap& valid_res,
+        const size_t res_offset,
+        const size_t valid_res_offset) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         if (data == nullptr) {
             return;
         }
@@ -1335,10 +1358,10 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[res_offset + i] = valid_res[valid_res_offset + i] = false;
                 continue;
             }
-            res[i] = compare_length(
+            res[res_offset + i] = compare_length(
                 static_cast<int64_t>(GetArrayRowSize(data[offset])));
         }
     };
@@ -1346,19 +1369,30 @@ PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
     int64_t processed_size = 0;
     if (has_offset_input_) {
         if constexpr (ElementLevel) {
-            processed_size = ProcessElementLevelByOffsets<ArrayType>(
-                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+            processed_size =
+                ProcessElementLevelByOffsets<ArrayType>(execute_sub_batch,
+                                                        std::nullptr_t{},
+                                                        input,
+                                                        res,
+                                                        valid_res,
+                                                        0,
+                                                        0);
         } else {
-            processed_size = ProcessDataByOffsets<ArrayType>(
-                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+            processed_size = ProcessDataByOffsets<ArrayType>(execute_sub_batch,
+                                                             std::nullptr_t{},
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             0,
+                                                             0);
         }
     } else {
         if constexpr (ElementLevel) {
             processed_size = ProcessDataChunksForElementLevel<ArrayType>(
-                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0);
         } else {
             processed_size = ProcessDataChunks<ArrayType>(
-                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, 0, 0);
         }
     }
 
@@ -2321,8 +2355,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto& res = res_vec->GetMutableBitmap();
+    auto& valid_res = res_vec->GetMutableValidBitmap();
 
     if (!arg_inited_) {
         value_arg_.SetValue<HighPrecisionType>(expr_->value_);
@@ -2342,10 +2376,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmap& res,
+            TargetBitmap& valid_res,
+            const size_t res_offset,
+            const size_t valid_res_offset,
             HighPrecisionType value,
             HighPrecisionType right_operand) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
+
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // Nothing to do here since the caller has already handled valid_res.
         if (data == nullptr) {
@@ -2360,7 +2399,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2369,7 +2414,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2378,7 +2429,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2387,7 +2444,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2396,7 +2459,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2405,7 +2474,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2414,7 +2489,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2423,7 +2504,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2432,7 +2519,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2441,7 +2534,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2461,7 +2560,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2470,7 +2575,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2479,7 +2590,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2488,7 +2605,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2497,7 +2620,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2506,7 +2635,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2515,7 +2650,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2524,7 +2665,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2533,7 +2680,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2542,7 +2695,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2562,7 +2721,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2571,7 +2736,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2580,7 +2751,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2589,7 +2766,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2598,7 +2781,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2607,7 +2796,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2616,7 +2811,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2625,7 +2826,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2634,7 +2841,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2643,7 +2856,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2663,7 +2882,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2672,7 +2897,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2681,7 +2912,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2690,7 +2927,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2699,7 +2942,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2708,7 +2957,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2717,7 +2972,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2726,7 +2987,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2735,7 +3002,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2744,7 +3017,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2764,7 +3043,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2773,7 +3058,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2782,7 +3073,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2791,7 +3088,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2800,7 +3103,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2809,7 +3118,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2818,7 +3133,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2827,7 +3148,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2836,7 +3163,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2845,7 +3178,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2865,7 +3204,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Add,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
@@ -2874,7 +3219,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Sub,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
@@ -2883,7 +3234,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mul,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
@@ -2892,7 +3249,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Div,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
@@ -2901,7 +3264,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Mod,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
@@ -2910,7 +3279,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitAnd,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
@@ -2919,7 +3294,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitOr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
@@ -2928,7 +3309,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::BitXor,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
@@ -2937,7 +3324,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shl,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
@@ -2946,7 +3339,13 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                            proto::plan::ArithOpType::Shr,
                                            filter_type>
                             func;
-                        func(data, size, value, right_operand, res, offsets);
+                        func(data,
+                             size,
+                             value,
+                             right_operand,
+                             res,
+                             res_offset,
+                             offsets);
                         break;
                     }
                     default:
@@ -2969,13 +3368,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
         // but to mask res with valid_data after the batch operation.
         if constexpr (filter_type == FilterType::sequential) {
             // contiguous rows: reuse the vectorized shared helper
-            ApplyValidMask(valid_data, res, valid_res, size);
+            ApplyValidMask(
+                valid_data, res, valid_res, res_offset, valid_res_offset, size);
         } else if (valid_data) {
             // scattered by offsets: gather, keep the per-row loop
             for (int i = 0; i < size; i++) {
                 auto offset = (offsets) ? offsets[i] : i;
                 if (!valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
+                    res[res_offset + i] = valid_res[valid_res_offset + i] =
+                        false;
                 }
             }
         }
@@ -2996,6 +3397,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                              input,
                                                              res,
                                                              valid_res,
+                                                             0,
+                                                             0,
                                                              value,
                                                              right_operand);
         } else {
@@ -3004,6 +3407,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                      input,
                                                      res,
                                                      valid_res,
+                                                     0,
+                                                     0,
                                                      value,
                                                      right_operand);
         }
@@ -3015,6 +3420,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                     skip_index_func,
                                                     res,
                                                     valid_res,
+                                                    0,
+                                                    0,
                                                     value,
                                                     right_operand);
         } else {
@@ -3022,6 +3429,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                                   skip_index_func,
                                                   res,
                                                   valid_res,
+                                                  0,
+                                                  0,
                                                   value,
                                                   right_operand);
         }

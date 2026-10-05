@@ -111,7 +111,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     const std::shared_ptr<Scorer>& scorer,
                     FixedVector<int32_t>& offsets,
                     std::vector<std::optional<float>>& output_scores,
-                    const TargetBitmap* filter_bitset,
+                    const TargetBitmapView* filter_bitset,
                     exec::ExprSet* prepared_expr_set) {
     AssertInfo(output_scores.size() == offsets.size(),
                "scorer score output size {} must match offsets size {}",
@@ -127,12 +127,12 @@ ComputeScorerScores(exec::ExecContext* exec_context,
     }
 
     if (filter_bitset != nullptr) {
-        scorer->batch_score(op_context,
-                            segment,
-                            function_mode,
-                            offsets,
-                            *filter_bitset,
-                            output_scores);
+        scorer->batch_score_by_offsets(op_context,
+                                       segment,
+                                       function_mode,
+                                       offsets,
+                                       *filter_bitset,
+                                       output_scores);
         return;
     }
 
@@ -159,13 +159,13 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                    "ColumnVector, filter: {}",
                    filter->ToString());
         auto col_vec_size = col_vec->size();
-        TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+        const auto& bitsetview = col_vec->GetBitmap();
         // Fold UNKNOWN (NULL) into FALSE (data &= valid) so a null row
         // never receives a boost, keeping NULL policy identical on the
         // native and non-native branches (PhyIterativeFilterNode folds on
         // both of its branches too).
-        TargetBitmapView validview(col_vec->GetValidRawData(), col_vec_size);
-        bitsetview.inplace_and(validview, col_vec_size);
+        const auto& validview = col_vec->GetValidBitmap();
+        col_vec->GetMutableBitmap().inplace_and(validview, col_vec_size);
         scorer->batch_score(op_context,
                             segment,
                             function_mode,
@@ -174,8 +174,12 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                             output_scores);
     } else {
         auto bitset = EvalFilterOverAllBatches(exec_context, *expr_set);
-        scorer->batch_score(
-            op_context, segment, function_mode, offsets, bitset, output_scores);
+        scorer->batch_score_by_offsets(op_context,
+                                       segment,
+                                       function_mode,
+                                       offsets,
+                                       bitset.view(),
+                                       output_scores);
     }
 }
 
@@ -187,7 +191,7 @@ ComputeScorerScores(exec::ExecContext* exec_context,
                     FixedVector<int32_t>& offsets,
                     float* output_scores,
                     bool* output_has_score,
-                    const TargetBitmap* filter_bitset,
+                    const TargetBitmapView* filter_bitset,
                     exec::ExprSet* prepared_expr_set) {
     std::vector<std::optional<float>> scores(offsets.size());
     ComputeScorerScores(exec_context,

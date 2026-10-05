@@ -59,8 +59,8 @@ ExtractResults(const ColumnVectorPtr& vec,
     size_t size = vec->size();
     data.resize(size);
     valid.resize(size);
-    TargetBitmapView data_view(vec->GetRawData(), size);
-    TargetBitmapView valid_view(vec->GetValidRawData(), size);
+    const auto& data_view = vec->GetBitmap();
+    const auto& valid_view = vec->GetValidBitmap();
     for (size_t i = 0; i < size; ++i) {
         data[i] = data_view[i];
         valid[i] = valid_view[i];

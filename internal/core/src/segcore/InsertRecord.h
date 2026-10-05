@@ -255,7 +255,7 @@ class OffsetMap {
     virtual void
     find_range(const PkType& pk,
                proto::plan::OpType op,
-               BitsetTypeView& bitset,
+               BitsetType& bitset,
                Condition condition) const = 0;
 
     virtual void
@@ -330,7 +330,7 @@ class OffsetOrderedMap : public OffsetMap {
     void
     find_range(const PkType& pk,
                proto::plan::OpType op,
-               BitsetTypeView& bitset,
+               BitsetType& bitset,
                Condition condition) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
         const T& target = std::get<T>(pk);
@@ -654,7 +654,7 @@ class OffsetOrderedArray : public OffsetMap {
     void
     find_range(const PkType& pk,
                proto::plan::OpType op,
-               BitsetTypeView& bitset,
+               BitsetType& bitset,
                Condition condition) const override {
         check_search();
         auto lower_bound_comp = [](const std::pair<T, int64_t>& elem,
@@ -936,7 +936,7 @@ class VirtualPKOffsetMap : public OffsetMap {
     void
     find_range(const PkType& pk,
                proto::plan::OpType op,
-               BitsetTypeView& bitset,
+               BitsetType& bitset,
                Condition condition) const override {
         int64_t target = std::get<int64_t>(pk);
         // Virtual PKs for this segment are [base, base+num_rows_)
@@ -1202,7 +1202,7 @@ class InsertRecordSealed {
     void
     search_pk_range(const PkType& pk,
                     proto::plan::OpType op,
-                    BitsetTypeView& bitset) const {
+                    BitsetType& bitset) const {
         pk2offset_->find_range(
             pk, op, bitset, [](int64_t offset) { return true; });
     }
@@ -1211,7 +1211,7 @@ class InsertRecordSealed {
     search_pk_range(const PkType& pk,
                     Timestamp timestamp,
                     proto::plan::OpType op,
-                    BitsetTypeView& bitset) const {
+                    BitsetType& bitset) const {
         auto condition = [this, timestamp](int64_t offset) {
             return timestamps_[offset] <= timestamp;
         };
@@ -1223,14 +1223,13 @@ class InsertRecordSealed {
                            bool lower_inclusive,
                            const PkType& upper_pk,
                            bool upper_inclusive,
-                           BitsetTypeView& bitset) const {
+                           BitsetType& bitset) const {
         auto lower_op = lower_inclusive ? proto::plan::OpType::GreaterEqual
                                         : proto::plan::OpType::GreaterThan;
         auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
                                         : proto::plan::OpType::LessThan;
 
         BitsetType upper_result(bitset.size());
-        auto upper_view = upper_result.view();
 
         // values >= lower_pk (or > lower_pk if not inclusive)
         pk2offset_->find_range(
@@ -1238,7 +1237,7 @@ class InsertRecordSealed {
 
         // values <= upper_pk (or < upper_pk if not inclusive)
         pk2offset_->find_range(
-            upper_pk, upper_op, upper_view, [](int64_t offset) {
+            upper_pk, upper_op, upper_result, [](int64_t offset) {
                 return true;
             });
 
@@ -1511,7 +1510,7 @@ class InsertRecordGrowing {
     void
     search_pk_range(const PkType& pk,
                     proto::plan::OpType op,
-                    BitsetTypeView& bitset) const {
+                    BitsetType& bitset) const {
         pk2offset_->find_range(
             pk, op, bitset, [](int64_t offset) { return true; });
     }
@@ -1520,7 +1519,7 @@ class InsertRecordGrowing {
     search_pk_range(const PkType& pk,
                     Timestamp timestamp,
                     proto::plan::OpType op,
-                    BitsetTypeView& bitset) const {
+                    BitsetType& bitset) const {
         auto condition = [this, timestamp](int64_t offset) {
             return timestamps_[offset] <= timestamp;
         };

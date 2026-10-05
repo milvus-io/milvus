@@ -1101,8 +1101,8 @@ class JsonFlatIndexContainsExprTest : public ::testing::Test {
                 const std::vector<bool>& expected_valid) {
         ASSERT_EQ(result->size(), expected_result.size());
         ASSERT_EQ(result->size(), expected_valid.size());
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
             if (expected_valid[i]) {
@@ -1500,8 +1500,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         std::vector<proto::plan::GenericValue>());
     auto result = evaluate(equal_expr, true);
-    TargetBitmapView result_view(result->GetRawData(), result->size());
-    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    auto result_view = result->GetBitmap();
+    auto valid_view = result->GetValidBitmap();
     EXPECT_TRUE(valid_view[16]);
     EXPECT_TRUE(valid_view[17]);
     EXPECT_TRUE(valid_view[18]);
@@ -1514,8 +1514,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         std::vector<proto::plan::GenericValue>{value},
         false);
     result = evaluate(term_expr, true);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_TRUE(valid_view[16]);
     EXPECT_TRUE(valid_view[17]);
     EXPECT_TRUE(valid_view[18]);
@@ -1529,8 +1529,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         value,
         std::vector<proto::plan::GenericValue>());
     result = evaluate(greater_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_TRUE(valid_view[16]);
     EXPECT_TRUE(valid_view[17]);
     EXPECT_TRUE(valid_view[18]);
@@ -1545,8 +1545,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         true,
         true);
     result = evaluate(between_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_TRUE(valid_view[16]);
     EXPECT_TRUE(valid_view[17]);
     EXPECT_TRUE(valid_view[18]);
@@ -1563,8 +1563,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         true,
         true);
     result = evaluate(mixed_lower_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[16]);
     EXPECT_TRUE(result_view[17]);
     EXPECT_TRUE(result_view[18]);
@@ -1578,8 +1578,8 @@ TEST_F(JsonFlatIndexExprTest, PreservesLargeInt64LiteralPrecision) {
         true,
         true);
     result = evaluate(mixed_upper_expr, false);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_TRUE(result_view[16]);
     EXPECT_TRUE(result_view[17]);
     EXPECT_FALSE(result_view[18]);
@@ -1596,8 +1596,8 @@ TEST_F(JsonFlatIndexExprTest, EmptyJsonInIsDeterministicForEveryRow) {
                                                            filter_expr);
         auto result = gen_filter_res(
             plan.get(), segment_.get(), json_data_.size(), MAX_TIMESTAMP);
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_TRUE(valid_view[i]) << "row " << i;
             EXPECT_EQ(result_view[i], expected_result) << "row " << i;

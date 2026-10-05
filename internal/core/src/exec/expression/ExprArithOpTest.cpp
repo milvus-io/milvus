@@ -327,7 +327,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -846,7 +846,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1328,7 +1328,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1773,7 +1773,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1866,7 +1866,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1923,7 +1923,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1992,7 +1992,7 @@ TEST_P(ExprTest, TestJsonBinaryArithMissingPathIsUnknown) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
-        BitsetTypeView offset_view(col_vec->GetRawData(), col_vec->size());
+        const auto& offset_view = col_vec->GetBitmap();
         EXPECT_EQ(offset_view.size(), json_strs.size());
         std::vector<bool> offset_bits(offset_view.size());
         for (size_t i = 0; i < offset_view.size(); ++i) {
@@ -2002,7 +2002,7 @@ TEST_P(ExprTest, TestJsonBinaryArithMissingPathIsUnknown) {
                                                         std::move(offset_bits));
     };
 
-    auto expect_bits = [](const BitsetType& final,
+    auto expect_bits = [](const BitsetTypeView& final,
                           const std::vector<bool>& offset,
                           const std::vector<bool>& expected) {
         ASSERT_EQ(final.size(), expected.size());
@@ -2132,7 +2132,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloatNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2192,7 +2192,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloatNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2721,7 +2721,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
             N,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N, 10));
 
         for (int i = 0; i < N; ++i) {

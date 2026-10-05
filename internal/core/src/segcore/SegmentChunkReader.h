@@ -222,7 +222,10 @@ class SegmentChunkReader {
                         int64_t chunk_id,
                         int64_t offset,
                         int64_t size,
-                        TargetBitmapView valid_result) const {
+                        TargetBitmap& valid_result,
+                        const size_t valid_result_offset = 0) const {
+        auto valid_result_write_scope = valid_result.scoped_write();
+
         if (size == 0) {
             return;
         }
@@ -231,11 +234,20 @@ class SegmentChunkReader {
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
-            column->ApplyValidDataInChunk(
-                op_ctx, chunk_id, offset, size, valid_result);
+            column->ApplyValidDataInChunk(op_ctx,
+                                          chunk_id,
+                                          offset,
+                                          size,
+                                          valid_result,
+                                          valid_result_offset);
         } else {
-            segment_->ApplyFieldValidData(
-                op_ctx, field_id, chunk_id, offset, size, valid_result);
+            segment_->ApplyFieldValidData(op_ctx,
+                                          field_id,
+                                          chunk_id,
+                                          offset,
+                                          size,
+                                          valid_result,
+                                          valid_result_offset);
         }
     }
 
@@ -246,7 +258,10 @@ class SegmentChunkReader {
                                  FieldId field_id,
                                  const int64_t* offsets,
                                  int64_t count,
-                                 TargetBitmapView valid_result) const {
+                                 TargetBitmap& valid_result,
+                                 const size_t valid_result_offset = 0) const {
+        auto valid_result_write_scope = valid_result.scoped_write();
+
         if (count == 0) {
             return;
         }
@@ -260,16 +275,20 @@ class SegmentChunkReader {
             }
             column->BulkIsValid(
                 op_ctx,
-                [&valid_result](bool is_valid, size_t i) {
+                [&valid_result, valid_result_offset](bool is_valid, size_t i) {
                     if (!is_valid) {
-                        valid_result[i] = false;
+                        valid_result[valid_result_offset + i] = false;
                     }
                 },
                 offsets,
                 count);
         } else {
-            segment_->ApplyFieldValidDataByOffsets(
-                op_ctx, field_id, offsets, count, valid_result);
+            segment_->ApplyFieldValidDataByOffsets(op_ctx,
+                                                   field_id,
+                                                   offsets,
+                                                   count,
+                                                   valid_result,
+                                                   valid_result_offset);
         }
     }
 

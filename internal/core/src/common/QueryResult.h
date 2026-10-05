@@ -271,6 +271,7 @@ struct SearchResult {
     void
     SetVectorIteratorRecreator(const BitsetView& base_filter,
                                VectorIteratorRecreateFn recreate_fn) {
+        vector_iterator_dense_filter_view_ = {};
         vector_iterator_base_filter_.reset();
         vector_iterator_base_filter_view_ = base_filter;
         // The execution pipeline shares its input column. Direct low-level
@@ -285,6 +286,7 @@ struct SearchResult {
     ClearVectorIteratorRecreator() {
         vector_iterator_recreate_fn_ = {};
         vector_iterator_base_filter_view_ = {};
+        vector_iterator_dense_filter_view_ = {};
         vector_iterator_base_filter_.reset();
         vector_iterator_filter_owner_.reset();
     }
@@ -295,14 +297,16 @@ struct SearchResult {
                static_cast<bool>(vector_iterator_recreate_fn_);
     }
 
-    const TargetBitmap*
+    const TargetBitmapView*
     GetVectorIteratorBaseFilter() {
         const auto& base_filter = vector_iterator_base_filter_view_;
         if (!vector_iterator_base_filter_ && !base_filter.empty()) {
             auto copied_filter =
                 std::make_unique<TargetBitmap>(base_filter.size(), false);
-            if (!base_filter.has_out_ids()) {
-                std::memcpy(copied_filter->data(),
+            if (!base_filter.has_out_ids() && base_filter.id_offset() == 0 &&
+                base_filter.size() == base_filter.num_bits()) {
+                auto write_scope = copied_filter->scoped_write();
+                std::memcpy(write_scope.data(),
                             base_filter.data(),
                             base_filter.byte_size());
             } else {
@@ -311,10 +315,14 @@ struct SearchResult {
                 }
             }
             vector_iterator_base_filter_ = std::move(copied_filter);
+            vector_iterator_dense_filter_view_ =
+                vector_iterator_base_filter_->view();
             vector_iterator_base_filter_view_ =
                 BitsetView(*vector_iterator_base_filter_);
         }
-        return vector_iterator_base_filter_.get();
+        if (!vector_iterator_base_filter_)
+            return nullptr;
+        return &vector_iterator_dense_filter_view_;
     }
 
     // The returned SearchResult owns every bitmap and raw chunk buffer used by
@@ -406,6 +414,7 @@ struct SearchResult {
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
     VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
     TargetBitmapPtr vector_iterator_base_filter_{};
+    TargetBitmapView vector_iterator_dense_filter_view_;
     BitsetView vector_iterator_base_filter_view_{};
     std::shared_ptr<const void> vector_iterator_filter_owner_{};
     bool allow_vector_iterator_recreation_{true};

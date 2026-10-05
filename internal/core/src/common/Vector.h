@@ -57,7 +57,7 @@ class BaseVector {
         return GetDataTypeSize(type_kind_);
     };
 
-    size_t
+    virtual size_t
     nullCount() const {
         return null_count_.has_value() ? null_count_.value() : 0;
     }
@@ -119,6 +119,7 @@ class ColumnVector final : public SimpleVector {
           valid_values_(length,
                         !null_count.has_value() || null_count.value() == 0) {
         values_ = InitScalarFieldData(data_type, false, length);
+        valid_view_ = valid_values_.view();
     }
 
     //    ColumnVector(FixedVector<bool>&& data)
@@ -135,6 +136,7 @@ class ColumnVector final : public SimpleVector {
           valid_values_(std::move(valid_bitmap)) {
         values_ = std::make_shared<FieldBitsetImpl<uint8_t>>(DataType::INT8,
                                                              std::move(bitmap));
+        valid_view_ = valid_values_.view();
     }
 
     ColumnVector(FieldDataPtr&& value,
@@ -156,6 +158,7 @@ class ColumnVector final : public SimpleVector {
         values_ = std::move(value);
         null_count_ =
             null_count > 0 ? std::optional<size_t>(null_count) : std::nullopt;
+        valid_view_ = valid_values_.view();
     }
 
     virtual ~ColumnVector() override {
@@ -184,30 +187,48 @@ class ColumnVector final : public SimpleVector {
 
     void
     nullAt(size_t index) {
-        // Update null_count_ when setting a value to null
-        if (valid_values_[index]) {
-            // Was valid, now null: increment count
-            null_count_ = null_count_.value_or(0) + 1;
-        }
-        valid_values_.set(index, false);
+        valid_values_.reset(index);
     }
 
     void
     clearNullAt(size_t index) {
-        // Update null_count_ when clearing a null value
-        if (!valid_values_[index]) {
-            // Was null, now valid: decrement count
-            if (null_count_.has_value()) {
-                null_count_ =
-                    (null_count_.value() > 0) ? null_count_.value() - 1 : 0;
-            }
-        }
-        valid_values_.set(index, true);
+        valid_values_.set(index);
+    }
+
+    size_t
+    nullCount() const override {
+        return length_ - GetValidBitmap().count();
+    }
+
+    const TargetBitmapView&
+    GetBitmap() const {
+        AssertInfo(is_bitmap_, "GetBitmap requires a bitmap column");
+        return static_cast<const FieldBitsetImpl<uint8_t>&>(*values_)
+            .GetBitmap();
+    }
+
+    // Bit writes only: keep the column shape and owner identity unchanged.
+    TargetBitmap&
+    GetMutableBitmap() {
+        AssertInfo(is_bitmap_, "GetMutableBitmap requires a bitmap column");
+        return static_cast<FieldBitsetImpl<uint8_t>&>(*values_)
+            .GetMutableBitmap();
+    }
+
+    const TargetBitmapView&
+    GetValidBitmap() const {
+        return valid_view_;
+    }
+
+    // Bit writes only: use ColumnVector::resize to change the shape.
+    TargetBitmap&
+    GetMutableValidBitmap() {
+        return valid_values_;
     }
 
     bool
     ValidAt(size_t index) override {
-        return valid_values_[index];
+        return GetValidBitmap()[index];
     }
 
     void*
@@ -234,89 +255,29 @@ class ColumnVector final : public SimpleVector {
     void
     resize(vector_size_t new_size, bool setNotNull = true) override {
         AssertInfo(!is_bitmap_, "Cannot resize bitmap column vector");
-        auto old_size = length_;
         BaseVector::resize(new_size, setNotNull);
         ResizeScalarFieldData(type(), new_size, values_);
-
-        if (new_size > old_size) {
-            // Growing: new bits are added
-            valid_values_.resize(new_size);
-            if (setNotNull) {
-                // All new bits are set to valid (true), no nulls added
-                for (auto i = old_size; i < new_size; ++i) {
-                    valid_values_.set(i, true);
-                }
-                // null_count_ unchanged (no new nulls)
-            } else {
-                // New bits default to null (false)
-                for (auto i = old_size; i < new_size; ++i) {
-                    valid_values_.set(i, false);
-                }
-                // Update null_count_: add (new_size - old_size) nulls
-                null_count_ = null_count_.value_or(0) + (new_size - old_size);
-            }
-        } else if (new_size < old_size) {
-            // Shrinking: need to count nulls in removed range and subtract
-            size_t removed_nulls = 0;
-            for (auto i = new_size; i < old_size; ++i) {
-                if (!valid_values_[i]) {
-                    ++removed_nulls;
-                }
-            }
-            valid_values_.resize(new_size);
-            // Update null_count_: subtract removed nulls
-            if (removed_nulls > 0 && null_count_.has_value()) {
-                null_count_ = (null_count_.value() >= removed_nulls)
-                                  ? null_count_.value() - removed_nulls
-                                  : 0;
-            }
-        }
-        // If new_size == old_size, no change needed
+        valid_values_.resize(new_size, setNotNull);
+        valid_view_ = valid_values_.view();
     }
 
     void
     append(const ColumnVector& other) {
-        // Validate that both vectors have the same type
         AssertInfo(type() == other.type(),
                    "Cannot append ColumnVector with different type: {} != {}",
                    static_cast<int>(type()),
                    static_cast<int>(other.type()));
-
-        auto old_size = length_;
+        const auto old_size = length_;
         values_->FillFieldData(other.GetRawData(), other.size());
-
-        auto values_length = values_->Length();
+        const auto values_length = values_->Length();
         AssertInfo(values_length >= old_size,
                    "ColumnVector append length mismatch: values_length {} < "
                    "old_size {}",
                    values_length,
                    old_size);
         length_ = values_length;
-        valid_values_.resize(length_);
-
-        // Copy validity from other
-        for (size_t i = 0; i < other.size(); ++i) {
-            valid_values_.set(old_size + i, other.valid_values_[i]);
-        }
-
-        // Update null_count_ by accumulating the original null_count_ and other's null count
-        size_t other_nulls = 0;
-        if (other.null_count_.has_value()) {
-            // Use cached null_count_ if available
-            other_nulls = other.null_count_.value();
-        } else {
-            // Compute null count from other.valid_values_ if not cached
-            for (size_t i = 0; i < other.size(); ++i) {
-                if (!other.valid_values_[i]) {
-                    ++other_nulls;
-                }
-            }
-        }
-
-        // Accumulate null counts
-        size_t total_nulls = null_count_.value_or(0) + other_nulls;
-        null_count_ = (total_nulls > 0) ? std::optional<size_t>{total_nulls}
-                                        : std::nullopt;
+        valid_values_.append(other.GetValidBitmap());
+        valid_view_ = valid_values_.view();
     }
 
     VectorPtr
@@ -324,93 +285,23 @@ class ColumnVector final : public SimpleVector {
         return std::make_shared<ColumnVector>(type(), size, std::nullopt);
     }
 
-    // Check if all rows are definitely TRUE (valid=1, data=1)
-    // Uses early termination for efficiency
-    // Can only be called when ColumnVector is a bitmap
+    // SQL predicates are definite only when validity is all true.
     bool
     AllTrue() const {
         AssertInfo(is_bitmap_, "AllTrue can only be called on bitmap vectors");
-        const size_t len = length_;
-        if (len == 0) {
-            return true;
-        }
-
-        const uint64_t* data =
-            reinterpret_cast<const uint64_t*>(values_->Data());
-        const uint64_t* valid =
-            reinterpret_cast<const uint64_t*>(valid_values_.data());
-
-        const size_t num_full_words = len / 64;
-        const size_t tail_bits = len % 64;
-
-        // For AllTrue: every bit must have valid=1 AND data=1
-        // (data & valid) == all_ones implies both are all 1s
-        constexpr uint64_t all_ones = ~0ULL;
-
-        // Process full 64-bit words with early termination
-        for (size_t i = 0; i < num_full_words; ++i) {
-            if ((data[i] & valid[i]) != all_ones) {
-                return false;
-            }
-        }
-
-        // Process remaining bits (if any)
-        if (tail_bits > 0) {
-            const uint64_t mask = (1ULL << tail_bits) - 1;
-            if (((data[num_full_words] & valid[num_full_words]) & mask) !=
-                mask) {
-                return false;
-            }
-        }
-
-        return true;
+        return GetBitmap().all() && GetValidBitmap().all();
     }
 
-    // Check if all rows are definitely FALSE (valid=1, data=0)
-    // Uses early termination for efficiency
-    // Can only be called when ColumnVector is a bitmap
     bool
     AllFalse() const {
         AssertInfo(is_bitmap_, "AllFalse can only be called on bitmap vectors");
-        const size_t len = length_;
-        if (len == 0) {
-            return true;
-        }
-
-        const uint64_t* data =
-            reinterpret_cast<const uint64_t*>(values_->Data());
-        const uint64_t* valid =
-            reinterpret_cast<const uint64_t*>(valid_values_.data());
-
-        const size_t num_full_words = len / 64;
-        const size_t tail_bits = len % 64;
-
-        // For AllFalse: every bit must have valid=1 AND data=0
-        // (valid & ~data) == all_ones means all bits are definitely FALSE
-        constexpr uint64_t all_ones = ~0ULL;
-
-        // Process full 64-bit words with early termination
-        for (size_t i = 0; i < num_full_words; ++i) {
-            if ((valid[i] & ~data[i]) != all_ones) {
-                return false;
-            }
-        }
-
-        // Process remaining bits (if any)
-        if (tail_bits > 0) {
-            const uint64_t mask = (1ULL << tail_bits) - 1;
-            if (((valid[num_full_words] & ~data[num_full_words]) & mask) !=
-                mask) {
-                return false;
-            }
-        }
-
-        return true;
+        return GetBitmap().none() && GetValidBitmap().all();
     }
 
  private:
     bool is_bitmap_;  // TODO: remove the field after implementing BitmapVector
     FieldDataPtr values_;
+    mutable TargetBitmapView valid_view_;
     TargetBitmap valid_values_;  // false means the value is null
 };
 

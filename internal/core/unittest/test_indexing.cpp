@@ -361,7 +361,7 @@ TEST(Indexing, Naive) {
         bitmap.set(i);
     }
 
-    BitsetView view = bitmap;
+    BitsetView view(bitmap.view());
     auto query_ds = knowhere::GenDataSet(1, DIM, raw_data.data());
 
     milvus::SearchInfo searchInfo;
@@ -520,7 +520,7 @@ TEST(Indexing, Iterator) {
 
     auto bitmap = BitsetType(N, false);
 
-    BitsetView view = bitmap;
+    BitsetView view(bitmap.view());
     auto query_ds = knowhere::GenDataSet(1, dim, raw_data.data());
 
     milvus::SearchInfo searchInfo;

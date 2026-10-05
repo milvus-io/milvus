@@ -476,7 +476,7 @@ SegmentGrowingImpl::PreInsert(int64_t size) {
 }
 
 void
-SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
+SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
     deleted_record_.Query(bitset, ins_barrier, timestamp);
@@ -1522,12 +1522,16 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
 }
 
 void
-SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
-                                        FieldId field_id,
-                                        int64_t chunk_id,
-                                        int64_t offset,
-                                        int64_t size,
-                                        TargetBitmapView valid_result) const {
+SegmentGrowingImpl::ApplyFieldValidData(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    int64_t offset,
+    int64_t size,
+    TargetBitmap& valid_result,
+    const size_t valid_result_offset) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
+
     (void)op_ctx;
     if (size == 0) {
         return;
@@ -1544,7 +1548,7 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
     auto valid_data = valid_vec_ptr->get_chunk_data(row_offset);
     for (int64_t i = 0; i < size; ++i) {
         if (!valid_data[i]) {
-            valid_result[i] = false;
+            valid_result[valid_result_offset + i] = false;
         }
     }
 }
@@ -1555,7 +1559,10 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     FieldId field_id,
     const int64_t* offsets,
     int64_t count,
-    TargetBitmapView valid_result) const {
+    TargetBitmap& valid_result,
+    const size_t valid_result_offset) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
+
     (void)op_ctx;
     if (count == 0) {
         return;
@@ -1569,7 +1576,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
     for (int64_t i = 0; i < count; ++i) {
         if (!valid_vec_ptr->is_valid(offsets[i])) {
-            valid_result[i] = false;
+            valid_result[valid_result_offset + i] = false;
         }
     }
 }
@@ -2686,10 +2693,8 @@ SegmentGrowingImpl::search_ids(BitsetType& bitset,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    BitsetTypeView bitset_view(bitset);
     for (auto& pk : pks) {
-        insert_record_.search_pk_range(
-            pk, proto::plan::OpType::Equal, bitset_view);
+        insert_record_.search_pk_range(pk, proto::plan::OpType::Equal, bitset);
     }
 }
 
@@ -2706,7 +2711,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
+SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
                                          Timestamp timestamp,
                                          Timestamp collection_ttl) const {
     if (collection_ttl > 0) {
