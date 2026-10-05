@@ -13,6 +13,9 @@
 - **Core implementation:** [`xiaofan-luan/fm-index-lite`](https://github.com/xiaofan-luan/fm-index-lite)
   (self-contained C++17, complete, benchmarked — this is PR 1 of the original plan)
 - **Related Issues:** #51577 (v1 anchored LIKE), #52683 (general Match)
+- **Regex follow-up:** [R01 candidate/recheck implementation draft](20261004-fmindex-regex-candidates.md)
+  (#53862). The release scope below describes the original implementation;
+  the follow-up specifies bounded regex acceleration and its validation limits.
 - **Released:** TBD
 
 ## Summary

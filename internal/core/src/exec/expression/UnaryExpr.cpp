@@ -1538,12 +1538,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
 
     if constexpr (std::is_same_v<T, std::string> ||
                   std::is_same_v<T, std::string_view>) {
-        // PatternMatch(Match) is candidates only. Never serve it through
-        // UnaryIndexFuncForMatch. Recheck on VARCHAR, or scan.
-        if (expr_->op_type_ == proto::plan::OpType::Match &&
+        // FM Match/RegexMatch return candidates only. Never serve them through
+        // UnaryIndexFunc. Recheck on VARCHAR, or scan.
+        if ((expr_->op_type_ == proto::plan::OpType::Match ||
+             expr_->op_type_ == proto::plan::OpType::RegexMatch) &&
             PinnedIndexIsFMIndex() && !has_offset_input_) {
-            if (CanUseFMMatch()) {
-                auto res = ExecFMMatch(context);
+            if (CanUseFMPatternCandidates()) {
+                auto res = ExecFMPatternCandidates(context);
                 if (res.has_value()) {
                     return res.value();
                 }
@@ -1810,8 +1811,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     auto expr_type = expr_->op_type_;
 
-    // Pre-build regex / LIKE pattern objects once for the entire segment
-    EnsureRegexCache();
+    // Pre-build regex / LIKE scan objects once for the entire segment
+    EnsureRegexScanCache();
     EnsureLikeMatcherCache();
     const PartialRegexMatcher* regex_matcher_ptr = cached_regex_matcher_.get();
     const VolnitskySearcher* volnitsky_ptr = cached_volnitsky_searcher_.get();
@@ -2057,7 +2058,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 std::string
 PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
     switch (expr_->op_type_) {
-        // Anchored pattern ops and general LIKE: FMINDEX's count-first guard
+        // Anchored pattern ops, general LIKE and regex: FMINDEX's count-first guard
         // uses the literal to decline degenerate high-hit patterns.
         // Equality (Equal/IN) is intentionally NOT accelerated by FMINDEX
         // (ShouldUseOp declines it), so it needs no literal here.
@@ -2065,6 +2066,7 @@ PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
         case proto::plan::PostfixMatch:
         case proto::plan::InnerMatch:
         case proto::plan::Match:
+        case proto::plan::RegexMatch:
             return GetValueFromProto<std::string>(expr_->val_);
         default:
             return "";
@@ -2440,11 +2442,12 @@ PhyUnaryRangeFilterExpr::PinnedIndexIsFMIndex() const {
 }
 
 bool
-PhyUnaryRangeFilterExpr::CanUseFMMatch() {
+PhyUnaryRangeFilterExpr::CanUseFMPatternCandidates() {
     if (has_offset_input_ || exec_path_ != ExprExecPath::ScalarIndex) {
         return false;
     }
-    if (expr_->op_type_ != proto::plan::OpType::Match) {
+    if (expr_->op_type_ != proto::plan::OpType::Match &&
+        expr_->op_type_ != proto::plan::OpType::RegexMatch) {
         return false;
     }
     if (segment_->type() != SegmentType::Sealed) {
@@ -2457,7 +2460,7 @@ PhyUnaryRangeFilterExpr::CanUseFMMatch() {
 }
 
 std::optional<VectorPtr>
-PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
+PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -2473,13 +2476,12 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         dynamic_cast<const index::ScalarIndex<std::string>*>(
             pinned_index_[0].get()));
     AssertInfo(index != nullptr,
-               "FMINDEX Match path requires a string scalar index");
+               "FMINDEX pattern candidate path requires a string scalar index");
     AssertInfo(num_data_chunk_ > 0,
-               "FMINDEX Match recheck needs sealed VARCHAR field data");
+               "FMINDEX pattern recheck needs sealed VARCHAR field data");
 
     if (cached_phase1_res_ == nullptr) {
-        auto candidates =
-            index->PatternMatch(literal, proto::plan::OpType::Match);
+        auto candidates = index->PatternMatch(literal, expr_->op_type_);
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =
@@ -2502,8 +2504,11 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
 
     if (!batch_candidates.none()) {
         EnsureLikeMatcherCache();
+        EnsureRegexCache();
         const LikePatternMatcher* matcher = cached_like_matcher_.get();
-        AssertInfo(matcher != nullptr, "LIKE matcher cache missing for Match");
+        const PartialRegexMatcher* regex_matcher = cached_regex_matcher_.get();
+        AssertInfo(matcher != nullptr || regex_matcher != nullptr,
+                   "pattern matcher cache missing for FMINDEX recheck");
 
         OffsetVector offsets;
         offsets.reserve(batch_candidates.count());
@@ -2518,14 +2523,15 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         TargetBitmapView compact_view(compact);
         TargetBitmapView compact_valid_view(compact_valid);
 
-        auto execute_sub_batch = [matcher]<FilterType filter_type =
-                                               FilterType::sequential>(
-            const std::string_view* data,
-            ValidityView valid_data,
-            const int32_t* /*offsets*/,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView /*valid_res*/) {
+        auto execute_sub_batch =
+            [ matcher,
+              regex_matcher ]<FilterType filter_type = FilterType::sequential>(
+                const std::string_view* data,
+                ValidityView valid_data,
+                const int32_t* /*offsets*/,
+                const int size,
+                TargetBitmapView res,
+                TargetBitmapView /*valid_res*/) {
             if (data == nullptr) {
                 return;
             }
@@ -2534,7 +2540,8 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
                     res[i] = false;
                     continue;
                 }
-                res[i] = (*matcher)(data[i]);
+                res[i] = regex_matcher != nullptr ? (*regex_matcher)(data[i])
+                                                  : (*matcher)(data[i]);
             }
         };
 
