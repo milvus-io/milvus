@@ -30,12 +30,13 @@ namespace milvus::index::detail {
 // Queries must be sorted and distinct, and indexed values must be ordered by
 // the same comparison. Accessors let numeric entries and string dictionaries
 // (including mmap dictionaries) share the cursor without copying index data.
-template <typename Queries, typename ValueAt, typename Match>
+template <typename Queries, typename ValueAt, typename Match, typename Continue>
 void
 VisitOrderedMatches(size_t size,
                     const Queries& queries,
                     ValueAt value_at,
-                    Match match) {
+                    Match match,
+                    Continue continue_matching) {
     size_t cursor = 0;
     for (const auto value : queries) {
         if (cursor == size) {
@@ -61,11 +62,26 @@ VisitOrderedMatches(size_t size,
             }
             cursor += lo;
         }
-        while (cursor != size && value_at(cursor) == value) {
+        while (cursor != size && continue_matching(value, value_at(cursor))) {
             match(cursor, value);
             ++cursor;
         }
     }
+}
+
+template <typename Queries, typename ValueAt, typename Match>
+void
+VisitOrderedMatches(size_t size,
+                    const Queries& queries,
+                    ValueAt value_at,
+                    Match match) {
+    VisitOrderedMatches(size,
+                        queries,
+                        value_at,
+                        match,
+                        [](const auto& query, const auto& indexed) {
+                            return indexed == query;
+                        });
 }
 
 // Visit matching original row offsets. Callers initialize IN to false and
@@ -89,6 +105,9 @@ VisitSortedMatches(Iterator first,
         validate(value, first[i]);
         visit(first[i].idx_);
     };
+    const auto upper_bound_match = [](const auto& query, const auto& indexed) {
+        return !(query < indexed);
+    };
     const size_t size = static_cast<size_t>(last - first);
     if constexpr (std::is_same_v<Value, bool>) {
         std::array<bool, 2> present{false, false};
@@ -100,11 +119,17 @@ VisitSortedMatches(Iterator first,
         }
         // No query allocation or sorting is needed for a two-value domain.
         if (present[0] && present[1]) {
-            VisitOrderedMatches(
-                size, std::array<bool, 2>{false, true}, value_at, match);
+            VisitOrderedMatches(size,
+                                std::array<bool, 2>{false, true},
+                                value_at,
+                                match,
+                                upper_bound_match);
         } else {
-            VisitOrderedMatches(
-                size, std::array<bool, 1>{present[1]}, value_at, match);
+            VisitOrderedMatches(size,
+                                std::array<bool, 1>{present[1]},
+                                value_at,
+                                match,
+                                upper_bound_match);
         }
     } else {
         if constexpr (std::is_floating_point_v<Value>) {
@@ -143,7 +168,8 @@ VisitSortedMatches(Iterator first,
         std::sort(queries.begin(), queries.end());
         queries.erase(std::unique(queries.begin(), queries.end()),
                       queries.end());
-        VisitOrderedMatches(size, queries, value_at, match);
+        // Use upper-bound semantics so malformed ranges still reach validate.
+        VisitOrderedMatches(size, queries, value_at, match, upper_bound_match);
     }
 }
 

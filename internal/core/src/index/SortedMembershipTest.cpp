@@ -250,5 +250,26 @@ TEST(SortedStringMembershipTest, BorrowedViewsAndScanOracle) {
     }
 }
 
+TEST(SortedMembershipTest, ValidatorSeesOutOfOrderEntriesInBoundRange) {
+    using Entry = IndexStructure<int64_t>;
+    std::vector<Entry> entries{{1, 0}, {3, 1}, {2, 2}, {4, 3}};
+    const int64_t query[] = {3};
+    std::vector<int32_t> visited;
+    size_t mismatches = 0;
+
+    detail::VisitSortedMatches(
+        entries.begin(),
+        entries.end(),
+        std::size(query),
+        query,
+        [&](int32_t row) { visited.push_back(row); },
+        [&](int64_t value, const Entry& entry) {
+            mismatches += entry.a_ != value;
+        });
+
+    EXPECT_EQ(visited, (std::vector<int32_t>{1, 2}));
+    EXPECT_EQ(mismatches, 1);
+}
+
 }  // namespace
 }  // namespace milvus::index
