@@ -155,8 +155,14 @@ func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx co
 	if err != nil {
 		return err
 	}
+	// The configuration this cluster received may carry redacted tokens that it
+	// could not fill from its own store, for example when it is joining the
+	// topology and has never stored its peers, while the configuration replicated
+	// from the primary carries the real ones. Tokens are not part of the topology,
+	// so the comparison ignores them; otherwise the wait would never end.
+	want := replicateutil.SanitizeReplicateConfiguration(config)
 	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
-		if proto.Equal(config, param.ReplicateConfiguration) {
+		if proto.Equal(want, replicateutil.SanitizeReplicateConfiguration(param.ReplicateConfiguration)) {
 			return errAssignmentDone
 		}
 		return nil
