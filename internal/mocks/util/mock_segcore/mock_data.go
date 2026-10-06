@@ -591,6 +591,14 @@ func NullablePatternValidData(msgLength int) []bool {
 	return out
 }
 
+// CompactFloatVecData is exported so end-to-end fixtures outside this package
+// can reproduce the same compaction invariant GenInsertData applies. Keeping
+// one copy is what keeps the two generators in agreement; segcore rejects an
+// insert whose nullable vector payload is not compacted to its valid rows.
+func CompactFloatVecData(src []float32, valid []bool, dim int) []float32 {
+	return compactFloatVecData(src, valid, dim)
+}
+
 func compactFloatVecData(src []float32, valid []bool, dim int) []float32 {
 	out := make([]float32, 0, len(src))
 	for i, v := range valid {

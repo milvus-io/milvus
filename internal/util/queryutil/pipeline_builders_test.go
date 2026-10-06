@@ -139,7 +139,7 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 	t.Run("plain", func(t *testing.T) {
 		pipeline, err := BuildQueryReducePipeline(
 			"plain", schema, 3, reduce.IReduceNoOrder,
-			nil, nil, nil, 0,
+			nil, nil, nil, 0, nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Contains(t, pipeline.String(), OpReduceByPKTS)
@@ -165,7 +165,7 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		orderBy := []*orderby.OrderByField{orderby.NewOrderByField(101, "age", schemapb.DataType_Int64)}
 		pipeline, err := BuildQueryReducePipeline(
 			"orderby", schema, 3, reduce.IReduceNoOrder,
-			orderBy, nil, nil, 0,
+			orderBy, nil, nil, 0, nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Contains(t, pipeline.String(), OpDeduplicatePK)
@@ -195,7 +195,7 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		// must still accumulate correctly across all results.
 		pipeline, err := BuildQueryReducePipeline(
 			"groupby", schema, 2, reduce.IReduceNoOrder,
-			nil, []int64{200}, aggs, 0,
+			nil, []int64{200}, aggs, 0, nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Contains(t, pipeline.String(), OpReduceByGroups)
@@ -232,7 +232,7 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		orderBy := []*orderby.OrderByField{orderby.NewOrderByField(500, "count", schemapb.DataType_Int64, orderby.WithAscending(false))}
 		pipeline, err := BuildQueryReducePipeline(
 			"groupby-orderby", schema, 2, reduce.IReduceNoOrder,
-			orderBy, []int64{200}, aggs, 0,
+			orderBy, []int64{200}, aggs, 0, nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Contains(t, pipeline.String(), OpReduceByGroups)

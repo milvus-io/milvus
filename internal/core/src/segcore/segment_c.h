@@ -29,6 +29,9 @@ extern "C" {
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
+struct ArrowSchema;
+struct ArrowArray;
+
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
 NewSegment(CCollection collection,
@@ -196,6 +199,71 @@ AsyncRetrieve(CTraceContext c_trace,
               int32_t consistency_level,
               uint64_t collection_ttl,
               uint64_t entity_ttl_physical_time_us);
+
+// CRetrieveArrowResult splits one retrieve result in two:
+//
+//   header       the protobuf RetrieveResults with the *user* output columns
+//                removed from fields_data. ids, offset, element_indices, the
+//                scalar counters and the system-field columns (RowID,
+//                Timestamp) are left exactly as Retrieve() produced them.
+//   schema/array the user output columns as an Arrow RecordBatch, exported
+//                through the Arrow C Data Interface.
+//
+// The Arrow fields carry NO per-field metadata. Columns are identified
+// positionally instead, from two schema-level keys:
+//
+//   milvus.field_order        the field ids of the original fields_data, in
+//                             their original order, comma separated. Go
+//                             rebuilds fields_data to this order, which is
+//                             what the protobuf path emits. It cannot be
+//                             derived from the plan: FillTargetEntry follows
+//                             plan->field_ids_ while FillOrderByResult follows
+//                             pipeline_field_ids_ and appends system fields
+//                             last.
+//   milvus.valid_data_fields  the ids whose source DataArray carried a
+//                             valid_data bitmap (see segment_c.cpp).
+//
+// The Arrow columns are field_order minus the ids retained in the header, in
+// field_order sequence, so their ids need not be repeated per field. Dropping
+// the per-field `milvus.field_id` / `milvus.data_type` that MilvusField would
+// attach avoids decoding and re-cloning them on the Go side
+// (cdata.decodeCMetadata, then Arrow's StructOf). In a one-off profile of the
+// narrow 4-column shape that was roughly a third of the per-call allocations;
+// it is not a committed benchmark, so treat it as an order of magnitude rather
+// than a figure. MilvusField itself is unchanged, since the search export
+// relies on it.
+//
+// Leaked by AsyncRetrieveAsArrow; free with DeleteRetrieveArrowResult.
+typedef struct CRetrieveArrowResult {
+    CRetrieveResult* header;
+    struct ArrowSchema* schema;
+    struct ArrowArray* array;
+} CRetrieveArrowResult;
+
+// AsyncRetrieveAsArrow mirrors AsyncRetrieve, but splits the result as above
+// instead of serializing all of it to protobuf.
+//
+// Preconditions, all enforced by the Go caller
+// (shouldUseArrowTransport in querynodev2/segments/retrieve.go):
+//   - no aggregates and no group-by fields: aggregation columns carry
+//     field_id 0 and are identified positionally, so they cannot be matched
+//     by id;
+//   - not ignore_non_pk: that withholds every user column, leaving nothing
+//     for the Arrow batch.
+// count(*) needs no exclusion: it sets no output fields, so the batch is zero
+// columns wide and the header carries the answer unchanged.
+CFuture*  // Future<CRetrieveArrowResult>
+AsyncRetrieveAsArrow(CTraceContext c_trace,
+                     CSegmentInterface c_segment,
+                     CRetrievePlan c_plan,
+                     uint64_t timestamp,
+                     int64_t limit_size,
+                     int32_t consistency_level,
+                     uint64_t collection_ttl,
+                     uint64_t entity_ttl_physical_time_us);
+
+void
+DeleteRetrieveArrowResult(CRetrieveArrowResult* result);
 
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,

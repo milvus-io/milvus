@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
+	"github.com/milvus-io/milvus/internal/util/arrowconv"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -236,9 +237,18 @@ func fetchFieldsArrow(
 	}
 	defer rec.Release()
 
-	fieldsData, err := segcore.ArrowFieldsToProto(rec, fieldSchemaMap)
+	fieldsData, err := arrowconv.ArrowFieldsToProto(rec, fieldSchemaMap)
 	if err != nil {
 		return nil, err
+	}
+
+	// ArrowFieldsToProto fills FieldName from the schema; fetchFieldsProto
+	// leaves it empty and the proxy fills it in complement_fields. Clearing it
+	// keeps the two interchangeable byte-for-byte, which matters because the
+	// flag selecting between them is per-node and refreshable, so results from
+	// both can meet in one reduce that merges columns positionally.
+	for _, fd := range fieldsData {
+		fd.FieldName = ""
 	}
 	ret.FieldsData = fieldsData
 

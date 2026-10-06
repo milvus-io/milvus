@@ -23,6 +23,8 @@
 package queryutil
 
 import (
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -31,7 +33,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// rowRef references a specific row in a specific result.
+// rowRef names one row of one per-segment result: an index into the result
+// slice, and a row index inside that result.
 type rowRef struct {
 	resultIdx int
 	rowIdx    int64
@@ -74,13 +77,46 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	template := results[selectedRows[0].resultIdx]
 	numFields := len(template.GetFieldsData())
 
-	// Validate all referenced results have the same number of fields.
+	// Validate all referenced results have the same number of fields, AND that
+	// they agree on which field id sits at each position.
+	//
+	// The merge below is purely positional: it takes fieldID from the template's
+	// column fieldIdx and then copies values from every other result's column
+	// fieldIdx. Matching counts but differing ORDER therefore writes one
+	// column's values under another column's field id -- silent corruption with
+	// no error, which downstream AppendFieldData cannot detect either because by
+	// then the ids look self-consistent.
+	//
+	// Nothing in-tree produces mismatched order today; segcore builds every
+	// segment's columns from the same plan->field_ids_. The check is here
+	// because this file now has TWO producers of its input (the protobuf reduce
+	// and the Arrow materializer), and byte-identity between them is asserted by
+	// tests rather than enforced by construction. An error is recoverable; a
+	// misattributed column is not.
+	// Once per referenced RESULT, not once per selected row: selectedRows is the
+	// output row count (tens of thousands) while the distinct results are the
+	// segment count (single digits), and the check is per column.
+	tmplFields := template.GetFieldsData()
+	checked := make(map[int]struct{}, len(results))
 	for _, ref := range selectedRows {
-		refFields := len(results[ref.resultIdx].GetFieldsData())
-		if refFields != numFields {
+		if _, done := checked[ref.resultIdx]; done {
+			continue
+		}
+		checked[ref.resultIdx] = struct{}{}
+
+		refFields := results[ref.resultIdx].GetFieldsData()
+		if len(refFields) != numFields {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"FieldsData count mismatch: result[%d] has %d fields, expected %d",
-				ref.resultIdx, refFields, numFields)
+				ref.resultIdx, len(refFields), numFields)
+		}
+		for i, fd := range refFields {
+			if want := tmplFields[i].GetFieldId(); fd.GetFieldId() != want {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"FieldsData order mismatch: result[%d] column %d is field %d, "+
+						"expected %d; a positional merge would misattribute it",
+					ref.resultIdx, i, fd.GetFieldId(), want)
+			}
 		}
 	}
 
@@ -1355,6 +1391,34 @@ func usesCompactNullableVectorData(vf *schemapb.VectorField, validData []bool) b
 type rowSizeCalculator struct {
 	result         *internalpb.RetrieveResults
 	compactIndices [][]int
+
+	// arrowFixed is the summed per-row size of the Arrow columns whose width is
+	// constant, and arrowVarLen holds the ones whose is not. Both are zero on
+	// the protobuf path.
+	//
+	// Without these the maxOutputSize guard is blind on the Arrow path: the
+	// user columns are not in FieldsData there -- the export leaves only the
+	// system columns behind -- so rowSize would return the size of a Timestamp
+	// and nothing else. For a 128-dim float vector schema that is 8 bytes
+	// against a real 536, a 67x undercount, and it grows with the vector width.
+	// The guard's whole job is to refuse before materializing, so a silent
+	// undercount turns it into "materialize twice, then refuse one hop later".
+	arrowFixed  int64
+	arrowVarLen []varLenArrowCol
+	// arrowNullable are the nullable VECTOR columns, and ONLY those. The
+	// protobuf side charges 0 for a null row of a compact-nullable vector
+	// (calcFieldElementSizeWithCompactIndex's compactIdx test, which lives
+	// inside its GetVectors() branch), so charging the full width here would
+	// trip the guard earlier on the Arrow path than on the protobuf one.
+	//
+	// Nullable SCALARS must NOT be in here. compactIndices is only populated
+	// for IsCompactNullableVectorFieldData, and the scalar branch of
+	// calcFieldElementSizeWithCompactIndex returns the fixed width
+	// unconditionally -- it never looks at validity. So a nullable scalar is
+	// charged its full width on the protobuf path, and anything else here
+	// undercounts, which is the exact failure class this calculator exists to
+	// close. See TestRowSizeChargesNullableScalarLikeProtobuf.
+	arrowNullable []nullableArrowCol
 }
 
 func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator {
@@ -1372,12 +1436,138 @@ func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator
 	return c
 }
 
+// withArrowRecord adds the user output columns a result carries as Arrow rather
+// than as FieldsData. A nil record leaves the calculator unchanged.
+//
+// The widths mirror calcFieldElementSizeWithCompactIndex exactly, which is what
+// makes the guard trip at the same row count on both transports: the export
+// maps every dense vector to fixed_size_binary(dim*elemSize), so its ByteWidth
+// IS the protobuf per-row size, and INT8/INT16 arrive widened to int32, which
+// is also what protobuf counts.
+func (c *rowSizeCalculator) withArrowRecord(rec arrow.Record) *rowSizeCalculator {
+	if rec == nil {
+		return c
+	}
+	for i := 0; i < int(rec.NumCols()); i++ {
+		col := rec.Column(i)
+		// fixedByteWidth is the gather path's own classifier. Sharing it is the
+		// point: this calculator's widths have to agree with what the gather
+		// produces, and two copies of the rule is exactly how that stops being
+		// true.
+		if w, ok := fixedByteWidth(col.DataType()); ok {
+			// Only a VECTOR column skips its width on a null row, matching the
+			// protobuf side's compactIdx test. Every dense vector arrives as
+			// fixed_size_binary; a nullable fixed-width SCALAR is charged
+			// unconditionally there, so it must be charged unconditionally
+			// here too or the guard trips at different row counts on the two
+			// transports.
+			if col.DataType().ID() == arrow.FIXED_SIZE_BINARY && col.NullN() != 0 {
+				c.arrowNullable = append(c.arrowNullable,
+					nullableArrowCol{col: col, width: int64(w)})
+			} else {
+				c.arrowFixed += int64(w)
+			}
+			continue
+		}
+		if col.DataType().ID() == arrow.BOOL {
+			// Rejected by fixedByteWidth because Arrow bit-packs it, but
+			// protobuf counts a byte per bool.
+			c.arrowFixed++
+			continue
+		}
+		// VARCHAR, JSON and geometry: per-row length, read from the offsets.
+		// Sparse vectors never reach an Arrow column (see varLenOffsets).
+		c.arrowVarLen = append(c.arrowVarLen, varLenArrowCol{
+			offsets: varLenOffsets(col),
+			col:     col,
+			rows:    col.Len(),
+		})
+	}
+	return c
+}
+
 func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
 	for fieldIdx, fd := range c.result.GetFieldsData() {
 		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
 	}
+	size += c.arrowFixed
+	for _, nc := range c.arrowNullable {
+		if int(rowIdx) < nc.col.Len() && !nc.col.IsNull(int(rowIdx)) {
+			size += nc.width
+		}
+	}
+	for _, vc := range c.arrowVarLen {
+		size += vc.valueLen(int(rowIdx))
+	}
 	return size
+}
+
+// nullableArrowCol is a fixed-width Arrow column that has nulls, so its
+// contribution has to be decided per row rather than summed once.
+type nullableArrowCol struct {
+	col   arrow.Array
+	width int64
+}
+
+// varLenArrowCol is a variable-length Arrow column with its offset buffer
+// already resolved.
+//
+// rowSize runs once per INPUT row -- more rows than the output on a
+// multi-segment requery -- so the per-row body has to be arithmetic, not
+// interface dispatch. Reading Len/IsNull/ValueLen through arrow.Array measured
+// ~6.7x slower over 10k rows than indexing the offsets directly, in a
+// standalone harness during this change -- no in-tree benchmark, so the ratio
+// is indicative rather than reproducible. This is the
+// same hoisting gatherFixedWidth does with its `source` struct, for the same
+// reason; rowSize just did not have it.
+//
+// offsets is nil for a type with no offset buffer, in which case the column
+// contributes 0 and the fallback path is never taken.
+type varLenArrowCol struct {
+	offsets []int32
+	col     arrow.Array
+	rows    int
+}
+
+// valueLen is the byte length of row's value, or 0 if the row is absent or null.
+func (v varLenArrowCol) valueLen(row int) int64 {
+	if v.offsets == nil || row < 0 || row >= v.rows {
+		return 0
+	}
+	if v.col.IsNull(row) {
+		return 0
+	}
+	return int64(v.offsets[row+1] - v.offsets[row])
+}
+
+// varLenOffsets returns the offset buffer of the variable-length types the
+// retrieve export emits: utf8 for VARCHAR, binary for JSON/geometry.
+//
+// The vector-of-vector and sparse types never reach an Arrow column --
+// WorthCarryingAsArrow leaves them in fields_data, where the protobuf
+// accounting measures them -- so there is no list case, and adding one would
+// need to match proto.Size rather than the payload length. Anything else
+// returns nil and contributes 0, matching
+// calcFieldElementSizeWithCompactIndex's behavior for payloads it cannot
+// measure.
+func varLenOffsets(col arrow.Array) []int32 {
+	var offs []int32
+	switch v := col.(type) {
+	case *array.String:
+		offs = v.ValueOffsets()
+	case *array.Binary:
+		offs = v.ValueOffsets()
+	default:
+		return nil
+	}
+	// valueLen reads offs[row+1], so a buffer with no final offset is unusable.
+	// Both builders always append it, even for zero rows, so this is belt and
+	// braces rather than a reachable case.
+	if len(offs) == 0 {
+		return nil
+	}
+	return offs
 }
 
 // calcRowSize is a convenience wrapper for one-off checks. Hot merge loops
