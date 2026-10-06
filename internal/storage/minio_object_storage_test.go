@@ -812,3 +812,17 @@ func TestMapObjectStorageError_MinIO_NewErrors(t *testing.T) {
 		})
 	}
 }
+
+// A store that answers DeleteObject with HTTP 200 has deleted the object; minio-go
+// still reports the response as an error. Only that case is treated as success:
+// a 404 keeps surfacing as ErrIoKeyNotFound for the callers that handle it.
+func TestIsDeleteSucceededWithOK(t *testing.T) {
+	assert.False(t, isDeleteSucceededWithOK(nil))
+	assert.True(t, isDeleteSucceededWithOK(minio.ErrorResponse{StatusCode: http.StatusOK}))
+
+	notFound := minio.ErrorResponse{StatusCode: http.StatusNotFound, Code: minioNoSuchKey, Message: "The specified key does not exist."}
+	assert.False(t, isDeleteSucceededWithOK(notFound))
+	assert.True(t, errors.Is(mapObjectStorageError("k", notFound), merr.ErrIoKeyNotFound))
+
+	assert.False(t, isDeleteSucceededWithOK(errors.New("dial tcp: connection refused")))
+}
