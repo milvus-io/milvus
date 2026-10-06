@@ -147,6 +147,82 @@ TYPED_TEST(SortedMembershipTest, RandomizedScanOracle) {
 }
 
 template <typename T>
+struct ObservedValue {
+    T value;
+    size_t* reads;
+
+    operator T() const {
+        ++*reads;
+        return value;
+    }
+};
+
+template <typename T>
+struct ObservedEntry {
+    ObservedValue<T> a_;
+    int32_t idx_;
+};
+
+TYPED_TEST(SortedMembershipTest, FewDistinctTermsUseBinaryLookup) {
+    using T = TypeParam;
+    size_t reads = 0;
+    std::vector<ObservedEntry<T>> entries;
+    for (int32_t group = 0; group < 9; ++group) {
+        for (int32_t i = 0; i < 1024; ++i) {
+            entries.push_back({{static_cast<T>(group), &reads},
+                               static_cast<int32_t>(entries.size())});
+        }
+    }
+    for (size_t n : {1, 2, 8, 9, 127, 128, 129}) {
+        SCOPED_TRACE(testing::Message() << "terms=" << n);
+        auto queries = std::make_unique<T[]>(n);
+        for (size_t i = 0; i < n; ++i) {
+            queries[i] = static_cast<T>(i % 8);
+        }
+        reads = 0;
+        size_t validations = 0;
+        std::vector<int> visits(entries.size());
+        detail::VisitSortedMatches(
+            entries.begin(),
+            entries.end(),
+            n,
+            queries.get(),
+            [&](int32_t row) { ++visits[row]; },
+            [&](T value, const auto& entry) {
+                EXPECT_EQ(entry.a_.value, value);
+                ++validations;
+            });
+        size_t hits = 0;
+        for (size_t row = 0; row < entries.size(); ++row) {
+            const bool hit =
+                std::find(queries.get(),
+                          queries.get() + n,
+                          entries[row].a_.value) != queries.get() + n;
+            EXPECT_EQ(visits[row], hit ? 1 : 0);
+            hits += hit;
+        }
+        EXPECT_EQ(validations, hits);
+        // Ordering comparisons stay logarithmic even when thousands of matching
+        // rows reach the callbacks. A cursor compares every matching value.
+        EXPECT_LT(reads, 256);
+    }
+    if constexpr (!std::is_same_v<T, bool>) {
+        const T queries[] = {
+            T(8), T(7), T(6), T(5), T(4), T(3), T(2), T(1), T(0)};
+        reads = 0;
+        size_t visits = 0;
+        detail::VisitSortedMatches(entries.begin(),
+                                   entries.end(),
+                                   std::size(queries),
+                                   queries,
+                                   [&](int32_t) { ++visits; });
+        EXPECT_EQ(visits, entries.size());
+        // More than eight distinct terms retain the ordered cursor.
+        EXPECT_GE(reads, entries.size());
+    }
+}
+
+template <typename T>
 class SortedFloatingMembershipTest : public testing::Test {};
 using FloatingMembershipTypes = testing::Types<float, double>;
 TYPED_TEST_SUITE(SortedFloatingMembershipTest, FloatingMembershipTypes);
@@ -165,11 +241,17 @@ TYPED_TEST(SortedFloatingMembershipTest, NaNRetainsBinarySearchSemantics) {
     for (size_t i = 0; i < std::size(rows); ++i)
         entries.emplace_back(rows[i], i);
     const T nan = std::numeric_limits<T>::quiet_NaN();
-    for (const auto& queries : std::vector<std::vector<T>>{
-             {nan},
-             {nan, T(0), nan},
-             {T(1), nan, T(-1)},
-             {nan, -nan, std::numeric_limits<T>::infinity()}}) {
+    std::vector<std::vector<T>> query_lists{
+        {nan},
+        {nan, T(0), nan},
+        {T(1), nan, T(-1)},
+        {nan, -nan, std::numeric_limits<T>::infinity()}};
+    for (size_t n : {8, 9, 127, 128, 129}) {
+        std::vector<T> queries(n, T(1));
+        queries[n / 2] = nan;
+        query_lists.push_back(std::move(queries));
+    }
+    for (const auto& queries : query_lists) {
         auto original = queries;
         std::vector<int32_t> expected, actual;
         size_t validations = 0;
@@ -250,25 +332,67 @@ TEST(SortedStringMembershipTest, BorrowedViewsAndScanOracle) {
     }
 }
 
+TEST(SortedStringMembershipTest, FewDistinctTermsUseBinaryLookup) {
+    std::vector<std::string> dictionary;
+    for (size_t i = 0; i < 16384; ++i) {
+        dictionary.push_back(std::to_string(i));
+    }
+    std::sort(dictionary.begin(), dictionary.end());
+    for (size_t n : {1, 2, 8, 9, 127, 128, 129}) {
+        SCOPED_TRACE(testing::Message() << "terms=" << n);
+        std::vector<std::string> queries(n);
+        for (size_t i = 0; i < n; ++i) {
+            queries[i] = dictionary[dictionary.size() - 1 - i % 8];
+        }
+        const auto original = queries;
+        size_t reads = 0;
+        std::vector<int> visits(dictionary.size());
+        detail::VisitSortedStringMatches(
+            dictionary.size(),
+            queries.size(),
+            queries.data(),
+            [&](size_t i) {
+                ++reads;
+                return std::string_view(dictionary[i]);
+            },
+            [&](size_t i) { ++visits[i]; });
+        for (size_t i = 0; i < dictionary.size(); ++i) {
+            const bool hit =
+                std::find(queries.begin(), queries.end(), dictionary[i]) !=
+                queries.end();
+            EXPECT_EQ(visits[i], hit ? 1 : 0);
+        }
+        EXPECT_EQ(queries, original);
+        // At most eight independent lower bounds, including equality checks.
+        EXPECT_LE(reads, 128);
+        if (n == 1) {
+            // A single high-end term must not gallop over the dictionary.
+            EXPECT_LE(reads, 16);
+        }
+    }
+}
+
 TEST(SortedMembershipTest, ValidatorSeesOutOfOrderEntriesInBoundRange) {
     using Entry = IndexStructure<int64_t>;
     std::vector<Entry> entries{{1, 0}, {3, 1}, {2, 2}, {4, 3}};
-    const int64_t query[] = {3};
-    std::vector<int32_t> visited;
-    size_t mismatches = 0;
+    // These malformed ranges reach diagnostics in the binary and ordered paths.
+    for (const auto& queries : std::vector<std::vector<int64_t>>{
+             {2}, {3, 5, 6, 7, 8, 9, 10, 11, 12}}) {
+        std::vector<int32_t> visited;
+        size_t mismatches = 0;
+        detail::VisitSortedMatches(
+            entries.begin(),
+            entries.end(),
+            queries.size(),
+            queries.data(),
+            [&](int32_t row) { visited.push_back(row); },
+            [&](int64_t value, const Entry& entry) {
+                mismatches += entry.a_ != value;
+            });
 
-    detail::VisitSortedMatches(
-        entries.begin(),
-        entries.end(),
-        std::size(query),
-        query,
-        [&](int32_t row) { visited.push_back(row); },
-        [&](int64_t value, const Entry& entry) {
-            mismatches += entry.a_ != value;
-        });
-
-    EXPECT_EQ(visited, (std::vector<int32_t>{1, 2}));
-    EXPECT_EQ(mismatches, 1);
+        EXPECT_EQ(visited, (std::vector<int32_t>{1, 2}));
+        EXPECT_EQ(mismatches, 1);
+    }
 }
 
 }  // namespace
