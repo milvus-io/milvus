@@ -1047,6 +1047,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     DetermineExecPath() override;
 
     bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_ &&
+               !IsTextIndexOpType(expr_->op_type_) && !CanUseNgramIndex();
+    }
+
+    bool
     SupportOffsetInput() override {
         if (IsTextIndexOpType(expr_->op_type_)) {
             return false;
@@ -1077,11 +1083,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>
     GetLogicalExpr() {
         return expr_;
-    }
-
-    int64_t
-    GetActiveCount() const {
-        return active_count_;
     }
 
     // The concrete string literal to hand to a scalar index's ShouldUseOp cost

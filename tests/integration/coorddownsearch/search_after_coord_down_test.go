@@ -109,10 +109,10 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	s.Require().NoError(merr.CheckRPCCall(flushResp, err))
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -272,11 +272,12 @@ func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consisten
 }
 
 func (s *CoordDownSearch) insertBatchCollections(prefix string, collectionBatchSize, idxStart, dim int, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	for idx := 0; idx < collectionBatchSize; idx++ {
 		collectionName := prefix + "_" + strconv.Itoa(idxStart+idx)
 		s.loadCollection(collectionName, dim)
 	}
-	wg.Done()
 }
 
 func (s *CoordDownSearch) setupData() {
@@ -294,6 +295,9 @@ func (s *CoordDownSearch) setupData() {
 		go s.insertBatchCollections(prefix, collectionBatchSize, idx*collectionBatchSize, Dim, &wg)
 	}
 	wg.Wait()
+	if s.T().Failed() {
+		s.T().FailNow()
+	}
 	mlog.Info(context.TODO(), "=========================Data injection finished=========================")
 	s.checkCollections()
 	s.waitLeaderServiceable()

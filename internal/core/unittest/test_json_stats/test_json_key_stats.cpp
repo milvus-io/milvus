@@ -1531,11 +1531,11 @@ TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
 TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
     std::string path = "/int";
     TargetBitmap valid_res(size_, true);
-    TargetBitmapView valid_res_view(valid_res);
+    auto valid_res_view = valid_res.write_view();
     auto shredding_fields = index_->GetShreddingFields(path);
     for (const auto& field : shredding_fields) {
         auto processed_size =
-            index_->ExecutorForGettingValid(nullptr, field, valid_res, 0);
+            index_->ExecutorForGettingValid(nullptr, field, valid_res_view);
         EXPECT_EQ(processed_size, size_);
     }
     std::cout << "can not skip shared" << std::endl;
@@ -1559,8 +1559,8 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     std::string path = "/int";
     TargetBitmap res(size_);
     TargetBitmap valid_res(size_, true);
-    TargetBitmapView res_view(res);
-    TargetBitmapView valid_res_view(valid_res);
+    auto res_view = res.write_view();
+    auto valid_res_view = valid_res.write_view();
 
     auto func = [](const int64_t* data,
                    ValidityView valid_data,
@@ -1580,7 +1580,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     auto field_name = *(index_->GetShreddingFields(path).begin());
     std::cout << "field_name: " << field_name << std::endl;
     int processed_size = index_->ExecutorForShreddingData<int64_t>(
-        nullptr, field_name, func, nullptr, res_view, valid_res_view, 0, 0);
+        nullptr, field_name, func, nullptr, res_view, valid_res_view);
     std::cout << "processed_size: " << processed_size << std::endl;
     EXPECT_EQ(processed_size, size_);
 
@@ -1597,10 +1597,8 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
         field_name,
         func,
         [](const SkipIndex&, std::string, int) { return true; },
-        skipped_res,
-        skipped_valid_res,
-        0,
-        0);
+        skipped_res.write_view(),
+        skipped_valid_res.write_view());
     EXPECT_EQ(processed_size, size_);
     const auto expected_valid_count = nullable_ ? 400 : 800;
     EXPECT_EQ(skipped_res.count(), expected_valid_count);
@@ -1855,9 +1853,9 @@ TEST_P(JsonKeyStatsAsyncLoadTest, HonorsRolloutForMmapEagerAndLazyLoad) {
         operation = std::async(std::launch::async,
                                [this, lazy_field = std::move(lazy_field)]() {
                                    TargetBitmap valid_res(data_.size(), true);
-                                   TargetBitmapView valid_res_view(valid_res);
+                                   auto valid_res_view = valid_res.write_view();
                                    return load_index_->ExecutorForGettingValid(
-                                       nullptr, lazy_field, valid_res, 0);
+                                       nullptr, lazy_field, valid_res_view);
                                });
     }
 

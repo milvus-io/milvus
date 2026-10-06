@@ -133,9 +133,9 @@ func (s *TargetTestSuit) insertToCollection(ctx context.Context, dbName string, 
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)

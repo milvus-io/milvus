@@ -2,22 +2,29 @@ package segment
 
 import (
 	"context"
+	"math"
 	"path"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestCurrentSplitForGrowingPackFillsNewSplitFormats(t *testing.T) {
@@ -317,4 +324,102 @@ func testGrowingPackSchema() *schemapb.CollectionSchema {
 			{FieldID: 101, DataType: schemapb.DataType_FloatVector},
 		},
 	}
+}
+
+func TestFlushInsertBufferMaterializesMissingBM25Output(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "consumer_fallback", Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: 1, Name: "timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
+				{Key: "max_length", Value: "1024"}, {Key: "enable_analyzer", Value: "true"},
+			}},
+			{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "bm25", Type: schemapb.FunctionType_BM25,
+			InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"},
+			InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+		}},
+	}
+	body := &msgpb.InsertRequest{
+		Version: msgpb.InsertDataVersion_ColumnBased,
+		RowIDs:  []int64{1, 2}, Timestamps: []uint64{10, 10}, NumRows: 2,
+		FieldsData: []*schemapb.FieldData{
+			newTestLongFieldData(0, 1, 2),
+			newTestLongFieldData(1, 10, 10),
+			newTestLongFieldData(100, 1, 2),
+			{
+				FieldId: 101, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"search engine", "distributed database"}}},
+				}},
+			},
+		},
+	}
+	packFor := func() *flushPack {
+		msg := message.NewInsertMessageBuilderV1().WithVChannel("consumer_fallback").
+			WithHeader(&messagespb.InsertMessageHeader{
+				CollectionId: 991059427,
+				Partitions: []*messagespb.PartitionSegmentAssignment{{
+					PartitionId: 2, Rows: 2,
+					SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 3},
+				}},
+			}).
+			WithBody(body).MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		pack := crashTestPack(991059427, 2, 3, "consumer_fallback", 10, schema, msg)
+		pack.Rows = 2
+		return pack
+	}
+
+	t.Run("missing managed runner", func(t *testing.T) {
+		// Drop releases managed WAL runners before the final growing flush.
+		// With no managed entry for this collection, use a pack-local runner.
+		writer := &growingBulkPackWriter{writeFn: func(_ context.Context, req *growingBulkWriteRequest) (*growingBulkWriteResult, error) {
+			require.Len(t, req.insertData, 1)
+			require.Equal(t, 2, req.insertData[0].Data[102].RowNum())
+			return &growingBulkWriteResult{}, nil
+		}}
+		_, err := writer.FlushInsertBuffer(context.Background(), packFor())
+		require.NoError(t, err)
+		_, stats, err := buildGrowingInsertData(schema, packFor())
+		require.NoError(t, err)
+		require.NotNil(t, stats[102])
+	})
+	t.Run("persist missing output with StorageV3", func(t *testing.T) {
+		storageConfig, cm := setupV3TestEnv(t)
+		writer := NewBulkPackWriter(cm, allocator.NewLocalAllocator(1, math.MaxInt64), storageConfig)
+		result, err := writer.FlushInsertBuffer(context.Background(), packFor())
+		require.NoError(t, err)
+		stats, err := packed.GetManifestStats(result.PersistedStorage.GetManifestPath(), storageConfig)
+		require.NoError(t, err)
+		require.NotEmpty(t, stats["bm25.102"].Paths)
+	})
+	t.Run("transient materialization failure", func(t *testing.T) {
+		mockey.PatchConvey("retry instead of poisoning WAL handles", t, func() {
+			materializeErr := merr.WrapErrServiceInternalMsg("remote analyzer temporarily unavailable")
+			mockey.Mock((*function.FunctionRunnerLocalStore).FillEmbeddingData).Return(materializeErr).Build()
+			writer := &growingBulkPackWriter{}
+			_, err := writer.FlushInsertBuffer(context.Background(), packFor())
+			require.ErrorIs(t, err, materializeErr)
+			require.True(t, retry.IsRecoverable(err))
+		})
+	})
+	t.Run("preserve existing output", func(t *testing.T) {
+		store := function.NewFunctionRunnerLocalStore()
+		defer store.Close()
+		require.NoError(t, store.FillEmbeddingData(991059427, schema, body))
+		expected := body.FieldsData[len(body.FieldsData)-1].GetVectors().GetSparseFloatVector().Contents
+		mockey.PatchConvey("no function execution for materialized WAL", t, func() {
+			patch := mockey.Mock((*function.FunctionRunnerLocalStore).FillEmbeddingData).
+				Return(merr.WrapErrServiceInternalMsg("must not execute again")).Build()
+			data, _, err := buildGrowingInsertData(schema, packFor())
+			require.NoError(t, err)
+			require.Equal(t, expected, data[0].Data[102].(*storage.SparseFloatVectorFieldData).Contents)
+			require.Zero(t, patch.Times())
+		})
+	})
 }

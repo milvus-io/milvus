@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -67,7 +68,7 @@ type UpdateJobAction func(job ImportJob)
 const importJobReasonAbortedByUser = "aborted by user"
 
 // UnfailableJobStates are the committed states: the commit fence is out and
-// HandleCommitVchannel may already have made segments visible, so failing the
+// the commit callback may already have made segments visible, so failing the
 // job would drop committed data.
 var UnfailableJobStates = typeutil.NewSet(
 	internalpb.ImportJobState_Committing,
@@ -154,6 +155,8 @@ type ImportJob interface {
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
+	GetCommitByCoordinator() bool
+	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

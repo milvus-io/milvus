@@ -34,8 +34,8 @@ TEST(QueryResultFilterTest, CopiesContiguousBackendWindow) {
     filter.set_filter_count(2);
 
     SearchResult result;
-    result.SetVectorIteratorRecreator(filter, {});
-    const auto* copied = result.GetVectorIteratorBaseFilter();
+    result.SetVectorSearchProvider(filter, {});
+    const auto* copied = result.GetVectorSearchBaseFilter();
     ASSERT_NE(copied, nullptr);
     ASSERT_EQ(copied->size(), filter.size());
     for (size_t i = 0; i < filter.size(); ++i) {
@@ -45,7 +45,7 @@ TEST(QueryResultFilterTest, CopiesContiguousBackendWindow) {
     source.reset();
     EXPECT_TRUE((*copied)[0]);
     EXPECT_TRUE((*copied)[9]);
-    EXPECT_EQ(result.GetVectorIteratorBaseFilter(), copied);
+    EXPECT_EQ(result.GetVectorSearchBaseFilter(), copied);
 }
 
 TEST(QueryResultFilterTest, CopiesBackendBoundaryExclusions) {
@@ -55,8 +55,8 @@ TEST(QueryResultFilterTest, CopiesBackendBoundaryExclusions) {
     filter.set_filter_count(6);
 
     SearchResult result;
-    result.SetVectorIteratorRecreator(filter, {});
-    const auto* copied = result.GetVectorIteratorBaseFilter();
+    result.SetVectorSearchProvider(filter, {});
+    const auto* copied = result.GetVectorSearchBaseFilter();
     ASSERT_NE(copied, nullptr);
     ASSERT_EQ(copied->size(), 23);
     for (size_t i = 0; i < copied->size(); ++i) {
@@ -76,12 +76,12 @@ TEST(QueryResultFilterTest, LazyMappedCopyRetainsPinnedSourceLifetime) {
     filter.set_filter_count(3);
 
     SearchResult result;
-    result.vector_iterator_filter_owner_ = source;
-    result.SetVectorIteratorRecreator(filter, {});
-    EXPECT_FALSE(result.vector_iterator_base_filter_);
+    result.vector_search_filter_owner_ = source;
+    result.SetVectorSearchProvider(filter, {});
+    EXPECT_FALSE(result.vector_search_base_filter_);
     source.reset();
 
-    const auto* copied = result.GetVectorIteratorBaseFilter();
+    const auto* copied = result.GetVectorSearchBaseFilter();
     ASSERT_NE(copied, nullptr);
     ASSERT_EQ(copied->size(), ids.size());
     EXPECT_TRUE((*copied)[0]);
@@ -89,10 +89,10 @@ TEST(QueryResultFilterTest, LazyMappedCopyRetainsPinnedSourceLifetime) {
     EXPECT_TRUE((*copied)[2]);
     EXPECT_TRUE((*copied)[3]);
     EXPECT_EQ(copied->count(), 3);
-    result.ClearVectorIteratorRecreator();
-    EXPECT_FALSE(result.vector_iterator_base_filter_);
-    EXPECT_FALSE(result.vector_iterator_filter_owner_);
-    EXPECT_EQ(result.GetVectorIteratorBaseFilter(), nullptr);
+    result.ClearVectorSearchProvider();
+    EXPECT_FALSE(result.vector_search_base_filter_);
+    EXPECT_FALSE(result.vector_search_filter_owner_);
+    EXPECT_EQ(result.GetVectorSearchBaseFilter(), nullptr);
 }
 
 }  // namespace

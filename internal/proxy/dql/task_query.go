@@ -19,12 +19,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -82,6 +84,9 @@ type QueryTask struct {
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
 	preferredNodes     map[string]int64
 	fastSkip           bool
+	skipRuntimeRLS     bool
+	preserveRawFields  bool
+	node               taskmodel.TaskNode
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -108,6 +113,7 @@ func NewQueryTask(ctx context.Context, node taskmodel.TaskNode, request *milvusp
 		},
 		ctx:                 ctx,
 		Condition:           NewTaskCondition(ctx),
+		node:                node,
 		request:             request,
 		plan:                plan,
 		lb:                  node.LBPolicy(),
@@ -145,6 +151,20 @@ func (t *QueryTask) HasRecordedChannelMvcc() bool {
 // Request returns the original query request.
 func (t *QueryTask) Request() *milvuspb.QueryRequest {
 	return t.request
+}
+
+// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
+//
+//go:noinline
+func (t *QueryTask) SetSkipRuntimeRLS(skip bool) {
+	t.skipRuntimeRLS = skip
+}
+
+// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
+//
+//go:noinline
+func (t *QueryTask) SetPreserveRawFields(preserve bool) {
+	t.preserveRawFields = preserve
 }
 
 // StorageCost returns the storage cost reported by the last execution.
@@ -741,7 +761,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		mlog.Strings("partitionNames", t.request.GetPartitionNames()),
 		mlog.String("requestType", t.getQueryLabel()))
 
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := ValidateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "Invalid collectionName.")
 		return err
 	}
@@ -765,14 +785,34 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
-
-	schema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil {
-		log.Warn(ctx, "get collection schema failed", mlog.Err(err))
-		return err
+	canonicalDBName := colInfo.DBName
+	if canonicalDBName == "" {
+		canonicalDBName = t.request.GetDbName()
 	}
+
+	var principalName string
+	var enforceRLS bool
+	if !t.skipRuntimeRLS {
+		rlsEnabled := colInfo.RlsEnabled
+		if rlsEnabled && t.request.GetSkipRls() {
+			if t.node == nil {
+				return merr.WrapErrServiceInternalMsg("query task has no host node for SkipRLS authorization")
+			}
+			rlsEnabled, err = t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
+				canonicalDBName, colInfo.Schema.GetName(), "query")
+			if err != nil {
+				return err
+			}
+		}
+		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		if err != nil {
+			return err
+		}
+	}
+
+	schema := colInfo.Schema
 	t.schema = schema
-	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
@@ -783,11 +823,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		t.request.PartitionNames = partitionNames
 	}
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.GetMetaCache(), t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn(ctx, "check partition key mode failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
-		return err
-	}
+	t.partitionKeyMode = schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -797,7 +833,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, tag := range t.request.PartitionNames {
-		if err := validatePartitionTag(tag, false); err != nil {
+		if err := ValidatePartitionTag(tag, false); err != nil {
 			log.Warn(ctx, "invalid partition name", mlog.String("partition name", tag))
 			return err
 		}
@@ -856,8 +892,20 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	t.resolvedTimezoneStr = timezone
 
-	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}
+	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
 		return err
+	}
+	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
+
+	if enforceRLS {
+		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.SchemaHelper)
+		if err != nil {
+			return err
+		}
+		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
+			return err
+		}
 	}
 	t.plan.GetQuery().Limit = t.Limit
 	if t.queryParams.queryIteratorCursor != nil {
@@ -870,15 +918,15 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	// Both are safe without a limit, so exempt them from the limit requirement.
 	hasAgg := len(t.userAggregates) > 0
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited && !hasAgg {
+	if userPlanAlwaysTrue && t.Limit == typeutil.Unlimited && !hasAgg {
 		return merr.WrapErrParameterInvalidMsg("empty expression should be used with limit")
 	}
 
 	// convert partition names only when requery is false
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
-		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.request.Namespace)
+		if NamespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+			hashedPartitionNames, err := AssignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -890,7 +938,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := AssignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -908,7 +956,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
-	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, _, err = MarshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
@@ -934,7 +982,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
 		// Compatibility logic, parse guarantee timestamp
@@ -942,7 +990,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 		} else {
 			// parse from guarantee timestamp and user input consistency level
-			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
 
@@ -1010,13 +1058,13 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		Exec:           t.queryShard,
 		PreferredNodes: t.preferredNodes,
 	}
-	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
 		}
-		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		channelName, ok, err := NamespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
 		if err != nil {
 			return err
 		}
@@ -1137,24 +1185,31 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
-	if !t.reQuery {
-		if len(t.queryParams.extractTimeFields) > 0 {
-			log.Debug(ctx, "extracting fields for timestamptz", mlog.Strings("fields", t.queryParams.extractTimeFields))
-			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)
-			if err != nil {
-				log.Warn(ctx, "fail to extract fields for timestamptz", mlog.Err(err))
-				return err
-			}
-		} else {
-			log.Debug(ctx, "translate timestamp to ISO string", mlog.String("timezone", t.resolvedTimezoneStr))
-			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
-			if err != nil {
-				log.Warn(ctx, "fail to translate timestamp", mlog.Err(err))
-				return err
-			}
-		}
+	if err := t.formatTimeFields(ctx); err != nil {
+		return err
 	}
 	log.Debug(ctx, "Query PostExecute done")
+	return nil
+}
+
+func (t *QueryTask) formatTimeFields(ctx context.Context) error {
+	if t.reQuery || t.preserveRawFields {
+		return nil
+	}
+	if len(t.queryParams.extractTimeFields) > 0 {
+		mlog.Debug(ctx, "extracting fields for timestamptz", mlog.Strings("fields", t.queryParams.extractTimeFields))
+		if err := extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields); err != nil {
+			mlog.Warn(ctx, "fail to extract fields for timestamptz", mlog.Err(err))
+			return err
+		}
+		return nil
+	}
+
+	mlog.Debug(ctx, "translate timestamp to ISO string", mlog.String("timezone", t.resolvedTimezoneStr))
+	if err := timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr); err != nil {
+		mlog.Warn(ctx, "fail to translate timestamp", mlog.Err(err))
+		return err
+	}
 	return nil
 }
 

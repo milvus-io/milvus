@@ -71,6 +71,11 @@ Cold all/none use their existing early-exit scans. Caching them does not force a
 full count. When count is known, all/none are derived from it. A true all/none
 result also establishes count as the interval size or zero.
 
+Predicate conversion checks validity before mutating output, so an all-valid
+input can reuse its owner statistics. ColumnVector AllTrue/AllFalse retain
+fused data/validity word checks and early termination; their pointers come
+from ReadView accessors and do not mark the owner as escaped.
+
 Writable raw pointer escape disables caching because later pointer writes cannot
 be observed. A raw-buffer view has no invalidation source and remains uncached.
 Native kernels may use a scoped write pointer that must not outlive its scope.
@@ -120,13 +125,22 @@ and architecture-specific validation remain required before publishing claims.
 
 ## Validation results and limits
 
-The native Release build uses GCC 14.2, Knowhere `faff72c4` and MilvusStorage
-`15ab3d7`, including the real Go/native plan-parser bridge. The final owner-cache
-implementation passed 5,287 affected Milvus tests, 17 JSON numeric tests through
-`all_tests`, and 354 native bitset tests. All three test processes exited 0,
-and the complete validation driver exited 0. Checksums for all 143 changed
-C++/build files matched between the local source and test machine.
+The native Release build uses GCC 14.2, Knowhere `16e873b1`, MilvusStorage
+`15ab3d7`, simdjson 5.0.2 and milvus-common `1.0.0-45fca32`, including the
+real Go/native plan-parser bridge. After merging master `243ebd872b`, all
+three targets (`all_tests`, `bitset_test`, and `json_stats_test`) built.
 
+The affected Milvus selection ran 5,425 tests from 150 suites: 5,423 passed and
+two growing-snapshot cases were skipped for inapplicable sealed-cache backend
+parameters. The selection includes all 17 JSON numeric cases, the warmed-statistics
+predicate regression, fused ColumnVector predicates, vector NULL filtering,
+independent cache encoding and packed-window ownership. All 354 native bitset tests
+and all 118 standalone JSON stats tests also passed. Each test process and the
+complete validation driver exited 0. Checksums for all 146 changed C++/build files
+matched between local source and the test machine. The CI clang-format 15 script
+was idempotent and `git diff --check` passed.
+
+The bitset library sources are unchanged from `7791e7c56c`. At that head,
 ARM library-only Release and ASan/UBSan each passed 354 tests plus the C++17
 header-only check. Cases cover nested writable windows, owner-statistics
 invalidation, retained proxies and copied views, owner moves, resize/clear,
@@ -137,7 +151,7 @@ copyable descriptors. An ARM64 size check with the uint64 element-wise policy
 measured ReadView at 32 bytes, down from 56 bytes at the preceding implementation
 head; WriteView remains 32 bytes. This measures descriptor layout, not query QPS.
 
-The new x86 TSAN concurrent-reader smoke binary could not start: ThreadSanitizer
+The previously attempted x86 TSAN concurrent-reader smoke binary could not start: ThreadSanitizer
 reports an unexpected memory mapping. Disabling ASLR for that test process was
 not permitted. The preceding-head TSAN result does not verify this redesign;
 the normal and ASan/UBSan suites include concurrent read-only cases.
@@ -149,7 +163,8 @@ the test user cannot write. At the preceding implementation head, the standalone
 with zero tests; its abort trace
 reaches the MilvusStorage global finalizer. Those same 17 numeric cases pass
 through the initialized Milvus `all_tests` entry point with exit status 0. The
-standalone exit failure remains a validation limitation.
+standalone executable was not rerun after the dependency update; the current
+numeric validation uses the initialized Milvus entry point.
 
 These checks establish covered bitmap, expression and query behavior. They do not
 measure end-to-end Milvus/ANN QPS or prove that every mutation workload is

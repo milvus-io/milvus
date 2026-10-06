@@ -248,7 +248,7 @@ func (s *CipherSuite) TestNewKmsConfigFields() {
 	s.NotNil(params.KmsAwsRoleARN.GetValue())
 	s.NotNil(params.KmsAwsExternalID.GetValue())
 	s.NotNil(params.RotationPeriodInHours.GetValue())
-	s.NotNil(params.UpdatePerieldInMinutes.GetValue())
+	s.NotNil(params.UpdatePeriodInMinutes.GetValue())
 
 	s.Equal("cipherPlugin.kms.defaultKey", params.DefaultRootKey.Key)
 	s.Equal("cipherPlugin.kms.credentials.aws.roleARN", params.KmsAwsRoleARN.Key)

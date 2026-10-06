@@ -203,6 +203,9 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 		used[idx] = true
 	}
 	for _, g := range groups {
+		if len(g.lowers)+len(g.uppers) == 1 {
+			continue
+		}
 		// Use the effective type stored in the group
 		var bestLower *bound
 		for i := range g.lowers {

@@ -132,13 +132,6 @@ func TestSegmentStats(t *testing.T) {
 	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
 	assert.False(t, inserted)
 	assert.Equal(t, modifiedAfterCrossing, stat.Modified)
-
-	stat.UpdateOnSync(SyncOperationMetrics{
-		BinLogCounterIncr:     4,
-		BinLogFileCounterIncr: 9,
-	})
-	assert.Equal(t, uint64(7), stat.BinLogCounter)
-	assert.Equal(t, uint64(13), stat.BinLogFileCounter)
 }
 
 func TestIsZero(t *testing.T) {

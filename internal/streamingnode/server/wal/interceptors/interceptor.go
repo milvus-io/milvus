@@ -29,6 +29,7 @@ type InterceptorBuildParam struct {
 	WriteAheadBuffer       *wab.WriteAheadBuffer        // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
 	MVCCManager            *mvcc.MVCCManager            // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
 	InitialRecoverSnapshot *recovery.RecoverySnapshot   // The initial recover snapshot for the wal, used to recover the wal state.
+	RecoveryStorage        recovery.RecoveryStorage     // The recovery storage owned by the wal lifecycle.
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
@@ -41,6 +42,9 @@ func (p *InterceptorBuildParam) Clear() {
 	}
 	if p.ShardManager != nil {
 		p.ShardManager.Close()
+	}
+	if p.RecoveryStorage != nil {
+		p.RecoveryStorage.Close()
 	}
 }
 

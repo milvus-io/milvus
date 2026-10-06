@@ -110,6 +110,35 @@ TEST(FilterBitsNodeTest, PredicateConversionFiltersOutInvalidResults) {
     EXPECT_TRUE(valid.all());
 }
 
+TEST(FilterBitsNodeTest, PredicateConversionRefreshesWarmedOwnerStatistics) {
+    for (const bool all_valid : {false, true}) {
+        TargetBitmap data(129, false);
+        TargetBitmap valid(129, true);
+        for (size_t i = 0; i < data.size(); ++i) {
+            data.set(i, i % 2 == 0);
+            valid.set(i, all_valid || i % 3 != 0);
+        }
+        const auto input = data.read_view();
+        const auto validity = valid.read_view();
+        ASSERT_EQ(input.count(), 65);
+        ASSERT_EQ(validity.count(), all_valid ? 129 : 86);
+        ASSERT_EQ(validity.all(), all_valid);
+
+        EXPECT_EQ(ConvertPredicateToFilteredBitset(
+                      data.write_view(), valid.write_view(), data.size()),
+                  all_valid);
+        const size_t excluded = all_valid ? 64 : 86;
+        EXPECT_EQ(input.count(), excluded);
+        EXPECT_EQ(data.read_view().count(), excluded);
+        EXPECT_EQ(validity.count(), 129);
+        EXPECT_TRUE(validity.all());
+
+        valid.reset(128);
+        EXPECT_EQ(validity.count(), 128);
+        EXPECT_FALSE(validity.all());
+    }
+}
+
 TEST(FilterBitsNodeTest, PredicateConversionPreservesUnalignedViewBoundaries) {
     for (const size_t size : {0, 1, 7, 8, 63, 64, 65, 127, 128, 129, 4097}) {
         for (const size_t offset : {0, 1, 7, 63}) {

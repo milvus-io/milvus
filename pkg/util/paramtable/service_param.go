@@ -835,17 +835,19 @@ type WoodpeckerConfig struct {
 	MaxMessageSize ParamItem `refreshable:"true"`
 
 	// client
-	AppendQueueSize           ParamItem `refreshable:"true"`
-	AppendMaxRetries          ParamItem `refreshable:"true"`
-	AppendMaxBatchEntries     ParamItem `refreshable:"false"`
-	AppendMaxBatchBytes       ParamItem `refreshable:"false"`
-	SegmentRollingMaxSize     ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime     ParamItem `refreshable:"true"`
-	SegmentRollingMaxBlocks   ParamItem `refreshable:"true"`
-	AuditorMaxInterval        ParamItem `refreshable:"true"`
-	DirectReadEnabled         ParamItem `refreshable:"false"`
-	DirectReadMaxBatchSize    ParamItem `refreshable:"false"`
-	DirectReadMaxFetchThreads ParamItem `refreshable:"false"`
+	AppendQueueSize                 ParamItem `refreshable:"true"`
+	AppendMaxRetries                ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries           ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes             ParamItem `refreshable:"false"`
+	SegmentRollingMaxSize           ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime           ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks         ParamItem `refreshable:"true"`
+	AuditorMaxInterval              ParamItem `refreshable:"true"`
+	AuditorCompactionAttemptTimeout ParamItem `refreshable:"false"`
+	AuditorCompactionPassBudget     ParamItem `refreshable:"false"`
+	DirectReadEnabled               ParamItem `refreshable:"false"`
+	DirectReadMaxBatchSize          ParamItem `refreshable:"false"`
+	DirectReadMaxFetchThreads       ParamItem `refreshable:"false"`
 
 	// quorum configuration
 	// Buffer pools for different regions
@@ -872,6 +874,10 @@ type WoodpeckerConfig struct {
 	CompactionSize                 ParamItem `refreshable:"true"`
 	CompactionMaxParallelUploads   ParamItem `refreshable:"true"`
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
+	CompactionTimeout              ParamItem `refreshable:"false"`
+	CompactionMaxInflightMemory    ParamItem `refreshable:"false"`
+	CompactionMemoryHighWatermark  ParamItem `refreshable:"false"`
+	SyncSchedulerMaxWorkers        ParamItem `refreshable:"false"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
 	RetentionTTL                   ParamItem `refreshable:"true"`
@@ -985,6 +991,30 @@ Values below 256 KiB are clamped to 256 KiB. Invalid or out-of-range values fall
 		Export:       true,
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
+
+	p.AuditorCompactionAttemptTimeout = ParamItem{
+		Key:          "woodpecker.client.auditor.compactionAttemptTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "330s",
+		Doc: `How long this client waits for one logstore node to answer one compaction request.
+It travels to the node as the gRPC deadline; the node applies its own ceiling
+(woodpecker.logstore.segmentCompactionPolicy.timeout) on top and the shorter of the two applies.
+Raise it together with that ceiling: on its own it has no effect while it stays above the node's.`,
+		Export: true,
+	}
+	p.AuditorCompactionAttemptTimeout.Init(base.mgr)
+
+	p.AuditorCompactionPassBudget = ParamItem{
+		Key:          "woodpecker.client.auditor.compactionPassBudget",
+		Version:      "3.0.2",
+		DefaultValue: "60s",
+		Doc: `How long one auditor cycle keeps starting compactions. It is a start deadline, not a cap on the
+cycle: once spent no further segment is begun, but one already running finishes, so a cycle can
+overrun this by one segment. Raise it to trade the timeliness of the auditor's other passes
+(truncate state, snapshot publication, orphan sweep) for compaction throughput.`,
+		Export: true,
+	}
+	p.AuditorCompactionPassBudget.Init(base.mgr)
 
 	p.DirectReadEnabled = ParamItem{
 		Key:          "woodpecker.client.directRead.enabled",
@@ -1195,6 +1225,56 @@ Example configuration below:
 		Export:       true,
 	}
 	p.CompactionMaxParallelReads.Init(base.mgr)
+
+	p.CompactionTimeout = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.timeout",
+		Version:      "3.0.2",
+		DefaultValue: "300s",
+		Doc: `Ceiling on how long one compaction may run on a logstore node. This is the node's guardrail, not a
+per-tenant policy: one node serves many logs from this single value, and it exists so no one
+request can hold a node's compaction resources indefinitely.`,
+		Export: true,
+	}
+	p.CompactionTimeout.Init(base.mgr)
+
+	p.CompactionMaxInflightMemory = ParamItem{
+		Key:     "woodpecker.logstore.segmentCompactionPolicy.maxInflightMemory",
+		Version: "3.0.2",
+		// Decimal, matching woodpecker's own default exactly: "1G" would parse as 2^30 here and
+		// quietly raise the ceiling by 7% relative to what the library ships with.
+		DefaultValue: "1000000000",
+		Doc: `Memory a logstore node will reserve for the compactions it runs at once, across every log it
+serves. Absolute rather than a share of the pod: useful compaction concurrency saturates on
+object-storage bandwidth long before memory, so a larger node does not need a larger allowance.
+Raise it alongside maxSize or maxParallelUploads, which raise what one compaction costs.
+Compactions beyond it are refused, not queued, and retried on a later auditor cycle.`,
+		Export: true,
+	}
+	p.CompactionMaxInflightMemory.Init(base.mgr)
+
+	p.CompactionMemoryHighWatermark = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.memoryHighWatermark",
+		Version:      "3.0.2",
+		DefaultValue: "0.7",
+		Doc: `Stop taking on new compactions once a logstore node's memory usage passes this fraction of its
+limit, whatever is using it -- maxInflightMemory above only accounts for compaction. Applies only
+where a container memory limit can be read; on bare metal, with no limit set, or if detection
+fails, it is skipped rather than measured against host memory.`,
+		Export: true,
+	}
+	p.CompactionMemoryHighWatermark.Init(base.mgr)
+
+	p.SyncSchedulerMaxWorkers = ParamItem{
+		Key:          "woodpecker.logstore.syncScheduler.maxWorkers",
+		Version:      "3.0.2",
+		DefaultValue: "32",
+		Doc: `Workers in a logstore node's shared flush pool, as a plain count. Each one blocks in fdatasync
+while a flush is in flight, so this bounds concurrent syncs, not CPU usage. Tune it from the
+volume's IOPS budget: workers ~= target IOPS x fsync latency. Past the point where the device
+saturates, more workers buy queueing rather than throughput.`,
+		Export: true,
+	}
+	p.SyncSchedulerMaxWorkers.Init(base.mgr)
 
 	p.ReaderMaxBatchSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentReadPolicy.maxBatchSize",
@@ -1857,6 +1937,7 @@ type MinioConfig struct {
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
 
+	MultipartCopyThreshold    ParamItem `refreshable:"true"`
 	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
@@ -2116,6 +2197,27 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+
+	p.MultipartCopyThreshold = ParamItem{
+		Key:          "minio.multipartCopyThreshold",
+		Version:      "3.0.3",
+		DefaultValue: "1073741824",
+		Doc: "Object size threshold in bytes for switching from a single CopyObject request to multipart copy. " +
+			"Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). " +
+			"Must be a positive integer; invalid values fall back to the default. " +
+			"Single CopyObject requests remain capped at 5 GiB regardless of this threshold. " +
+			"Changes apply to subsequent copies, not copies already in progress. " +
+			"Does not apply to GCP or Azure.",
+		Formatter: func(v string) string {
+			size, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || size <= 0 {
+				return "1073741824"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MultipartCopyThreshold.Init(base.mgr)
 
 	p.UseCRC32C = ParamItem{
 		Key:          "minio.ssl.useCRC32C",

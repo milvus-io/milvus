@@ -19,6 +19,35 @@ import (
 	"google.golang.org/api/googleapi"
 )
 
+func TestResolveCloudProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, address, want string
+	}{
+		{"explicit_gcp", CloudProviderGCP, "custom.example.com", CloudProviderGCP},
+		{"explicit_aliyun", CloudProviderAliyun, "storage.googleapis.com", CloudProviderAliyun},
+		{"explicit_tencent", CloudProviderTencent, "storage.googleapis.com", CloudProviderTencent},
+		{"explicit_huawei", CloudProviderHuawei, "oss-cn-hangzhou.aliyuncs.com", CloudProviderHuawei},
+		{"default_gcp", "", "storage.googleapis.com", CloudProviderGCP},
+		{"aws_gcp_with_port", CloudProviderAWS, "storage.googleapis.com:443", CloudProviderGCP},
+		{"unknown_gcp", "minio", "storage.googleapis.com", CloudProviderGCP},
+		{"default_aliyun", "", "oss-cn-hangzhou.aliyuncs.com", CloudProviderAliyun},
+		{"aws_aliyun", CloudProviderAWS, "oss-cn-hangzhou.aliyuncs.com", CloudProviderAliyun},
+		{"gcp_endpoint_precedence", "", "storage.googleapis.com.oss.aliyuncs.com", CloudProviderGCP},
+		{"aws", CloudProviderAWS, "s3.amazonaws.com", CloudProviderAWS},
+		{"default_minio", "", "localhost:9000", ""},
+		{"unknown_provider", "minio", "localhost:9000", "minio"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := Config{CloudProvider: tc.provider, Address: tc.address}
+			original := config
+			assert.Equal(t, tc.want, ResolveCloudProvider(&config))
+			assert.Equal(t, original, config)
+			config.CloudProvider = tc.want
+			assert.Equal(t, tc.want, ResolveCloudProvider(&config), "resolution must be idempotent")
+		})
+	}
+}
+
 func TestIsGcsNotExist(t *testing.T) {
 	notFound := &googleapi.Error{Code: http.StatusNotFound}
 	// cloud.google.com/go/storage >= v1.51 formats not-found errors this way
@@ -165,6 +194,26 @@ func TestNewTLSHTTPClientRejectsLowerVersion(t *testing.T) {
 		assert.Equal(t, uint16(tls.VersionTLS12), resp.TLS.Version)
 		t.Logf("confirmed: negotiated %s", tlsVersionName(resp.TLS.Version))
 	})
+}
+
+func TestNewMinioClientInferredGCP(t *testing.T) {
+	for _, provider := range []string{"", CloudProviderAWS} {
+		for _, useIAM := range []bool{false, true} {
+			t.Run(fmt.Sprintf("provider=%s/iam=%t", provider, useIAM), func(t *testing.T) {
+				config := Config{
+					Address: "storage.googleapis.com:443", CloudProvider: provider,
+					UseSSL: true, UseIAM: useIAM, SkipBucketCheck: true,
+					BucketName: "src-bucket", AccessKeyID: "access-key", SecretAccessKeyID: "secret-key",
+				}
+				original := config
+				client, err := NewMinioClient(context.Background(), &config)
+				require.NoError(t, err)
+				// The GCP constructor removes the port so the SDK recognizes GCS.
+				assert.Equal(t, "storage.googleapis.com", client.EndpointURL().Host)
+				assert.Equal(t, original, config)
+			})
+		}
+	}
 }
 
 func TestNewMinioClientSkipsBucketCheck(t *testing.T) {

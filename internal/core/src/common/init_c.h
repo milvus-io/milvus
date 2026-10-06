@@ -97,8 +97,10 @@ SetExprResCacheEnable(bool val);
 void
 SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
                       const char* disk_base_path,  // disk mode: file path
+                      int64_t materialization_max_bytes,
                       int64_t mem_max_bytes,
                       bool compression_enabled,
+                      bool mem_enable_growing,
                       int32_t admission_threshold,
                       int64_t mem_min_eval_duration_us,
                       int64_t disk_max_bytes,

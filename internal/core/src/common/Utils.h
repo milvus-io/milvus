@@ -273,6 +273,8 @@ KnowhereStatusToErrorCode(knowhere::Status status) {
             return ErrorCode::MemAllocateFailed;
         case knowhere::Status::disk_file_error:
             return ErrorCode::FileReadFailed;
+        case knowhere::Status::cancelled:
+            return ErrorCode::FollyCancel;
         // Server-side inner errors -> generic KnowhereError. timeout is
         // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
         // timeout) and conflates cancel with timeout, so it stays here rather

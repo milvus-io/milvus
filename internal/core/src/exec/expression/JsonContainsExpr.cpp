@@ -468,18 +468,11 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
         }
     } else {
         if constexpr (ElementLevel) {
-            processed_size =
-                ProcessDataChunksForElementLevel<ArrayType>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            res,
-                                                            valid_res,
-                                                            *elements);
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
         } else {
-            processed_size = ProcessDataChunks<ArrayType>(execute_sub_batch,
-                                                          std::nullptr_t{},
-                                                          res,
-                                                          valid_res,
-                                                          *elements);
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
         }
     }
     AssertInfo(processed_size == real_batch_size,
@@ -1130,18 +1123,11 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
         }
     } else {
         if constexpr (ElementLevel) {
-            processed_size =
-                ProcessDataChunksForElementLevel<ArrayType>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            res,
-                                                            valid_res,
-                                                            *elements);
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
         } else {
-            processed_size = ProcessDataChunks<ArrayType>(execute_sub_batch,
-                                                          std::nullptr_t{},
-                                                          res,
-                                                          valid_res,
-                                                          *elements);
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
         }
     }
     AssertInfo(processed_size == real_batch_size,

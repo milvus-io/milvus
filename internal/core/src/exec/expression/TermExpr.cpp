@@ -374,11 +374,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
                                                     valid_res,
                                                     target_val);
     } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
-                                                              std::nullptr_t{},
-                                                              res,
-                                                              valid_res,
-                                                              target_val);
+        processed_size = ProcessDataChunks<milvus::ArrayView>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, target_val);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -601,12 +598,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
                                                             pointer,
                                                             val);
     } else {
-        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                         std::nullptr_t{},
-                                                         res,
-                                                         valid_res,
-                                                         pointer,
-                                                         val);
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer, val);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1248,18 +1241,11 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
     } else {
         if (expr_->column_.element_level_) {
             // For element-level filtering without offset input (brute force)
-            processed_size =
-                ProcessDataChunksForElementLevel<T>(execute_sub_batch,
-                                                    skip_index_func,
-                                                    res,
-                                                    valid_res,
-                                                    arg_set_);
+            processed_size = ProcessDataChunksForElementLevel<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
         } else {
-            processed_size = ProcessDataChunks<T>(execute_sub_batch,
-                                                  skip_index_func,
-                                                  res,
-                                                  valid_res,
-                                                  arg_set_);
+            processed_size = ProcessDataChunks<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
         }
     }
     AssertInfo(processed_size == real_batch_size,

@@ -630,20 +630,11 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     } else {
         if (expr_->column_.element_level_) {
             // For element-level filtering without offset input (brute force)
-            processed_size =
-                ProcessDataChunksForElementLevel<T>(execute_sub_batch,
-                                                    skip_index_func,
-                                                    res,
-                                                    valid_res,
-                                                    val1,
-                                                    val2);
+            processed_size = ProcessDataChunksForElementLevel<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
         } else {
-            processed_size = ProcessDataChunks<T>(execute_sub_batch,
-                                                  skip_index_func,
-                                                  res,
-                                                  valid_res,
-                                                  val1,
-                                                  val2);
+            processed_size = ProcessDataChunks<T>(
+                execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
         }
     }
     AssertInfo(processed_size == real_batch_size,
@@ -788,12 +779,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
                                                             val1,
                                                             val2);
     } else {
-        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                         std::nullptr_t{},
-                                                         res,
-                                                         valid_res,
-                                                         val1,
-                                                         val2);
+        processed_size = ProcessDataChunks<milvus::Json>(
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, val1, val2);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

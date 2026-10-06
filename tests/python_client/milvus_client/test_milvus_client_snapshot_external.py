@@ -677,11 +677,11 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_table_snapshot_excludes_unflushed_dml(self, request):
+    def test_milvus_table_snapshot_includes_unflushed_dml(self, request):
         """
-        target: keep the snapshot boundary at flushed source data
+        target: capture pre-snapshot DML without a separate client Flush
         method: flush a baseline, then delete, update-upsert, and insert-upsert without flushing
-        expected: target contains original baseline rows and excludes all unflushed changes
+        expected: target reflects pre-snapshot mutations and excludes later source changes
         """
         client = self._client()
         cfg = self._minio_cfg(request)
@@ -695,11 +695,8 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         self.delete(client, source, ids=[0])
         self.upsert(client, source, [_core_row(1, marker=9), _core_row(SMALL_ROWS, marker=9)])
 
-        # Establish, with Strong consistency, that these unflushed mutations are
-        # actually visible in the source BEFORE the snapshot. This proves the
-        # snapshot below excluded real changes (delete of pk 0, in-place
-        # replacement of pk 1, and insert-upsert of pk SMALL_ROWS) rather than
-        # no-op writes that the target would also not contain.
+        # Confirm that the pre-snapshot Delete and Upserts are visible in the
+        # source without a client Flush. CreateSnapshot must persist them.
         source_rows = self.query(
             client,
             source,
@@ -721,18 +718,35 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
 
         snapshot = self._create_snapshot_ref(client, source, cfg, suffix="unflushed")
 
+        # Mutate the same keys after the snapshot to verify its fixed boundary:
+        # reinsert pk 0, delete the replacement at pk 1, and add a new key.
+        self.delete(client, source, ids=[1])
+        self.upsert(client, source, [_core_row(0, marker=10), _core_row(SMALL_ROWS + 1, marker=10)])
+        source_rows = self.query(
+            client,
+            source,
+            filter=f"pk in [0, 1, {SMALL_ROWS}, {SMALL_ROWS + 1}]",
+            output_fields=["pk"],
+            consistency_level="Strong",
+            limit=10,
+        )[0]
+        assert {_row_value(row, "pk") for row in source_rows} == {0, SMALL_ROWS, SMALL_ROWS + 1}
+
         schema = self._build_core_target_schema(client, snapshot, cfg, real_pk=True)
         self.create_collection(client, collection_name=target, schema=schema)
         self._refresh(client, target)
         self._index_and_load(client, target)
 
         assert self._count(client, target) == SMALL_ROWS
-        row_zero = self._query_source_pks(client, target, [0])
-        row_one = self._query_source_pks(client, target, [1])
-        assert len(row_zero) == len(row_one) == 1
-        self._assert_core_row(row_zero[0], _core_row(0))
-        self._assert_core_row(row_one[0], _core_row(1))
-        assert self._query_source_pks(client, target, [SMALL_ROWS]) == []
+        assert self._query_source_pks(client, target, [0, SMALL_ROWS + 1]) == []
+        for row_id in (1, SMALL_ROWS):
+            queried = self._query_source_pks(client, target, [row_id])
+            assert len(queried) == 1
+            self._assert_core_row(queried[0], _core_row(row_id, marker=9))
+        # Unmodified baseline data is preserved alongside the two Upserts.
+        queried = self._query_source_pks(client, target, [2])
+        assert len(queried) == 1
+        self._assert_core_row(queried[0], _core_row(2))
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("real_pk", [True, False], ids=["real_pk", "virtual_pk"])

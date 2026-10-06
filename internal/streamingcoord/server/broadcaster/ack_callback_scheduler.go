@@ -344,8 +344,7 @@ func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutab
 // (ControlChannelTimeTick returns 0), and two such tasks tie. sort.Slice is not stable:
 // its permutation of tied elements depends on the whole slice, which differs between
 // clusters (different recovery info), so tied tasks could be ordered differently on the
-// primary and on a secondary -- e.g. two ImportIDRange broadcasts for one job applying
-// different ID ranges. broadcastID is unique and travels with the replicated message, so
+// primary and on a secondary. broadcastID is unique and travels with the replicated message, so
 // every cluster breaks the tie the same way.
 func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 	sort.Slice(tasks, func(i, j int) bool {

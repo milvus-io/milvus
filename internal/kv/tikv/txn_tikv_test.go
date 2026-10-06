@@ -385,10 +385,11 @@ func TestWalkWithPagination(t *testing.T) {
 	}
 
 	t.Run("apply function error ", func(t *testing.T) {
+		callbackErr := errors.New("callback stopped")
 		err = kv.WalkWithPrefix(context.TODO(), "A", 5, func(key []byte, value []byte) error {
-			return errors.New("error")
+			return callbackErr
 		})
-		assert.Error(t, err)
+		require.EqualError(t, err, callbackErr.Error())
 	})
 
 	t.Run("get with non-exist prefix ", func(t *testing.T) {

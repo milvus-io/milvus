@@ -684,8 +684,7 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 		}
 		err = fn(iter.Key(), byteVal)
 		if err != nil {
-			loggingErr = merr.Wrap(err, fmt.Sprintf("Failed to apply fn to (%s;%s)", string(iter.Key()), string(byteVal)))
-			return loggingErr
+			return err
 		}
 		err = iter.Next()
 		if err != nil {

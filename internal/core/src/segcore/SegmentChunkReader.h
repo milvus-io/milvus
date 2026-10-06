@@ -183,6 +183,44 @@ class SegmentChunkReader {
         snapshot_ = snapshot;
     }
 
+    // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
+    // read the column from the frozen published state (same generation as the
+    // chunk boundaries above); otherwise fall back to the segment.
+    template <typename T>
+    PinWrapper<Span<T>>
+    ChunkData(FieldId field_id, int64_t chunk_id) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk data",
+                       field_id.get());
+            return column->Span(op_ctx_, chunk_id)
+                .template transform<Span<T>>([](SpanBase&& span_base) {
+                    return static_cast<Span<T>>(span_base);
+                });
+        }
+        return segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    }
+
+    // Pinned sealed string chunk view. Pinned path reads the column from the
+    // frozen snapshot so the string views come from the same generation as
+    // every other read above.
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+    ChunkStringView(FieldId field_id,
+                    int64_t chunk_id,
+                    std::optional<std::pair<int64_t, int64_t>> offset_len =
+                        std::nullopt) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting string chunk view",
+                       field_id.get());
+            return column->StringViews(op_ctx_, chunk_id, offset_len);
+        }
+        return segment_->chunk_view<std::string_view>(
+            op_ctx_, field_id, chunk_id, offset_len);
+    }
+
     int64_t
     ChunkSize(FieldId field_id, int64_t chunk_id) const {
         return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
@@ -228,7 +266,7 @@ class SegmentChunkReader {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -253,7 +291,7 @@ class SegmentChunkReader {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());

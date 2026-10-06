@@ -191,13 +191,10 @@ func (b *mutableMesasgeBuilder[H, B]) WithVChannel(vchannel string) *mutableMesa
 // OptBuildBroadcast is the option for building broadcast message.
 type OptBuildBroadcast func(*messagespb.BroadcastHeader)
 
-// OptBuildBroadcastAckSyncUp sets the ack sync up of the broadcast message.
-// Whether the broadcast operation is need to be synced up between the streaming node and the coordinator.
-// If set, the broadcast operation will be acked after the checkpoint of current vchannel reach current message.
-// the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
-// TODO: current implementation doesn't promise the ack sync up semantic,
-// it only promise FastAck operation will not be applied, wait for 3.0 to implement the ack sync up semantic.
-// only for truncate api now.
+// OptBuildBroadcastAckSyncUp disables FastAck and waits for consuming-side Ack.
+// RecoveryStorage acknowledges only after all retained consumers have completed
+// their work and installed dirty recovery metadata. Ack does not wait for global
+// checkpoint publication; unfinished publication is recovered through WAL replay.
 func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 	return func(bh *messagespb.BroadcastHeader) {
 		bh.AckSyncUp = true

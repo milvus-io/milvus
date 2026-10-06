@@ -168,12 +168,6 @@ func (s *SegmentStats) IsEmpty() bool {
 	return s.Modified.Rows == 0
 }
 
-// UpdateOnSync updates the stats of segment on sync.
-func (s *SegmentStats) UpdateOnSync(f SyncOperationMetrics) {
-	s.BinLogCounter += f.BinLogCounterIncr
-	s.BinLogFileCounter += f.BinLogFileCounterIncr
-}
-
 // Copy copies the segment stats.
 func (s *SegmentStats) Copy() *SegmentStats {
 	s2 := *s
@@ -207,10 +201,4 @@ func (m *ModifiedMetrics) Subtract(other ModifiedMetrics) {
 	}
 	m.Rows -= other.Rows
 	m.BinarySize -= other.BinarySize
-}
-
-// SyncOperationMetrics is the metrics of sync operation.
-type SyncOperationMetrics struct {
-	BinLogCounterIncr     uint64 // the counter increment of bin log
-	BinLogFileCounterIncr uint64 // the counter increment of bin log file
 }

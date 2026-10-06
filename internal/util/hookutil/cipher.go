@@ -498,7 +498,7 @@ func registerCallback() {
 	params.KmsAwsRoleARN.RegisterCallback(reloadCipherConfig)
 	params.KmsAwsExternalID.RegisterCallback(reloadCipherConfig)
 	params.RotationPeriodInHours.RegisterCallback(reloadCipherConfig)
-	params.UpdatePerieldInMinutes.RegisterCallback(reloadCipherConfig)
+	params.UpdatePeriodInMinutes.RegisterCallback(reloadCipherConfig)
 	mlog.Info(context.TODO(), "cipher config callbacks registered")
 }
 

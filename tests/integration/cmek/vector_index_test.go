@@ -145,7 +145,7 @@ func (s *VectorIndexV2Suite) TestVectorIndexData() {
 	s.Require().NoError(merr.CheckRPCCall(insert, err))
 	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{DbName: s.dbName, CollectionNames: []string{collection}})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
-	flushedIDs := flush.GetCollSegIDs()[collection].GetData()
+	flushedIDs := flush.GetFlushCollSegIDs()[collection].GetData()
 	s.Require().NotEmpty(flushedIDs)
 	s.WaitForFlush(ctx, flushedIDs, flush.GetCollFlushTs()[collection], s.dbName, collection)
 	segments := s.vectorSealedSegments(collection)

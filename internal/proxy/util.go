@@ -1253,86 +1253,10 @@ func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *
 // 1. The number of columns matches the expected count (excluding BM25 output fields)
 // 2. All field names exist in the schema
 // Returns detailed error message listing expected and provided fields if validation fails.
-func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo) error {
-	expectColumnNum := 0
-
-	// Count expected columns
-	for _, field := range schema.GetFields() {
-		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) && !typeutil.IsMinHashFunctionOutputField(field, schema.CollectionSchema) {
-			expectColumnNum++
-		}
-	}
-	for _, structField := range schema.GetStructArrayFields() {
-		expectColumnNum += len(structField.GetFields())
-	}
-
-	// Validate column count
-	if len(columns) != expectColumnNum {
-		return merr.WrapErrParameterInvalidMsg("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
-			expectColumnNum, len(columns))
-	}
-
-	// Validate field existence using schemaHelper
-	for _, fieldData := range columns {
-		_, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
-		}
-	}
-
-	return nil
-}
-
-// validateAndNormalizeFieldDataValidData validates compatibility fields once
-// when a user payload enters the proxy, then keeps only the current
-// field-specific representation for internal processing.
-func validateAndNormalizeFieldDataValidData(fields []*schemapb.FieldData) error {
-	for _, field := range fields {
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
-			return merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				field.GetFieldName(),
-			)
-		}
-	}
-	return nil
-}
 
 // fillFieldPropertiesOnly fills field properties (FieldId, Type, ElementType) from schema.
 // It assumes that columns have been validated and does not perform validation.
 // Use validateFieldDataColumns before calling this function if validation is needed.
-func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
-	for _, fieldData := range columns {
-		// Use schemaHelper to get field schema, automatically handles dynamic fields
-		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("fieldName %v not exist in collection schema", fieldData.FieldName)
-		}
-
-		fieldData.FieldId = fieldSchema.FieldID
-		fieldData.Type = fieldSchema.DataType
-
-		// Set the ElementType because it may not be set in the insert request.
-		switch fieldData.Type {
-		case schemapb.DataType_Array:
-			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-			if !ok || fd.Scalars.GetArrayData() == nil {
-				return merr.WrapErrParameterInvalidMsg("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
-					fieldData.FieldName, schema.Name)
-			}
-			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-		case schemapb.DataType_ArrayOfVector:
-			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
-			if !ok || fd.Vectors.GetVectorArray() == nil {
-				return merr.WrapErrParameterInvalidMsg("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
-					fieldData.FieldName, schema.Name)
-			}
-			fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
-		}
-	}
-
-	return nil
-}
 
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
@@ -1633,18 +1557,6 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	mlog.Debug(ctx, "credential cache populated")
 	privilegeCache.UpdateCredential(credInfo)
 	return true
-}
-
-func translatePkOutputFields(schema *schemapb.CollectionSchema) ([]string, []int64) {
-	pkNames := []string{}
-	fieldIDs := []int64{}
-	for _, field := range schema.Fields {
-		if field.IsPrimaryKey {
-			pkNames = append(pkNames, field.GetName())
-			fieldIDs = append(fieldIDs, field.GetFieldID())
-		}
-	}
-	return pkNames, fieldIDs
 }
 
 func recallCal[T string | int64](results []T, gts []T) float32 {
@@ -2206,65 +2118,6 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 	return nil
 }
 
-func checkPrimaryFieldData(ctx context.Context, allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
-	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
-	rowNums := uint32(insertMsg.NRows())
-	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	if insertMsg.NRows() <= 0 {
-		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
-	}
-
-	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, true); err != nil {
-		return nil, err
-	}
-
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
-		return nil, err
-	}
-	if primaryFieldSchema.GetNullable() {
-		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
-	}
-	var primaryFieldData *schemapb.FieldData
-	// when checkPrimaryFieldData in insert
-
-	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
-	skipAutoIDCheck := primaryFieldSchema.AutoID &&
-		typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) && (Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() || allowInsertAutoID)
-
-	if !primaryFieldSchema.AutoID || skipAutoIDCheck {
-		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
-		if err != nil {
-			log.Info(ctx, "get primary field data failed", mlog.Err(err))
-			return nil, err
-		}
-	} else {
-		// check primary key data not exist
-		if typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) {
-			return nil, merr.WrapErrParameterInvalidMsg("can not assign primary field data when auto id enabled and allow_insert_auto_id is false %v", primaryFieldSchema.Name)
-		}
-		// if autoID == true, currently support autoID for int64 and varchar PrimaryField
-		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
-		if err != nil {
-			log.Info(ctx, "generate primary field data failed when autoID == true", mlog.Err(err))
-			return nil, err
-		}
-		// if autoID == true, set the primary field data
-		// insertMsg.fieldsData need append primaryFieldData
-		insertMsg.FieldsData = append(insertMsg.FieldsData, primaryFieldData)
-	}
-
-	// parse primaryFieldData to result.IDs, and as returned primary keys
-	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
-	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, err
-	}
-
-	return ids, nil
-}
-
 // check whether insertMsg has all fields in schema
 func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
 	log := mlog.With(mlog.String("collection", schema.GetName()))
@@ -2350,94 +2203,6 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 		}
 	}
 	return nil
-}
-
-// checkUpsertPrimaryFieldData validates and returns the PKs, applying only
-// caller-allocated AutoIDs. allocatedIDs maps zero-based row offsets in the
-// supplied field data to IDs; a nil or empty map leaves the input fields unchanged.
-// A PK column is required; non-PK fields are neither validated nor filled, so
-// partial patches are accepted. When IDs are supplied, the PK column is replaced
-// only after validation, collision checking, and parsing succeed. Allocation and
-// retry state remain the caller's responsibility.
-func checkUpsertPrimaryFieldData(
-	schema *schemaInfo,
-	fields []*schemapb.FieldData,
-	numRows uint64,
-	allocatedIDs map[int]int64,
-) (*schemapb.IDs, error) {
-	if numRows == 0 {
-		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(numRows), "num_rows should be greater than 0")
-	}
-	pkSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
-	if err != nil {
-		return nil, err
-	}
-	if pkSchema.GetNullable() {
-		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
-	}
-	primaryField, err := typeutil.GetPrimaryFieldData(fields, pkSchema)
-	if err != nil {
-		return nil, err
-	}
-	pk := proto.Clone(primaryField).(*schemapb.FieldData)
-	if err := fieldvalidator.NewValidateUtil().Validate([]*schemapb.FieldData{pk}, schema.SchemaHelper, numRows); err != nil {
-		return nil, err
-	}
-	if len(allocatedIDs) > 0 {
-		ids := make([]int64, 0, len(allocatedIDs))
-		rows := make([]int64, 0, len(allocatedIDs))
-		indices := make([]int64, 0, len(allocatedIDs))
-		for row, id := range allocatedIDs {
-			if row < 0 || row >= typeutil.GetPKSize(pk) {
-				return nil, merr.WrapErrServiceInternalMsg("upsert allocated AutoID row %d is out of range", row)
-			}
-			indices = append(indices, int64(len(ids)))
-			ids = append(ids, id)
-			rows = append(rows, int64(row))
-		}
-		generated, err := autoGenPrimaryFieldData(pkSchema, ids)
-		if err != nil {
-			return nil, err
-		}
-		if err := typeutil.UpdateFieldDataByColumn(pk, generated, rows, indices); err != nil {
-			return nil, err
-		}
-		// Supplied PKs can contain arbitrary values, including a generated ID.
-		duplicate, err := CheckDuplicatePkExist(pkSchema, []*schemapb.FieldData{pk})
-		if err != nil {
-			return nil, err
-		}
-		if duplicate {
-			return nil, merr.WrapErrServiceInternalMsg("upsert: duplicate primary keys after applying allocated AutoIDs")
-		}
-	}
-	ids, err := parsePrimaryFieldData2IDs(pk)
-	if err != nil {
-		return nil, err
-	}
-	if len(allocatedIDs) > 0 {
-		for index, field := range fields {
-			if field == primaryField {
-				fields[index] = pk
-				break
-			}
-		}
-	}
-	return ids, nil
-}
-
-func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
-	if len(insertMsg.GetPartitionName()) > 0 && !Params.ProxyCfg.SkipPartitionKeyCheck.GetAsBool() {
-		return nil, merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
-	}
-
-	for _, fieldData := range insertMsg.GetFieldsData() {
-		if fieldData.GetFieldId() == fieldSchema.GetFieldID() {
-			return fieldData, nil
-		}
-	}
-
-	return nil, merr.WrapErrParameterInvalidMsg("partition key not specify when insert")
 }
 
 func getCollectionProgress(
@@ -2578,48 +2343,6 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, metaCache Cache
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
-	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
-	if err != nil {
-		return nil, err
-	}
-	insertMsg.HashValues = hashValues
-
-	numChannels := len(channelNames)
-	if numChannels == 0 {
-		return nil, nil
-	}
-
-	numRows := len(insertMsg.HashValues)
-	avgCapacity := (numRows / numChannels) + 1
-
-	channel2RowOffsets := make(map[string][]int, numChannels)
-
-	for offset, channelID := range insertMsg.HashValues {
-		idx := int(channelID)
-		if idx >= numChannels {
-			continue
-		}
-
-		channelName := channelNames[idx]
-
-		if _, ok := channel2RowOffsets[channelName]; !ok {
-			channel2RowOffsets[channelName] = make([]int, 0, avgCapacity)
-		}
-		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
-	}
-
-	return channel2RowOffsets, nil
-}
-
-func assignChannelsByNamespace(namespace string, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
-	if len(channelNames) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("no virtual channels available for namespace sharding")
-	}
-	channelID := typeutil.HashNamespace2Channels(namespace, channelNames)
-	return assignChannelsByChannel(channelID, channelNames, insertMsg), nil
-}
-
 func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg *msgstream.InsertMsg) map[string][]int {
 	insertMsg.HashValues = make([]uint32, insertMsg.NumRows)
 	for i := range insertMsg.HashValues {
@@ -2636,18 +2359,13 @@ func assignChannelsByChannel(channelID uint32, channelNames []string, insertMsg 
 	return channel2RowOffsets
 }
 
-func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := metaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := metaCache.GetCollectionSchema(ctx, dbName, collName)
-	if err != nil {
-		return nil, err
-	}
-
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -2656,12 +2374,12 @@ func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, co
 	return hashedPartitionNames, err
 }
 
-func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
+func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
 	}
 
-	return assignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
+	return assignPartitionKeys(ctx, metaCache, dbName, collName, schema, []*planpb.GenericValue{
 		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
 	})
 }
@@ -2730,16 +2448,6 @@ func doCheckDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgst
 
 func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	return doCheckDynamicFieldData(schema, insertMsg, false)
-}
-
-// checkDynamicFieldDataForPartialUpdate is a relaxed version of checkDynamicFieldData
-// for partial updates. After schema evolution, $meta may legitimately contain keys
-// matching static field names (e.g., a dynamic field "end_timestamp" that was later
-// added as a static column). This function validates JSON format and rejects the
-// reserved $meta key, but skips the static field name conflict check so that
-// existing dynamic field data is preserved.
-func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
 func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
@@ -3207,26 +2915,6 @@ func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	fields := make([]string, 0)
 	for _, fSchema := range collSchema.Functions {
 		fields = append(fields, fSchema.OutputFieldNames...)
-	}
-	return fields
-}
-
-func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
-	fields := make([]string, 0)
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			fields = append(fields, fSchema.OutputFieldNames...)
-		}
-	}
-	return fields
-}
-
-func GetMinHashFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
-	fields := make([]string, 0)
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_MinHash {
-			fields = append(fields, fSchema.OutputFieldNames...)
-		}
 	}
 	return fields
 }

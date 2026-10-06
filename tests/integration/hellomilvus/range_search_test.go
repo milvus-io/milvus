@@ -85,9 +85,9 @@ func (s *HelloMilvusSuite) TestRangeSearchIP() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -234,9 +234,9 @@ func (s *HelloMilvusSuite) TestRangeSearchL2() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -375,9 +375,9 @@ func (s *HelloMilvusSuite) TestRangeSearchElementLevelL2() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	s.Require().True(has)
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(segmentIDs.GetData())
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.Require().True(has)
 	s.WaitForFlush(ctx, segmentIDs.GetData(), flushTs, dbName, collectionName)

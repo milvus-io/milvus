@@ -41,6 +41,7 @@
 #include "exec/expression/MatchExpr.h"
 #include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
+#include "exec/expression/RawExprCacheAdapter.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "exec/expression/UnaryExpr.h"
@@ -166,6 +167,13 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
 
     if (OPTIMIZE_EXPR_ENABLED.load()) {
         OptimizeCompiledExprs(context, exprs);
+    }
+
+    if (ExprResCacheManager::IsEnabled()) {
+        auto* query_context = context->get_query_context();
+        DecorateRawExprCache(exprs,
+                             query_context->get_op_context(),
+                             query_context->get_enable_sub_expr_cache_write());
     }
 
     return exprs;

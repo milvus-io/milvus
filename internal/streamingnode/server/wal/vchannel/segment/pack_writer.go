@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -86,7 +87,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 	}
 	insertData, bm25Stats, err := buildGrowingInsertData(schema, pack)
 	if err != nil {
-		return nil, retry.Unrecoverable(err)
+		return nil, err
 	}
 
 	metaCache := newGrowingSegmentMetaCache(pack.Meta, schema)
@@ -142,7 +143,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) ([]*storage.InsertData, map[int64]*storage.BM25Stats, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, retry.Unrecoverable(err)
 	}
 	insertMessages := make([]*msgstream.InsertMsg, 0, len(pack.Inserts))
 	for _, raw := range pack.Inserts {
@@ -185,15 +186,34 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			})
 			return nil
 		}); err != nil {
-			return nil, nil, err
+			return nil, nil, retry.Unrecoverable(err)
 		}
 	}
 	if len(insertMessages) == 0 {
-		return nil, nil, merr.WrapErrServiceInternalMsg("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID)
+		return nil, nil, retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing insert pack has no insert messages, segmentID=%d", pack.SegmentID))
+	}
+	// WAL inserts may predate write-before-materialization. Use the pack's
+	// schema, and own fallback runners per pack: Drop can already have released
+	// the WAL's managed runners, and this writer is shared by multiple segments.
+	functionStore := function.NewFunctionRunnerLocalStore()
+	defer functionStore.Close()
+	outputFieldIDs, err := functionStore.OutputFieldIDs(schema)
+	if err != nil {
+		return nil, nil, retry.Unrecoverable(err)
+	}
+	for _, msg := range insertMessages {
+		if function.HasAllFieldDataByID(msg.GetFieldsData(), outputFieldIDs) {
+			continue
+		}
+		if err := functionStore.FillEmbeddingData(pack.CollectionID, schema, msg.InsertRequest); err != nil {
+			// Runner initialization can fail transiently (e.g. fetching a remote
+			// analyzer resource). Keep the WAL handles pending and retry the pack.
+			return nil, nil, err
+		}
 	}
 	prepared, err := writebuffer.PrepareInsert(schema, pkField, insertMessages)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, retry.Unrecoverable(err)
 	}
 	insertData := lo.FlatMap(prepared, func(data *writebuffer.InsertData, _ int) []*storage.InsertData {
 		if data.GetSegmentID() != pack.SegmentID {

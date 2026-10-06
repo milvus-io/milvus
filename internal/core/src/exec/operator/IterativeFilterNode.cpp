@@ -366,9 +366,10 @@ PhyIterativeFilterNode::GetOutput() {
         scalar_cost / 1000);
 
     if (!is_native_supported_) {
-        tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
-                                     need_process_rows_,
-                                     need_process_rows_ - bitset.view().count()));
+        tracer::AddEvent(
+            fmt::format("total_processed: {}, matched: {}",
+                        need_process_rows_,
+                        need_process_rows_ - bitset.view().count()));
     }
 
     return input_;
