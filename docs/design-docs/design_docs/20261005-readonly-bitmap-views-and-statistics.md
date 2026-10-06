@@ -161,6 +161,18 @@ An empty callback preserves it. This checks cache reuse, not query latency or QP
 PK regression coverage reads statistics within the predicate callback, throws
 mid-batch, then verifies subsequent writes and reads after stack unwinding.
 
+The branch was then rebased onto master `6140f5f55c`, including the sorted
+membership optimization from #53901. Both string-index NotIn implementations
+retain the new membership algorithm, accept ReadView validity, and initialize
+owned output by copying that view. Membership writes use a batch scope.
+The rebuilt native `all_tests` passed all 198 selected tests from 40 suites
+with exit status 0, covering sorted membership, memory/mmap string indexes,
+scalar indexes, bitmap columns, nullable predicate conversion, serialization,
+filter ownership, Tantivy callbacks, PK ranges and MVCC. Checksums matched all
+155 source/build inputs, including the new upstream membership helper and tests.
+The formatting and whitespace checks passed. The previous validation limits
+remain; this selection does not rerun every Milvus test or measure query QPS.
+
 The bitset library sources are unchanged from `7791e7c56c`. At that head,
 ARM library-only Release and ASan/UBSan each passed 354 tests plus the C++17
 header-only check. Cases cover nested writable windows, owner-statistics
