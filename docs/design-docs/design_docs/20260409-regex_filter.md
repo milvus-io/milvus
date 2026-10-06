@@ -238,7 +238,7 @@ The `RegexMatch` op is integrated into the `UnaryExpr` execution pipeline:
 - **Scalar index path**: Indexes that support `PatternMatch()` (Sort, Marisa, Bitmap, Inverted) iterate unique values and apply matching, which is O(unique\_values) instead of O(total\_rows).
 - **Execution ordering**: Both `=~` and `!~` are classified as "heavy" operations (same as `LIKE`), so they are reordered after cheaper indexed expressions in conjunctive filters. For `!~`, `IsLikeExpr` recursively checks through the NOT wrapper.
 
-### 3. Index Optimization: Ngram Index (Primary Path)
+### 3. Index Optimization: Ngram Index
 
 The ngram index is the primary optimization path for regex queries. It uses a two-phase approach:
 
@@ -257,6 +257,18 @@ The ngram index is the primary optimization path for regex queries. It uses a tw
 3. Eliminate false positives from the coarse filter.
 
 This is the same two-phase architecture already used by `LIKE` on ngram indexes.
+
+### 3.1 FMIndex Candidate Path
+
+For a `VARCHAR` field with an `FMINDEX`, regex preparation uses RE2's
+`FilteredRE2` prefilter to build a bounded Boolean condition over required byte
+literals. FMIndex counts the retained literals on the current segment, selects
+the lowest-cost child of each AND, evaluates the selected condition as
+candidate bitmaps, and the expression layer rechecks candidate values with the
+canonical RE2 matcher. AND/OR relationships remain intact, so alternatives
+retain coverage while selective literals can be chosen per segment. See the
+[FMIndex regex candidate design](20261004-fmindex-regex-candidates.md) for the
+condition contract and budgets.
 
 **Literal extraction strategy** (`extract_literals_from_regex`): A conservative parser walks the regex pattern character-by-character, collecting runs of non-metacharacter bytes. Key behaviors:
 
@@ -327,6 +339,7 @@ Regex filtering works with all index types that support LIKE, using the same or 
 |------------|----------------------|
 | **No index (brute force)** | Volnitsky pre-filter (if extractable literal exists) + RE2 PartialMatch on raw data |
 | **Ngram index** | Two-phase: ngram filter (literal extraction) + RE2 PartialMatch verify |
+| **FMIndex** | Count-selected Boolean candidate bitmaps + RE2 PartialMatch verify |
 | **Inverted index (tantivy)** | Convert pattern to tantivy-compatible syntax (see below), call `regex_query` on term dictionary |
 | **Sort index (StringIndexSort)** | Iterate unique values with RE2 PartialMatch, union posting lists. O(unique\_values). Both Memory and Mmap impls. |
 | **Marisa index (StringIndexMarisa)** | Iterate unique trie keys with RE2 PartialMatch, union row offsets. O(unique\_values). |
@@ -378,12 +391,16 @@ Regex supports the same field types and access patterns as LIKE:
 - `regex_to_tantivy_pattern`: `(?s)`/`(?-s)` flag awareness, scoped groups, escaped dots, character classes, non-capturing groups, combined flags.
 - ClickHouse edge case alignment: empty pattern, `.*`, dot\_nl, `(?-s)`, alternation, Unicode codepoints, emoji, word boundaries, backreference rejection.
 - Ngram two-phase execution (Phase1 + Phase2) produces correct results for `RegexMatch`.
+- FMIndex candidate conditions preserve nested alternatives, Count selection,
+  NULL/NOT semantics, batch and multi-chunk sealed reads, and invalid syntax.
 - NULL field values produce NULL results (excluded from filter).
 
 ### Integration Tests
 - End-to-end: create collection with VARCHAR field, insert data, query with `=~` and `!~`, verify results.
 - With ngram index: create ngram index on field, verify regex queries use ngram acceleration.
-- All index types: inverted, sort, marisa, bitmap, ngram — verified across 25 test patterns.
+- With FMIndex: create an FM index on a VARCHAR field, verify Count-selected
+  candidates and canonical RE2 recheck preserve results.
+- All index types: inverted, sort, marisa, bitmap, ngram, FMIndex — verified across the regex cases above.
 - Case-insensitive: verify `(?i)` patterns return correct results with and without ngram index.
 - JSON field: `metadata["key"] =~ "pattern"`.
 - Combined with vector search: hybrid search with regex filter.
