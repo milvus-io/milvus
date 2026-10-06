@@ -268,6 +268,7 @@ class DeletedRecord {
         }
 
         auto it = hit_snapshot ? next_iter : accessor.begin();
+        auto write_scope = bitset.scoped_write();
 
         while (it != accessor.end() && it->first <= query_timestamp) {
             if (it->second < insert_barrier) {

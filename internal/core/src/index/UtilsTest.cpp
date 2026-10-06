@@ -323,3 +323,31 @@ TEST(UtilIndex, SetBitsetHandlesEmptyInput) {
     EXPECT_EQ(sealed.count(), 0);
     EXPECT_EQ(growing.count(), 0);
 }
+
+TEST(UtilIndex, SetBitsetCallbacksRefreshWarmedStatistics) {
+    for (const auto callback : {SetBitsetSealed, SetBitsetGrowing}) {
+        TargetBitmap bitmap(129, false);
+        const auto view = bitmap.read_view();
+        ASSERT_EQ(view.count(), 0);
+        ASSERT_TRUE(view.none());
+        const uint32_t ids[] = {1, 63, 64, 128};
+        callback(&bitmap, ids, 4);
+        EXPECT_EQ(view.count(), 4);
+        EXPECT_EQ(bitmap.read_view().count(), 4);
+        EXPECT_FALSE(view.none());
+        EXPECT_FALSE(view.all());
+
+        std::vector<uint32_t> all_ids;
+        for (uint32_t id = 0; id < bitmap.size(); ++id) {
+            all_ids.push_back(id);
+        }
+        callback(&bitmap, all_ids.data(), all_ids.size());
+        EXPECT_TRUE(view.all());
+        EXPECT_EQ(view.count(), 129);
+        callback(&bitmap, nullptr, 0);
+        EXPECT_EQ(view.count(), 129);
+        bitmap.reset(128);
+        EXPECT_EQ(view.count(), 128);
+        EXPECT_FALSE(view.all());
+    }
+}

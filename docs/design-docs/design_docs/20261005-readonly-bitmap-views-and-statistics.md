@@ -82,6 +82,10 @@ Native kernels may use a scoped write pointer that must not outlive its scope.
 Raw pointers reference base storage, so callers must honor the view bit offset
 and interval. The typed kernels apply these offsets automatically.
 
+Tantivy result callbacks use a scoped raw pointer rather than escaping the
+owner buffer. Empty callbacks leave statistics intact. PK range writers and
+the MVCC deletion-list query loop open a batch scope around fixed-size writes.
+
 A write scope clears the owner's statistics on entry and keeps reads uncached
 while editing, including exception unwinding. Nested scopes on one owner are
 supported. Per-bit proxies remain safe when retained and assigned later. Owner
@@ -127,7 +131,8 @@ and architecture-specific validation remain required before publishing claims.
 
 The native Release build uses GCC 14.2, Knowhere `16e873b1`, MilvusStorage
 `15ab3d7`, simdjson 5.0.2 and milvus-common `1.0.0-45fca32`, including the
-real Go/native plan-parser bridge. After merging master `243ebd872b`, all
+real Go/native plan-parser bridge. At `0abf10de98`, after merging master
+`243ebd872b`, all
 three targets (`all_tests`, `bitset_test`, and `json_stats_test`) built.
 
 The affected Milvus selection ran 5,425 tests from 150 suites: 5,423 passed and
@@ -139,6 +144,22 @@ and all 118 standalone JSON stats tests also passed. Each test process and the
 complete validation driver exited 0. Checksums for all 146 changed C++/build files
 matched between local source and the test machine. The CI clang-format 15 script
 was idempotent and `git diff --check` passed.
+
+The subsequent batch-write follow-up rebuilt `all_tests` and `json_stats_test`.
+Its PK/MVCC/callback selection passed 191 tests with exit status 0. The direct
+text/inverted/JSON index selection passed 130 tests and skipped two floating-point
+array-equality parameter combinations. Two TEXT/LOB fixtures failed before reaching
+bitmap callbacks because they try to create `/sealed_text_lob_index_*` and
+`/growing_text_lob_index_*` directories without root-directory write permission;
+that test process exited 1. The standalone JSON stats suite passed all 118 tests
+with exit status 0. Local and native checksums matched all 148 changed C++/build files.
+
+A native probe instrumented full-count kernel calls for the real sealed and
+growing callbacks at one million and ten million bits. Two consecutive count reads
+after a write now scan once, and a subsequent write invalidates that cached count.
+An empty callback preserves it. This checks cache reuse, not query latency or QPS.
+PK regression coverage reads statistics within the predicate callback, throws
+mid-batch, then verifies subsequent writes and reads after stack unwinding.
 
 The bitset library sources are unchanged from `7791e7c56c`. At that head,
 ARM library-only Release and ASan/UBSan each passed 354 tests plus the C++17

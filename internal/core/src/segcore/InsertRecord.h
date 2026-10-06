@@ -332,6 +332,7 @@ class OffsetOrderedMap : public OffsetMap {
                proto::plan::OpType op,
                BitsetTypeWriteView bitset,
                Condition condition) const override {
+        auto write_scope = bitset.scoped_write();
         std::shared_lock<std::shared_mutex> lck(mtx_);
         const T& target = std::get<T>(pk);
 
@@ -656,6 +657,7 @@ class OffsetOrderedArray : public OffsetMap {
                proto::plan::OpType op,
                BitsetTypeWriteView bitset,
                Condition condition) const override {
+        auto write_scope = bitset.scoped_write();
         check_search();
         auto lower_bound_comp = [](const std::pair<T, int64_t>& elem,
                                    const T& value) {
@@ -938,6 +940,7 @@ class VirtualPKOffsetMap : public OffsetMap {
                proto::plan::OpType op,
                BitsetTypeWriteView bitset,
                Condition condition) const override {
+        auto write_scope = bitset.scoped_write();
         int64_t target = std::get<int64_t>(pk);
         // Virtual PKs for this segment are [base, base+num_rows_)
         // where base = shifted_segment_id_

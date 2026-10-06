@@ -640,12 +640,19 @@ TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
     BitsetType bitsets(N);
     BitsetTypeView bitsets_view(bitsets);
     int64_t insert_barrier = N;
+    ASSERT_EQ(bitsets_view.count(), 0);
+    ASSERT_TRUE(bitsets_view.none());
     delete_record.Query(bitsets, insert_barrier, query_timestamp);
+    EXPECT_EQ(bitsets_view.count(), 1);
+    EXPECT_FALSE(bitsets_view.none());
 
     for (int i = 0; i < N; i++) {
         bool expected = (i == 0);
         ASSERT_EQ(bitsets_view[i], expected) << i;
     }
+    bitsets.reset(0);
+    EXPECT_EQ(bitsets_view.count(), 0);
+    EXPECT_TRUE(bitsets_view.none());
 }
 
 TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
