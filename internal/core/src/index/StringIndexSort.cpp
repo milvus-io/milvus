@@ -16,6 +16,7 @@
 
 #include "index/IndexLoadUtils.h"
 #include "index/StringIndexSort.h"
+#include "index/SortedMembership.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "common/FastMem.h"
@@ -1287,14 +1288,21 @@ StringIndexSortMemoryImpl::LoadFromData(const uint8_t* data,
     }
 }
 
-size_t
-StringIndexSortMemoryImpl::FindValueIndex(const std::string& value) const {
-    auto it =
-        std::lower_bound(unique_values_.begin(), unique_values_.end(), value);
-    if (it != unique_values_.end() && *it == value) {
-        return std::distance(unique_values_.begin(), it);
-    }
-    return std::numeric_limits<size_t>::max();
+void
+StringIndexSortMemoryImpl::ApplyMembership(size_t n,
+                                           const std::string* values,
+                                           TargetBitmap& bitset,
+                                           bool in) const {
+    detail::VisitSortedStringMatches(
+        unique_values_.size(),
+        n,
+        values,
+        [&](size_t i) { return std::string_view(unique_values_[i]); },
+        [&](size_t i) {
+            for (uint32_t row : posting_lists_[i]) {
+                bitset[row] = in;
+            }
+        });
 }
 
 const TargetBitmap
@@ -1302,17 +1310,7 @@ StringIndexSortMemoryImpl::In(size_t n,
                               const std::string* values,
                               size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
-
-    for (size_t i = 0; i < n; ++i) {
-        size_t idx = FindValueIndex(values[i]);
-        if (idx != std::numeric_limits<size_t>::max()) {
-            const auto& posting_list = posting_lists_[idx];
-            for (uint32_t row_id : posting_list) {
-                bitset[row_id] = true;
-            }
-        }
-    }
-
+    ApplyMembership(n, values, bitset, true);
     return bitset;
 }
 
@@ -1321,17 +1319,9 @@ StringIndexSortMemoryImpl::NotIn(size_t n,
                                  const std::string* values,
                                  size_t total_num_rows,
                                  const TargetBitmap& valid_bitset) {
-    auto in_bitset = In(n, values, total_num_rows);
-    in_bitset.flip();
-
-    // Reset null values
-    for (size_t i = 0; i < total_num_rows; ++i) {
-        if (!valid_bitset[i]) {
-            in_bitset.reset(i);
-        }
-    }
-
-    return in_bitset;
+    auto bitset = valid_bitset.clone();
+    ApplyMembership(n, values, bitset, false);
+    return bitset;
 }
 
 const TargetBitmap
@@ -1791,30 +1781,6 @@ StringIndexSortMmapImpl::MmapAndParse(size_t data_size,
 }
 
 size_t
-StringIndexSortMmapImpl::FindValueIndex(const std::string& value) const {
-    std::string_view search_value(value);
-    size_t left = 0;
-    size_t right = unique_count_;
-
-    while (left < right) {
-        size_t mid = left + (right - left) / 2;
-        MmapEntry entry = GetEntry(mid);
-        std::string_view entry_sv = entry.get_string_view();
-
-        int cmp = entry_sv.compare(search_value);
-        if (cmp < 0) {
-            left = mid + 1;
-        } else if (cmp > 0) {
-            right = mid;
-        } else {
-            return mid;
-        }
-    }
-
-    return unique_count_;
-}
-
-size_t
 StringIndexSortMmapImpl::LowerBound(const std::string_view& value) const {
     size_t left = 0, right = unique_count_;
     while (left < right) {
@@ -1842,22 +1808,28 @@ StringIndexSortMmapImpl::UpperBound(const std::string_view& value) const {
     return left;
 }
 
+void
+StringIndexSortMmapImpl::ApplyMembership(size_t n,
+                                         const std::string* values,
+                                         TargetBitmap& bitset,
+                                         bool in) const {
+    detail::VisitSortedStringMatches(
+        unique_count_,
+        n,
+        values,
+        [&](size_t i) { return GetEntry(i).get_string_view(); },
+        [&](size_t i) {
+            GetEntry(i).for_each_row_id(
+                [&](uint32_t row) { bitset[row] = in; });
+        });
+}
+
 const TargetBitmap
 StringIndexSortMmapImpl::In(size_t n,
                             const std::string* values,
                             size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
-
-    for (size_t i = 0; i < n; ++i) {
-        size_t idx = FindValueIndex(values[i]);
-        if (idx < unique_count_) {
-            MmapEntry entry = GetEntry(idx);
-            // Set bits for all row_ids in posting list
-            entry.for_each_row_id(
-                [&bitset](uint32_t row_id) { bitset.set(row_id); });
-        }
-    }
-
+    ApplyMembership(n, values, bitset, true);
     return bitset;
 }
 
@@ -1866,16 +1838,9 @@ StringIndexSortMmapImpl::NotIn(size_t n,
                                const std::string* values,
                                size_t total_num_rows,
                                const TargetBitmap& valid_bitset) {
-    auto in_bitset = In(n, values, total_num_rows);
-    in_bitset.flip();
-
-    for (size_t i = 0; i < total_num_rows; ++i) {
-        if (!valid_bitset[i]) {
-            in_bitset.reset(i);
-        }
-    }
-
-    return in_bitset;
+    auto bitset = valid_bitset.clone();
+    ApplyMembership(n, values, bitset, false);
+    return bitset;
 }
 
 const TargetBitmap
