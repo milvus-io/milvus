@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <unordered_map>
+#include <bitset>
 #include <memory>
 #include <string>
 #include <thread>
@@ -29,6 +31,31 @@
 #include "index/fmindex/FMIndex.h"
 
 using milvus::PartialRegexMatcher;
+using milvus::RegexLiteralCondition;
+
+namespace {
+std::vector<std::string>
+ConditionAtoms(const RegexLiteralCondition& condition) {
+    std::vector<std::string> atoms;
+    condition.Evaluate(
+        [&](const std::string& literal) {
+            atoms.push_back(literal);
+            return true;
+        },
+        [] { return true; });
+    return atoms;
+}
+
+bool
+ConditionMatches(const RegexLiteralCondition& condition,
+                 const std::string& row) {
+    return condition.Evaluate(
+        [&](const std::string& literal) {
+            return row.find(literal) != std::string::npos;
+        },
+        [] { return true; });
+}
+}  // namespace
 
 TEST(RegexRequiredPrefix, ExtractionAndBounds) {
     EXPECT_EQ(PartialRegexMatcher("foo.*bar").RequiredPrefix(), "foo");
@@ -63,76 +90,333 @@ TEST(RegexRequiredPrefix, DeclinesExternalWordBoundaryContext) {
     EXPECT_TRUE(PartialRegexMatcher(R"(\b-foo|bar)")(std::string("a-foo")));
 }
 
-TEST(RegexRequiredPrefix, IndexRequirementsKeepIndependentSelectiveLiterals) {
-    for (const auto& [pattern, expected] :
-         std::vector<std::pair<std::string, std::vector<std::string>>>{
-             {".*RARE", {"RARE"}},
-             {"x.*RARE123END", {"RARE123END", "x"}},
-             {"RARE.*COMMON", {"COMMON", "RARE"}},
-             {"foo.*foobar", {"foobar"}},
-             {"[a]needle", {"aneedle"}},
-             {"foo|foobar", {"foo"}},
-             {R"(.*\x41)", {"A"}},
-             {R"(\Bfoo)", {"foo"}},
-             {R"(\Bfoo|bar)", {}},
-             {"foo|bar", {}},
-             {"foo|", {}},
-             {"(?i)foo", {}},
-             {"a*", {}},
-             {"", {}}}) {
-        EXPECT_EQ(PartialRegexMatcher(pattern).RequiredIndexLiterals(), expected)
+TEST(RegexRequiredPrefix, IndexConditionsRetainBooleanRelationships) {
+    using Op = RegexLiteralCondition::Op;
+    const auto literal = RegexLiteralCondition::Literal;
+    auto both = PartialRegexMatcher("foo.*bar").RequiredIndexCondition();
+    EXPECT_EQ(both,
+              RegexLiteralCondition::Combine(
+                  Op::And, literal("foo"), literal("bar")));
+    auto branches =
+        PartialRegexMatcher("foo.*bar|baz.*qux").RequiredIndexCondition();
+    EXPECT_EQ(branches,
+              RegexLiteralCondition::Combine(
+                  Op::Or,
+                  RegexLiteralCondition::Combine(
+                      Op::And, literal("foo"), literal("bar")),
+                  RegexLiteralCondition::Combine(
+                      Op::And, literal("baz"), literal("qux"))));
+    const auto suffix =
+        PartialRegexMatcher("(ERROR|WARN).*timeout").RequiredIndexCondition();
+    double cost;
+    EXPECT_EQ(suffix.Select([](const std::string& s)
+                                -> size_t { return s == "timeout" ? 1 : 1000; },
+                            cost),
+              literal("timeout"));
+    EXPECT_EQ(cost, 1);
+    auto selected = branches.Select(
+        [](const std::string& s) -> size_t {
+            return s == "bar" || s == "baz" ? 1 : 1000;
+        },
+        cost);
+    EXPECT_EQ(
+        selected,
+        RegexLiteralCondition::Combine(Op::Or, literal("bar"), literal("baz")));
+    EXPECT_EQ(cost, 2);
+    EXPECT_TRUE(ConditionMatches(selected, "bar"));
+    EXPECT_TRUE(ConditionMatches(selected, "baz"));
+    EXPECT_FALSE(ConditionMatches(branches, "bar"));
+    for (const std::string pattern :
+         {"a|timeout", "(?i:foo)|bar", "foo|", "a*", "", ".*\\x41"}) {
+        EXPECT_TRUE(
+            PartialRegexMatcher(pattern).RequiredIndexCondition().IsTrue())
             << pattern;
     }
-    EXPECT_EQ(PartialRegexMatcher(".*" + std::string(500, 'x') + "END")
-                  .RequiredIndexLiterals(),
-              (std::vector<std::string>{std::string(64, 'x'),
-                                       std::string(61, 'x') + "END"}));
-    EXPECT_EQ(PartialRegexMatcher("RARE.*BEGIN" + std::string(100, 'x') + "END")
-                  .RequiredIndexLiterals(),
-              (std::vector<std::string>{"BEGIN" + std::string(59, 'x'),
-                                       std::string(61, 'x') + "END",
-                                       "RARE"}));
+    // Minimum means two BYTES, so a single multi-byte Unicode rune qualifies.
+    EXPECT_EQ(PartialRegexMatcher(".*é").RequiredIndexCondition(),
+              literal("é"));
+    EXPECT_EQ(PartialRegexMatcher(R"(.*\x41\141\.)").RequiredIndexCondition(),
+              literal("Aa."));
+    EXPECT_EQ(
+        PartialRegexMatcher(".*COMMON_LONG.*RARE").RequiredIndexCondition(),
+        RegexLiteralCondition::Combine(
+            Op::And, literal("COMMON_LONG"), literal("RARE")));
+}
+
+TEST(RegexRequiredPrefix, PrefilterByteMappingPreservesBranchCoverage) {
+    // RE2 merges lowercased atoms across branches. A spelling from one branch
+    // cannot constrain a folded or character-class occurrence in another.
+    for (const auto& [pattern, match] :
+         std::vector<std::pair<std::string, std::string>>{
+             {"(?i:foo).*bar|foo.*baz", "FOO bar"},
+             {"foo.*baz|(?i:foo).*bar", "FoO bar"},
+             {"[fF]oo.*bar|foo.*baz", "Foo bar"},
+             {"(?i:foo).*bar|foo.*bar", "FOO bar"},
+             {"(?i:foo)|foo.*bar", "FOO"},
+             {"((?i:foo).*bar|foo.*baz).*END", "FOO bar END"},
+             {"(?i:kk).*bar|kk.*baz", "KK bar"},
+             {"(?i:éé).*bar|éé.*baz", "ÉÉ bar"},
+             {"Foo.*bar|foo.*baz", "Foo bar"}}) {
+        SCOPED_TRACE(pattern);
+        PartialRegexMatcher matcher(pattern);
+        ASSERT_TRUE(matcher(match));
+        const auto condition =
+            PartialRegexMatcher::PrepareIndexCondition(pattern);
+        EXPECT_TRUE(ConditionMatches(condition, match));
+
+        // No exact lowercase spelling exists on this segment for the folded
+        // cases. Choosing it with Count == 0 must never remove a real match.
+        std::vector<std::string> rows{match, "bar baz END", "unrelated"};
+        std::vector<std::string_view> docs(rows.begin(), rows.end());
+        milvus::index::fmindex::FMIndex index;
+        index.Build(docs, 8);
+        double cost;
+        const auto selected = condition.Select(
+            [&](const std::string& atom) {
+                return index.Count(
+                    reinterpret_cast<const uint8_t*>(atom.data()), atom.size());
+            },
+            cost);
+        auto lookup = [&](const std::string& atom) {
+            std::bitset<3> hits;
+            index.VisitMatchingDocs(
+                reinterpret_cast<const uint8_t*>(atom.data()),
+                atom.size(),
+                [&](uint64_t row) { hits.set(row); });
+            return hits;
+        };
+        auto universe = [] { return std::bitset<3>().set(); };
+        const auto full = condition.Evaluate(lookup, universe);
+        const auto candidates = selected.Evaluate(lookup, universe);
+        for (size_t row = 0; row < rows.size(); ++row) {
+            EXPECT_EQ(full[row] && matcher(rows[row]), matcher(rows[row]));
+            EXPECT_EQ(candidates[row] && matcher(rows[row]),
+                      matcher(rows[row]));
+        }
+    }
+}
+
+TEST(RegexRequiredPrefix, UnmappedAtomsRetainIndependentConditions) {
+    const std::string long_text = std::string(500, 'x') + "COMMON_LONG";
+    const std::vector<std::string> rows{long_text, long_text + "RARE"};
+    std::vector<std::string_view> docs(rows.begin(), rows.end());
+    milvus::index::fmindex::FMIndex index;
+    index.Build(docs, 8);
+    for (const std::string pattern : {".*x{500}COMMON_LONG.*RARE",
+                                      ".*RARE.*x{500}COMMON_LONG",
+                                      "(?:x{500}COMMON_LONG|OTHER).*RARE",
+                                      "(?i:foo)?.*RARE"}) {
+        SCOPED_TRACE(pattern);
+        const auto condition =
+            PartialRegexMatcher::PrepareIndexCondition(pattern);
+        ASSERT_FALSE(condition.IsTrue());
+        EXPECT_LE(condition.NodeCount(), RegexLiteralCondition::kMaxNodes);
+        double cost;
+        std::unordered_map<std::string, size_t> counts;
+        const auto selected = condition.Select(
+            [&](const std::string& atom) {
+                EXPECT_GE(atom.size(), 2);
+                EXPECT_LE(atom.size(), RegexLiteralCondition::kMaxLiteralBytes);
+                const auto count = index.Count(
+                    reinterpret_cast<const uint8_t*>(atom.data()), atom.size());
+                EXPECT_TRUE(counts.emplace(atom, count).second);
+                return count;
+            },
+            cost);
+        EXPECT_EQ(counts.at("RARE"), 1);
+        EXPECT_EQ(selected, RegexLiteralCondition::Literal("RARE"));
+        EXPECT_EQ(cost, 1);
+        PartialRegexMatcher matcher(pattern);
+        const std::string matching_row = "RARE" + long_text + "RARE";
+        ASSERT_TRUE(matcher(matching_row));
+        EXPECT_TRUE(ConditionMatches(condition, matching_row));
+        for (const auto& row : rows) {
+            EXPECT_EQ(ConditionMatches(condition, row) && matcher(row),
+                      matcher(row));
+            EXPECT_EQ(ConditionMatches(selected, row) && matcher(row),
+                      matcher(row));
+        }
+    }
+    // An unfilterable OR branch must still cover its matches, even when the
+    // other branch offers exact atoms that the RE2 prefilter can map.
+    const auto unknown_or = PartialRegexMatcher("(?i:foo)|x{500}COMMON_LONG")
+                                .RequiredIndexCondition();
+    EXPECT_TRUE(unknown_or.IsTrue());
+    EXPECT_TRUE(ConditionMatches(unknown_or, "FOO"));
+}
+
+TEST(RegexRequiredPrefix, ConditionBudgetsAndDeduplicatedCounts) {
+    std::string conjunction, alternative;
+    for (int i = 0; i < 150; ++i) {
+        const auto atom = "L" + std::to_string(i) + "X";
+        conjunction += (i == 0 ? "" : ".*") + atom;
+        alternative += (i == 0 ? "" : "|") + atom;
+    }
+    for (const auto& pattern :
+         {conjunction, alternative, "(?:" + alternative + ").*SUFFIX"}) {
+        auto condition = PartialRegexMatcher(pattern).RequiredIndexCondition();
+        EXPECT_LE(condition.NodeCount(), RegexLiteralCondition::kMaxNodes);
+        for (const auto& atom : ConditionAtoms(condition)) {
+            EXPECT_GE(atom.size(), 2);
+            EXPECT_LE(atom.size(), 64);
+        }
+        if (pattern == alternative) {
+            EXPECT_TRUE(condition.IsTrue());
+        } else if (pattern == "(?:" + alternative + ").*SUFFIX") {
+            EXPECT_EQ(condition, RegexLiteralCondition::Literal("SUFFIX"));
+        }
+    }
+    // Fourteen independent atoms fit the output tree but exhaust the bounded
+    // AllPotentials subset probes. Retain the original AND, not TRUE.
+    std::string probe_limited;
+    for (int i = 0; i < 14; ++i) {
+        probe_limited += (i == 0 ? "" : ".*") + std::string("ATOM") +
+                         std::to_string(i) + "X";
+    }
+    const auto retained =
+        PartialRegexMatcher(probe_limited).RequiredIndexCondition();
+    EXPECT_EQ(ConditionAtoms(retained).size(), 14);
+    auto repeated =
+        PartialRegexMatcher("(foo.*bar)|(baz.*foo)").RequiredIndexCondition();
+    std::unordered_map<std::string, int> calls;
+    double cost;
+    repeated.Select(
+        [&](const std::string& atom) -> size_t {
+            ++calls[atom];
+            return 1;
+        },
+        cost);
+    ASSERT_EQ(calls.size(), 3);
+    for (const auto& [atom, count] : calls) {
+        EXPECT_EQ(count, 1) << atom;
+    }
     EXPECT_TRUE(PartialRegexMatcher(std::string(4097, 'a'))
-                    .RequiredIndexLiterals()
-                    .empty());
+                    .RequiredIndexCondition()
+                    .IsTrue());
+}
+
+TEST(RegexRequiredPrefix, CurrentIndexCountsChooseDifferentBranches) {
+    for (bool rare_bar : {false, true}) {
+        std::vector<std::string> rows(
+            1000, std::string(500, 'x') + (rare_bar ? "foo" : "bar"));
+        rows[9] += rare_bar ? "bar" : "foo";
+        std::vector<std::string_view> docs(rows.begin(), rows.end());
+        milvus::index::fmindex::FMIndex index;
+        index.Build(docs, 8);
+        double cost;
+        auto selected =
+            PartialRegexMatcher::PrepareIndexCondition("foo.*bar")
+                .Select(
+                    [&](const std::string& atom) {
+                        return index.Count(
+                            reinterpret_cast<const uint8_t*>(atom.data()),
+                            atom.size());
+                    },
+                    cost);
+        EXPECT_EQ(selected,
+                  RegexLiteralCondition::Literal(rare_bar ? "bar" : "foo"));
+        EXPECT_EQ(cost, 1);
+        std::vector<uint64_t> candidates;
+        index.VisitMatchingDocs(
+            reinterpret_cast<const uint8_t*>(selected.literal.data()),
+            selected.literal.size(),
+            [&](uint64_t row) { candidates.push_back(row); });
+        EXPECT_EQ(candidates, (std::vector<uint64_t>{9}));
+    }
+}
+
+TEST(RegexRequiredPrefix, NestedAndOverBudgetConditionsNeverLoseMatches) {
+    std::string alternatives;
+    std::vector<std::string> rows{"a",
+                                  "bar",
+                                  "FoO",
+                                  "foo",
+                                  "fooTIMEOUT",
+                                  "WARNtimeout",
+                                  "ERRORtimeout",
+                                  "quxbaz",
+                                  "bazqux",
+                                  "barfoo"};
+    for (int i = 0; i < 150; ++i) {
+        const auto atom = "L" + std::to_string(i) + "X";
+        alternatives += (i == 0 ? "" : "|") + atom;
+        rows.push_back(atom + "SUFFIX");
+    }
+    const std::vector<std::string> patterns{"a|timeout",
+                                            "(?i:foo)|bar",
+                                            "((foo.*bar)|(baz.*qux))|a",
+                                            "(ERROR|WARN).*timeout",
+                                            "(foo|(bar|baz))?(qux|TIMEOUT)",
+                                            "((foo|bar).*){2,3}SUFFIX",
+                                            "foo(?i)bar|baz",
+                                            "(?:(?i)foo|bar).*SUFFIX",
+                                            "(?:" + alternatives + ").*SUFFIX",
+                                            "a|(?:" + alternatives + ")",
+                                            "(?:" + std::string(65, '(') +
+                                                "foo" + std::string(65, ')') +
+                                                "|bar).*SUFFIX",
+                                            "a|foo{01}",
+                                            R"(a|\Qfoo|bar\E)",
+                                            R"(\Bfoo|bar)"};
+    for (const auto& pattern : patterns) {
+        PartialRegexMatcher matcher(pattern);
+        const auto condition = matcher.RequiredIndexCondition();
+        EXPECT_LE(condition.NodeCount(), RegexLiteralCondition::kMaxNodes);
+        for (const auto& row : rows) {
+            if (matcher(row)) {
+                EXPECT_TRUE(ConditionMatches(condition, row))
+                    << pattern << " row=" << row;
+            }
+        }
+    }
 }
 
 TEST(RegexRequiredPrefix, NullableRequirementsAndPreparationCache) {
-    for (const auto& pattern :
-         {std::string(".*"), std::string("RARE|"),
-          "(?:" + std::string(3000, 'x') + ")?"}) {
+    for (const auto& pattern : {std::string(".*"),
+                                std::string("RARE|"),
+                                "(?:" + std::string(3000, 'x') + ")?"}) {
         PartialRegexMatcher matcher(pattern);
         ASSERT_TRUE(matcher(std::string{}));
         EXPECT_TRUE(matcher.RequiredLiteral().empty());
-        EXPECT_TRUE(matcher.RequiredIndexLiterals().empty());
+        EXPECT_TRUE(matcher.RequiredIndexCondition().IsTrue());
     }
     // Interleave keys, unsupported forms, embedded NULs, and an over-budget
     // pattern. Cache eviction or bypass must not change the analysis result.
-    const std::vector<std::string> patterns{
-        ".*RARE", "foo|bar", "", "(?i)RARE", std::string("a\\x00b"),
-        std::string("a\\x00c"), std::string("a\0b", 3),
-        std::string(4097, 'x'), ".*OTHER", ".*RARE"};
+    const std::vector<std::string> patterns{".*RARE",
+                                            "foo|bar",
+                                            "",
+                                            "(?i)RARE",
+                                            std::string("a\\x00b"),
+                                            std::string("a\\x00c"),
+                                            std::string("a\0b", 3),
+                                            std::string(4097, 'x'),
+                                            ".*OTHER",
+                                            ".*RARE"};
     for (const auto& pattern : patterns) {
         const auto expected =
-            PartialRegexMatcher(pattern).RequiredIndexLiterals();
-        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(pattern), expected);
-        auto copy = PartialRegexMatcher::PrepareIndexLiterals(pattern);
-        copy.clear();
-        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(pattern), expected);
+            PartialRegexMatcher(pattern).RequiredIndexCondition();
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexCondition(pattern),
+                  expected);
+        auto copy = PartialRegexMatcher::PrepareIndexCondition(pattern);
+        copy = {};
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexCondition(pattern),
+                  expected);
     }
     for (int i = 0; i < 2; ++i) {
-        EXPECT_ANY_THROW(PartialRegexMatcher::PrepareIndexLiterals("["));
-        EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(".*RARE"),
-                  (std::vector<std::string>{"RARE"}));
+        EXPECT_ANY_THROW(PartialRegexMatcher::PrepareIndexCondition("["));
+        EXPECT_EQ(PartialRegexMatcher::PrepareIndexCondition(".*RARE"),
+                  RegexLiteralCondition::Literal("RARE"));
     }
 }
 
 TEST(RegexRequiredPrefix, PreparationCacheIsThreadLocal) {
     auto exercise = [](const std::string& literal) {
         for (int i = 0; i < 100; ++i) {
-            EXPECT_EQ(PartialRegexMatcher::PrepareIndexLiterals(".*" + literal),
-                      (std::vector<std::string>{literal}));
-            EXPECT_TRUE(PartialRegexMatcher::PrepareIndexLiterals(".*").empty());
+            EXPECT_EQ(
+                PartialRegexMatcher::PrepareIndexCondition(".*" + literal),
+                RegexLiteralCondition::Literal(literal));
+            EXPECT_TRUE(
+                PartialRegexMatcher::PrepareIndexCondition(".*").IsTrue());
         }
     };
     std::thread first(exercise, "FIRST");
@@ -260,7 +544,8 @@ TEST(RegexRequiredPrefix, LargeRepeatedLiteralsRemainSound) {
         const auto literal = matcher.RequiredLiteral();
         EXPECT_LE(literal.size(), 4096);
         EXPECT_NE(row.find(literal), std::string::npos) << pattern;
-        for (const auto& requirement : matcher.RequiredIndexLiterals()) {
+        for (const auto& requirement :
+             ConditionAtoms(matcher.RequiredIndexCondition())) {
             EXPECT_LE(requirement.size(), 64);
             EXPECT_NE(row.find(requirement), std::string::npos) << pattern;
         }
@@ -552,21 +837,30 @@ TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {
         const auto literal = matcher.RequiredLiteral();
         ASSERT_LE(literal.size(), 4096);
         const auto requirements =
-            PartialRegexMatcher::PrepareIndexLiterals(pattern);
-        EXPECT_EQ(requirements, matcher.RequiredIndexLiterals());
-        ASSERT_LE(requirements.size(), 3);
-        std::vector<bool> index_candidates(rows.size(), true);
-        for (const auto& requirement : requirements) {
-            ASSERT_FALSE(requirement.empty());
-            ASSERT_LE(requirement.size(), 64);
-            std::vector<bool> hits(rows.size(), false);
+            PartialRegexMatcher::PrepareIndexCondition(pattern);
+        EXPECT_EQ(requirements, matcher.RequiredIndexCondition());
+        ASSERT_LE(requirements.NodeCount(), RegexLiteralCondition::kMaxNodes);
+        auto lookup = [&](const std::string& requirement) {
+            std::bitset<20000> hits;
             index.VisitMatchingDocs(
                 reinterpret_cast<const uint8_t*>(requirement.data()),
                 requirement.size(),
-                [&](uint64_t row) { hits.at(row) = true; });
-            for (size_t i = 0; i < rows.size(); ++i) {
-                index_candidates[i] = index_candidates[i] && hits[i];
-            }
+                [&](uint64_t row) { hits.set(row); });
+            return hits;
+        };
+        auto universe = [] { return std::bitset<20000>().set(); };
+        const auto index_candidates = requirements.Evaluate(lookup, universe);
+        double cost;
+        const auto selected = requirements.Select(
+            [&](const std::string& atom) {
+                return index.Count(
+                    reinterpret_cast<const uint8_t*>(atom.data()), atom.size());
+            },
+            cost);
+        const auto selected_candidates = selected.Evaluate(lookup, universe);
+        for (const auto& requirement : ConditionAtoms(requirements)) {
+            ASSERT_FALSE(requirement.empty());
+            ASSERT_LE(requirement.size(), 64);
         }
         milvus::VolnitskySearcher searcher(literal);
         std::vector<bool> candidates(rows.size(), prefix.empty());
@@ -583,8 +877,10 @@ TEST(RegexRequiredPrefix, EveryMatchContainsTheRequirement) {
                     << "pattern=" << pattern << " row=" << row;
                 EXPECT_TRUE(candidates[i])
                     << "pattern=" << pattern << " row=" << row;
-                // Even intersecting every requirement must retain all matches;
-                // choosing only the rarest one therefore remains sound.
+                EXPECT_TRUE(selected_candidates[i])
+                    << "selected condition rejected " << pattern;
+                // Full-tree execution and Count selection must both retain
+                // every canonical match, including short/unknown OR branches.
                 EXPECT_TRUE(index_candidates[i])
                     << "index requirements rejected pattern=" << pattern
                     << " row=" << row;
@@ -707,7 +1003,8 @@ TEST(RegexRequiredPrefix, DISABLED_AnalysisBenchmark) {
                     return matcher.RequiredPrefix().size();
                 }
                 size_t size = 0;
-                for (const auto& part : matcher.RequiredIndexLiterals()) {
+                for (const auto& part :
+                     ConditionAtoms(matcher.RequiredIndexCondition())) {
                     size += part.size();
                 }
                 return size;
@@ -787,48 +1084,44 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
         auto run = [&](int mode, const std::string& query) {
             PartialRegexMatcher matcher(query);
             auto select = [&]() {
-                std::vector<std::string> parts;
-                if (mode >= 4) {
-                    parts = PartialRegexMatcher::PrepareIndexLiterals(query);
-                } else if (mode == 3) {
-                    parts = PartialRegexMatcher(query).RequiredIndexLiterals();
-                }
-                if (mode == 2) {
-                    auto prefix = PartialRegexMatcher(query).RequiredPrefix();
-                    if (!prefix.empty()) {
-                        parts.push_back(std::move(prefix));
-                    }
-                }
-                std::string best;
-                uint64_t minimum = 0;
-                for (const auto& part : parts) {
-                    const auto count = index.Count(
-                        reinterpret_cast<const uint8_t*>(part.data()),
-                        part.size());
-                    if (best.empty() || count < minimum) {
-                        best = part;
-                        minimum = count;
-                    }
-                }
-                return std::make_pair(std::move(best), minimum);
+                auto condition =
+                    mode >= 4
+                        ? PartialRegexMatcher::PrepareIndexCondition(query)
+                    : mode == 3 ? matcher.RequiredIndexCondition()
+                                : RegexLiteralCondition::Literal(
+                                      matcher.RequiredPrefix());
+                double count;
+                auto plan = condition.Select(
+                    [&](const std::string& part) {
+                        return index.Count(
+                            reinterpret_cast<const uint8_t*>(part.data()),
+                            part.size());
+                    },
+                    count);
+                return std::make_pair(std::move(plan), count);
             };
-            std::vector<bool> candidates(rows.size(), true);
+            std::bitset<20000> candidates;
+            candidates.set();
             bool accepted = false;
             if (mode >= 2) {
-                const auto [guard_literal, count] = select();
-                accepted = !guard_literal.empty() &&
+                const auto [guard, count] = select();
+                accepted = !guard.IsTrue() &&
                            (count == 0 || count * 8.0 < bytes * 0.001);
                 if (accepted) {
-                    const auto [literal, unused_count] = select();
-                    std::fill(candidates.begin(), candidates.end(), false);
-                    index.VisitMatchingDocs(
-                        reinterpret_cast<const uint8_t*>(literal.data()),
-                        literal.size(),
-                        [&](uint64_t row) { candidates.at(row) = true; });
+                    const auto [plan, unused_count] = select();
+                    candidates = plan.Evaluate(
+                        [&](const std::string& atom) {
+                            std::bitset<20000> hits;
+                            index.VisitMatchingDocs(
+                                reinterpret_cast<const uint8_t*>(atom.data()),
+                                atom.size(),
+                                [&](uint64_t row) { hits.set(row); });
+                            return hits;
+                        },
+                        [] { return std::bitset<20000>().set(); });
                 }
             }
-            const auto candidate_count =
-                std::count(candidates.begin(), candidates.end(), true);
+            const auto candidate_count = candidates.count();
             const auto raw_literal = mode != 0 && !accepted
                                          ? matcher.RequiredLiteral()
                                          : std::string{};
@@ -863,7 +1156,7 @@ TEST(RegexRequiredPrefix, DISABLED_ComponentBenchmark) {
                 // Set cache state outside timing. Cold still benefits from
                 // reuse between this query's guard and candidate generation.
                 if (mode >= 4) {
-                    PartialRegexMatcher::PrepareIndexLiterals(
+                    PartialRegexMatcher::PrepareIndexCondition(
                         mode == 4 ? "__evict_benchmark_cache__" : pattern);
                 }
                 const auto start = std::chrono::steady_clock::now();

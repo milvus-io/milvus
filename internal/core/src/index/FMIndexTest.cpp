@@ -33,11 +33,13 @@
 #include "common/RegexQuery.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Volnitsky.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "index/FMIndex.h"
+#include "index/fmindex/FMIndex.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "common/type_c.h"
@@ -1994,7 +1996,8 @@ TEST(FMIndex, RegexCandidatesAndRecheckEqualCanonicalScan) {
     // Candidate membership alone must never be treated as a final result.
     const auto candidates =
         idx->PatternMatch("foo.*bar", proto::plan::OpType::RegexMatch);
-    EXPECT_TRUE(candidates[4]);  // "barfoo" has both literals in the wrong order.
+    EXPECT_TRUE(
+        candidates[4]);  // "barfoo" has both literals in the wrong order.
     EXPECT_FALSE(PartialRegexMatcher("foo.*bar")(rows[4]));
     EXPECT_LT(candidates.count(), rows.size());
 }
@@ -2009,7 +2012,11 @@ TEST(FMIndex, RegexExternalWordBoundaryCandidatesAndRawFallback) {
         EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern));
         const auto candidates =
             idx->PatternMatch(pattern, proto::plan::RegexMatch);
-        EXPECT_EQ(candidates.count(), rows.size());
+        EXPECT_LT(candidates.count(), rows.size());
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]));
+        }
     }
 
     // Exercise the physical raw-data executor both with an FMIndex that must
@@ -2083,9 +2090,9 @@ TEST(FMIndex, RegexInteriorLiteralCandidatesAndFallback) {
                  {".*RARE[[:digit:]]+END", true},
                  {"x.*RARE?", true},
                  {"x.*(RARE)?", false},
-                 {"x.*RARE|bar", false},
-                 {R"(.*\x41)", true},
-                 {R"(\Bfoo|bar)", false}}) {
+                 {"x.*RARE|bar", true},
+                 {R"(.*\x41)", false},
+                 {R"(\Bfoo|bar)", true}}) {
             auto expression = MakeMatchTypedExpr(loaded.schema,
                                                  loaded.varchar_id,
                                                  pattern,
@@ -2122,7 +2129,8 @@ TEST(FMIndex, RegexGuardAndFallback) {
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "ABSENT.*"));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, ".*RARE"));
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "x.*RARE123"));
-    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(), 1);
+    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(),
+              1);
     for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
         EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern))
             << pattern;
@@ -2161,6 +2169,111 @@ TEST(FMIndex, RegexPreparationDoesNotCacheIndexStatistics) {
         EXPECT_TRUE(first_candidates[7]);
         EXPECT_EQ(second_candidates.count(), 1);
         EXPECT_TRUE(second_candidates[9]);
+    }
+}
+
+TEST(FMIndex, RegexBooleanConditionsUseCurrentCounts) {
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    rows[9] += "RARE bar timeout";
+    rows[19] += "baz";
+    auto index = MakeRawDataIndex(rows);
+    for (const auto& [pattern, expected] :
+         std::vector<std::pair<std::string, size_t>>{
+             {".*COMMON_LONG.*RARE", 1},
+             {"(ERROR|WARN).*timeout", 1},
+             {"foo.*bar|baz.*qux", 2},
+             {"foo.*ABSENT|baz.*qux", 1}}) {
+        EXPECT_TRUE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        auto candidates = index->PatternMatch(pattern, proto::plan::RegexMatch);
+        EXPECT_EQ(candidates.count(), expected) << pattern;
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]))
+                << pattern;
+        }
+    }
+    for (const std::string pattern :
+         {"a|timeout", "(?i:foo)|timeout", "(foo)?|timeout"}) {
+        EXPECT_FALSE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        EXPECT_EQ(index->PatternMatch(pattern, proto::plan::RegexMatch).count(),
+                  rows.size());
+    }
+}
+
+TEST(FMIndex, RegexBooleanConditionsAcrossChunksBatchesNullAndNot) {
+    constexpr size_t n = 384;
+    std::vector<std::string> rows(n, std::string(500, 'x'));
+    std::vector<uint8_t> validity(n / 8, 0xff);
+    for (size_t base : {0, 128, 256}) {
+        rows[base + 3] += "foo bar";
+        rows[base + 4] += "baz qux";
+        rows[base + 5] += "bar foo";  // candidate rejected by RE2
+        rows[base + 6] += "baz qux";  // null candidate payload
+        validity[(base + 6) / 8] &= ~(1u << ((base + 6) % 8));
+    }
+    std::vector<FieldDataPtr> chunks;
+    for (size_t base : {0, 128, 256}) {
+        auto chunk =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+        chunk->FillFieldData(
+            rows.data() + base, validity.data() + base / 8, 128, 0);
+        chunks.push_back(std::move(chunk));
+    }
+    auto loaded = LoadSealedFMMatch(
+        101, 102, 103, 8901, rows, chunks, true, validity.data(), nullptr);
+    milvus::test::ExprBatchSizeGuard batch_guard(64);
+    for (const std::string pattern : {"foo.*bar|baz.*qux",
+                                      "(foo|baz).*(bar|qux)",
+                                      "a|foo",
+                                      "(?i:foo)|baz"}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        PartialRegexMatcher matcher(pattern);
+        for (bool negate : {false, true}) {
+            expr::TypedExprPtr root = expression;
+            if (negate) {
+                root = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, expression);
+            }
+            auto query_context = std::make_shared<exec::QueryContext>(
+                DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+            query_context->set_enable_expr_cache(false);
+            exec::ExecContext exec_context(query_context.get());
+            auto compiled =
+                exec::CompileExpressions({root}, &exec_context, {}, false);
+            exec::EvalCtx context(&exec_context);
+            for (size_t base = 0; base < n; base += 64) {
+                TargetBitmap input(64, true);
+                // A nonmatching row and a true match are both excluded.
+                input[0] = false;
+                input[4] = false;
+                auto saved = input.clone();
+                context.set_bitmap_input(std::move(input));
+                VectorPtr output;
+                compiled[0]->Eval(context, output);
+                auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+                ASSERT_NE(result, nullptr);
+                ASSERT_EQ(result->size(), 64);
+                TargetBitmapView hits(result->GetRawData(), 64);
+                TargetBitmapView valid(result->GetValidRawData(), 64);
+                for (size_t i = 0; i < 64; ++i) {
+                    EXPECT_EQ(context.get_bitmap_input()[i], saved[i]);
+                    // Bitmap-excluded rows are not consumed by the parent.
+                    if (!saved[i])
+                        continue;
+                    const bool expected_valid =
+                        validity[(base + i) / 8] & (1u << ((base + i) % 8));
+                    EXPECT_EQ(valid[i], expected_valid);
+                    if (expected_valid)
+                        EXPECT_EQ(hits[i], negate != matcher(rows[base + i]))
+                            << pattern << " row=" << base + i;
+                }
+            }
+        }
     }
 }
 
@@ -2234,6 +2347,272 @@ TEST(FMIndex, ExecutorRegexFallbackNegationAndInvalidPattern) {
     }
 }
 
+// Small native experiment runs in ordinary C++ CI and records stage timings in
+// gtest XML. Larger production-expression measurements remain opt-in below.
+// These stage comparisons include sealed-column reads, but not expression
+// dispatch. The separate end-to-end benchmark measures that dispatch as well.
+TEST(FMIndex, RegexSealedColumnExperiment) {
+    milvus::test::ExprBatchSizeGuard batch_guard(2048);
+    using Clock = std::chrono::steady_clock;
+    auto micros = [](Clock::time_point start) {
+        return std::chrono::duration<double, std::micro>(Clock::now() - start)
+            .count();
+    };
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    for (size_t i = 0; i < rows.size(); i += 100) {
+        rows[i] += " bar RARE123END timeout";
+        rows[i + 1] += " baz WARNtimeout";
+        rows[i + 2] += " RAREwrong";
+    }
+    auto fixture = LoadSealedFMMatch(
+        111, 112, 113, 9001, rows, {}, false, nullptr, nullptr, false);
+    auto index = MakeRawDataIndex(rows);
+    std::vector<std::string_view> docs(rows.begin(), rows.end());
+    milvus::index::fmindex::FMIndex counts;
+    counts.Build(docs, 8);
+    const std::vector<std::pair<std::string, std::string>> workloads{
+        {"independent", "foo.*bar"},
+        {"short_rare", ".*COMMON_LONG.*RARE"},
+        {"mandatory_suffix", "(ERROR|WARN).*timeout"},
+        {"branches", "foo.*bar|baz.*qux"},
+        {"frequent", "COMMON_LONG.*foo"},
+        {"long", ".*x{500}COMMON_LONG.*RARE123END"},
+        {"short_branch", "a|timeout"},
+        {"folded_branch", "(?i:foo)|bar"},
+        {"fallback", ".*"},
+    };
+    const std::string modes[]{"raw", "legacy", "all", "selected"};
+    const std::string stages[]{
+        "prepare", "count", "lookup", "bitset", "raw_read", "recheck", "total"};
+    RecordProperty("expression_result_cache",
+                   "disabled: direct sealed reads; no expression cache");
+    RecordProperty("rows", rows.size());
+    RecordProperty("samples", 3);
+    for (const auto& [name, pattern] : workloads) {
+        PartialRegexMatcher oracle(pattern);
+        for (bool sparse : {false, true}) {
+            TargetBitmap input(rows.size(), !sparse);
+            if (sparse) {
+                for (size_t i = 0; i < rows.size(); i += 100) input.set(i);
+            }
+            for (bool cold : {false, true}) {
+                std::optional<std::pair<std::string, RegexLiteralCondition>>
+                    legacy_cache;
+                auto prepare = [&](int mode) {
+                    if (mode == 0)
+                        return RegexLiteralCondition{};
+                    if (mode != 1)
+                        return PartialRegexMatcher::PrepareIndexCondition(
+                            pattern);
+                    if (legacy_cache && legacy_cache->first == pattern)
+                        return legacy_cache->second;
+                    // Reproduce the old longest-literal + RE2-prefix contract.
+                    PartialRegexMatcher matcher(pattern);
+                    auto best = matcher.RequiredLiteral();
+                    std::vector<std::string> atoms{best.substr(0, 64),
+                                                   matcher.RequiredPrefix()};
+                    if (best.size() > 64)
+                        atoms.push_back(best.substr(best.size() - 64));
+                    RegexLiteralCondition condition;
+                    for (const auto& atom : atoms) {
+                        if (!atom.empty())
+                            condition = RegexLiteralCondition::Combine(
+                                RegexLiteralCondition::Op::And,
+                                std::move(condition),
+                                {RegexLiteralCondition::Op::Literal, atom, {}});
+                    }
+                    legacy_cache = std::make_pair(pattern, condition);
+                    return condition;
+                };
+                std::array<std::array<std::vector<double>, 7>, 4> samples;
+                for (int round = 0; round < 4; ++round) {
+                    for (int turn = 0; turn < 4; ++turn) {
+                        const int mode = (round + turn) % 4;
+                        if (cold) {
+                            legacy_cache.reset();
+                            PartialRegexMatcher::PrepareIndexCondition(
+                                "__evict__");
+                        } else {
+                            prepare(mode);
+                        }
+                        std::array<double, 7> elapsed{};
+                        const auto total_start = Clock::now();
+                        auto start = Clock::now();
+                        PartialRegexMatcher matcher(pattern);
+                        auto condition = prepare(mode);
+                        const auto raw_literal = mode == 0
+                                                     ? matcher.RequiredLiteral()
+                                                     : std::string{};
+                        std::unique_ptr<VolnitskySearcher> raw_searcher;
+                        if (!raw_literal.empty()) {
+                            raw_searcher = std::make_unique<VolnitskySearcher>(
+                                raw_literal);
+                        }
+                        elapsed[0] = micros(start);
+                        start = Clock::now();
+                        double cost = 0;
+                        auto count = [&](const std::string& atom) {
+                            return counts.Count(
+                                reinterpret_cast<const uint8_t*>(atom.data()),
+                                atom.size());
+                        };
+                        if (mode == 1 || mode == 3) {
+                            condition = condition.Select(count, cost);
+                        }
+                        elapsed[1] = micros(start);
+                        start = Clock::now();
+                        auto candidates = condition.Evaluate(
+                            [&](const std::string& atom) {
+                                auto lookup_start = Clock::now();
+                                TargetBitmap hits = index->PatternMatch(
+                                    atom, proto::plan::InnerMatch);
+                                elapsed[2] += micros(lookup_start);
+                                return hits;
+                            },
+                            [&] { return TargetBitmap(rows.size(), true); });
+                        candidates &= input;
+                        elapsed[3] = std::max(0.0, micros(start) - elapsed[2]);
+                        start = Clock::now();
+                        using PinnedStrings =
+                            decltype(fixture.segment->chunk_views_by_offsets<
+                                     std::string_view>(
+                                nullptr,
+                                fixture.varchar_id,
+                                0,
+                                std::declval<const FixedVector<int32_t>&>()));
+                        std::vector<PinnedStrings> pins;
+                        std::vector<size_t> selected_rows;
+                        FixedVector<int32_t> local_offsets;
+                        int64_t current_chunk = -1;
+                        auto flush = [&] {
+                            if (!local_offsets.empty()) {
+                                pins.push_back(
+                                    fixture.segment->chunk_views_by_offsets<
+                                        std::string_view>(nullptr,
+                                                          fixture.varchar_id,
+                                                          current_chunk,
+                                                          local_offsets));
+                                local_offsets.clear();
+                            }
+                        };
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            if (!candidates[row])
+                                continue;
+                            auto [chunk, offset] =
+                                fixture.segment->get_chunk_by_offset(
+                                    fixture.varchar_id, row);
+                            if (chunk != current_chunk) {
+                                flush();
+                                current_chunk = chunk;
+                            }
+                            local_offsets.push_back(offset);
+                            selected_rows.push_back(row);
+                        }
+                        flush();
+                        elapsed[4] = micros(start);
+                        start = Clock::now();
+                        size_t checked = 0;
+                        for (auto& pin : pins) {
+                            const auto& [values, valid] = pin.get();
+                            for (size_t j = 0; j < values.size(); ++j) {
+                                candidates[selected_rows[checked++]] =
+                                    (valid.empty() || valid[j]) &&
+                                    (!raw_searcher ||
+                                     raw_searcher->contains(values[j])) &&
+                                    matcher(values[j]);
+                            }
+                        }
+                        elapsed[5] = micros(start);
+                        elapsed[6] = micros(total_start);
+                        ASSERT_EQ(checked, selected_rows.size());
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            ASSERT_EQ(candidates[row],
+                                      input[row] && oracle(rows[row]))
+                                << name << " " << modes[mode] << " row=" << row;
+                        }
+                        if (round > 0) {
+                            for (size_t stage = 0; stage < elapsed.size();
+                                 ++stage)
+                                samples[mode][stage].push_back(elapsed[stage]);
+                        }
+                    }
+                }
+                for (int mode = 0; mode < 4; ++mode) {
+                    for (size_t stage = 0; stage < 7; ++stage) {
+                        auto& values = samples[mode][stage];
+                        std::sort(values.begin(), values.end());
+                        RecordProperty(name + "_" + modes[mode] +
+                                           (sparse ? "_sparse" : "_dense") +
+                                           (cold ? "_cold_" : "_warm_") +
+                                           stages[stage] + "_us",
+                                       std::to_string(values[1]));
+                    }
+                }
+            }
+        }
+    }
+    // Exercise production expression dispatch with mixed patterns. Every query
+    // owns fresh physical state and explicitly disables expression caching.
+    auto indexed = LoadSealedFMMatch(
+        121, 122, 123, 9101, rows, {}, false, nullptr, nullptr);
+    for (bool sparse : {false, true}) {
+        for (bool with_index : {false, true}) {
+            const auto& loaded = with_index ? indexed : fixture;
+            std::vector<double> samples;
+            for (int round = 0; round < 4; ++round) {
+                double total = 0;
+                for (const auto& [name, pattern] : workloads) {
+                    auto expression =
+                        MakeMatchTypedExpr(loaded.schema,
+                                           loaded.varchar_id,
+                                           pattern,
+                                           false,
+                                           proto::plan::RegexMatch);
+                    TargetBitmap input(rows.size(), !sparse);
+                    if (sparse) {
+                        for (size_t i = 0; i < rows.size(); i += 100)
+                            input.set(i);
+                    }
+                    const auto start = Clock::now();
+                    auto query_context = std::make_shared<exec::QueryContext>(
+                        DEAFULT_QUERY_ID,
+                        loaded.segment.get(),
+                        rows.size(),
+                        MAX_TIMESTAMP);
+                    query_context->set_enable_expr_cache(false);
+                    exec::ExecContext exec_context(query_context.get());
+                    auto compiled = exec::CompileExpressions(
+                        {expression}, &exec_context, {}, false);
+                    exec::EvalCtx context(&exec_context);
+                    context.set_bitmap_input(input.clone());
+                    VectorPtr output;
+                    compiled[0]->Eval(context, output);
+                    total += micros(start);
+                    auto result =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(result, nullptr);
+                    ASSERT_EQ(result->size(), rows.size());
+                    TargetBitmapView hits(result->GetRawData(), rows.size());
+                    PartialRegexMatcher oracle(pattern);
+                    for (size_t row = 0; row < rows.size(); ++row) {
+                        if (input[row])
+                            EXPECT_EQ(hits[row], oracle(rows[row]))
+                                << name << " row=" << row;
+                    }
+                }
+                if (round > 0)
+                    samples.push_back(total / workloads.size());
+            }
+            std::sort(samples.begin(), samples.end());
+            RecordProperty(std::string("mixed_") +
+                               (sparse ? "sparse_" : "dense_") +
+                               (with_index ? "indexed_us" : "scan_us"),
+                           std::to_string(samples[1]));
+        }
+    }
+}
+
 // Opt-in: reports warm end-to-end expression execution, including expression
 // compilation, the routing guard, candidate generation, raw-column reads and
 // recheck. Index construction/loading is outside the timed query. Compare the
@@ -2263,11 +2642,16 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
         {"common_prefix", "x.*RARE123END"},
         {"long_literal", ".*x{500}COMMONRARE123END"},
         {"rare_prefix", "RARE.*COMMON"},
+        {"mandatory_suffix", "(COMMON|WARN).*RARE"},
+        {"or_branches", "COMMON.*RARE123END|RAREwrong.*COMMON"},
         {"no_literal", ".*"},
         {"nullable_long", "(?:" + std::string(3000, 'x') + ")?"},
         {"empty_branch", "RARE|"},
         {"zero_hits", "ABSENT.*"},
     };
+    // ExecuteQueryExpr constructs a fresh QueryContext with expression-result
+    // caching disabled (QueryContext's default); no result cache is reused.
+    RecordProperty("expression_result_cache", "disabled");
     RecordProperty("rows", static_cast<int>(rows.size()));
     RecordProperty("sa_sample_rate", 8);
     RecordProperty(
@@ -2291,7 +2675,7 @@ TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
             std::vector<double> times;
             for (int iteration = 0; iteration < 8; ++iteration) {
                 if (cold) {
-                    PartialRegexMatcher::PrepareIndexLiterals(
+                    PartialRegexMatcher::PrepareIndexCondition(
                         "__evict_benchmark_cache__");
                 }
                 const auto start = std::chrono::steady_clock::now();
