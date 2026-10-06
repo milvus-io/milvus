@@ -128,4 +128,6 @@ type ReopenRequest struct {
 	LoadInfo      *querypb.SegmentLoadInfo
 	Schema        *schemapb.CollectionSchema
 	SchemaVersion uint64
+	// LoadFields is captured with Schema. Empty means all fields.
+	LoadFields []int64
 }

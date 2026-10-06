@@ -379,10 +379,14 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
 	}
 	defer runtime.KeepAlive(schemaBlob)
+	var loadFieldsPtr *C.int64_t
+	if len(req.LoadFields) > 0 {
+		loadFieldsPtr = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
+	}
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
+			return (cgo.CFuturePtr)(C.AsyncReopenSegmentWithLoadFields(
 				traceCtx.ctx,
 				s.ptr,
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
@@ -390,6 +394,8 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 				unsafe.Pointer(&schemaBlob[0]),
 				C.int64_t(len(schemaBlob)),
 				C.uint64_t(req.SchemaVersion),
+				loadFieldsPtr,
+				C.int64_t(len(req.LoadFields)),
 			))
 		},
 		cgo.WithName("segment-reopen"),

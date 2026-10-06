@@ -140,6 +140,22 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t schema_length,
                    const uint64_t schema_version);
 
+/**
+ * Reopen with the effective field warmup hint captured with the schema.
+ * A zero count means all fields; otherwise load_fields must not be null.
+ * The hint is copied during preflight, before the asynchronous load starts.
+ */
+CFuture*
+AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 const uint8_t* load_info_blob,
+                                 const int64_t load_info_length,
+                                 const void* schema_blob,
+                                 const int64_t schema_length,
+                                 const uint64_t schema_version,
+                                 const int64_t* load_fields,
+                                 const int64_t load_field_count);
+
 void
 DeleteSegment(CSegmentInterface c_segment);
 

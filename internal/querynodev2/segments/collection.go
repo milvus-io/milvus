@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"encoding/base64"
+	"maps"
 	"sync"
 
 	"github.com/samber/lo"
@@ -124,7 +125,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 
 	if collection, ok := m.acquireCollectionLease(collectionID); ok {
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, loadMeta, logicalSchemaVersion, schemaBarrierTs)
 	}
 
 	m.mut.Lock()
@@ -132,7 +133,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		collection.refCount.Inc()
 		m.mut.Unlock()
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, loadMeta, logicalSchemaVersion, schemaBarrierTs)
 	}
 	defer m.mut.Unlock()
 
@@ -148,12 +149,12 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
+func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
 	// Existing collections may be reached by a later load result or by a
 	// same-version properties refresh. Keep the Go-side logical schema version
 	// separate from the barrier timestamp so stale schema payloads cannot roll
 	// back fields, while newer properties-only payloads can still refresh.
-	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, loadMeta, logicalSchemaVersion, schemaBarrierTs)
 	if err != nil {
 		return err
 	}
@@ -330,10 +331,11 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType atomic.String // deprecated
-	schema     atomic.Pointer[collectionSchemaSnapshot]
-	isGpuIndex bool
-	loadFields typeutil.Set[int64]
+	metricType        atomic.String // deprecated
+	schema            atomic.Pointer[collectionSchemaSnapshot]
+	isGpuIndex        bool
+	loadFields        typeutil.Set[int64] // protected by mu
+	loadFieldsDefault bool                // native empty hint warms all fields, including future fields
 
 	refCount *atomic.Uint32
 }
@@ -443,6 +445,30 @@ func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uin
 	return c.ccollection.UpdateSchema(schema, version)
 }
 
+func (c *Collection) updateLoadFields(fields []int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ccollection == nil {
+		return merr.WrapErrServiceInternal("update load fields on released collection")
+	}
+	loadFields := resolveLoadFields(c.Schema(), fields)
+	defaultFields := len(fields) == 0
+	if defaultFields && c.loadFieldsDefault {
+		c.loadFields = loadFields
+		return nil
+	}
+	if !defaultFields && !c.loadFieldsDefault && maps.Equal(c.loadFields, loadFields) {
+		return nil
+	}
+	if err := c.ccollection.UpdateLoadFields(fields); err != nil {
+		return err
+	}
+	c.loadFields = loadFields
+	c.loadFieldsDefault = defaultFields
+	return nil
+}
+
 func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
@@ -450,9 +476,18 @@ func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logica
 	return c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 }
 
-func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
+
+	_, currentVersion, currentBarrierTs := c.SchemaSnapshot()
+	// Field hints can change without a schema-version or barrier bump. Accept
+	// equal-version loads, but do not let older schema snapshots restore an old
+	// hint. LoadMeta has no independent load-configuration version to order
+	// differing hints carried by otherwise identical snapshots.
+	updateLoadFields := loadMeta != nil && loadMeta.LoadFields != nil &&
+		(logicalSchemaVersion > currentVersion ||
+			(logicalSchemaVersion == currentVersion && schemaBarrierTs >= currentBarrierTs))
 
 	plan, shouldUpdate, err := c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 	if err != nil {
@@ -463,9 +498,14 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	if err := c.updateIndexMeta(meta); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
+	if updateLoadFields {
+		if err := c.updateLoadFields(loadMeta.GetLoadFields()); err != nil {
+			return collectionSchemaUpdatePlan{}, false, err
+		}
+	}
 	// The temporary manager lease keeps the collection alive while this update
 	// waits. Publish the caller-visible ref only after the schema and index meta
-	// that determine its storage context are applied.
+	// and field warmup hints that determine its storage context are applied.
 	c.Ref(1)
 	return plan, shouldUpdate, nil
 }
@@ -479,6 +519,11 @@ func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, 
 		return collectionSchemaUpdatePlan{}, false, err
 	}
 	c.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
+	c.mu.Lock()
+	if c.loadFieldsDefault {
+		c.loadFields = resolveLoadFields(schema, nil)
+	}
+	c.mu.Unlock()
 	return plan, true, nil
 }
 
@@ -534,6 +579,23 @@ func (c *Collection) SchemaAndVersion() (*schemapb.CollectionSchema, uint64) {
 func (c *Collection) SchemaAndSegcoreVersion() (*schemapb.CollectionSchema, uint64) {
 	schema, _, _, segcoreSchemaVersion := c.schemaSnapshotWithSegcoreSchemaVersion()
 	return schema, segcoreSchemaVersion
+}
+
+// LoadSchemaSnapshot returns the schema, native schema version and effective
+// warmup fields from one transition epoch. The returned field list is owned by
+// the caller, and no collection locks remain held while it is used for I/O.
+func (c *Collection) LoadSchemaSnapshot() (*schemapb.CollectionSchema, uint64, []int64) {
+	c.schemaTransitionMu.RLock()
+	defer c.schemaTransitionMu.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	schema, version := c.SchemaAndSegcoreVersion()
+	fields := c.loadFields
+	if c.loadFieldsDefault || len(fields) == 0 {
+		fields = resolveLoadFields(schema, nil)
+	}
+	return schema, version, fields.Collect()
 }
 
 // Schema returns the schema of collection
@@ -598,25 +660,14 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		NewCollection(const char* schema_proto_blob);
 	*/
 
-	var loadFieldIDs typeutil.Set[int64]
 	loadSchema := typeutil.Clone(schema)
-	// if load fields is specified, do filtering logic
-	// otherwise use all fields for backward compatibility
-	if len(loadMetaInfo.GetLoadFields()) > 0 {
-		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
-	} else {
-		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
-		for _, structArrayField := range loadSchema.GetStructArrayFields() {
-			for _, subField := range structArrayField.GetFields() {
-				loadFieldIDs.Insert(subField.GetFieldID())
-			}
-		}
-	}
+	loadFields := loadMetaInfo.GetLoadFields()
+	loadFieldIDs := resolveLoadFields(loadSchema, loadFields)
 
 	isGpuIndex := false
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
-		LoadFieldList: loadFieldIDs.Collect(),
+		LoadFieldList: loadFields,
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
@@ -634,16 +685,17 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		return nil, err
 	}
 	coll := &Collection{
-		ccollection:   ccollection,
-		id:            collectionID,
-		partitions:    typeutil.NewConcurrentSet[int64](),
-		loadType:      loadMetaInfo.GetLoadType(),
-		dbName:        loadMetaInfo.GetDbName(),
-		dbProperties:  loadMetaInfo.GetDbProperties(),
-		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		refCount:      atomic.NewUint32(0),
-		isGpuIndex:    isGpuIndex,
-		loadFields:    loadFieldIDs,
+		ccollection:       ccollection,
+		id:                collectionID,
+		partitions:        typeutil.NewConcurrentSet[int64](),
+		loadType:          loadMetaInfo.GetLoadType(),
+		dbName:            loadMetaInfo.GetDbName(),
+		dbProperties:      loadMetaInfo.GetDbProperties(),
+		resourceGroup:     loadMetaInfo.GetResourceGroup(),
+		refCount:          atomic.NewUint32(0),
+		isGpuIndex:        isGpuIndex,
+		loadFields:        loadFieldIDs,
+		loadFieldsDefault: len(loadFields) == 0,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
@@ -653,6 +705,21 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll.setSchema(schema, logicalSchemaVersion, schemaBarrierTs, initialSegcoreSchemaVersion(logicalSchemaVersion, schemaBarrierTs))
 
 	return coll, nil
+}
+
+func resolveLoadFields(schema *schemapb.CollectionSchema, fields []int64) typeutil.Set[int64] {
+	if len(fields) > 0 {
+		return typeutil.NewSet(fields...)
+	}
+	// Empty load fields retains the legacy default of warming every field,
+	// including the subfields of struct arrays.
+	loadFields := typeutil.NewSet(lo.Map(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		for _, subField := range structArrayField.GetFields() {
+			loadFields.Insert(subField.GetFieldID())
+		}
+	}
+	return loadFields
 }
 
 // Only for test

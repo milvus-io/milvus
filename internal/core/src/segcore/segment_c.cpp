@@ -212,14 +212,17 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
     return milvus::Schema::ParseFrom(collection_schema);
 }
 
-CFuture*
-AsyncReopenSegment(CTraceContext c_trace,
-                   CSegmentInterface c_segment,
-                   const uint8_t* load_info_blob,
-                   const int64_t load_info_length,
-                   const void* schema_blob,
-                   const int64_t schema_length,
-                   const uint64_t schema_version) {
+static CFuture*
+AsyncReopenSegmentImpl(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       const uint8_t* load_info_blob,
+                       const int64_t load_info_length,
+                       const void* schema_blob,
+                       const int64_t schema_length,
+                       const uint64_t schema_version,
+                       const int64_t* load_fields,
+                       const int64_t load_field_count,
+                       const bool explicit_load_fields) {
     try {
         AssertInfo(load_info_blob, "load info is null");
         milvus::proto::segcore::SegmentLoadInfo load_info;
@@ -230,6 +233,23 @@ AsyncReopenSegment(CTraceContext c_trace,
 
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment != nullptr, "segment is null");
+        if (explicit_load_fields) {
+            AssertInfo(load_field_count >= 0,
+                       "load field count must be nonnegative");
+            std::vector<int64_t> fields;
+            if (load_field_count > 0) {
+                AssertInfo(load_fields != nullptr,
+                           "load fields must not be null");
+                fields.assign(load_fields, load_fields + load_field_count);
+            }
+            schema->UpdateLoadFields(fields);
+        } else {
+            // Legacy callers do not supply a hint. Preserve the segment's
+            // effective policy instead of resetting the parsed schema to all.
+            schema->UpdateLoadFields(
+                segment->get_schema_snapshot()->load_fields());
+        }
 
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
@@ -282,6 +302,48 @@ AsyncReopenSegment(CTraceContext c_trace,
         return static_cast<CFuture*>(static_cast<void*>(
             static_cast<milvus::futures::IFuture*>(future.release())));
     }
+}
+
+CFuture*
+AsyncReopenSegment(CTraceContext c_trace,
+                   CSegmentInterface c_segment,
+                   const uint8_t* load_info_blob,
+                   const int64_t load_info_length,
+                   const void* schema_blob,
+                   const int64_t schema_length,
+                   const uint64_t schema_version) {
+    return AsyncReopenSegmentImpl(c_trace,
+                                  c_segment,
+                                  load_info_blob,
+                                  load_info_length,
+                                  schema_blob,
+                                  schema_length,
+                                  schema_version,
+                                  nullptr,
+                                  0,
+                                  false);
+}
+
+CFuture*
+AsyncReopenSegmentWithLoadFields(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 const uint8_t* load_info_blob,
+                                 const int64_t load_info_length,
+                                 const void* schema_blob,
+                                 const int64_t schema_length,
+                                 const uint64_t schema_version,
+                                 const int64_t* load_fields,
+                                 const int64_t load_field_count) {
+    return AsyncReopenSegmentImpl(c_trace,
+                                  c_segment,
+                                  load_info_blob,
+                                  load_info_length,
+                                  schema_blob,
+                                  schema_length,
+                                  schema_version,
+                                  load_fields,
+                                  load_field_count,
+                                  true);
 }
 
 CLoadCancellationSource

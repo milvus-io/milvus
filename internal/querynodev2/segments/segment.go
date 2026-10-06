@@ -1214,11 +1214,12 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+	schema, schemaVersion, loadFields := s.collection.LoadSchemaSnapshot()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
 		Schema:        schema,
 		SchemaVersion: schemaVersion,
+		LoadFields:    loadFields,
 	})
 	if err != nil {
 		return err

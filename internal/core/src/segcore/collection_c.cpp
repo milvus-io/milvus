@@ -60,8 +60,13 @@ UpdateLoadFields(CCollection collection,
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        col->get_schema()->UpdateLoadFields(
-            std::vector<int64_t>(field_ids, field_ids + length));
+        AssertInfo(length >= 0, "load field count must be nonnegative");
+        std::vector<int64_t> fields;
+        if (length > 0) {
+            AssertInfo(field_ids != nullptr, "load fields must not be null");
+            fields.assign(field_ids, field_ids + length);
+        }
+        col->update_load_fields(fields);
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS
