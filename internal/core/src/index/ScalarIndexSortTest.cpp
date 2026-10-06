@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/FieldData.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
@@ -92,6 +94,133 @@ struct ScalarSortAsyncLoadFixture {
     milvus_storage::ArrowFileSystemPtr fs;
     storage::FileManagerContext ctx;
 };
+
+}  // namespace
+
+namespace {
+
+template <typename T>
+class ScalarIndexSortNaNTest : public testing::Test {};
+using NaNTypes = testing::Types<float, double>;
+TYPED_TEST_SUITE(ScalarIndexSortNaNTest, NaNTypes);
+
+template <typename Build>
+void
+ExpectNaNBuildError(Build build) {
+    try {
+        build();
+        FAIL() << "a valid NaN must not be added to a sorted index";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+        EXPECT_NE(std::string(error.what()).find("NaN"), std::string::npos);
+    }
+}
+
+template <typename T>
+FieldDataPtr
+NaNScalarFieldData(const std::vector<T>& rows, uint8_t validity) {
+    const auto type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto field = std::make_shared<FieldData<T>>(type, true);
+    field->FillFieldData(rows.data(), &validity, rows.size(), 0);
+    return field;
+}
+
+template <typename T>
+FieldDataPtr
+NaNArrayFieldData(const std::vector<std::vector<T>>& rows, uint8_t validity) {
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto values;
+        for (T value : row) {
+            if constexpr (std::is_same_v<T, float>) {
+                values.mutable_float_data()->add_data(value);
+            } else {
+                values.mutable_double_data()->add_data(value);
+            }
+        }
+        arrays.emplace_back(values);
+    }
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, true);
+    field->FillFieldData(arrays.data(), &validity, arrays.size(), 0);
+    return field;
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, RejectsValidNaNInEveryBuildRoute) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> rows{T(1), nan, T(2)};
+    ScalarIndexSort<T> raw;
+    ExpectNaNBuildError([&] { raw.Build(rows.size(), rows.data()); });
+
+    auto scalar_data = NaNScalarFieldData(rows, 0x07);
+    ScalarIndexSort<T> scalar;
+    ExpectNaNBuildError([&] { scalar.BuildWithFieldData({scalar_data}); });
+
+    auto array_data = NaNArrayFieldData<T>({{T(1)}, {nan, T(2)}}, 0x03);
+    ScalarIndexSort<T> nested({}, true);
+    ExpectNaNBuildError([&] { nested.BuildWithFieldData({array_data}); });
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest,
+           IgnoresNullPayloadAndPreservesOrderedValues) {
+    using T = TypeParam;
+    const std::vector<T> rows{std::numeric_limits<T>::quiet_NaN(),
+                              -std::numeric_limits<T>::infinity(),
+                              T(-0.0),
+                              T(0.0),
+                              std::numeric_limits<T>::infinity()};
+    const bool valid[] = {false, true, true, true, true};
+    ScalarIndexSort<T> raw;
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data(), valid));
+    auto scalar_data = NaNScalarFieldData(rows, 0x1e);
+    ScalarIndexSort<T> scalar;
+    ASSERT_NO_THROW(scalar.BuildWithFieldData({scalar_data}));
+    for (auto* index : {&raw, &scalar}) {
+        EXPECT_EQ(index->Count(), rows.size());
+        EXPECT_EQ(index->Size(), 4);
+        EXPECT_FALSE(index->Reverse_Lookup(0).has_value());
+        for (size_t row = 1; row < rows.size(); ++row) {
+            const auto value = index->Reverse_Lookup(row);
+            ASSERT_TRUE(value.has_value());
+            EXPECT_EQ(*value, rows[row]);
+            EXPECT_EQ(std::signbit(*value), std::signbit(rows[row]));
+        }
+        const T zero = T(0);
+        auto in = index->In(1, &zero);
+        auto not_in = index->NotIn(1, &zero);
+        EXPECT_FALSE(in[0]);
+        EXPECT_FALSE(not_in[0]);
+        EXPECT_TRUE(in[2]);
+        EXPECT_TRUE(in[3]);
+        EXPECT_EQ(in.count(), 2);
+        EXPECT_TRUE(not_in[1]);
+        EXPECT_TRUE(not_in[4]);
+        EXPECT_EQ(not_in.count(), 2);
+    }
+
+    auto array_data = NaNArrayFieldData<T>(
+        {{rows[0]}, {rows[1], rows[2], rows[3], rows[4]}}, 0x02);
+    ScalarIndexSort<T> nested({}, true);
+    ASSERT_NO_THROW(nested.BuildWithFieldData({array_data}));
+    EXPECT_EQ(nested.Count(), 4);
+    EXPECT_EQ(nested.Size(), 4);
+    for (size_t offset = 0; offset < 4; ++offset) {
+        const auto value = nested.Reverse_Lookup(offset);
+        ASSERT_TRUE(value.has_value());
+        EXPECT_EQ(*value, rows[offset + 1]);
+        EXPECT_EQ(std::signbit(*value), std::signbit(rows[offset + 1]));
+    }
+    const T zero = T(0);
+    auto in = nested.In(1, &zero);
+    auto not_in = nested.NotIn(1, &zero);
+    EXPECT_TRUE(in[1]);
+    EXPECT_TRUE(in[2]);
+    EXPECT_EQ(in.count(), 2);
+    EXPECT_TRUE(not_in[0]);
+    EXPECT_TRUE(not_in[3]);
+    EXPECT_EQ(not_in.count(), 2);
+}
 
 }  // namespace
 

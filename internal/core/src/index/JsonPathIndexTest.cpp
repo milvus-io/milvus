@@ -16,6 +16,8 @@
 #include <folly/ScopeGuard.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -189,6 +191,94 @@ TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
 
     // Key: non_exist_offsets should be EMPTY because path exists in all rows
     EXPECT_TRUE(result.non_exist_offsets.empty());
+}
+
+TEST(JsonPathIndexTest, StringToDoubleNaNIsCastFailureWithExistingPath) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a":"NaN"})",
+        R"({"a":"-nan"})",
+        R"json({"a":"nan(payload)"})json",
+        R"({"a":"1"})",
+        R"({"a":2})",
+        R"({"a":"Inf"})",
+        R"({"a":"-Inf"})",
+        R"({"a":"-0"})",
+        R"({"b":0})",
+    });
+    const auto schema = MakeJsonSchema();
+    const auto cast_type = JsonCastType::FromString("DOUBLE");
+    const auto cast_function = JsonCastFunction::FromString("STRING_TO_DOUBLE");
+    auto converted = ConvertJsonToTypedFieldData<double>(
+        {json_fd}, schema, "/a", cast_type, cast_function);
+    ASSERT_EQ(converted.field_data->get_num_rows(), 9);
+    for (int row : {0, 1, 2, 8}) {
+        EXPECT_FALSE(converted.field_data->is_valid(row));
+    }
+    for (int row : {3, 4, 5, 6, 7}) {
+        EXPECT_TRUE(converted.field_data->is_valid(row));
+    }
+    EXPECT_EQ(converted.non_exist_offsets, std::vector<size_t>{8});
+    EXPECT_TRUE(std::isinf(
+        *static_cast<const double*>(converted.field_data->RawValue(5))));
+    EXPECT_TRUE(std::signbit(
+        *static_cast<const double*>(converted.field_data->RawValue(7))));
+
+    CreateIndexInfo info;
+    info.index_type = ASCENDING_SORT;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = cast_type;
+    info.json_path = "/a";
+    info.json_cast_function = "STRING_TO_DOUBLE";
+    auto index =
+        IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
+    auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
+    ASSERT_NE(scalar, nullptr);
+    ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
+    EXPECT_EQ(scalar->Count(), 9);
+    EXPECT_EQ(scalar->Size(), 5);
+    for (int row : {0, 1, 2, 8}) {
+        EXPECT_FALSE(scalar->Reverse_Lookup(row).has_value());
+    }
+    for (int row : {3, 4, 5, 6, 7}) {
+        const auto value = scalar->Reverse_Lookup(row);
+        ASSERT_TRUE(value.has_value());
+        const auto expected =
+            *static_cast<const double*>(converted.field_data->RawValue(row));
+        EXPECT_EQ(*value, expected);
+        EXPECT_EQ(std::signbit(*value), std::signbit(expected));
+    }
+    auto exists = scalar->Exists();
+    EXPECT_EQ(exists.count(), 8);
+    for (int row : {0, 1, 2}) {
+        EXPECT_TRUE(exists[row]);
+        const auto* source = static_cast<const Json*>(json_fd->RawValue(row));
+        EXPECT_TRUE(source->exist("/a"));
+    }
+    EXPECT_FALSE(exists[8]);
+
+    const double query = 2;
+    auto in = scalar->In(1, &query);
+    auto not_in = scalar->NotIn(1, &query);
+    EXPECT_EQ(in.count(), 1);
+    EXPECT_TRUE(in[4]);
+    EXPECT_EQ(not_in.count(), 4);
+    for (int row : {0, 1, 2, 4, 8}) {
+        EXPECT_FALSE(not_in[row]);
+    }
+}
+
+TEST(JsonPathIndexTest, StringToDoubleNumericNaNIsCastFailure) {
+    const auto cast = JsonCastFunction::FromString("STRING_TO_DOUBLE");
+    EXPECT_FALSE(cast.cast<double>(std::numeric_limits<double>::quiet_NaN())
+                     .has_value());
+    const auto positive_inf =
+        cast.cast<double>(std::numeric_limits<double>::infinity());
+    const auto negative_inf =
+        cast.cast<double>(-std::numeric_limits<double>::infinity());
+    ASSERT_TRUE(positive_inf.has_value());
+    ASSERT_TRUE(negative_inf.has_value());
+    EXPECT_EQ(*positive_inf, std::numeric_limits<double>::infinity());
+    EXPECT_EQ(*negative_inf, -std::numeric_limits<double>::infinity());
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_MixedRows) {

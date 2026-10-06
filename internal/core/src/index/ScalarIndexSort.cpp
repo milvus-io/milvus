@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -78,6 +79,18 @@ constexpr size_t SCALAR_SORT_ALIGNMENT = 32;  // 32-byte alignment
 const uint64_t SCALAR_SORT_MMAP_INDEX_PADDING = 1;
 
 namespace {
+
+template <typename T>
+void
+CheckScalarSortValue(T value, int64_t offset) {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (std::isnan(value)) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "ScalarIndexSort cannot index NaN at row offset {}",
+                      offset);
+        }
+    }
+}
 
 bool
 IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
@@ -174,6 +187,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     T* p = const_cast<T*>(values);
     for (size_t i = 0; i < n; ++i, ++p) {
         if (!valid_data || valid_data[i]) {
+            CheckScalarSortValue(*p, i);
             data_.emplace_back(IndexStructure(*p, i));
             valid_bitset_.set(i);
         }
@@ -219,6 +233,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         for (size_t i = 0; i < slice_num; ++i) {
             if (data->is_valid(i)) {
                 auto value = reinterpret_cast<const T*>(data->RawValue(i));
+                CheckScalarSortValue(*value, offset);
                 data_.emplace_back(IndexStructure(*value, offset));
                 valid_bitset_.set(offset);
             }
@@ -227,8 +242,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
     }
     std::sort(data_.begin(), data_.end());
     idx_to_offsets_.resize(total_num_rows_);
-    for (size_t i = 0; i < length; ++i) {
-        // TODO: there is an existing bug here, data_[i].idx_ is out of range, should be fixed
+    for (size_t i = 0; i < data_.size(); ++i) {
         if (data_[i].idx_ < 0 || data_[i].idx_ >= total_num_rows_) {
             continue;
         }
@@ -276,8 +290,9 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                data_.emplace_back(
-                    IndexStructure(array->get_data_unchecked<T>(j), offset));
+                auto value = array->get_data_unchecked<T>(j);
+                CheckScalarSortValue(value, offset);
+                data_.emplace_back(IndexStructure(value, offset));
                 offset++;
             }
         }
