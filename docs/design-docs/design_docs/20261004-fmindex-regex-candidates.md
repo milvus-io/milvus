@@ -7,155 +7,176 @@ Builds on the [FMIndex scalar index design](20260708-fm_index_scalar_index.md).
 
 ## Problem and scope
 
-Regex filtering scans row bytes even when a pattern contains a selective
-mandatory substring. For example, `.*timeout` needs only rows containing
-`timeout`. Use the existing FMIndex to find those rows, then apply the canonical
-RE2 matcher. Results must equal a full regex scan, including NULL handling.
+Regex filtering scans row bytes even when the pattern contains selective
+literal conditions. Choosing the longest literal during extraction loses
+information needed for index-specific planning: `foo.*bar` needs both literals,
+and the shorter literal in `.*COMMON_LONG.*RARE` can be much rarer.
+Alternation must also preserve branch coverage, including mandatory suffixes
+such as `(ERROR|WARN).*timeout`.
 
 Scope: existing `RegexMatch` on sealed VARCHAR with raw field data available.
-Reuse expression hooks and index format. General LIKE changes, other field
-types, a new regex engine and acceleration of every RE2 pattern are out of scope.
+Reuse the FM index format and canonical RE2 matcher. General LIKE semantics,
+other field types and a new regex engine are out of scope.
 
-## Design
+## Extraction contract
 
-1. Compile the canonical matcher before routing, so invalid patterns fail even
-   when the candidate set is empty.
-2. Extract mandatory byte substrings. Count each with FMIndex and choose the
-   least frequent one. Accept zero occurrences immediately; otherwise use the
-   existing guard:
-   `occurrences * sa_sample_rate < fmindexCostRatio * TotalTokens`.
-3. Retrieve candidate rows, intersect the input bitmap, fetch raw values and
-   recheck with RE2. Return validity separately so NOT cannot match NULL.
+Compile the canonical RE2 matcher before extracting any conditions. Preparation
+returns a necessary Boolean condition with TRUE, literal, AND and OR nodes.
+It is a candidate superset, never a final regex result. TRUE means no pruning.
 
-`PatternMatch(RegexMatch)` returns a **candidate superset**, never final results.
-Candidates use `ExecFMPatternCandidates`, bypassing the generic scalar-index
-final-answer path. Missing requirements or a declined guard select raw scanning;
-a direct candidate call without requirements returns all non-null rows.
-Offset-input evaluation retains the raw path.
+`RequiredIndexCondition()` uses the RE2 prefilter tree for the index contract.
+RE2's parsed structure preserves independent concatenation requirements and
+alternative branch conditions. Optional and case-folded bodies contribute TRUE.
+The existing bounded analyzer supplies original byte spellings and a necessary
+structural condition used to verify the mapped prefilter. It also supplies the
+fallback when the adapter cannot safely reconstruct a condition. A fixed suffix
+remains pending until a gap, so a long run does not exhaust the tree budget with
+overlapping windows.
 
-### Safe, bounded extraction
+The implementation uses RE2's public `FilteredRE2` entry point, which invokes the
+pinned version's parsed `Regexp` walker and `Prefilter` internally. `FilteredRE2`
+returns lowercased atoms by design, so the adapter maps each atom back to exact
+byte spellings from the canonical literal summary before FMIndex lookup.
+Finding a spelling somewhere in the pattern is not sufficient: lowercased atoms
+merge occurrences across branches, including folded and character-class forms.
+A bounded implication check must prove that the original-byte condition implies
+the mapped condition. If it cannot, the adapter returns the original condition.
+For example, `(?i:foo).*bar|foo.*baz` retains `bar OR (foo AND baz)` and must not
+require lowercase `foo` for the first branch.
 
-`RequiredIndexLiterals()` combines the RE2 matched-substring prefix with a
-structurally derived interior literal. It returns at most three requirements,
-each at most 64 bytes: the prefix and the first/last fragments of the interior
-literal. Remove duplicates and subsumed fragments. Every requirement is
-mandatory, so choosing any one is sound; these are AND terms, never OR branches.
-Lookup is unanchored because a match can start anywhere within a row.
+Unmapped atoms, such as a long RE2 atom exceeding the retained 64-byte endpoints,
+also return the original condition, preserving independent literals such as
+`RARE` and the bounded endpoints. This keeps the Conan package boundary on RE2's
+installed public headers while retaining safe AND/OR relationships. RE2 validates
+the full pattern and decodes consuming escapes. A bounded monotone-probe pass
+over `AllPotentials` reconstructs minimal satisfying atom sets; if its budget is
+exceeded, the original structural condition is retained as well.
 
-The structural analyzer tracks mandatory prefix, suffix and interior bytes,
-plus whether a subexpression matches exactly one fixed string. Concatenation
-joins only adjacent requirements; repetition uses its minimum count. Optional
-bodies lose requirements, while variable repetition and truncation clear
-exactness. Case-folded scopes contribute no fixed bytes. RE2 decodes escapes;
-quote boundaries remain intact. Unsupported syntax falls back to a safe RE2
-prefix or scanning.
+Bounds:
 
-Extraction stops for patterns above 4096 bytes/instructions or matching empty
-input. Structural analysis caps nesting at 64 groups and literals at 4096
-bytes. Raw scanning uses that longer literal with the existing Volnitsky
-prefilter; FM lookups use 64-byte fragments to bound backward-search work.
-A selective middle of a long literal may be missed, sacrificing pruning only.
+- “2gram” means **two bytes**, not two Unicode characters. Atoms are original,
+  case-sensitive bytes, including embedded NULs; a multi-byte rune qualifies.
+- Each atom is at most 64 bytes. Longer fixed runs contribute their first and
+  last fragments. Truncated fragments are never joined as if adjacent.
+- A condition has at most 127 nodes, hence at most 126 literal occurrences.
+  AND may omit an over-budget child; an over-budget OR becomes TRUE in full.
+- The adapter allows at most 8,128 `AllPotentials` probes and 16,129 recursive
+  implication checks. Exhausting either budget retains the original condition.
+- Patterns and RE2 programs above 4096 bytes/instructions, or matching empty
+  input, produce TRUE. Parser nesting is capped at 64. Repeats use bounded
+  summaries and exponentiation rather than expanded strings. Together these
+  bound traversal, intermediate strings, final tree size and Count work.
 
-RE2 range bounds are unsuitable for external word-boundary context:
-`\Bfoo|bar` can yield prefix `bar`, yet matches `afoo`. Prefix extraction therefore
-declines patterns containing `\b` or `\B`; structural analysis may still prove
-an interior requirement for simpler forms such as `\Bfoo`.
+Dropping an OR branch is forbidden: `a|timeout` becomes TRUE because `a` is too
+short, not `timeout`. TRUE in an AND can be omitted. Unsupported consuming
+atoms break adjacency; zero-width assertions do not. External word boundaries
+are retained structurally but disable the RE2 range-prefix fallback because
+anchored range analysis can omit matches using preceding row bytes.
 
-| Pattern | Requirements / route |
+| Pattern | Necessary condition |
 | --- | --- |
-| `ERROR.*timeout` | `ERROR`, `timeout`; choose the rarer fragment |
-| `.*needle` | `needle` |
-| `foo\|foobar` | `foo`, from RE2 bounds |
-| `\x41\141\.` | decoded bytes `Aa.` |
-| `foo\|bar`, `foo\|`, `a*`, empty pattern | scan |
-| `\Bfoo` / `\Bfoo\|bar` | `foo` / scan |
+| `foo.*bar` | `foo AND bar` |
+| `.*COMMON_LONG.*RARE` | `COMMON_LONG AND RARE` |
+| `(ERROR\|WARN).*timeout` | `(ERROR OR WARN) AND timeout` |
+| `foo.*bar\|baz.*qux` | `(foo AND bar) OR (baz AND qux)` |
+| `a\|timeout`, `(?i:foo)\|bar`, `foo\|`, `a*` | TRUE |
+| `\Bfoo\|bar` | `foo OR bar`; never the unsafe anchored prefix `bar` |
+| `\x41\141\.` | decoded `Aa.` |
 
-### Preparation reuse
+Raw scanning retains the existing `RequiredLiteral()`/Volnitsky prefilter,
+including its conservative alternation fallback. Its 4096-byte literal budget
+is separate from the index's 64-byte atoms.
 
-`PrepareIndexLiterals()` keeps one entry per thread, keyed by full pattern bytes
-under the matcher's fixed RE2 options. Retain keys up to 4096 bytes and return
-copies of the requirements. Construct replacement entries before publication;
-invalid patterns still throw. Index statistics, row IDs and validity are never
-cached, so the same pattern can safely query different indexes.
+## Planning and execution
 
-This removes repeated analysis between routing and candidate generation on the
-same thread. Thread migration or another pattern causes a harmless miss.
-The expression retains its own canonical matcher. The cost guard still estimates
-locate work only; compilation, analysis and raw-column reads can outweigh savings.
+`PrepareIndexCondition()` caches one immutable condition per thread, keyed by
+full pattern bytes under fixed RE2 options. Copies are independent. Replacement
+is published only after successful compilation; invalid patterns still fail.
+Counts, row IDs and validity are never cached.
 
-Implementation: [literal analysis](../../../internal/core/src/common/RegexLiteral.cpp),
+Each routing or candidate request counts every distinct retained atom once on
+the **current segment's index** (at most 126 searches of at most 64 bytes).
+Recursively select the least costly child of each AND; keep every OR child.
+The cost of an OR is the sum of its children's occurrence counts. For example,
+`(foo AND bar) OR (baz AND qux)` can select `bar OR baz` on one segment and
+`foo OR qux` on another. Selection minimizes estimated locate work, not the
+number of final candidate rows; it does not yet exploit intersections of
+individually common atoms.
+
+TRUE declines routing. Zero estimated occurrences accepts immediately;
+otherwise retain the existing guard:
+`selected_occurrences * sa_sample_rate < fmindexCostRatio * TotalTokens`.
+Occurrence counts upper-bound row counts and the sum prices every selected
+branch, even overlapping branches. The guard does not price preparation,
+bitmap operations or raw reads; performance measurements must guide tuning.
+
+Exact contains lookups produce per-literal bitmaps, combined by intersection
+and union. The generic evaluator can execute all retained conditions; production
+currently executes the Count-selected condition. `PatternMatch(RegexMatch)`
+returns only candidates and excludes NULL rows. A direct TRUE call returns all
+non-null rows. The expression executor intersects its input bitmap, fetches
+sealed-column strings and rechecks with the canonical RE2 matcher. Validity is
+returned separately; NOT is applied to the rechecked result, never the candidate
+superset. Offset-input evaluation retains the raw path.
+
+Implementation: [analysis and selection](../../../internal/core/src/common/RegexLiteral.cpp),
+[condition contract](../../../internal/core/src/common/RegexQuery.h),
 [FMIndex routing](../../../internal/core/src/index/FMIndex.cpp),
 [expression recheck](../../../internal/core/src/exec/expression/UnaryExpr.cpp).
 
-## Alternatives
+## Verification
 
-[Google Code Search](https://github.com/google/codesearch) and
-[Rust regex](https://github.com/rust-lang/regex) use bounded literal summaries
-and conservative weakening. This design adopts those principles with existing
-FM substring lookup. Boolean OR extraction is deferred: every alternative must
-be covered, and the current requirement vector cannot represent that contract.
+The standalone differential harness builds against the **pinned RE2
+2023-03-01 source** and compares canonical RE2 matches with both the complete
+condition tree and the Count-selected condition. It exercises nested
+alternatives, short and case-folded branches, embedded NULs, Unicode, external
+word boundaries, extraction budgets, cache replacement and concurrent
+preparation. It also builds two FM indexes with opposite `foo`/`bar`
+selectivity and verifies that Count chooses the literal that is rare on the
+current index. Sanitizer runs rebuild the harness and its RE2, GoogleTest and
+libsais dependencies with ASan and UBSan.
 
-[RE2 FilteredRE2](https://github.com/google/re2/blob/2023-03-01/re2/filtered_re2.h)
-is not a drop-in extractor: its atoms are lowercased, incompatible with the
-existing case-sensitive byte index.
-[PostgreSQL pg_trgm](https://github.com/postgres/postgres/tree/master/contrib/pg_trgm)
-uses a lossy NFA-derived trigram filter and recheck; adopting its pipeline would
-require different regex internals and index machinery.
+The source-to-consumer review follows literal construction and adjacency,
+optional/repeat weakening, OR absorption, budget exhaustion, prefix fallback,
+cache publication, current-index Count, exact contains, NULL exclusion, input
+intersection, raw recheck and final NOT. Native tests exercise the same
+conditions through sealed-column reads, batches, multiple chunks, offset
+fallback and invalid syntax.
 
-## Validation
+### Native performance experiments
 
-Ten standalone correctness tests passed, covering 6,162 patterns against 1,589
-rows: alternation, escapes, empty matches, boundaries, Unicode/NUL/invalid UTF-8,
-groups, quantifiers and truncation. Cached and uncached requirements agree;
-intersecting all extracted requirements retains every canonical match in this
-corpus. Cache tests cover replacement, independent copies, invalid-pattern
-retry, oversize bypass and concurrent threads. Standalone ASan/UBSan passed;
-cache fixtures also passed TSan. Prebuilt dependencies were not sanitized.
+`FMIndex.RegexSealedColumnExperiment` runs in the ordinary C++ test suite with
+1,000 rows, one warmup and three measured samples (median, microseconds),
+rotating mode order. It records preparation, Count, candidate lookup, bitset
+work, sealed-column reads, RE2 recheck and total time in gtest XML. Parity with
+canonical RE2 is checked after every timed sample.
 
-Native fixtures cover nullable/NOT, bitmap/batch/multi-chunk evaluation, offset
-fallback, invalid syntax and different-index selectivity. **These fixtures and
-native end-to-end performance remain unverified.** Local component runs used
-RE2 2025-11-05 with an error-header adapter, not Milvus's pinned RE2 20230301.
+The stage experiment compares a raw literal/RE2 pipeline, the former
+longest-literal/prefix candidate policy, full AND/OR bitset execution and
+Count-selected execution. Each mode fetches selected strings through the sealed
+chunk reader and records preparation, Count, lookup, bitset, raw-read, recheck
+and total time. A separate mixed-pattern sweep measures physical-expression
+compilation, routing, reads and recheck on indexed and unindexed segments, with
+expression-result caching explicitly disabled.
 
-### Component measurements
+Workloads include independent common/rare literals, a shorter rare literal,
+alternatives with a mandatory suffix, multiple OR branches, frequent and long
+literals, short/folded OR branches and fallback. Dense and 1% input bitmaps,
+cold/warm preparation and mixed patterns are covered. Candidate lookup time
+includes bitmap population; the bitset stage covers Boolean combinations and
+input intersection. Raw-read timing includes offset collection and pinning;
+recheck also includes writing result bits.
 
-Fixture: 20,000 rows, each containing 500 `x` bytes plus `COMMON`; 20 rows append
-`RARE123END`, another 20 prepend `RAREwrong`. Apple M1 Pro, Clang 21, C++20 `-O2`,
-FM sample rate 8, cost ratio 0.001. Three processes; one warmup and nine samples
-of ten queries per mode, rotating order. Values below are medians of process
-medians, in microseconds per query. Build/load time is excluded.
-
-All modes use the same rows and verify parity against full RE2. Raw scan uses
-Volnitsky + RE2. Prefix FM uses only the RE2 prefix with the same raw fallback.
-Cold preparation alternates equivalent patterns to miss on every query; warm
-preparation reuses one key. Cache priming and parity checks are outside timing.
-
-| Pattern | FM candidates | Raw scan | Prefix FM | Current FM, cold / warm |
-| --- | ---: | ---: | ---: | ---: |
-| `.*RARE` | 40 | 3578.9 | 3544.4 | 85.9 / 80.2 |
-| `x.*RARE123END` | 20 | 1455.0 | 1482.7 | 88.0 / 78.5 |
-| `.*x{500}COMMONRARE123END` | 20 | 1863.1 | 1911.5 | 1918.6 / 1865.1 |
-| `COMMON.*` | scan | 3233.9 | 3272.8 | 3278.9 / 3243.5 |
-| `.*` | scan | 1404.2 | 1416.1 | 1464.6 / 1403.0 |
-| `ABSENT.*` | 0 | 2223.9 | 76.7 | 61.0 / 47.1 |
-
-Interior literals avoid scanning row bytes when selective. The raw prefilter
-already reduces RE2 calls to 40 and 20 for the first two patterns; FM mainly
-avoids those per-row substring searches. Long-pattern and fallback cases show
-little benefit or regressions. Small timing differences remain noisy.
-These component measurements exclude segment dispatch and sealed-column reads;
-they do not establish production end-to-end speedups.
-
-### Reproduction
-
-After building the native unit-test target, run the commands below. Native
-benchmarks require expression-result caching to be disabled.
+`DISABLED_RegexEndToEndBenchmark` compares production raw scan and indexed
+execution with cold/warm preparation across the same workloads. Expression
+results are not cached, and build/load time is outside query timing.
 
 ```sh
 internal/core/output/unittest/all_tests \
-  --gtest_filter='RegexRequiredPrefix.*:FMIndex.*Regex*:FMIndex/FMIndexPatternExecutorTest.*'
+  --gtest_filter='RegexRequiredPrefix.*:FMIndex.*Regex*:FMIndex/FMIndexPatternExecutorTest.*' \
+  --gtest_output=xml:fm_regex_ci.xml
 
 internal/core/output/unittest/all_tests --gtest_also_run_disabled_tests \
-  --gtest_filter='RegexRequiredPrefix.DISABLED_*Benchmark:FMIndex.DISABLED_RegexEndToEndBenchmark' \
+  --gtest_filter='FMIndex.DISABLED_RegexEndToEndBenchmark' \
   --gtest_output=xml:fm_regex_benchmark.xml
 ```

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <re2/re2.h>
@@ -81,6 +82,67 @@ RegexMatcher::operator()(const std::string_view& operand) {
     return RE2::FullMatch(sp, *re2_);
 }
 
+// A necessary condition for a regex match, never a final answer. TRUE means
+// no pruning. Atoms are case-sensitive byte substrings, 2..64 bytes each.
+// Construction bounds the tree to 127 nodes (at most 126 literal occurrences).
+struct RegexLiteralCondition {
+    enum class Op { True, Literal, And, Or };
+    Op op = Op::True;
+    std::string literal;
+    std::vector<RegexLiteralCondition> children;
+
+    static constexpr size_t kMaxNodes = 127;
+    static constexpr size_t kMaxLiteralBytes = 64;
+
+    static RegexLiteralCondition
+    Literal(const std::string& text);
+
+    static RegexLiteralCondition
+    Combine(Op op, RegexLiteralCondition a, RegexLiteralCondition b);
+
+    size_t
+    NodeCount() const;
+
+    bool
+    IsTrue() const {
+        return op == Op::True;
+    }
+
+    bool
+    operator==(const RegexLiteralCondition&) const = default;
+
+    // Count each distinct atom once on the CURRENT index. An AND chooses its
+    // cheapest child; an OR retains every child. Cost is the sum of selected
+    // occurrence counts (an upper bound on locate work), infinity for TRUE.
+    RegexLiteralCondition
+    Select(const std::function<size_t(const std::string&)>& count,
+           double& cost) const;
+
+    // Used with bitmaps in FMIndex and booleans in differential tests. The
+    // caller supplies the universe for TRUE (all non-null rows in FMIndex).
+    template <typename Lookup, typename Universe>
+    auto
+    Evaluate(const Lookup& lookup, const Universe& universe) const
+        -> decltype(lookup(literal)) {
+        if (IsTrue()) {
+            return universe();
+        }
+        if (op == Op::Literal) {
+            return lookup(literal);
+        }
+        auto result = children.front().Evaluate(lookup, universe);
+        for (size_t i = 1; i < children.size(); ++i) {
+            auto next = children[i].Evaluate(lookup, universe);
+            if (op == Op::And) {
+                result &= next;
+            } else {
+                result |= next;
+            }
+        }
+        return result;
+    }
+};
+
 // PartialRegexMatcher using RE2 for partial regex matching (substring match)
 // Unlike RegexMatcher which uses RE2::FullMatch, this uses RE2::PartialMatch
 struct PartialRegexMatcher {
@@ -145,18 +207,17 @@ struct PartialRegexMatcher {
     std::string
     RequiredLiteral() const;
 
-    // At most three mandatory byte substrings (each <= 64 bytes): the RE2
-    // prefix and both ends of the structural interior literal. The index may
-    // count and choose any one. These are AND requirements, never alternatives.
-    // Subsumed requirements are omitted; empty means no filtering, not no hits.
-    std::vector<std::string>
-    RequiredIndexLiterals() const;
+    // Bounded necessary AND/OR condition from RE2's parsed Regexp/Prefilter,
+    // checked against the original-byte structural condition. Unproved atom
+    // mappings or exhausted adapter budgets retain that structural condition;
+    // short/optional/unsupported OR branches are never dropped.
+    RegexLiteralCondition
+    RequiredIndexCondition() const;
 
-    // Reuse only immutable analysis, never index-specific counts or row IDs.
-    // One bounded entry per thread avoids sharing query state across threads.
-    // Options are fixed by this class; the full pattern bytes are the key.
-    static std::vector<std::string>
-    PrepareIndexLiterals(const std::string& pattern);
+    // One immutable preparation entry per thread; never cache segment counts
+    // or row IDs. Compile before publishing, including invalid-pattern errors.
+    static RegexLiteralCondition
+    PrepareIndexCondition(const std::string& pattern);
 
  private:
     bool

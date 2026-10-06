@@ -12,11 +12,244 @@
 #include "common/RegexQuery.h"
 
 #include <algorithm>
+#include <cctype>
+#include <functional>
+#include <limits>
+#include <set>
 #include <optional>
+#include <unordered_map>
+
+#include <re2/filtered_re2.h>
 
 namespace milvus {
 
 namespace {
+
+std::string
+AsciiLower(std::string_view value) {
+    std::string result(value);
+    for (char& c : result) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x80) {
+            c = static_cast<char>(std::tolower(byte));
+        }
+    }
+    return result;
+}
+
+void
+CollectLiteralNodes(const RegexLiteralCondition& condition,
+                    std::vector<std::string>& literals) {
+    if (condition.op == RegexLiteralCondition::Op::Literal) {
+        literals.push_back(condition.literal);
+        return;
+    }
+    for (const auto& child : condition.children) {
+        CollectLiteralNodes(child, literals);
+    }
+}
+
+std::vector<std::string>
+MapPrefilterAtomToOriginalBytes(const std::string& atom,
+                                const RegexLiteralCondition& fallback) {
+    std::vector<std::string> source_literals;
+    CollectLiteralNodes(fallback, source_literals);
+    std::set<std::string> mapped;
+    for (const auto& source : source_literals) {
+        if (source.size() < atom.size()) {
+            continue;
+        }
+        for (size_t offset = 0; offset + atom.size() <= source.size();
+             ++offset) {
+            const auto candidate = source.substr(offset, atom.size());
+            if (AsciiLower(candidate) == atom) {
+                mapped.insert(candidate);
+            }
+        }
+    }
+    return {mapped.begin(), mapped.end()};
+}
+
+RegexLiteralCondition
+BuildMappedAtomCondition(const std::vector<std::string>& literals) {
+    RegexLiteralCondition result;
+    bool initialized = false;
+    for (const auto& literal : literals) {
+        auto atom = RegexLiteralCondition::Literal(literal);
+        result = initialized ? RegexLiteralCondition::Combine(
+                                   RegexLiteralCondition::Op::Or,
+                                   std::move(result),
+                                   std::move(atom))
+                             : std::move(atom);
+        initialized = true;
+    }
+    return result;
+}
+
+// Prove that every row satisfying the original-byte condition also satisfies
+// the mapped prefilter. Lowercased atoms lose branch provenance: a spelling
+// found in one branch is not evidence for a folded occurrence in another.
+// These implication rules are sufficient, not complete. Failure (including
+// budget exhaustion) means keep the original condition, never trust a mapping.
+bool
+ConditionImplies(const RegexLiteralCondition& original,
+                 const RegexLiteralCondition& mapped,
+                 size_t& work_left) {
+    if (work_left == 0) {
+        return false;
+    }
+    --work_left;
+    if (mapped.IsTrue() || original == mapped) {
+        return true;
+    }
+    if (original.IsTrue()) {
+        return false;
+    }
+    using Op = RegexLiteralCondition::Op;
+    if (original.op == Op::Or) {
+        return std::all_of(original.children.begin(),
+                           original.children.end(),
+                           [&](const auto& child) {
+                               return ConditionImplies(
+                                   child, mapped, work_left);
+                           });
+    }
+    if (mapped.op == Op::And) {
+        return std::all_of(mapped.children.begin(),
+                           mapped.children.end(),
+                           [&](const auto& child) {
+                               return ConditionImplies(
+                                   original, child, work_left);
+                           });
+    }
+    if (original.op == Op::And) {
+        return std::any_of(original.children.begin(),
+                           original.children.end(),
+                           [&](const auto& child) {
+                               return ConditionImplies(
+                                   child, mapped, work_left);
+                           });
+    }
+    if (mapped.op == Op::Or) {
+        return std::any_of(mapped.children.begin(),
+                           mapped.children.end(),
+                           [&](const auto& child) {
+                               return ConditionImplies(
+                                   original, child, work_left);
+                           });
+    }
+    return original.literal.find(mapped.literal) != std::string::npos;
+}
+
+RegexLiteralCondition
+ExtractPrefilterCondition(const std::string& pattern,
+                          const RE2::Options& options,
+                          const RegexLiteralCondition& fallback) {
+    // FilteredRE2 is the public entry point to RE2's parsed Regexp walker and
+    // Prefilter. Its atoms are lowercased by design, so map them back to the
+    // exact byte spelling retained by the canonical structural summary before
+    // they reach FMIndex. The original-byte condition is also the safety
+    // fallback when a mapping cannot be proved to cover every viable branch.
+    if (fallback.IsTrue()) {
+        return fallback;
+    }
+    re2::FilteredRE2 filtered(2);
+    int regexp_id = -1;
+    if (filtered.Add(re2::StringPiece(pattern), options, &regexp_id) !=
+        RE2::NoError) {
+        return fallback;
+    }
+
+    std::vector<std::string> atoms;
+    filtered.Compile(&atoms);
+    if (atoms.empty()) {
+        return fallback;
+    }
+
+    std::vector<RegexLiteralCondition> mapped_atoms;
+    mapped_atoms.reserve(atoms.size());
+    for (const auto& atom : atoms) {
+        auto mapped = MapPrefilterAtomToOriginalBytes(atom, fallback);
+        if (mapped.empty()) {
+            // For example, a long RE2 atom may exceed the retained 64-byte
+            // endpoints. Keep those endpoints and independent rare literals.
+            return fallback;
+        }
+        mapped_atoms.push_back(BuildMappedAtomCondition(mapped));
+        if (mapped_atoms.back().IsTrue()) {
+            return fallback;
+        }
+    }
+
+    const size_t max_probes = RegexLiteralCondition::kMaxNodes * 64;
+    size_t probes = 0;
+    std::vector<std::vector<int>> terms;
+    std::vector<int> selected;
+    bool exhausted = false;
+    auto satisfies = [&](const std::vector<int>& ids) {
+        if (++probes > max_probes) {
+            exhausted = true;
+            return false;
+        }
+        std::vector<int> potential;
+        filtered.AllPotentials(ids, &potential);
+        return std::find(potential.begin(), potential.end(), regexp_id) !=
+               potential.end();
+    };
+    std::function<void(size_t)> visit = [&](size_t next) {
+        if (exhausted) {
+            return;
+        }
+        if (satisfies(selected)) {
+            // The prefilter is monotone. A satisfying set is useful only when
+            // none of its atoms can be removed while keeping it satisfying.
+            for (size_t i = 0; i < selected.size(); ++i) {
+                auto reduced = selected;
+                reduced.erase(reduced.begin() + i);
+                if (satisfies(reduced)) {
+                    return;
+                }
+            }
+            terms.push_back(selected);
+            return;
+        }
+        if (next == atoms.size()) {
+            return;
+        }
+        visit(next + 1);
+        selected.push_back(static_cast<int>(next));
+        visit(next + 1);
+        selected.pop_back();
+    };
+    visit(0);
+    if (exhausted || terms.empty()) {
+        return fallback;
+    }
+
+    RegexLiteralCondition result;
+    bool initialized = false;
+    for (const auto& term : terms) {
+        RegexLiteralCondition conjunction;
+        for (const auto atom_id : term) {
+            conjunction =
+                RegexLiteralCondition::Combine(RegexLiteralCondition::Op::And,
+                                               std::move(conjunction),
+                                               mapped_atoms[atom_id]);
+        }
+        result = initialized ? RegexLiteralCondition::Combine(
+                                   RegexLiteralCondition::Op::Or,
+                                   std::move(result),
+                                   std::move(conjunction))
+                             : std::move(conjunction);
+        initialized = true;
+        if (result.IsTrue()) {
+            return fallback;
+        }
+    }
+    size_t work_left =
+        RegexLiteralCondition::kMaxNodes * RegexLiteralCondition::kMaxNodes;
+    return ConditionImplies(fallback, result, work_left) ? result : fallback;
+}
 
 // Soundness contract for ALL matches of a subexpression:
 // - prefix/suffix are mandatory at its ends; best is mandatory somewhere.
@@ -29,14 +262,19 @@ struct RegexLiteralSummary {
     std::string suffix;
     std::string best;
     bool exact = true;
+    RegexLiteralCondition condition;
 };
 
 class RegexLiteralAnalyzer {
  public:
     RegexLiteralAnalyzer(const std::string& pattern,
                          const RE2::Options& options,
-                         size_t limit)
-        : options_(options), limit_(limit), pattern_(pattern) {
+                         size_t limit,
+                         bool conditions = false)
+        : options_(options),
+          limit_(limit),
+          pattern_(pattern),
+          conditions_(conditions) {
     }
 
     std::optional<std::string>
@@ -48,10 +286,33 @@ class RegexLiteralAnalyzer {
         return std::move(result.best);
     }
 
+    std::optional<RegexLiteralCondition>
+    ExtractCondition() {
+        auto result = Sequence(false, 0);
+        if (!ok_ || pos_ != pattern_.size()) {
+            return std::nullopt;
+        }
+        return Condition(result);
+    }
+
  private:
+    static RegexLiteralCondition
+    Condition(const RegexLiteralSummary& s) {
+        if (s.exact) {
+            return RegexLiteralCondition::Literal(s.prefix);
+        }
+        return RegexLiteralCondition::Combine(
+            RegexLiteralCondition::Op::And,
+            RegexLiteralCondition::Combine(
+                RegexLiteralCondition::Op::And,
+                s.condition,
+                RegexLiteralCondition::Literal(s.prefix)),
+            RegexLiteralCondition::Literal(s.suffix));
+    }
+
     static RegexLiteralSummary
     Unknown() {
-        return {{}, {}, {}, false};
+        return {{}, {}, {}, false, {}};
     }
 
     RegexLiteralSummary
@@ -59,7 +320,8 @@ class RegexLiteralAnalyzer {
         if (folded) {
             return Unknown();
         }
-        return {s, s, s, true};  // One decoded rune, never longer than limit_.
+        return {
+            s, s, s, true, {}};  // One decoded rune, never longer than limit_.
     }
 
     RegexLiteralSummary
@@ -68,6 +330,26 @@ class RegexLiteralAnalyzer {
             a.exact && b.exact && a.prefix.size() + b.prefix.size() <= limit_;
         const auto bridge_size =
             std::min(limit_, a.suffix.size() + b.prefix.size());
+        RegexLiteralCondition condition;
+        if (conditions_ && !exact) {
+            using Op = RegexLiteralCondition::Op;
+            // Keep a growing fixed suffix pending until a gap, so long runs
+            // retain their endpoints without accumulating overlapping windows
+            // (or spending the tree budget before a later rare condition).
+            condition = a.condition;
+            if (!b.exact) {
+                condition = RegexLiteralCondition::Combine(
+                    Op::And, Condition(a), Condition(b));
+                if (!a.suffix.empty() && !b.prefix.empty()) {
+                    auto bridge = a.suffix;
+                    bridge.append(b.prefix, 0, limit_ - bridge.size());
+                    condition = RegexLiteralCondition::Combine(
+                        Op::And,
+                        std::move(condition),
+                        RegexLiteralCondition::Literal(bridge));
+                }
+            }
+        }
         // Reuse the sequence accumulator's buffers. Building a fresh summary
         // and temporary concatenations per rune allocates repeatedly on long
         // literal runs, even though the required strings only grow in place.
@@ -81,13 +363,15 @@ class RegexLiteralAnalyzer {
             a.prefix.append(b.prefix, 0, limit_ - a.prefix.size());
         }
         if (b.exact) {
-            const auto keep = std::min(a.suffix.size(), limit_ - b.suffix.size());
+            const auto keep =
+                std::min(a.suffix.size(), limit_ - b.suffix.size());
             a.suffix.erase(0, a.suffix.size() - keep);
             a.suffix += b.suffix;
         } else {
             a.suffix = b.suffix;
         }
         a.exact = exact;
+        a.condition = std::move(condition);
         return a;
     }
 
@@ -100,6 +384,9 @@ class RegexLiteralAnalyzer {
             return Unknown();
         }
         if (minimum == 1) {
+            if (conditions_) {
+                atom.condition = Condition(atom);
+            }
             atom.exact = atom.exact && maximum == 1;
             return atom;
         }
@@ -114,6 +401,9 @@ class RegexLiteralAnalyzer {
             }
         }
         if (minimum != maximum) {
+            if (conditions_) {
+                result.condition = Condition(result);
+            }
             result.exact = false;
         }
         return result;
@@ -338,6 +628,7 @@ class RegexLiteralAnalyzer {
             return Unknown();
         }
         RegexLiteralSummary result;
+        std::optional<RegexLiteralCondition> alternatives;
         while (ok_ && pos_ < pattern_.size()) {
             if (!quoted_) {
                 SkipEmptyQuotes();
@@ -365,7 +656,18 @@ class RegexLiteralAnalyzer {
             const char c = pattern_[pos_];
             if (c == '(')
                 atom = Group(folded, depth);
-            else if (c == '[')
+            else if (c == '|' && conditions_) {
+                auto branch = Condition(result);
+                alternatives = alternatives.has_value()
+                                   ? RegexLiteralCondition::Combine(
+                                         RegexLiteralCondition::Op::Or,
+                                         std::move(*alternatives),
+                                         std::move(branch))
+                                   : std::move(branch);
+                result = {};
+                ++pos_;
+                continue;
+            } else if (c == '[')
                 atom = CharacterClass();
             else if (c == '\\')
                 atom = Escape(folded);
@@ -388,6 +690,14 @@ class RegexLiteralAnalyzer {
                 break;
             result = Concat(std::move(result), Quantify(std::move(atom)));
         }
+        if (alternatives.has_value()) {
+            auto condition =
+                RegexLiteralCondition::Combine(RegexLiteralCondition::Op::Or,
+                                               std::move(*alternatives),
+                                               Condition(result));
+            result = Unknown();
+            result.condition = std::move(condition);
+        }
         return result;
     }
 
@@ -397,6 +707,7 @@ class RegexLiteralAnalyzer {
     size_t pos_ = 0;
     bool ok_ = true;
     bool quoted_ = false;
+    const bool conditions_;
 };
 
 }  // namespace
@@ -412,64 +723,216 @@ PartialRegexMatcher::RequiredLiteral() const {
     return literal.has_value() ? std::move(*literal) : RequiredPrefix();
 }
 
-std::vector<std::string>
-PartialRegexMatcher::RequiredIndexLiterals() const {
+RegexLiteralCondition
+PartialRegexMatcher::RequiredIndexCondition() const {
     if (!CanExtractLiteral()) {
         return {};
     }
-    auto prefix = RequiredPrefix();
-    // Analyze directly so unsupported syntax reuses the prefix above rather
-    // than computing RE2's bounds again through RequiredLiteral's fallback.
-    auto literal = RegexLiteralAnalyzer(
-                       re2_->pattern(), re2_->options(), kMaxScanLiteralBytes)
-                       .Extract();
-    std::vector<std::string> requirements;
-    auto add = [&](std::string requirement) {
-        if (requirement.empty() ||
-            std::any_of(requirements.begin(),
-                        requirements.end(),
-                        [&](const auto& existing) {
-                            return existing.find(requirement) !=
-                                   std::string::npos;
-                        })) {
-            return;
-        }
-        // Remove weaker requirements implied by the new substring.
-        std::erase_if(requirements, [&](const auto& existing) {
-            return requirement.find(existing) != std::string::npos;
-        });
-        requirements.push_back(std::move(requirement));
-    };
-    if (literal.has_value()) {
-        // Bound backward-search work, retaining both ends so either can supply
-        // selectivity. Every substring of a mandatory literal is mandatory;
-        // these fragments are independent requirements, never concatenated.
-        add(literal->substr(0, kMaxPrefixBytes));
-        if (literal->size() > kMaxPrefixBytes) {
-            add(literal->substr(literal->size() - kMaxPrefixBytes));
-        }
+    auto fallback =
+        RegexLiteralAnalyzer(
+            re2_->pattern(), re2_->options(), kMaxScanLiteralBytes, true)
+            .ExtractCondition();
+    if (!fallback.has_value()) {
+        return {};
     }
-    add(std::move(prefix));
-    return requirements;
+    return ExtractPrefilterCondition(
+        re2_->pattern(), re2_->options(), *fallback);
 }
 
-std::vector<std::string>
-PartialRegexMatcher::PrepareIndexLiterals(const std::string& pattern) {
+RegexLiteralCondition
+PartialRegexMatcher::PrepareIndexCondition(const std::string& pattern) {
     struct Entry {
         std::string pattern;
-        std::vector<std::string> requirements;
+        RegexLiteralCondition condition;
     };
     static thread_local std::optional<Entry> cache;
     if (cache.has_value() && cache->pattern == pattern) {
-        return cache->requirements;
+        return cache->condition;
     }
-    // Compile before publishing: invalid regexes still throw and cannot leave
-    // a new key paired with an old result. Returned vectors are independent.
-    auto requirements = PartialRegexMatcher(pattern).RequiredIndexLiterals();
+    auto condition = PartialRegexMatcher(pattern).RequiredIndexCondition();
     if (pattern.size() <= kMaxProgramSize) {
-        cache.emplace(Entry{pattern, requirements});
+        cache.emplace(Entry{pattern, condition});
     }
-    return requirements;
+    return condition;
+}
+
+size_t
+RegexLiteralCondition::NodeCount() const {
+    size_t result = 1;
+    for (const auto& child : children) {
+        result += child.NodeCount();
+    }
+    return result;
+}
+
+RegexLiteralCondition
+RegexLiteralCondition::Literal(const std::string& text) {
+    if (text.size() < 2) {
+        return {};
+    }
+    RegexLiteralCondition first{
+        Op::Literal, text.substr(0, kMaxLiteralBytes), {}};
+    if (text.size() <= kMaxLiteralBytes) {
+        return first;
+    }
+    return Combine(
+        Op::And,
+        std::move(first),
+        {Op::Literal, text.substr(text.size() - kMaxLiteralBytes), {}});
+}
+
+RegexLiteralCondition
+RegexLiteralCondition::Combine(Op op,
+                               RegexLiteralCondition a,
+                               RegexLiteralCondition b) {
+    if (a.IsTrue() || b.IsTrue()) {
+        if (op == Op::Or) {
+            return {};
+        }
+        return a.IsTrue() ? std::move(b) : std::move(a);
+    }
+    if (a == b) {
+        return a;
+    }
+    if (op == Op::And) {
+        // Flatten ANDs and drop weaker atoms implied by a longer atom. This
+        // keeps incremental fixed runs from filling the budget with prefixes.
+        if (a.op != op) {
+            if (a.NodeCount() == kMaxNodes) {
+                return a;
+            }
+            a = {op, {}, {std::move(a)}};
+        }
+        auto add = [&](RegexLiteralCondition child) {
+            for (const auto& existing : a.children) {
+                if (existing == child ||
+                    (existing.op == Op::Literal && child.op == Op::Literal &&
+                     existing.literal.find(child.literal) !=
+                         std::string::npos)) {
+                    return;
+                }
+            }
+            if (child.op == Op::Literal) {
+                std::erase_if(a.children, [&](const auto& existing) {
+                    return existing.op == Op::Literal &&
+                           child.literal.find(existing.literal) !=
+                               std::string::npos;
+                });
+            }
+            if (a.NodeCount() + child.NodeCount() <= kMaxNodes) {
+                a.children.push_back(std::move(child));
+            }
+        };
+        if (b.op == op) {
+            for (auto& child : b.children) {
+                add(std::move(child));
+            }
+        } else {
+            add(std::move(b));
+        }
+        auto key = [](const RegexLiteralCondition& node,
+                      const auto& self) -> std::string {
+            if (node.op == Op::Literal) {
+                return "L" + node.literal;
+            }
+            std::vector<std::string> children;
+            children.reserve(node.children.size());
+            for (const auto& child : node.children) {
+                children.push_back(self(child, self));
+            }
+            std::sort(children.begin(), children.end());
+            std::string result = node.op == Op::And ? "A" : "O";
+            for (const auto& child : children) {
+                result += "(" + child + ")";
+            }
+            return result;
+        };
+        std::sort(a.children.begin(),
+                  a.children.end(),
+                  [&](const auto& left, const auto& right) {
+                      return key(left, key) < key(right, key);
+                  });
+        if (a.children.size() == 1) {
+            return std::move(a.children.front());
+        }
+        return a;
+    }
+    // Never drop an OR branch on exhaustion: the entire OR becomes TRUE.
+    if (a.NodeCount() + b.NodeCount() + 1 > kMaxNodes) {
+        return {};
+    }
+    return {op, {}, {std::move(a), std::move(b)}};
+}
+
+RegexLiteralCondition
+RegexLiteralCondition::Select(
+    const std::function<size_t(const std::string&)>& count,
+    double& cost) const {
+    std::unordered_map<std::string, size_t> counts;
+    std::function<RegexLiteralCondition(const RegexLiteralCondition&, double&)>
+        select;
+    select = [&](const RegexLiteralCondition& node, double& estimate) {
+        if (node.IsTrue()) {
+            estimate = std::numeric_limits<double>::infinity();
+            return node;
+        }
+        if (node.op == Op::Literal) {
+            auto [it, inserted] = counts.try_emplace(node.literal, 0);
+            if (inserted) {
+                it->second = count(node.literal);
+            }
+            estimate = static_cast<double>(it->second);
+            return node;
+        }
+        RegexLiteralCondition result;
+        estimate =
+            node.op == Op::And ? std::numeric_limits<double>::infinity() : 0;
+        for (const auto& child : node.children) {
+            double child_cost;
+            auto selected = select(child, child_cost);
+            if (node.op == Op::And) {
+                if (child_cost < estimate) {
+                    estimate = child_cost;
+                    result = std::move(selected);
+                }
+            } else {
+                estimate += child_cost;
+                if (selected.IsTrue()) {
+                    estimate = std::numeric_limits<double>::infinity();
+                    return selected;
+                }
+                // Start with the first child, not TRUE (which absorbs OR).
+                result = result.IsTrue() ? std::move(selected)
+                                         : Combine(Op::Or,
+                                                   std::move(result),
+                                                   std::move(selected));
+            }
+        }
+        return result;
+    };
+    auto result = select(*this, cost);
+    std::unordered_map<std::string, size_t> selected_counts;
+    std::function<double(const RegexLiteralCondition&)> selected_cost =
+        [&](const RegexLiteralCondition& node) {
+            if (node.IsTrue()) {
+                return std::numeric_limits<double>::infinity();
+            }
+            if (node.op == Op::Literal) {
+                const auto [it, inserted] =
+                    selected_counts.try_emplace(node.literal, 0);
+                if (inserted) {
+                    it->second = counts.at(node.literal);
+                }
+                return static_cast<double>(it->second);
+            }
+            double total = 0;
+            for (const auto& child : node.children) {
+                total += selected_cost(child);
+            }
+            return total;
+        };
+    cost = selected_cost(result);
+    return result;
 }
 
 }  // namespace milvus

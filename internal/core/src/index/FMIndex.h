@@ -92,7 +92,7 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 // (milvus::index::fmindex::FMIndex). It accelerates LIKE prefix/infix/suffix on
 // VARCHAR exactly (no recheck). General LIKE (Match) returns rarest-fragment
 // candidates; ExecFMPatternCandidates rechecks those rows on sealed VARCHAR.
-// RegexMatch also returns candidates from mandatory regex literals. Both paths
+// RegexMatch returns candidates from a necessary AND/OR literal condition. Both paths
 // always recheck; range / equality fall back to the raw-data scan.
 class FMIndex : public ScalarIndex<std::string> {
  public:
@@ -341,17 +341,14 @@ class FMIndex : public ScalarIndex<std::string> {
     }
 
  private:
-    // Count-first guard for general LIKE and regex. Regex declines when no
-    // nonempty mandatory literal is available. Match declines an empty
-    // pattern and every pattern with no literal fragment (`%`, `%_%`), because
-    // phase 1 has no seed. Otherwise the rarest fragment is scored as
-    // occ x sa_sample_rate < ratio x tokens, the same locate-only bound as
-    // the anchored ops. Phase 2 reads those candidates back from sealed
-    // VARCHAR via ProcessDataByOffsets; its byte cost is not priced here
-    // (known approximation for long rows x unselective fragments).
+    // Count-first guard for LIKE and regex. Regex counts each distinct atom
+    // on this index, chooses the cheapest AND child, and sums the costs of
+    // every OR branch. TRUE declines routing. LIKE uses its rarest fragment.
+    // Both score locate work as occurrences * sa_sample_rate < ratio * tokens;
+    // raw-column reads, bitset operations and RE2 recheck are not priced here.
     bool
     PatternCandidateGuardAccepts(const std::string& pattern,
-                                proto::plan::OpType op) const;
+                                 proto::plan::OpType op) const;
 
     void
     RefreshResidentSize();

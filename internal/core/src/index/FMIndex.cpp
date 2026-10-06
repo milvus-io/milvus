@@ -56,16 +56,6 @@ bytes(const std::string& s) {
     return reinterpret_cast<const uint8_t*>(s.data());
 }
 
-// Every returned literal is required. An empty set must yield all non-null
-// candidates (or decline routing), never an empty result.
-std::vector<std::string>
-CandidateLiterals(const std::string& pattern, proto::plan::OpType op) {
-    if (op == proto::plan::OpType::Match) {
-        return split_by_wildcard(pattern);
-    }
-    return PartialRegexMatcher::PrepareIndexLiterals(pattern);
-}
-
 // Trailing slack appended to the mmap'd blob file so any word-granular read at
 // the very end of the FM-index stays inside the mapping.
 constexpr size_t kFMIndexMmapPadding = 64;
@@ -320,27 +310,28 @@ FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
 
 bool
 FMIndex::PatternCandidateGuardAccepts(const std::string& pattern,
-                                     proto::plan::OpType op) const {
-    auto parts = CandidateLiterals(pattern, op);
-    // No literal fragment to seed phase 1 with. Covers the wildcard-only
-    // patterns ("%", "%_%") and, because split_by_wildcard("") is also empty,
-    // the empty pattern: PatternMatch(Match, "") can only answer by handing
-    // every non-null row to the phase-2 recheck, which is the raw scan wearing
-    // an index costume. Decline so the executor runs the scan directly. The
-    // planner never produces Match with an empty pattern (a wildcard-free LIKE
-    // lowers to Equal, see optimizeLikePattern) -- this keeps the direct-API
-    // contract honest, and PatternMatch keeps its all-rows fallback because a
-    // candidate superset is the only safe answer there.
-    if (parts.empty()) {
-        return false;
-    }
-    int64_t occ =
-        static_cast<int64_t>(fm_.Count(bytes(parts[0]), parts[0].size()));
-    for (size_t i = 1; i < parts.size(); ++i) {
-        int64_t c =
-            static_cast<int64_t>(fm_.Count(bytes(parts[i]), parts[i].size()));
-        if (c < occ) {
-            occ = c;
+                                      proto::plan::OpType op) const {
+    double occ;
+    if (op == proto::plan::RegexMatch) {
+        auto condition = PartialRegexMatcher::PrepareIndexCondition(pattern);
+        if (condition.IsTrue()) {
+            return false;
+        }
+        condition.Select(
+            [&](const std::string& literal) {
+                return fm_.Count(bytes(literal), literal.size());
+            },
+            occ);
+    } else {
+        auto parts = split_by_wildcard(pattern);
+        if (parts.empty()) {
+            return false;
+        }
+        occ = static_cast<double>(fm_.Count(bytes(parts[0]), parts[0].size()));
+        for (size_t i = 1; i < parts.size(); ++i) {
+            occ = std::min(occ,
+                           static_cast<double>(
+                               fm_.Count(bytes(parts[i]), parts[i].size())));
         }
     }
     if (occ == 0) {
@@ -403,12 +394,37 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                                   [&](uint64_t d) { bitset.set(d); });
             return bitset;
         }
-        case proto::plan::OpType::Match:
         case proto::plan::OpType::RegexMatch: {
+            auto condition =
+                PartialRegexMatcher::PrepareIndexCondition(pattern);
+            double cost;
+            auto selected = condition.Select(
+                [&](const std::string& literal) {
+                    return fm_.Count(bytes(literal), literal.size());
+                },
+                cost);
+            // The selected tree preserves OR coverage; AND children may be
+            // omitted. Exact contains lookups produce only a candidate superset.
+            // The executor owns the input bitmap and canonical RE2 recheck.
+            return selected.Evaluate(
+                [&](const std::string& literal) {
+                    TargetBitmap hits(total_rows_);
+                    fm_.VisitMatchingDocs(
+                        bytes(literal), literal.size(), [&](uint64_t row) {
+                            if (row < static_cast<uint64_t>(total_rows_) &&
+                                !null_bitmap_[row]) {
+                                hits.set(row);
+                            }
+                        });
+                    return hits;
+                },
+                [&] { return IsNotNull(); });
+        }
+        case proto::plan::OpType::Match: {
             // Phase 1 only: rarest literal fragment to candidate rows.
             // ExecFMPatternCandidates rechecks those offsets on sealed VARCHAR.
             TargetBitmap candidates(total_rows_);
-            auto parts = CandidateLiterals(pattern, op);
+            auto parts = split_by_wildcard(pattern);
             if (parts.empty()) {
                 for (int64_t i = 0; i < total_rows_; ++i) {
                     if (!null_bitmap_[i]) {
