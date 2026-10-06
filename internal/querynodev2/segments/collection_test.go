@@ -489,6 +489,206 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNa
 	s.cm.Unref(1, 1)
 }
 
+func (s *CollectionManagerSuite) TestPutOrRefPublishesLoadUpdateBeforeNativeReaders() {
+	cm := NewCollectionManager()
+	schema := mock_segcore.GenTestCollectionSchema("atomic_load_update", schemapb.DataType_Int64, false)
+	initialFields := []int64{schema.GetFields()[0].GetFieldID()}
+	initialIndexMeta := mock_segcore.GenTestIndexMeta(10, schema)
+	s.Require().NoError(cm.PutOrRef(10, schema, initialIndexMeta, &querypb.LoadMetaInfo{
+		LoadFields: initialFields,
+	}))
+	defer cm.Unref(10, 1)
+	coll := cm.Get(10)
+
+	newSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	newSchema.Version++
+	newSchema.Fields = append(newSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  580,
+		Name:     "new_warmup_field",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	})
+	newFields := append(append([]int64(nil), initialFields...), 580)
+	newIndexMeta := proto.Clone(initialIndexMeta).(*segcorepb.CollectionIndexMeta)
+	newIndexMeta.MaxIndexRowCount++
+	retrieveReq := s.newSimpleRetrieveRequest(coll)
+
+	// Stop after the native schema has changed and its Go snapshot has been
+	// published, but before the new index metadata and warmup hint are applied.
+	// The old implementation released mu at this exact point, allowing native
+	// readers to capture the new schema together with the previous hint.
+	schemaPublished := make(chan struct{})
+	continueUpdate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseUpdate := func() { releaseOnce.Do(func() { close(continueUpdate) }) }
+	var setSchemaOrigin func(*Collection, *schemapb.CollectionSchema, uint64, uint64, uint64)
+	schemaPatch := mockey.Mock((*Collection).setSchema).To(func(c *Collection, schema *schemapb.CollectionSchema, logicalVersion, barrierTs, nativeVersion uint64) {
+		setSchemaOrigin(c, schema, logicalVersion, barrierTs, nativeVersion)
+		close(schemaPublished)
+		<-continueUpdate
+	}).Origin(&setSchemaOrigin).Build()
+	defer schemaPatch.UnPatch()
+
+	hintPublished := make(chan struct{})
+	nativeLoadFields := append([]int64(nil), initialFields...)
+	var loadFieldsOrigin func(*segcore.CCollection, []int64) error
+	hintPatch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).To(func(c *segcore.CCollection, fields []int64) error {
+		if err := loadFieldsOrigin(c, fields); err != nil {
+			return err
+		}
+		nativeLoadFields = append([]int64(nil), fields...)
+		close(hintPublished)
+		return nil
+	}).Origin(&loadFieldsOrigin).Build()
+	defer hintPatch.UnPatch()
+
+	type nativeReadSnapshot struct {
+		reader           string
+		schemaVersion    uint64
+		nativeVersion    uint64
+		indexMeta        *segcorepb.CollectionIndexMeta
+		loadFields       []int64
+		nativeLoadFields []int64
+		hintPublished    bool
+	}
+	observed := make(chan nativeReadSnapshot, 3)
+	capture := func(reader string) {
+		_, version := coll.SchemaAndVersion()
+		_, nativeVersion := coll.SchemaAndSegcoreVersion()
+		var hintReady bool
+		select {
+		case <-hintPublished:
+			hintReady = true
+		default:
+		}
+		observed <- nativeReadSnapshot{
+			reader:           reader,
+			schemaVersion:    version,
+			nativeVersion:    nativeVersion,
+			indexMeta:        coll.ccollection.IndexMeta(),
+			loadFields:       coll.loadFields.Collect(),
+			nativeLoadFields: append([]int64(nil), nativeLoadFields...),
+			hintPublished:    hintReady,
+		}
+	}
+	segmentPatch := mockey.Mock(segcore.CreateCSegment).To(func(*segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
+		capture("CreateCSegment")
+		return nil, nil
+	}).Build()
+	defer segmentPatch.UnPatch()
+	searchPatch := mockey.Mock(segcore.NewSearchRequest).To(func(*segcore.CCollection, *querypb.SearchRequest, []byte) (*segcore.SearchRequest, error) {
+		capture("NewSearchRequest")
+		return nil, nil
+	}).Build()
+	defer searchPatch.UnPatch()
+	retrievePatch := mockey.Mock(segcore.NewRetrievePlan).To(func(*segcore.CCollection, []byte, typeutil.Timestamp, int64, commonpb.ConsistencyLevel, typeutil.Timestamp, typeutil.Timestamp) (*segcore.RetrievePlan, error) {
+		capture("NewRetrievePlan")
+		return nil, nil
+	}).Build()
+	defer retrievePatch.UnPatch()
+
+	updateDone := make(chan error, 1)
+	updateFinished := make(chan struct{})
+	go func() {
+		defer close(updateFinished)
+		err := cm.PutOrRef(10, newSchema, newIndexMeta, &querypb.LoadMetaInfo{
+			LoadFields:      newFields,
+			SchemaBarrierTs: 100,
+		})
+		if err == nil {
+			cm.Unref(10, 1)
+		}
+		updateDone <- err
+	}()
+	var readers sync.WaitGroup
+	defer func() {
+		releaseUpdate()
+		select {
+		case <-updateFinished:
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("load update did not finish")
+		}
+		readersFinished := make(chan struct{})
+		go func() {
+			readers.Wait()
+			close(readersFinished)
+		}()
+		select {
+		case <-readersFinished:
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("native readers did not finish")
+		}
+	}()
+
+	select {
+	case <-schemaPublished:
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("load update did not reach the schema publication point")
+	}
+	// TryRLock makes the exclusion assertion deterministic: it fails the old
+	// split publication even if the scheduler has not run a reader goroutine.
+	readLockAcquired := coll.mu.TryRLock()
+	if readLockAcquired {
+		coll.mu.RUnlock()
+	}
+	s.Require().False(readLockAcquired, "native readers must be excluded until schema, index metadata, and hints are all published")
+
+	readerStarted := make(chan struct{}, 3)
+	readerDone := make(chan error, 3)
+	for _, read := range []func() error{
+		func() error {
+			_, err := coll.CreateCSegment(&segcore.CreateCSegmentRequest{SegmentID: 1, SegmentType: SegmentTypeSealed})
+			return err
+		},
+		func() error {
+			_, err := coll.NewSearchRequest(&querypb.SearchRequest{}, nil)
+			return err
+		},
+		func() error {
+			_, err := coll.NewRetrievePlan(retrieveReq)
+			return err
+		},
+	} {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			readerStarted <- struct{}{}
+			readerDone <- read()
+		}()
+	}
+	for range 3 {
+		<-readerStarted
+	}
+	select {
+	case snapshot := <-observed:
+		s.T().Fatalf("%s entered native code before warmup hints were published", snapshot.reader)
+	default:
+	}
+
+	releaseUpdate()
+	select {
+	case err := <-updateDone:
+		s.Require().NoError(err)
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("load update did not complete after publication resumed")
+	}
+	for range 3 {
+		select {
+		case err := <-readerDone:
+			s.Require().NoError(err)
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("native reader did not resume after load update")
+		}
+		snapshot := <-observed
+		s.Equal(uint64(newSchema.GetVersion()), snapshot.schemaVersion, snapshot.reader)
+		s.Equal(uint64(1), snapshot.nativeVersion, snapshot.reader)
+		s.Same(newIndexMeta, snapshot.indexMeta, snapshot.reader)
+		s.ElementsMatch(newFields, snapshot.loadFields, snapshot.reader)
+		s.ElementsMatch(newFields, snapshot.nativeLoadFields, snapshot.reader)
+		s.True(snapshot.hintPublished, "%s must observe the updated native hint", snapshot.reader)
+	}
+}
+
 func (s *CollectionManagerSuite) TestPutOrRefUpdatesLoadFields() {
 	cm := NewCollectionManager()
 	schema := mock_segcore.GenTestCollectionSchema("load_fields", schemapb.DataType_Int64, false)

@@ -318,7 +318,7 @@ type collectionSchemaSnapshot struct {
 // Collection is a wrapper of the underlying C-structure C.CCollection
 // In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
-	mu                 sync.RWMutex // protects colllectionPtr
+	mu                 sync.RWMutex // protects native collection lifetime and schema/index/hint publication
 	schemaTransitionMu sync.RWMutex // serializes schema transitions with insert payload conversion and growing writes
 	ccollection        *segcore.CCollection
 	id                 int64
@@ -419,12 +419,17 @@ func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore
 }
 
 func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.updateIndexMetaLocked(meta)
+}
+
+// updateIndexMetaLocked requires c.mu to be write-locked.
+func (c *Collection) updateIndexMetaLocked(meta *segcorepb.CollectionIndexMeta) error {
 	if meta == nil {
 		return nil
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update index meta on released collection")
@@ -439,6 +444,11 @@ func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uin
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	return c.updateSchemaLocked(schema, version)
+}
+
+// updateSchemaLocked requires c.mu to be write-locked.
+func (c *Collection) updateSchemaLocked(schema *schemapb.CollectionSchema, version uint64) error {
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update schema on released collection")
 	}
@@ -449,6 +459,11 @@ func (c *Collection) updateLoadFields(fields []int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	return c.updateLoadFieldsLocked(fields)
+}
+
+// updateLoadFieldsLocked requires c.mu to be write-locked.
+func (c *Collection) updateLoadFieldsLocked(fields []int64) error {
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update load fields on released collection")
 	}
@@ -472,6 +487,8 @@ func (c *Collection) updateLoadFields(fields []int64) error {
 func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	return c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 }
@@ -479,6 +496,11 @@ func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logica
 func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
+	// Segment and plan creation hold c.mu, but may already be inside an insert
+	// schema transition. Keep the complete native update under one write lock
+	// so they cannot capture a new schema with the previous index/hint state.
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	_, currentVersion, currentBarrierTs := c.SchemaSnapshot()
 	// Field hints can change without a schema-version or barrier bump. Accept
@@ -495,11 +517,11 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	}
 	// Always update index meta to ensure newly indexed fields are visible
 	// for search plan creation (CollectionIndexMeta::HasField check).
-	if err := c.updateIndexMeta(meta); err != nil {
+	if err := c.updateIndexMetaLocked(meta); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
 	if updateLoadFields {
-		if err := c.updateLoadFields(loadMeta.GetLoadFields()); err != nil {
+		if err := c.updateLoadFieldsLocked(loadMeta.GetLoadFields()); err != nil {
 			return collectionSchemaUpdatePlan{}, false, err
 		}
 	}
@@ -510,20 +532,19 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	return plan, shouldUpdate, nil
 }
 
+// applySchemaUpdateLocked requires both schemaTransitionMu and c.mu to be write-locked.
 func (c *Collection) applySchemaUpdateLocked(schema *schemapb.CollectionSchema, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
 	plan, shouldUpdate := prepareCollectionSchemaUpdate(c, logicalSchemaVersion, schemaBarrierTs)
 	if !shouldUpdate {
 		return collectionSchemaUpdatePlan{}, false, nil
 	}
-	if err := c.updateSchema(schema, plan.segcoreSchemaVersion); err != nil {
+	if err := c.updateSchemaLocked(schema, plan.segcoreSchemaVersion); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
 	c.setSchema(schema, plan.logicalSchemaVersion, plan.schemaBarrierTs, plan.segcoreSchemaVersion)
-	c.mu.Lock()
 	if c.loadFieldsDefault {
 		c.loadFields = resolveLoadFields(schema, nil)
 	}
-	c.mu.Unlock()
 	return plan, true, nil
 }
 
