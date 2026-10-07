@@ -73,6 +73,12 @@ func NewCompactionSignal() *compactionSignal {
 	}
 }
 
+// isGlobal reports whether the signal spans every collection (the periodic
+// tick) rather than one collection's channel (a flush).
+func (cs *compactionSignal) isGlobal() bool {
+	return cs.collectionID == 0
+}
+
 func (cs *compactionSignal) WithID(id UniqueID) *compactionSignal {
 	cs.id = id
 	return cs
@@ -421,9 +427,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		pg := &preparedGroup{group: group, coll: coll, compactTime: ct, expectedSize: getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)}
-		if !signal.isForce {
-			// Manual compaction expresses explicit operator intent and bypasses
-			// admission; its segments are classified by the planner as before.
+		if signal.isGlobal() {
 			for _, segment := range group.segments {
 				if reason := t.singleCompactionReason(segment, ct); reason != singleReasonNone {
 					pg.candidates = append(pg.candidates, newSingleCandidate(segment, reason))
@@ -434,22 +438,34 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	}
 
 	// Admission limits how many single compaction candidates this round may
-	// submit (see compaction_admission.go). The limit is also bounded by the
-	// room left in the inspector so no token is spent on a plan that would be
-	// dropped, and tokens of admitted segments that still do not reach the
-	// queue are given back when the signal is done.
+	// submit (see compaction_admission.go). Only the global round takes part:
+	// a manual signal expresses operator intent and bypasses admission, and a
+	// collection-scoped signal (a flush) plans no single compaction at all,
+	// leaving its segments to the next global round, so a busy collection
+	// cannot drain the shared budget with its flush signals. The limit is also
+	// bounded by the room left in the inspector so no token is spent on a plan
+	// that would be dropped, and tokens of admitted segments that still do not
+	// reach the queue are given back when the signal is done.
 	var admission *singleAdmission
 	if !signal.isForce {
 		var candidates []*singleCandidate
 		for _, pg := range prepared {
 			candidates = append(candidates, pg.candidates...)
 		}
-		admission = newSingleAdmission(getSingleCompactionAdmitter().admit(t.triggerContext(), candidates, t.inspector.getRemainingCapacity()))
+		admitted, deferred := 0, 0
+		if signal.isGlobal() {
+			var admittedCandidates []*singleCandidate
+			admittedCandidates, deferred = getSingleCompactionAdmitter().admit(t.triggerContext(), admissionSourceTrigger, candidates, t.inspector.getRemainingCapacity())
+			admission = newSingleAdmission(admittedCandidates, deferred, candidates)
+			admitted = len(admittedCandidates)
+		} else {
+			admission = newSingleAdmission(nil, 0, nil)
+		}
 		defer admission.settle(getSingleCompactionAdmitter())
-		if admission.deferred > 0 {
+		if deferred > 0 {
 			log.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
-				mlog.Int("admitted", len(admission.admitted)),
-				mlog.Int("deferred", admission.deferred))
+				mlog.Int("admitted", admitted),
+				mlog.Int("deferred", deferred))
 		}
 	}
 
@@ -547,31 +563,48 @@ func (t *compactionTrigger) generatePlansWithAdmission(segments []*SegmentInfo, 
 	return t.generatePlansLegacy(segments, signal, compactTime, expectedSize, admission)
 }
 
-// singleAdmission is the outcome of one admission round: which segments may
-// be planned as single compaction, and which of them actually reached the
-// queue, so the rest can be refunded.
+// singleAdmission is the outcome of one admission round: which segments are
+// eligible, which of them may be planned as single compaction, and which of
+// those actually reached the queue, so the rest can be refunded. The planner
+// reads the classification from it instead of classifying again.
 type singleAdmission struct {
+	eligible map[int64]struct{}
 	admitted map[int64]struct{}
 	deferred int
 	reached  map[int64]struct{}
 }
 
-func newSingleAdmission(admitted []*singleCandidate, deferred int) *singleAdmission {
-	a := &singleAdmission{admitted: make(map[int64]struct{}, len(admitted)), deferred: deferred, reached: make(map[int64]struct{})}
+func newSingleAdmission(admitted []*singleCandidate, deferred int, eligible []*singleCandidate) *singleAdmission {
+	a := &singleAdmission{
+		eligible: make(map[int64]struct{}, len(eligible)),
+		admitted: make(map[int64]struct{}, len(admitted)),
+		deferred: deferred,
+		reached:  make(map[int64]struct{}),
+	}
+	for _, c := range eligible {
+		a.eligible[c.segment.GetID()] = struct{}{}
+	}
 	for _, c := range admitted {
 		a.admitted[c.segment.GetID()] = struct{}{}
 	}
 	return a
 }
 
-// allows reports whether an eligible segment may be planned this round. A nil
-// admission allows everything.
-func (a *singleAdmission) allows(segmentID int64) bool {
+// single reports whether the planner should treat the segment as a single
+// compaction candidate: eligible and admitted this round. A nil admission
+// (force signal, or a planner called outside handleSignal) classifies the
+// segment itself. isSingle is the planner-side answer, heldBack says the
+// segment is eligible but deferred, so it must not be merged either.
+func (a *singleAdmission) single(t *compactionTrigger, segment *SegmentInfo, compactTime *compactTime) (isSingle, heldBack bool) {
 	if a == nil {
-		return true
+		return t.ShouldDoSingleCompaction(segment, compactTime), false
 	}
-	_, ok := a.admitted[segmentID]
-	return ok
+	id := segment.GetID()
+	if _, ok := a.admitted[id]; ok {
+		return true, false
+	}
+	_, eligible := a.eligible[id]
+	return false, eligible
 }
 
 // enqueued records that a task carrying these segments reached the queue.
@@ -614,13 +647,14 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*SegmentInfo, signal
 		segment := segment.ShadowClone()
 		if signal.isForce {
 			compactable = append(compactable, segment)
-		} else if t.ShouldDoSingleCompaction(segment, compactTime) {
-			// A candidate held back by admission is neither rewritten now nor
-			// merged as compactable: it is re-evaluated on a later round.
-			if admission.allows(segment.GetID()) {
-				prioritized = append(prioritized, segment)
-			}
-		} else if !isFullSegment(expectedSize, segment.GetResidualSegmentSize()) {
+			continue
+		}
+		// A candidate held back by admission is neither rewritten now nor
+		// merged as compactable: it is re-evaluated on a later round.
+		isSingle, heldBack := admission.single(t, segment, compactTime)
+		if isSingle {
+			prioritized = append(prioritized, segment)
+		} else if !heldBack && !isFullSegment(expectedSize, segment.GetResidualSegmentSize()) {
 			compactable = append(compactable, segment)
 		}
 	}
@@ -736,17 +770,19 @@ func (t *compactionTrigger) generatePlansLegacy(segments []*SegmentInfo, signal 
 		segment := segment.ShadowClone()
 		if signal.isForce {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
-		} else if t.ShouldDoSingleCompaction(segment, compactTime) {
-			// A candidate held back by admission is neither rewritten now nor
-			// merged as a small segment: it is re-evaluated on a later round.
-			if admission.allows(segment.GetID()) {
-				prioritizedCandidates = append(prioritizedCandidates, segment)
-			} else {
-				nonPlannedSegments = append(nonPlannedSegments, segment)
-			}
-		} else if t.isSmallSegment(segment, expectedSize) {
+			continue
+		}
+		// A candidate held back by admission is neither rewritten now nor
+		// merged as a small segment: it is re-evaluated on a later round.
+		isSingle, heldBack := admission.single(t, segment, compactTime)
+		switch {
+		case isSingle:
+			prioritizedCandidates = append(prioritizedCandidates, segment)
+		case heldBack:
+			nonPlannedSegments = append(nonPlannedSegments, segment)
+		case t.isSmallSegment(segment, expectedSize):
 			smallCandidates = append(smallCandidates, segment)
-		} else {
+		default:
 			nonPlannedSegments = append(nonPlannedSegments, segment)
 		}
 	}
@@ -1019,12 +1055,24 @@ func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compact
 		return false
 	}
 
-	// The ratio shares the per-segment jitter so that same-aged segments with
-	// a TTL field do not expire into compaction simultaneously either.
-	ratio := math.Min(1.0, Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*singleCompactionThresholdMultiplier(segment.ID))
+	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
 
 	index := getExpirQuantilesIndexByRatio(ratio, len(percentiles))
 	expirationTime := percentiles[index]
+	// The quantiles are 20% buckets, so jittering the ratio would rarely move
+	// the index. The jitter is applied in time instead: the expiration is
+	// pushed later by (multiplier-1) x the width of the neighboring quantile
+	// step, which spreads a same-aged cohort over the shape of its own TTL
+	// distribution.
+	if mult := singleCompactionThresholdMultiplier(segment.ID); mult > 1 {
+		var step int64
+		if index+1 < len(percentiles) && percentiles[index+1] > expirationTime {
+			step = percentiles[index+1] - expirationTime
+		} else if index > 0 && expirationTime > percentiles[index-1] {
+			step = expirationTime - percentiles[index-1]
+		}
+		expirationTime += int64(float64(step) * (mult - 1))
+	}
 	// If current time (startTime) is greater than the expiration time at this percentile, trigger compaction
 	startTs := tsoutil.PhysicalTime(compactTime.startTime)
 	return startTs.UnixMicro() >= expirationTime && expirationTime > 0
@@ -1097,7 +1145,7 @@ func (t *compactionTrigger) singleCompactionReason(segment *SegmentInfo, compact
 			mlog.Bool("createdByCompaction", segment.CreatedByCompaction),
 			mlog.Int64s("compactionFrom", segment.CompactionFrom),
 			mlog.Float64("jitterMultiplier", expiryMult))
-		return singleReasonAccumulation
+		return singleReasonRetention
 	}
 
 	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold

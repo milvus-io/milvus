@@ -102,7 +102,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	if policy.remainingCapacity != nil {
 		capacity = policy.remainingCapacity()
 	}
-	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, candidates, capacity)
+	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, admissionSourcePolicy, candidates, capacity)
 	views := make([]CompactionView, 0, len(admitted))
 	for _, c := range admitted {
 		round := rounds[c.collectionID]

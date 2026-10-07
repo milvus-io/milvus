@@ -210,6 +210,7 @@ var (
 			Help:      "Number of single compaction candidates admitted or deferred by the admission limiter in the latest trigger round",
 		}, []string{
 			nodeIDLabelName,
+			admissionSourceLabelName,
 			statusLabelName,
 		})
 
@@ -224,6 +225,7 @@ var (
 			Help:      "Estimated seconds for the deferred single compaction backlog to drain at the configured admission rate",
 		}, []string{
 			nodeIDLabelName,
+			admissionSourceLabelName,
 		})
 
 	DataCoordCompactionLatency = prometheus.NewHistogramVec(
