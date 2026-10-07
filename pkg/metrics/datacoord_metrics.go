@@ -199,6 +199,33 @@ var (
 			statusLabelName,
 		})
 
+	// DataCoordSingleCompactionAdmissionNum reports, for the latest single
+	// compaction trigger round, how many eligible segments the admission limiter
+	// admitted and how many it deferred to a later round.
+	DataCoordSingleCompactionAdmissionNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "single_compaction_admission_num",
+			Help:      "Number of single compaction candidates admitted or deferred by the admission limiter in the latest trigger round",
+		}, []string{
+			nodeIDLabelName,
+			statusLabelName,
+		})
+
+	// DataCoordSingleCompactionAdmissionDrainSeconds estimates how long the
+	// deferred backlog of the latest round needs to drain at the configured
+	// admission rate.
+	DataCoordSingleCompactionAdmissionDrainSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "single_compaction_admission_drain_seconds",
+			Help:      "Estimated seconds for the deferred single compaction backlog to drain at the configured admission rate",
+		}, []string{
+			nodeIDLabelName,
+		})
+
 	DataCoordCompactionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -485,6 +512,8 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordCompactedSegmentSize)
 	registry.MustRegister(DataCoordCompactionTaskNum)
 	registry.MustRegister(DataCoordCompactionLatency)
+	registry.MustRegister(DataCoordSingleCompactionAdmissionNum)
+	registry.MustRegister(DataCoordSingleCompactionAdmissionDrainSeconds)
 	registry.MustRegister(ImportJobLatency)
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)

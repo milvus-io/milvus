@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -36,6 +37,7 @@ func TestSingleCompactionPolicySuite(t *testing.T) {
 }
 
 type SingleCompactionPolicySuite struct {
+	jitter string
 	suite.Suite
 
 	mockAlloc          *allocator.MockAllocator
@@ -47,7 +49,14 @@ type SingleCompactionPolicySuite struct {
 	singlePolicy *singleCompactionPolicy
 }
 
+func (s *SingleCompactionPolicySuite) TearDownTest() {
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, s.jitter)
+}
+
 func (s *SingleCompactionPolicySuite) SetupTest() {
+	// The boundary cases below assume the configured thresholds apply exactly.
+	s.jitter = Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 	s.testLabel = &CompactionGroupLabel{
 		CollectionID: 1,
 		PartitionID:  10,
@@ -169,9 +178,9 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		State:        datapb.CompactionTaskState_executing,
 	})
 
-	views, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	candidates, _, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(2, len(views))
+	s.Equal(2, len(candidates))
 }
 
 func (s *SingleCompactionPolicySuite) TestSortCompaction() {
@@ -216,7 +225,7 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 		Type:         datapb.CompactionType_SortCompaction,
 	})
 
-	_, sortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	_, sortViews, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
 	s.Equal(3, len(sortViews))
 }
@@ -294,9 +303,82 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 	mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
 	policy := newSingleCompactionPolicy(s.singlePolicy.meta, s.mockAlloc, mockHandler)
 
-	views, sortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
+	candidates, sortViews, _, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
 	s.NoError(err)
-	s.Nil(views)
+	s.Nil(candidates)
 	s.Nil(sortViews)
 	s.EqualValues(0, triggerID)
+}
+
+// resetSingleCompactionAdmitterForTest replaces the process-wide admitter so a
+// test starts with a full bucket and fresh fairness cursors.
+func resetSingleCompactionAdmitterForTest() {
+	getSingleCompactionAdmitter()
+	globalSingleCompactionAdmitter = newSingleCompactionAdmitter(time.Now)
+}
+
+// With a budget of two tokens and three eligible segments in each of two
+// collections, one trigger round admits one segment per collection: the
+// candidates of the whole round are admitted in one pass and the budget
+// rotates across collections instead of being drained by the first one.
+func (s *SingleCompactionPolicySuite) TestTriggerAdmitsAcrossCollections() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitInterval.Key, "60")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitInterval.Key)
+	resetSingleCompactionAdmitterForTest()
+
+	meta := s.singlePolicy.meta
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
+	for _, collID := range []int64{100, 200} {
+		coll := &collectionInfo{ID: collID, Schema: newTestSchema()}
+		meta.collections.Insert(collID, coll)
+		s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil).Maybe()
+		for i := int64(1); i <= 3; i++ {
+			id := collID + i
+			// 201 deltalogs: over the file-count threshold, so every segment is eligible.
+			meta.segments.SetSegment(id, buildTestSegment(id, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false))
+		}
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	}, nil).Maybe()
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	views := events[TriggerTypeSingle]
+	s.Len(views, 2)
+	admittedCollections := make(map[int64]int)
+	for _, view := range views {
+		admittedCollections[view.GetGroupLabel().CollectionID]++
+	}
+	s.Equal(map[int64]int{100: 1, 200: 1}, admittedCollections)
+}
+
+// The budget is bounded by the room left in the inspector.
+func (s *SingleCompactionPolicySuite) TestTriggerBoundedByInspectorCapacity() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	resetSingleCompactionAdmitterForTest()
+
+	meta := s.singlePolicy.meta
+	collID := int64(100)
+	coll := &collectionInfo{ID: collID, Schema: newTestSchema()}
+	meta.collections.Insert(collID, coll)
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil).Maybe()
+	for i := int64(1); i <= 5; i++ {
+		meta.segments.SetSegment(collID+i, buildTestSegment(collID+i, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false))
+	}
+	s.singlePolicy.remainingCapacity = func() int { return 1 }
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	s.Len(events[TriggerTypeSingle], 1)
+	s.Equal(9.0, globalSingleCompactionAdmitter.tokens, "only the admitted candidate consumed a token")
 }

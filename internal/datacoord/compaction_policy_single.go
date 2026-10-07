@@ -38,6 +38,10 @@ type singleCompactionPolicy struct {
 	meta      *meta
 	allocator allocator.Allocator
 	handler   Handler
+	// remainingCapacity reports how many tasks the inspector can still take, so
+	// admission does not spend tokens on views that would be dropped. nil means
+	// unbounded.
+	remainingCapacity func() int
 }
 
 // Ensure singleCompactionPolicy implements CompactionPolicy interface
@@ -59,8 +63,16 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
-	views := make([]CompactionView, 0)
 	sortViews := make([]CompactionView, 0)
+	// Single compaction candidates are gathered from every collection first and
+	// admitted in one pass, so the admission budget is shared across
+	// collections instead of being drained by the first one in the walk.
+	type collectionRound struct {
+		collectionTTL time.Duration
+		triggerID     int64
+	}
+	rounds := make(map[int64]collectionRound)
+	candidates := make([]*singleCandidate, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
@@ -74,13 +86,38 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
-		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
+		collectionCandidates, collectionSortViews, collectionTTL, triggerID, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			mlog.Warn(ctx, "fail to trigger single compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 		}
-		views = append(views, collectionViews...)
 		sortViews = append(sortViews, collectionSortViews...)
+		if len(collectionCandidates) > 0 {
+			rounds[collection.ID] = collectionRound{collectionTTL: collectionTTL, triggerID: triggerID}
+			candidates = append(candidates, collectionCandidates...)
+		}
+	}
+
+	capacity := -1
+	if policy.remainingCapacity != nil {
+		capacity = policy.remainingCapacity()
+	}
+	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, candidates, capacity)
+	views := make([]CompactionView, 0, len(admitted))
+	for _, c := range admitted {
+		round := rounds[c.collectionID]
+		segmentViews := GetViewsByInfo(c.segment)
+		views = append(views, &MixSegmentView{
+			label:         segmentViews[0].label,
+			segments:      segmentViews,
+			collectionTTL: round.collectionTTL,
+			triggerID:     round.triggerID,
+		})
+	}
+	if deferred > 0 {
+		mlog.RatedInfo(ctx, rate.Limit(10), "deferred single compaction candidates by admission limit",
+			mlog.Int("admitted", len(admitted)),
+			mlog.Int("deferred", deferred))
 	}
 	events[TriggerTypeSingle] = views
 	events[TriggerTypeSort] = sortViews
@@ -235,46 +272,49 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	return views, nil
 }
 
-func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, []CompactionView, int64, error) {
+// triggerOneCollection returns the collection's single compaction candidates,
+// its sort compaction views, and the TTL and trigger id the candidates' views
+// are built with once admission has let them through.
+func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]*singleCandidate, []CompactionView, time.Duration, int64, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to get collection from handler",
 			mlog.Err(err))
-		return nil, nil, 0, err
+		return nil, nil, 0, 0, err
 	}
 	if collection == nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, collection not exist")
-		return nil, nil, 0, nil
+		return nil, nil, 0, 0, nil
 	}
 	if collection.IsExternal() {
 		log.Info(ctx, "skip single compaction for external collection")
-		return nil, nil, 0, nil
+		return nil, nil, 0, 0, nil
 	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, get collection ttl failed")
-		return nil, nil, 0, err
+		return nil, nil, 0, 0, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to allocate triggerID", mlog.Err(err))
-		return nil, nil, 0, err
+		return nil, nil, 0, 0, err
 	}
 
 	sortViews, err := policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
 	if err != nil {
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
-		return nil, nil, 0, err
+		return nil, nil, 0, 0, err
 	}
 	if !isCollectionAutoCompactionEnabled(collection) {
 		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
-		return nil, sortViews, 0, nil
+		return nil, sortViews, collectionTTL, newTriggerID, nil
 	}
 
-	views := make([]CompactionView, 0)
+	candidates := make([]*singleCandidate, 0)
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) &&
@@ -291,25 +331,20 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		}
 
 		for _, segment := range group.segments {
+			// L2 candidates are all delete-driven, so they belong to the
+			// accumulation class of the admission limiter.
 			if hasTooManyDeletions(segment) {
-				segmentViews := GetViewsByInfo(segment)
-				view := &MixSegmentView{
-					label:         segmentViews[0].label,
-					segments:      segmentViews,
-					collectionTTL: collectionTTL,
-					triggerID:     newTriggerID,
-				}
-				views = append(views, view)
+				candidates = append(candidates, newSingleCandidate(segment, singleReasonAccumulation))
 			}
 		}
 	}
 
-	if len(views) > 0 {
+	if len(candidates) > 0 {
 		log.Info(ctx, "succeeded to apply singleCompactionPolicy",
 			mlog.Int64("triggerID", newTriggerID),
-			mlog.Int("triggered view num", len(views)))
+			mlog.Int("candidate num", len(candidates)))
 	}
-	return views, sortViews, newTriggerID, nil
+	return candidates, sortViews, collectionTTL, newTriggerID, nil
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)
