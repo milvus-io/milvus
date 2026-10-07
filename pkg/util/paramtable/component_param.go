@@ -6886,7 +6886,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 			"(deltalog count/size, deleted-rows ratio, expired-entities ratio/size, TTL-field expiry ratio). " +
 			"Each segment's effective threshold becomes configured x [1, 1+jitter], so segments created in the same " +
 			"batch do not trigger rewrites simultaneously. 0 disables (legacy behavior).",
-		Export: false,
+		Export:      false,
+		Sensitivity: NonSensitive,
 	}
 	p.SingleCompactionThresholdJitter.Init(base.mgr)
 
@@ -6898,7 +6899,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 			"collections). Shock protection against mass eligibility (e.g. a threshold config change); size it " +
 			"above steady-state demand, an undersized bucket defers rewrites and lets the deltalog backlog grow " +
 			"(see the single_compaction_admission metrics). 0 disables (legacy behavior).",
-		Export: false,
+		Export:      false,
+		Sensitivity: NonSensitive,
 	}
 	p.SingleCompactionRateLimitTokens.Init(base.mgr)
 
@@ -6908,6 +6910,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		DefaultValue: "60",
 		Doc:          "Refill interval of the single compaction admission token bucket, in seconds.",
 		Export:       false,
+		Sensitivity:  NonSensitive,
 	}
 	p.SingleCompactionRateLimitInterval.Init(base.mgr)
 
