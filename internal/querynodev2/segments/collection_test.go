@@ -17,7 +17,6 @@
 package segments
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
