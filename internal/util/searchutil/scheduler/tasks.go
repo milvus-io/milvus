@@ -10,6 +10,7 @@ import (
 const (
 	schedulePolicyNameFIFO            = "fifo"
 	schedulePolicyNameRequeryEDF      = "requery-edf"
+	schedulePolicyNameRequeryPriority = "requery-priority"
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
@@ -25,6 +26,8 @@ func NewScheduler(policyName string) Scheduler {
 		)
 	case schedulePolicyNameRequeryEDF:
 		return newScheduler(schedulePolicyNameRequeryEDF, newRequeryEDFPolicy())
+	case schedulePolicyNameRequeryPriority:
+		return newScheduler(schedulePolicyNameRequeryPriority, newRequeryPriorityPolicy())
 	case schedulePolicyNameUserTaskPolling:
 		return newScheduler(
 			schedulePolicyNameUserTaskPolling,
@@ -99,6 +102,12 @@ type schedulePolicy interface {
 	Pop(now time.Time) *queuedTask
 
 	Len() int
+}
+
+// taskServedObserver is notified only after the scheduler successfully hands a
+// selected task to the executor. Policies may use it for handoff-based state.
+type taskServedObserver interface {
+	onTaskServed(task *queuedTask)
 }
 
 type queuedTask struct {

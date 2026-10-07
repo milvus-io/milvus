@@ -115,6 +115,60 @@ type SchedulerSuite struct {
 	suite.Suite
 }
 
+type servedTrackingPolicy struct {
+	schedulePolicy
+	served chan *queuedTask
+}
+
+func (p *servedTrackingPolicy) onTaskServed(task *queuedTask) {
+	p.served <- task
+}
+
+func newServedTrackingScheduler(t *testing.T, bufferedExec bool, receiveClosed bool) (*scheduler, *servedTrackingPolicy, Task) {
+	t.Helper()
+	base := newFIFOPolicy()
+	task := newMockTask(mockTaskConfig{})
+	queued := newQueuedTask(task, time.Now())
+	_, err := base.Push(queued)
+	assert.NoError(t, err)
+	policy := &servedTrackingPolicy{schedulePolicy: base, served: make(chan *queuedTask, 1)}
+	execChan := make(chan Task)
+	if bufferedExec {
+		execChan = make(chan Task, 1)
+	}
+	receiveChan := make(chan addTaskReq)
+	if receiveClosed {
+		close(receiveChan)
+	}
+	scheduler := &scheduler{policy: policy, receiveChan: receiveChan, execChan: execChan}
+	scheduler.updateWaitingTaskCounter(1, queued.NQ())
+	return scheduler, policy, task
+}
+
+func TestTaskServedObserverNormalHandoff(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, true, false)
+	scheduler.wg.Add(1)
+	go scheduler.schedule()
+	assert.Same(t, task, (<-policy.served).Task)
+	close(scheduler.receiveChan)
+	scheduler.wg.Wait()
+}
+
+func TestTaskServedObserverBatchHandoff(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, true, false)
+	assert.Nil(t, scheduler.produceExecChan(time.Now()))
+	assert.Same(t, task, (<-policy.served).Task)
+}
+
+func TestTaskServedObserverShutdownDrain(t *testing.T) {
+	scheduler, policy, task := newServedTrackingScheduler(t, false, true)
+	scheduler.wg.Add(1)
+	go scheduler.schedule()
+	assert.Same(t, task, <-scheduler.execChan)
+	assert.Same(t, task, (<-policy.served).Task)
+	scheduler.wg.Wait()
+}
+
 func (s *SchedulerSuite) TestConsumeRecvChan() {
 	s.Run("consume_chan_closed", func() {
 		ch := make(chan addTaskReq, 10)

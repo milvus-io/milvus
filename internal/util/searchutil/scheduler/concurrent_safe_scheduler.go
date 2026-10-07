@@ -206,6 +206,7 @@ func (s *scheduler) schedule() {
 				// drain policy maintained task
 				for task.valid() {
 					execChan <- task.executionTask()
+					s.onTaskServed(task)
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
@@ -222,6 +223,7 @@ func (s *scheduler) schedule() {
 			req.resp <- clearQueuedResp{result: result}
 		case execChan <- execTask:
 			// Task sent, drop the ownership of sent task.
+			s.onTaskServed(task)
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// And produce new task into execChan as much as possible.
@@ -318,6 +320,7 @@ func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 
 		select {
 		case execChan <- execTask:
+			s.onTaskServed(task)
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
 			// Task sent, drop the ownership of sent task.
@@ -325,6 +328,12 @@ func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 		default:
 			return task
 		}
+	}
+}
+
+func (s *scheduler) onTaskServed(task *queuedTask) {
+	if observer, ok := s.policy.(taskServedObserver); ok {
+		observer.onTaskServed(task)
 	}
 }
 

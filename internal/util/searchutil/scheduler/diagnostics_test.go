@@ -330,7 +330,9 @@ func BenchmarkSchedulerDiagnostics(b *testing.B) {
 					var p schedulePolicy = &fifoPolicy{queue: newMergeTaskQueue("")}
 					q := p.(*fifoPolicy).queue
 					if policy == schedulePolicyNameRequeryEDF {
-						p = &requeryEDFPolicy{regular: p.(*fifoPolicy), requery: newMergeTaskQueue("")}
+						p = &requeryEDFPolicy{requeryLanes: &requeryLanes{
+							regular: p.(*fifoPolicy), requery: newMergeTaskQueue(""),
+						}}
 					}
 					q.tasks = make([]*queuedTask, width, width+1)
 					candidateQueued := newQueuedTask(candidate, time.Now())

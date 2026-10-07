@@ -2,13 +2,9 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -17,47 +13,23 @@ var _ schedulePolicy = (*requeryEDFPolicy)(nil)
 // requeryEDFPolicy compares the heads of two FIFO lanes, not every queued task.
 // Queue ownership and capacity accounting stay on the scheduling goroutine.
 type requeryEDFPolicy struct {
-	regular         *fifoPolicy
-	requery         *mergeTaskQueue
-	requeryCapacity int64
+	*requeryLanes
 }
 
 func newRequeryEDFPolicy() *requeryEDFPolicy {
 	cfg := &paramtable.Get().QueryNodeCfg
-	requeryCapacity := cfg.RequeryUnsolvedQueueSize.GetAsInt64()
+	lanes := newRequeryLanes()
 	mlog.Info(context.TODO(), "requery EDF policy enabled",
 		mlog.FieldNodeID(paramtable.GetNodeID()),
 		mlog.Int64("regularCapacity", cfg.MaxUnsolvedQueueSize.GetAsInt64()),
-		mlog.Int64("requeryCapacity", requeryCapacity),
+		mlog.Int64("requeryCapacity", lanes.requeryCapacity),
 		mlog.String("selection", "FIFO lane heads at Pop; finite deadline ties favor requery"))
-	return &requeryEDFPolicy{
-		regular:         &fifoPolicy{queue: newMergeTaskQueue("")},
-		requery:         newMergeTaskQueue(metrics.ReQueryLabel),
-		requeryCapacity: requeryCapacity,
-	}
-}
-
-func (p *requeryEDFPolicy) CheckAdmission(task Task, _ int64) error {
-	cfg := &paramtable.Get().QueryNodeCfg
-	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
-		if p.requeryCapacity > 0 && int64(p.requery.len()) >= p.requeryCapacity {
-			return merr.WrapErrTooManyRequests(
-				int32(p.requeryCapacity),
-				fmt.Sprintf("limit by %s", cfg.RequeryUnsolvedQueueSize.Key),
-			)
-		}
-		return nil
-	}
-	return p.regular.CheckAdmission(task, int64(p.regular.Len()))
+	return &requeryEDFPolicy{requeryLanes: lanes}
 }
 
 func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
 	task.schedulingDeadline, _ = task.Context().Deadline()
-	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
-		p.requery.push(task)
-		return 1, nil
-	}
-	return p.regular.Push(task)
+	return p.requeryLanes.Push(task)
 }
 
 // Pop compares lane heads at selection time. The generic scheduler may stage
@@ -105,17 +77,4 @@ func (p *requeryEDFPolicy) earlierDeadlineQueue(regular, requery *queuedTask) *m
 		return p.requery
 	}
 	return p.requery
-}
-
-func (p *requeryEDFPolicy) Cleanup(now time.Time) []*queuedTask {
-	// EDF only reclaims tasks whose actual deadline has passed.
-	return append(p.regular.queue.cleanup(now), p.requery.cleanup(now)...)
-}
-
-func (p *requeryEDFPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTask {
-	return append(p.regular.Remove(filter, now), p.requery.remove(filter, now)...)
-}
-
-func (p *requeryEDFPolicy) Len() int {
-	return p.regular.Len() + p.requery.len()
 }
