@@ -616,6 +616,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         TargetBitmapView valid_result) const override;
 
     void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const override;
+
+    void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
                                  FieldId field_id,
                                  const int64_t* offsets,

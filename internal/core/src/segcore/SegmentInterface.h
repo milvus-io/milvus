@@ -456,6 +456,14 @@ class SegmentInternalInterface : public SegmentInterface {
                         int64_t size,
                         TargetBitmapView valid_result) const = 0;
 
+    // Applies validity for a contiguous segment-level logical-row range.
+    virtual void
+    ApplyFieldValidDataByRange(milvus::OpContext* op_ctx,
+                               FieldId field_id,
+                               int64_t logical_offset,
+                               int64_t count,
+                               TargetBitmapView valid_result) const = 0;
+
     // Offsets are segment-level row offsets. valid_result must have count bits.
     virtual void
     ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
