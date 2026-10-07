@@ -626,19 +626,20 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     res.value()->SetIsOwner(true);
     rc.RecordSection("clustering train done");
 
-    auto centroids_res = cluster_node.GetCentroids();
-    if (!centroids_res.has_value()) {
-        ThrowInfo(KnowhereStatusToErrorCode(centroids_res.error()),
-                  fmt::format("failed to get centroids: {}: {}",
-                              KnowhereStatusString(centroids_res.error()),
-                              centroids_res.what()));
-    }
-    // centroids owned by cluster_node
-    centroids_res.value()->SetIsOwner(false);
-    auto centroids =
-        reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
-
-    auto centroid_stats = CentroidsToPB<T>(centroids, num_clusters, dim);
+    auto centroid_stats = [&] {
+        auto centroids_res = cluster_node.GetCentroids();
+        if (!centroids_res.has_value()) {
+            ThrowInfo(KnowhereStatusToErrorCode(centroids_res.error()),
+                      fmt::format("failed to get centroids: {}: {}",
+                                  KnowhereStatusString(centroids_res.error()),
+                                  centroids_res.what()));
+        }
+        // Preserve the returned dataset's ownership. The protobuf owns a copy,
+        // so release the exported dataset before streaming assignment.
+        const auto* centroids =
+            static_cast<const T*>(centroids_res.value()->GetTensor());
+        return CentroidsToPB<T>(centroids, num_clusters, dim);
+    }();
     if (random_sample) {
         // Sampled rows are not a complete segment: release them before loading
         // full segments. Otherwise reuse the resident data without re-reading.
