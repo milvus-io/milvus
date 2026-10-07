@@ -130,6 +130,7 @@ const (
 	segmentPruneLabelName          = "segment_prune_label"
 	stageLabelName                 = "compaction_stage"
 	nodeIDLabelName                = "node_id"
+	admissionSourceLabelName       = "source"
 	nodeHostLabelName              = "node_host"
 	statusLabelName                = "status"
 	causeLabelName                 = "cause"

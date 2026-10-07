@@ -3664,6 +3664,10 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 
 func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 	trigger := &compactionTrigger{}
+	// The boundaries below assume the configured quantile applies exactly.
+	jitter := Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	defer Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, jitter)
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 	ts := time.Now()
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -4043,8 +4047,9 @@ func TestHasTooManyDeletions(t *testing.T) {
 	}
 }
 
-// The TTL-field expiry ratio shares the per-segment jitter, so same-aged
-// segments do not expire into compaction simultaneously.
+// The TTL-field expiration is jittered in time by (multiplier-1) x the width
+// of the quantile step, so same-aged segments do not expire into compaction
+// simultaneously, at the default jitter.
 func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_Jitter(t *testing.T) {
 	trigger := &compactionTrigger{}
 	for _, item := range []*paramtable.ParamItem{
@@ -4055,34 +4060,84 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_Jitter(t *testing.T)
 		defer Params.Save(item.Key, origin)
 	}
 	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0.25")
 
+	// Quantiles one hour apart: the jitter delays the first quantile's
+	// expiration by up to 15 minutes.
 	ts := time.Now()
-	// Only the first quantile has expired. At ratio 0.2 the first quantile is
-	// consulted and the segment triggers; a jittered ratio of 0.4 or more
-	// consults the second one, which has not expired.
 	newSegment := func(id int64) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             id,
 			NumOfRows:      100,
-			ExpirQuantiles: []int64{ts.Add(-time.Hour).UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
+			ExpirQuantiles: []int64{ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
 		}}
 	}
-	ct := &compactTime{startTime: tsoutil.ComposeTSByTime(ts)}
-
-	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "2")
-	var high, low int64
-	for id := int64(1); id < 10000 && (high == 0 || low == 0); id++ {
+	var late, early int64
+	for id := int64(1); id < 10000 && (late == 0 || early == 0); id++ {
 		switch m := singleCompactionThresholdMultiplier(id); {
-		case m >= 2.0 && high == 0:
-			high = id
-		case m < 1.9 && low == 0:
-			low = id
+		case m >= 1.2 && late == 0:
+			late = id
+		case m < 1.05 && early == 0:
+			early = id
 		}
 	}
-	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(high)), "ratio pushed to the next quantile by jitter")
-	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(low)))
+	// Five minutes past the first quantile: the lightly jittered segment has
+	// expired, the heavily jittered one has not.
+	ct := &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(5 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(early)))
+	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+	// Twenty minutes past, both have.
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(20 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
 
 	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
-	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(high)))
-	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(low)))
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(5 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+}
+
+// Expired-entities candidates are retention, not delete-driven accumulation,
+// so a steady delete stream cannot starve TTL cleanup.
+func Test_compactionTrigger_ExpiryIsRetentionClass(t *testing.T) {
+	trigger := &compactionTrigger{}
+	origin := Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	defer Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, origin)
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+
+	ts := time.Now()
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              1,
+		NumOfRows:       100,
+		CommitTimestamp: tsoutil.ComposeTSByTime(ts.Add(-2 * time.Hour)),
+	}}
+	ct := &compactTime{
+		startTime:  tsoutil.ComposeTSByTime(ts),
+		expireTime: tsoutil.ComposeTSByTime(ts.Add(-time.Hour)),
+	}
+	assert.Equal(t, singleReasonRetention, trigger.singleCompactionReason(segment, ct))
+}
+
+// A collection-scoped signal plans no single compaction: the planner is
+// handed an admission with nothing eligible, so neither a rewrite nor a merge
+// of those segments happens before the next global round.
+func Test_compactionTrigger_TargetedSignalPlansNoSingleCompaction(t *testing.T) {
+	assert.True(t, NewCompactionSignal().isGlobal())
+	assert.False(t, NewCompactionSignal().WithCollectionID(1).isGlobal())
+
+	trigger := &compactionTrigger{}
+	none := newSingleAdmission(nil, 0, nil)
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 100}}
+	isSingle, heldBack := none.single(trigger, segment, &compactTime{})
+	assert.False(t, isSingle)
+	assert.False(t, heldBack)
+
+	eligible := []*singleCandidate{newSingleCandidate(segment, singleReasonAccumulation)}
+	deferred := newSingleAdmission(nil, 1, eligible)
+	isSingle, heldBack = deferred.single(trigger, segment, &compactTime{})
+	assert.False(t, isSingle)
+	assert.True(t, heldBack)
+
+	admitted := newSingleAdmission(eligible, 0, eligible)
+	isSingle, heldBack = admitted.single(trigger, segment, &compactTime{})
+	assert.True(t, isSingle)
+	assert.False(t, heldBack)
 }

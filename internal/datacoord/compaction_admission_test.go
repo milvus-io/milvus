@@ -109,12 +109,12 @@ func TestAdmissionDisabledAdmitsEverything(t *testing.T) {
 		admissionSegment(1, 1, 1, 0.1, singleReasonAccumulation),
 		admissionSegment(2, 1, 1, 0.1, singleReasonRetention),
 	}
-	admitted, deferred := a.admit(context.Background(), cands, -1)
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 	assert.Len(t, admitted, 2)
 	assert.Zero(t, deferred)
 
 	// Still bounded by the room left in the inspector.
-	admitted, deferred = a.admit(context.Background(), cands, 1)
+	admitted, deferred = a.admit(context.Background(), admissionSourceTrigger, cands, 1)
 	assert.Len(t, admitted, 1)
 	assert.Equal(t, 1, deferred)
 }
@@ -130,18 +130,18 @@ func TestAdmissionDirtiestFirstAndTokenRefill(t *testing.T) {
 		admissionSegment(2, 1, 5, 0.5, singleReasonAccumulation),
 		admissionSegment(3, 1, 5, 0.3, singleReasonAccumulation),
 	}
-	admitted, deferred := a.admit(context.Background(), cands, -1)
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 	assert.Equal(t, []int64{2, 3}, ids(admitted))
 	assert.Equal(t, 1, deferred)
 
 	// Nothing refilled yet.
-	admitted, deferred = a.admit(context.Background(), cands[:1], -1)
+	admitted, deferred = a.admit(context.Background(), admissionSourceTrigger, cands[:1], -1)
 	assert.Empty(t, admitted)
 	assert.Equal(t, 1, deferred)
 
 	// Half an interval later one token is back.
 	now = now.Add(30 * time.Second)
-	admitted, _ = a.admit(context.Background(), cands[:1], -1)
+	admitted, _ = a.admit(context.Background(), admissionSourceTrigger, cands[:1], -1)
 	assert.Equal(t, []int64{1}, ids(admitted))
 }
 
@@ -159,9 +159,15 @@ func TestAdmissionHardCapGoesFirstButStaysPaced(t *testing.T) {
 		admissionSegment(3, 1, 60, 0.0, singleReasonAccumulation), // 6x the maximum
 		admissionSegment(4, 1, 45, 0.0, singleReasonAccumulation), // 4.5x the maximum
 	}
-	admitted, deferred := a.admit(context.Background(), cands, -1)
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+	assert.Equal(t, []int64{3, 1}, ids(admitted), "over-cap segments take half of the round, the rest goes to the regular classes")
+	assert.Equal(t, 2, deferred)
+
+	// With nothing else waiting, over-cap segments take the whole round, most deltalogs first.
+	a = newSingleCompactionAdmitter(time.Now)
+	admitted, deferred = a.admit(context.Background(), admissionSourceTrigger, cands[1:], -1)
 	assert.Equal(t, []int64{3, 4}, ids(admitted))
-	assert.Equal(t, 2, deferred, "the third over-cap segment waits for the next tokens like everyone else")
+	assert.Equal(t, 1, deferred, "the third over-cap segment waits for the next tokens like everyone else")
 }
 
 // A delete-heavy workload cannot starve retention (TTL / index rebuild)
@@ -182,7 +188,7 @@ func TestAdmissionRetentionNotStarved(t *testing.T) {
 
 	var served []int64
 	for round := 0; round < 4; round++ {
-		admitted, _ := a.admit(context.Background(), cands, -1)
+		admitted, _ := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 		require.Len(t, admitted, 1)
 		served = append(served, admitted[0].segment.GetID())
 		now = now.Add(60 * time.Second)
@@ -213,12 +219,12 @@ func TestAdmissionRoundRobinAcrossCollections(t *testing.T) {
 		}
 		return out
 	}
-	admitted, deferred := a.admit(context.Background(), cands, -1)
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 	assert.Equal(t, []int64{1, 2}, collectionsOf(admitted))
 	assert.Equal(t, 7, deferred)
 
 	now = now.Add(60 * time.Second)
-	admitted, _ = a.admit(context.Background(), cands, -1)
+	admitted, _ = a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 	assert.Equal(t, []int64{3, 1}, collectionsOf(admitted), "resumes after the collection the last round ended on")
 
 	// Within a collection the dirtiest segment goes first.
@@ -236,19 +242,18 @@ func TestAdmissionBoundedByCapacityAndRefund(t *testing.T) {
 	for i := int64(1); i <= 10; i++ {
 		cands = append(cands, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
 	}
-	admitted, deferred := a.admit(context.Background(), cands, 3)
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, cands, 3)
 	assert.Len(t, admitted, 3)
 	assert.Equal(t, 7, deferred)
 	assert.Equal(t, 7.0, a.tokens)
 
-	round := newSingleAdmission(admitted, deferred)
+	round := newSingleAdmission(admitted, deferred, cands)
 	round.enqueued(admitted[0].segment.GetID(), 999) // one reached the queue, with an unrelated segment
 	round.settle(a)
 	assert.Equal(t, 9.0, a.tokens, "two admitted segments did not reach the queue and were refunded")
 
-	// A nil admission (force signal) allows everything and settles to nothing.
+	// A nil admission (force signal) settles to nothing.
 	var none *singleAdmission
-	assert.True(t, none.allows(1))
 	none.settle(a)
 	assert.Equal(t, 9.0, a.tokens)
 }
@@ -265,18 +270,18 @@ func TestAdmissionMetricsAndThrottleWarning(t *testing.T) {
 	}
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	for round := 0; round < consecutiveThrottledRoundsToWarn+1; round++ {
-		a.admit(context.Background(), cands, -1)
+		a.admit(context.Background(), admissionSourceTrigger, cands, -1)
 		now = now.Add(60 * time.Second)
 	}
-	assert.Equal(t, 2.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, metrics.SingleCompactionAdmitted)))
-	assert.Equal(t, 3.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, metrics.SingleCompactionDeferred)))
+	assert.Equal(t, 2.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, admissionSourceTrigger, metrics.SingleCompactionAdmitted)))
+	assert.Equal(t, 3.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, admissionSourceTrigger, metrics.SingleCompactionDeferred)))
 	// 3 deferred at 2 tokens per 60 seconds.
-	assert.Equal(t, 90.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID)))
+	assert.Equal(t, 90.0, testutil.ToFloat64(metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID, admissionSourceTrigger)))
 	// Counted per round, not per collection: one call per round above.
 	assert.Equal(t, consecutiveThrottledRoundsToWarn+1, a.throttledRounds)
 
 	// A round with spare capacity clears the counter.
-	a.admit(context.Background(), cands[:1], -1)
+	a.admit(context.Background(), admissionSourceTrigger, cands[:1], -1)
 	assert.Equal(t, 0, a.throttledRounds)
 }
 
@@ -284,10 +289,94 @@ func TestAdmissionFractionalBudgetClampsToOne(t *testing.T) {
 	paramtable.Init()
 	withAdmissionParams(t, "0", "0.5", "60", "200")
 	a := newSingleCompactionAdmitter(time.Now)
-	admitted, deferred := a.admit(context.Background(), []*singleCandidate{
+	admitted, deferred := a.admit(context.Background(), admissionSourceTrigger, []*singleCandidate{
 		admissionSegment(1, 1, 5, 0.5, singleReasonAccumulation),
 		admissionSegment(2, 1, 5, 0.5, singleReasonAccumulation),
 	}, -1)
 	assert.Len(t, admitted, 1)
 	assert.Equal(t, 1, deferred)
+}
+
+// Each class keeps its own collection cursor, so a class that is present in
+// only one collection does not pin the other class's rotation to it.
+func TestAdmissionCursorsPerClass(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "2", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	// Collections 1, 2, 3 all have accumulation candidates; only 1 has retention.
+	var cands []*singleCandidate
+	for coll := int64(1); coll <= 3; coll++ {
+		cands = append(cands, admissionSegment(coll*10, coll, 5, 0.5, singleReasonAccumulation))
+	}
+	cands = append(cands, admissionSegment(100, 1, 0, 0, singleReasonRetention))
+
+	var accumulationServed []int64
+	for round := 0; round < 3; round++ {
+		admitted, _ := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+		require.Len(t, admitted, 2)
+		for _, c := range admitted {
+			if c.reason == singleReasonAccumulation {
+				accumulationServed = append(accumulationServed, c.collectionID)
+			}
+		}
+		now = now.Add(60 * time.Second)
+	}
+	assert.ElementsMatch(t, []int64{1, 2, 3}, accumulationServed, "every collection's accumulation candidate was served: %v", accumulationServed)
+}
+
+// Producers do not move each other's cursors.
+func TestAdmissionCursorsPerProducer(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "1", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var cands []*singleCandidate
+	for coll := int64(1); coll <= 2; coll++ {
+		cands = append(cands, admissionSegment(coll*10, coll, 5, 0.5, singleReasonAccumulation))
+	}
+	admitted, _ := a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+	assert.Equal(t, int64(1), admitted[0].collectionID)
+	now = now.Add(60 * time.Second)
+	// The policy's round starts from its own cursor, not after collection 1.
+	admitted, _ = a.admit(context.Background(), admissionSourcePolicy, cands, -1)
+	assert.Equal(t, int64(1), admitted[0].collectionID)
+	now = now.Add(60 * time.Second)
+	admitted, _ = a.admit(context.Background(), admissionSourceTrigger, cands, -1)
+	assert.Equal(t, int64(2), admitted[0].collectionID, "the trigger resumes after its own last collection")
+}
+
+// The gauges follow every round, including rounds with nothing eligible and
+// rounds with limiting disabled, so a cleared backlog is not reported as still
+// pending.
+func TestAdmissionMetricsClearOnEmptyAndDisabledRounds(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "1", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	deferredGauge := metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, admissionSourcePolicy, metrics.SingleCompactionDeferred)
+	drainGauge := metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID, admissionSourcePolicy)
+
+	cands := []*singleCandidate{
+		admissionSegment(1, 1, 5, 0.5, singleReasonAccumulation),
+		admissionSegment(2, 1, 5, 0.5, singleReasonAccumulation),
+	}
+	a.admit(context.Background(), admissionSourcePolicy, cands, -1)
+	assert.Equal(t, 1.0, testutil.ToFloat64(deferredGauge))
+	assert.Equal(t, 60.0, testutil.ToFloat64(drainGauge))
+
+	a.admit(context.Background(), admissionSourcePolicy, nil, -1)
+	assert.Equal(t, 0.0, testutil.ToFloat64(deferredGauge))
+	assert.Equal(t, 0.0, testutil.ToFloat64(drainGauge))
+
+	now = now.Add(60 * time.Second)
+	a.admit(context.Background(), admissionSourcePolicy, cands, -1)
+	assert.Equal(t, 1.0, testutil.ToFloat64(deferredGauge))
+	Params.Save(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "0")
+	a.admit(context.Background(), admissionSourcePolicy, cands, -1)
+	assert.Equal(t, 0.0, testutil.ToFloat64(deferredGauge))
+	assert.Equal(t, 0.0, testutil.ToFloat64(drainGauge))
 }

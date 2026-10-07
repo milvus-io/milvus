@@ -46,12 +46,17 @@ import (
 //
 // Admission runs once per trigger round over the candidates of every
 // collection, so the budget is shared fairly: picks alternate between the two
-// candidate classes and rotate across collections, and both cursors persist
+// candidate classes and rotate across collections, and the cursors persist
 // between rounds, so neither a class nor a collection can be starved however
 // small the budget is. Candidates whose deltalog count has grown past
-// `deferralHardCap` times the configured maximum are served first, so the
-// deferral of any single segment stays bounded without a bypass that a
-// configuration change could turn into a flood.
+// `deferralHardCap` times the configured maximum are served first, within a
+// share of the round, so the deferral of any single segment stays bounded
+// without a bypass that a configuration change could turn into a flood.
+//
+// Two producers share the bucket: the legacy trigger (global rounds only;
+// collection-scoped flush signals leave single compaction to the next global
+// round so a busy collection cannot drain the budget) and the single
+// compaction policy (L2 segments). Each keeps its own fairness cursors.
 //
 // Both knobs are refreshable; jitter=0 and tokens=0 restore legacy behavior.
 
@@ -77,10 +82,10 @@ const (
 	// the avalanche-shaped case the admission bucket exists for; candidates are
 	// paced dirtiest-first.
 	singleReasonAccumulation
-	// singleReasonRetention: strict age-based TTL, TTL-field expiry, or index
-	// rebuild. These are not delete-driven (deltalog count / deleted-rows ratio
-	// ~= 0), so under the accumulation ordering they would always sort last;
-	// they get every other pick instead.
+	// singleReasonRetention: TTL expiry (strict age, expired-entities ratio or
+	// size, TTL field) and index rebuild. These are not delete-driven (deltalog
+	// count / deleted-rows ratio ~= 0), so under the accumulation ordering they
+	// would always sort last; they get every other pick instead.
 	singleReasonRetention
 )
 
@@ -138,15 +143,27 @@ type singleCompactionAdmitter struct {
 	lastRefill      time.Time
 	throttledRounds int
 
-	// Fairness cursors. They persist across rounds so that a budget of a few
-	// tokens per round still rotates over every class and every collection
-	// instead of restarting from the same ones each time.
-	retentionTurn  bool  // the next interleaved pick goes to the retention class
-	lastCollection int64 // the round-robin resumes after this collection
-	hasCollection  bool
+	// Fairness cursors, per producer and per class. They persist across
+	// rounds so that a budget of a few tokens per round still rotates over
+	// every class and every collection instead of restarting from the same
+	// ones each time, and one producer's or class's progress does not move
+	// another's cursor.
+	retentionTurn  map[string]bool              // per producer: the next interleaved pick goes to retention
+	lastCollection map[admissionCursorKey]int64 // per producer and class: the round-robin resumes after this collection
 
 	nowFn func() time.Time // injectable for tests
 }
+
+type admissionCursorKey struct {
+	producer string
+	reason   singleCompactionReason
+}
+
+// Producers of single compaction candidates, used as metric label and cursor key.
+const (
+	admissionSourceTrigger = "trigger"
+	admissionSourcePolicy  = "policy"
+)
 
 var (
 	globalSingleCompactionAdmitter     *singleCompactionAdmitter
@@ -161,7 +178,11 @@ func getSingleCompactionAdmitter() *singleCompactionAdmitter {
 }
 
 func newSingleCompactionAdmitter(nowFn func() time.Time) *singleCompactionAdmitter {
-	return &singleCompactionAdmitter{nowFn: nowFn}
+	return &singleCompactionAdmitter{
+		nowFn:          nowFn,
+		retentionTurn:  make(map[string]bool),
+		lastCollection: make(map[admissionCursorKey]int64),
+	}
 }
 
 // admissionBudget returns the configured bucket size and refill interval, or
@@ -190,34 +211,42 @@ func admissionBudget(ctx context.Context) (budget float64, interval time.Duratio
 
 // admit selects which eligible segments may be submitted this round.
 //
-// candidates are the single-compaction candidates of every collection the
-// round looked at, so one call decides the whole round. capacity is how many
-// tasks the caller can still enqueue; a negative value means unbounded.
-// Admission never hands out more than that, so a token is only spent on a
-// candidate that has a place to go; a candidate the caller still fails to
-// enqueue is given back with refund.
+// producer names the caller (admissionSourceTrigger or admissionSourcePolicy)
+// for its cursors and metrics. candidates are the single-compaction candidates
+// of every collection the round looked at, so one call decides the whole
+// round. capacity is how many tasks the caller can still enqueue; a negative
+// value means unbounded. Admission never hands out more than that, so a token
+// is only spent on a candidate that has a place to go; a candidate the caller
+// still fails to enqueue is given back with refund.
 //
 // Order of service:
-//  1. accumulation candidates past the deferral hard cap, most deltalogs first;
+//  1. accumulation candidates past the deferral hard cap, most deltalogs
+//     first, within half of the round so they cannot crowd out the rest;
 //  2. the two classes alternately, each served round-robin across collections,
 //     accumulation dirtiest-first within a collection and retention by segment
-//     id. The class and collection cursors persist between rounds.
+//     id. The class and collection cursors persist between rounds;
+//  3. the remaining over-cap candidates.
 //
 // A non-positive token config disables limiting entirely (legacy behavior).
-func (a *singleCompactionAdmitter) admit(ctx context.Context, candidates []*singleCandidate, capacity int) (admitted []*singleCandidate, deferred int) {
-	if len(candidates) == 0 {
-		return nil, 0
-	}
+func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, candidates []*singleCandidate, capacity int) (admitted []*singleCandidate, deferred int) {
 	budget, interval, limited := admissionBudget(ctx)
 	if !limited {
+		admitted = candidates
 		if capacity >= 0 && len(candidates) > capacity {
-			return candidates[:capacity], len(candidates) - capacity
+			admitted, deferred = candidates[:capacity], len(candidates)-capacity
 		}
-		return candidates, 0
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.observe(ctx, producer, 0, 0, len(admitted), deferred)
+		return admitted, deferred
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if len(candidates) == 0 {
+		a.observe(ctx, producer, budget, interval, 0, 0)
+		return nil, 0
+	}
 
 	now := a.nowFn()
 	if a.lastRefill.IsZero() {
@@ -235,7 +264,7 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, candidates []*sing
 		available = capacity
 	}
 
-	queue, urgent := a.order(candidates)
+	queue, urgent := a.order(producer, candidates, available)
 	if available > len(queue) {
 		available = len(queue)
 	}
@@ -243,17 +272,16 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, candidates []*sing
 	deferred = len(queue) - available
 	a.tokens -= float64(available)
 	// Advance the cursors only by what was admitted: the class turn flips once
-	// per interleaved pick, and the round-robin resumes after the collection
-	// of the last admitted candidate.
+	// per interleaved pick, and each class's round-robin resumes after the
+	// collection of the last candidate admitted from it.
 	if interleaved := available - min(available, urgent); interleaved%2 == 1 {
-		a.retentionTurn = !a.retentionTurn
+		a.retentionTurn[producer] = !a.retentionTurn[producer]
 	}
-	if n := len(admitted); n > 0 {
-		last := admitted[n-1]
-		a.lastCollection, a.hasCollection = last.collectionID, true
+	for _, c := range admitted[min(available, urgent):] {
+		a.lastCollection[admissionCursorKey{producer, c.reason}] = c.collectionID
 	}
 
-	a.observe(ctx, budget, interval, len(admitted), deferred)
+	a.observe(ctx, producer, budget, interval, len(admitted), deferred)
 	return admitted, deferred
 }
 
@@ -264,18 +292,23 @@ func (a *singleCompactionAdmitter) refund(n int) {
 		return
 	}
 	budget := Params.DataCoordCfg.SingleCompactionRateLimitTokens.GetAsFloat()
+	if budget <= 0 {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.tokens += float64(n)
-	if budget > 0 && a.tokens > budget {
+	if a.tokens > budget {
 		a.tokens = budget
 	}
 }
 
-// order lays the candidates out in service order and reports how many of
-// them are over the hard cap (they lead the list). It reads the fairness
+// order lays the candidates out in service order and reports how many
+// over-cap candidates lead the list. Over-cap candidates take at most half of
+// the available picks ahead of the interleaved classes (all of them when
+// nothing else is waiting), the rest queue behind. It reads the fairness
 // cursors but leaves advancing them to admit, which knows what was admitted.
-func (a *singleCompactionAdmitter) order(candidates []*singleCandidate) (ordered []*singleCandidate, urgentCount int) {
+func (a *singleCompactionAdmitter) order(producer string, candidates []*singleCandidate, available int) (ordered []*singleCandidate, urgentCount int) {
 	hardCapCount := int(deferralHardCap * Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat())
 
 	var urgent []*singleCandidate
@@ -312,12 +345,18 @@ func (a *singleCompactionAdmitter) order(candidates []*singleCandidate) (ordered
 		sort.Slice(list, func(i, j int) bool { return list[i].segment.GetID() < list[j].segment.GetID() })
 	}
 
-	accumulationRR := newCollectionRoundRobin(accumulation, a.lastCollection, a.hasCollection)
-	retentionRR := newCollectionRoundRobin(retention, a.lastCollection, a.hasCollection)
+	accCursor, hasAcc := a.lastCollection[admissionCursorKey{producer, singleReasonAccumulation}]
+	retCursor, hasRet := a.lastCollection[admissionCursorKey{producer, singleReasonRetention}]
+	accumulationRR := newCollectionRoundRobin(accumulation, accCursor, hasAcc)
+	retentionRR := newCollectionRoundRobin(retention, retCursor, hasRet)
 
+	urgentCount = len(urgent)
+	if interleavedTotal := accumulationRR.remaining() + retentionRR.remaining(); interleavedTotal > 0 {
+		urgentCount = min(len(urgent), max(1, available/2))
+	}
 	ordered = make([]*singleCandidate, 0, len(candidates))
-	ordered = append(ordered, urgent...)
-	retentionTurn := a.retentionTurn
+	ordered = append(ordered, urgent[:urgentCount]...)
+	retentionTurn := a.retentionTurn[producer]
 	for accumulationRR.remaining()+retentionRR.remaining() > 0 {
 		var c *singleCandidate
 		if (retentionTurn || accumulationRR.remaining() == 0) && retentionRR.remaining() > 0 {
@@ -328,7 +367,8 @@ func (a *singleCompactionAdmitter) order(candidates []*singleCandidate) (ordered
 		ordered = append(ordered, c)
 		retentionTurn = !retentionTurn
 	}
-	return ordered, len(urgent)
+	ordered = append(ordered, urgent[urgentCount:]...)
+	return ordered, urgentCount
 }
 
 // collectionRoundRobin hands out candidates one collection at a time, in
@@ -375,16 +415,21 @@ func (rr *collectionRoundRobin) next() *singleCandidate {
 	}
 }
 
-// observe publishes the round's outcome: the admitted and deferred counts as
-// gauges, the time the deferred backlog needs to drain at the configured rate,
-// and a warning once rounds have been throttled for long enough that the
-// bucket is evidently below steady-state demand.
-func (a *singleCompactionAdmitter) observe(ctx context.Context, budget float64, interval time.Duration, admitted, deferred int) {
+// observe publishes the round's outcome for one producer: the admitted and
+// deferred counts as gauges, the time the deferred backlog needs to drain at
+// the configured rate (zero when limiting is off, budget <= 0), and a warning
+// once rounds have been throttled for long enough that the bucket is evidently
+// below steady-state demand. It is called on every path, including rounds
+// with nothing eligible, so the gauges never keep a stale backlog.
+func (a *singleCompactionAdmitter) observe(ctx context.Context, producer string, budget float64, interval time.Duration, admitted, deferred int) {
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
-	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, metrics.SingleCompactionAdmitted).Set(float64(admitted))
-	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, metrics.SingleCompactionDeferred).Set(float64(deferred))
-	drainSeconds := float64(deferred) / budget * interval.Seconds()
-	metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID).Set(drainSeconds)
+	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, producer, metrics.SingleCompactionAdmitted).Set(float64(admitted))
+	metrics.DataCoordSingleCompactionAdmissionNum.WithLabelValues(nodeID, producer, metrics.SingleCompactionDeferred).Set(float64(deferred))
+	drainSeconds := 0.0
+	if budget > 0 {
+		drainSeconds = float64(deferred) / budget * interval.Seconds()
+	}
+	metrics.DataCoordSingleCompactionAdmissionDrainSeconds.WithLabelValues(nodeID, producer).Set(drainSeconds)
 
 	if deferred == 0 {
 		// Only clear the counter when the round had spare capacity: a round
