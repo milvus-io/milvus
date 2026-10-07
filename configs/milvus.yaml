@@ -635,9 +635,10 @@ queryNode:
   scheduler:
     unsolvedQueueSize: 1024
     diagnostics:
-      enabled: false # Startup-only bounded scheduler/merge metrics, identical for FIFO and EDF.
+      enabled: false # Startup-only bounded scheduler/merge metrics, identical across read policies.
       logEnabled: false # Optional one-line summary per 30s; requires diagnostics.enabled.
-    requeryUnsolvedQueueSize: 1024 # Independent requery-edf lane capacity, captured at scheduler creation; restart to change it. Values below 1024 or invalid values fall back to 1024; ignored by other policies.
+    requeryUnsolvedQueueSize: 1024 # Independent requery lane capacity for requery-edf and requery-priority, captured at scheduler creation; restart to change it. Values below 1024 or invalid values fall back to 1024; ignored by other policies.
+    requeryPriorityBaseCredit: 3 # Consecutive requery selections allowed while both lanes are backlogged under requery-priority. Runtime updates are applied at scheduling decisions. Non-positive or invalid values fall back to 3.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -649,6 +650,7 @@ queryNode:
     scheduleReadPolicy:
       # fifo: A FIFO queue support the schedule.
       # requery-edf: Compare regular/requery FIFO head deadlines when an execution slot is available; equal deadlines favor requery.
+      # requery-priority: Serve a configurable bounded burst of requery tasks before a regular task while both lanes are backlogged.
       # user-task-polling:
       # 	The user's tasks will be polled one by one and scheduled.
       # 	Scheduling is fair on task granularity.

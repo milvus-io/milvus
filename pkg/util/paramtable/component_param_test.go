@@ -107,6 +107,22 @@ func TestComponentParam_RequeryEDFCapacity(t *testing.T) {
 	assert.Equal(t, "fifo", params.QueryNodeCfg.SchedulePolicyName.GetValue())
 }
 
+func TestRequeryPriorityBaseCredit(t *testing.T) {
+	t.Setenv("LOCALSTORAGE_PATH", t.TempDir())
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	credit := &params.QueryNodeCfg.RequeryPriorityBaseCredit
+	assert.EqualValues(t, 3, credit.GetAsInt64())
+	require.NoError(t, params.Save(credit.Key, "6"))
+	assert.EqualValues(t, 6, credit.GetAsInt64())
+	require.NoError(t, params.Save(credit.Key, "9223372036854775807"))
+	assert.EqualValues(t, int64(9223372036854775807), credit.GetAsInt64())
+	for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+		require.NoError(t, params.Save(credit.Key, invalid))
+		assert.EqualValues(t, 3, credit.GetAsInt64())
+	}
+}
+
 func TestComponentParamSchedulerDiagnostics(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))

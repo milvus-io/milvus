@@ -4012,6 +4012,7 @@ type queryNodeConfig struct {
 
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
 	RequeryUnsolvedQueueSize     ParamItem `refreshable:"false"`
+	RequeryPriorityBaseCredit    ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
@@ -4990,12 +4991,28 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 			}
 			return "1024"
 		},
-		Doc: "Independent waiting-task capacity of the requery lane under requery-edf. " +
+		Doc: "Independent waiting-task capacity of the requery lane under requery-edf and requery-priority. " +
 			"Captured when the scheduler is created; restart is required to change it. " +
 			"Values below 1024 or invalid values fall back to 1024. Ignored by other policies.",
 		Export: true,
 	}
 	p.RequeryUnsolvedQueueSize.Init(base.mgr)
+	p.RequeryPriorityBaseCredit = ParamItem{
+		Key:          "queryNode.scheduler.requeryPriorityBaseCredit",
+		Version:      "3.0.0",
+		DefaultValue: "3",
+		Formatter: func(v string) string {
+			if credit, err := strconv.ParseInt(v, 10, 64); err == nil && credit > 0 {
+				return v
+			}
+			return "3"
+		},
+		Doc: "Maximum consecutive requery selections while the regular lane is also backlogged under requery-priority. " +
+			"The policy rereads this value at scheduling decisions, so updates apply without recreating the scheduler. " +
+			"Non-positive or invalid values fall back to 3. Ignored by other policies.",
+		Export: true,
+	}
+	p.RequeryPriorityBaseCredit.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
@@ -5267,6 +5284,8 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc: `fifo: A FIFO queue support the schedule.
 requery-edf:
 	Compare the deadlines of regular and requery FIFO lane heads when an execution slot is available.
+requery-priority:
+	Serve a configurable bounded burst of requery tasks before a regular task while both lanes are backlogged.
 user-task-polling:
 	The user's tasks will be polled one by one and scheduled.
 	Scheduling is fair on task granularity.
