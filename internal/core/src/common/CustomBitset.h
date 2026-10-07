@@ -39,10 +39,13 @@ using container_type = folly::fbvector<uint8_t>;
 using bitset_type = milvus::bitset::Bitset<policy_type, container_type, true>;
 // temporary enable range check
 using bitset_view = milvus::bitset::BitsetView<policy_type, true>;
+using bitset_write_view = milvus::bitset::BitsetWriteView<policy_type, true>;
 
 }  // namespace
 
 using CustomBitset = bitset_type;
 using CustomBitsetView = bitset_view;
+using CustomBitsetReadView = bitset_view;
+using CustomBitsetWriteView = bitset_write_view;
 
 }  // namespace milvus

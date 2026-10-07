@@ -156,7 +156,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -216,7 +216,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -276,7 +276,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -336,7 +336,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -425,7 +425,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -488,7 +488,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -551,7 +551,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -615,7 +615,7 @@ TEST_P(ExprTest, TestJsonContainsAnyNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -703,7 +703,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -771,7 +771,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -838,7 +838,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -903,7 +903,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -996,7 +996,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1066,7 +1066,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1136,7 +1136,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1205,7 +1205,7 @@ TEST_P(ExprTest, TestJsonContainsAllNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1322,7 +1322,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1363,7 +1363,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1423,7 +1423,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1460,7 +1460,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1522,7 +1522,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1560,7 +1560,7 @@ TEST_P(ExprTest, TestJsonContainsArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1673,7 +1673,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1717,7 +1717,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1782,7 +1782,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1822,7 +1822,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1884,7 +1884,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -1922,7 +1922,7 @@ TEST_P(ExprTest, TestJsonContainsArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2033,7 +2033,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2068,7 +2068,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArray) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2158,7 +2158,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2193,7 +2193,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeArrayNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2281,7 +2281,7 @@ TEST_P(ExprTest, TestJsonContainsDiffType) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2315,7 +2315,7 @@ TEST_P(ExprTest, TestJsonContainsDiffType) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2405,7 +2405,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2446,7 +2446,7 @@ TEST_P(ExprTest, TestJsonContainsDiffTypeNullable) {
         }
         auto col_vec = milvus::test::gen_filter_res(
             plan.get(), seg_promote, N * num_iters, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), std::min(N * num_iters, 10));
 
         for (int i = 0; i < N * num_iters; ++i) {

@@ -264,12 +264,10 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec =
                         std::dynamic_pointer_cast<ColumnVector>(results[0]);
                     auto col_vec_size = col_vec->size();
-                    TargetBitmapView bitsetview(col_vec->GetRawData(),
-                                                col_vec_size);
+                    auto bitsetview = col_vec->GetBitmapWriteView();
                     // Fold UNKNOWN into FALSE explicitly (data &= valid):
                     // rows are included below on the data bit alone.
-                    TargetBitmapView validview(col_vec->GetValidRawData(),
-                                               col_vec_size);
+                    const auto& validview = col_vec->GetValidBitmap();
                     bitsetview.inplace_and(validview, col_vec_size);
 
                     if (element_level) {
@@ -368,9 +366,10 @@ PhyIterativeFilterNode::GetOutput() {
         scalar_cost / 1000);
 
     if (!is_native_supported_) {
-        tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
-                                     need_process_rows_,
-                                     need_process_rows_ - bitset.count()));
+        tracer::AddEvent(
+            fmt::format("total_processed: {}, matched: {}",
+                        need_process_rows_,
+                        need_process_rows_ - bitset.view().count()));
     }
 
     return input_;

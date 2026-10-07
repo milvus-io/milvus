@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "common/Types.h"
@@ -50,6 +51,10 @@ struct CompressedData {
     std::vector<char> valid_payload;
 
     // For Raw: zero-copy pointers to original data (header still in `header`)
+    // Nonzero-offset views need packed storage. Keep it alive while Raw
+    // pointers are consumed; whole-buffer views retain the zero-copy path.
+    std::shared_ptr<TargetBitmap> packed_result_owner;
+    std::shared_ptr<TargetBitmap> packed_valid_owner;
     const char* raw_result_ptr{nullptr};
     size_t raw_result_size{0};
     const char* raw_valid_ptr{nullptr};
@@ -93,14 +98,14 @@ class CacheCompressor {
     //   otherwise         → Raw (zero-copy)
     // Valid bitset: if all-ones, skipped entirely (flagged in header).
     static CompressedData
-    Compress(const TargetBitmap& result,
-             const TargetBitmap& valid,
+    Compress(const TargetBitmapView& result,
+             const TargetBitmapView& valid,
              bool compression_enabled);
 
     // Flatten both independently encoded bitmaps into an EntryPool buffer.
     static std::vector<char>
-    Compress(const TargetBitmap& result,
-             const TargetBitmap& valid,
+    Compress(const TargetBitmapView& result,
+             const TargetBitmapView& valid,
              bool compression_enabled,
              uint8_t& out_comp_type);
 
@@ -113,7 +118,7 @@ class CacheCompressor {
 
  private:
     static std::vector<char>
-    CompressRoaring(const TargetBitmap& bset, bool inverted = false);
+    CompressRoaring(const TargetBitmapView& bset, bool inverted = false);
 
     static bool
     DecompressBitmap(const char* data,

@@ -83,12 +83,13 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
 }
 
 void
-WeightScorer::batch_score(milvus::OpContext* op_ctx,
-                          const segcore::SegmentInternalInterface* segment,
-                          const proto::plan::FunctionMode& mode,
-                          const FixedVector<int32_t>& offsets,
-                          const TargetBitmap& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+WeightScorer::batch_score_by_offsets(
+    milvus::OpContext* op_ctx,
+    const segcore::SegmentInternalInterface* segment,
+    const proto::plan::FunctionMode& mode,
+    const FixedVector<int32_t>& offsets,
+    const TargetBitmapView& bitmap,
+    std::vector<std::optional<float>>& boost_scores) {
     auto bitmap_size = bitmap.size();
     size_t out_of_bounds = 0;
     for (auto i = 0; i < offsets.size(); i++) {
@@ -174,12 +175,13 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
 }
 
 void
-RandomScorer::batch_score(milvus::OpContext* op_ctx,
-                          const segcore::SegmentInternalInterface* segment,
-                          const proto::plan::FunctionMode& mode,
-                          const FixedVector<int32_t>& offsets,
-                          const TargetBitmap& bitmap,
-                          std::vector<std::optional<float>>& boost_scores) {
+RandomScorer::batch_score_by_offsets(
+    milvus::OpContext* op_ctx,
+    const segcore::SegmentInternalInterface* segment,
+    const proto::plan::FunctionMode& mode,
+    const FixedVector<int32_t>& offsets,
+    const TargetBitmapView& bitmap,
+    std::vector<std::optional<float>>& boost_scores) {
     FixedVector<int64_t> target_offsets;
     FixedVector<int> idx;
     target_offsets.reserve(offsets.size());

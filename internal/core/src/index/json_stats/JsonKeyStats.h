@@ -269,25 +269,35 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     int64_t
     ExecutorForGettingValid(milvus::OpContext* op_ctx,
                             const std::string& path,
-                            TargetBitmapView valid_res) {
+                            TargetBitmapWriteView valid_res) {
+        auto valid_res_write_scope = valid_res.scoped_write();
         size_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
             return processed_size;
         }
         auto column = shredding_columns_[path];
+        const auto num_rows = column->NumRows();
+        AssertInfo(valid_res.size() >= num_rows,
+                   "Validity output is shorter than column {} rows {}",
+                   path,
+                   num_rows);
         auto num_data_chunk = column->num_chunks();
 
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
             column->ApplyValidDataInChunk(
-                op_ctx, i, 0, chunk_size, valid_res + processed_size);
+                op_ctx,
+                i,
+                0,
+                chunk_size,
+                valid_res.write_view(processed_size, chunk_size));
             processed_size += chunk_size;
         }
-        AssertInfo(processed_size == valid_res.size(),
+        AssertInfo(processed_size == num_rows,
                    "Processed size {} is not equal to num_rows {}",
                    processed_size,
-                   valid_res.size());
+                   num_rows);
         return processed_size;
     }
 
@@ -300,9 +310,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, std::string, int)>
             skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res,
         ValTypes... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         int64_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
@@ -351,8 +363,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                        processed_size,
                        batch.row_id_start,
                        batch.size);
-            auto batch_res = res + processed_size;
-            auto batch_valid_res = valid_res + processed_size;
+            auto batch_res = res.write_view(processed_size, batch.size);
+            auto batch_valid_res =
+                valid_res.write_view(processed_size, batch.size);
             if (!batch.data_skipped) {
                 func(batch.values.template data_as<T>(),
                      batch.validity,

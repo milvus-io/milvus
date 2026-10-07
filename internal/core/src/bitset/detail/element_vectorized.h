@@ -92,6 +92,27 @@ struct VectorizedElementWiseBitsetPolicy {
     }
 
     static inline void
+    op_and_flip(data_type* const left,
+                const data_type* const right,
+                const size_t start_left,
+                const size_t start_right,
+                const size_t size) {
+        using Scalar = ElementWiseBitsetPolicy<ElementT>;
+        if (size == 0) {
+            return;
+        }
+        if (Scalar::ranges_overlap(
+                left, start_left, right, start_right, size)) {
+            // Use this policy's AND so even overlapping views retain the
+            // traversal of the selected platform implementation.
+            op_and(left, right, start_left, start_right, size);
+            op_flip(left, start_left, size);
+            return;
+        }
+        Scalar::op_and_flip(left, right, start_left, start_right, size);
+    }
+
+    static inline void
     op_and_multiple(data_type* const left,
                     const data_type* const* const rights,
                     const size_t start_left,

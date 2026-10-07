@@ -1531,7 +1531,7 @@ TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
 TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
     std::string path = "/int";
     TargetBitmap valid_res(size_, true);
-    TargetBitmapView valid_res_view(valid_res);
+    auto valid_res_view = valid_res.write_view();
     auto shredding_fields = index_->GetShreddingFields(path);
     for (const auto& field : shredding_fields) {
         auto processed_size =
@@ -1559,14 +1559,16 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
     std::string path = "/int";
     TargetBitmap res(size_);
     TargetBitmap valid_res(size_, true);
-    TargetBitmapView res_view(res);
-    TargetBitmapView valid_res_view(valid_res);
+    auto res_view = res.write_view();
+    auto valid_res_view = valid_res.write_view();
 
     auto func = [](const int64_t* data,
                    ValidityView valid_data,
                    const int size,
-                   TargetBitmapView res,
-                   TargetBitmapView valid_res) {
+                   TargetBitmapWriteView res,
+                   TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (int i = 0; i < size; i++) {
             if (valid_data[i]) {
                 res[i] = true;
@@ -1595,8 +1597,8 @@ TEST_P(JsonKeyStatsTest, TestExecutorForShreddingData) {
         field_name,
         func,
         [](const SkipIndex&, std::string, int) { return true; },
-        TargetBitmapView(skipped_res),
-        TargetBitmapView(skipped_valid_res));
+        skipped_res.write_view(),
+        skipped_valid_res.write_view());
     EXPECT_EQ(processed_size, size_);
     const auto expected_valid_count = nullable_ ? 400 : 800;
     EXPECT_EQ(skipped_res.count(), expected_valid_count);
@@ -1851,7 +1853,7 @@ TEST_P(JsonKeyStatsAsyncLoadTest, HonorsRolloutForMmapEagerAndLazyLoad) {
         operation = std::async(std::launch::async,
                                [this, lazy_field = std::move(lazy_field)]() {
                                    TargetBitmap valid_res(data_.size(), true);
-                                   TargetBitmapView valid_res_view(valid_res);
+                                   auto valid_res_view = valid_res.write_view();
                                    return load_index_->ExecutorForGettingValid(
                                        nullptr, lazy_field, valid_res_view);
                                });

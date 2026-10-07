@@ -271,6 +271,7 @@ struct SearchResult {
     void
     SetVectorSearchProvider(const BitsetView& base_filter,
                             FilteredVectorSearchFn provider) {
+        vector_search_dense_filter_view_ = {};
         vector_search_base_filter_.reset();
         vector_search_base_filter_view_ = base_filter;
         // The execution pipeline owns its input column. Direct callers without
@@ -285,18 +286,21 @@ struct SearchResult {
     ClearVectorSearchProvider() {
         filtered_vector_search_fn_ = {};
         vector_search_base_filter_view_ = {};
+        vector_search_dense_filter_view_ = {};
         vector_search_base_filter_.reset();
         vector_search_filter_owner_.reset();
     }
 
-    const TargetBitmap*
+    const TargetBitmapView*
     GetVectorSearchBaseFilter() {
         const auto& base_filter = vector_search_base_filter_view_;
         if (!vector_search_base_filter_ && !base_filter.empty()) {
             auto copied_filter =
                 std::make_unique<TargetBitmap>(base_filter.size(), false);
-            if (!base_filter.has_out_ids()) {
-                std::memcpy(copied_filter->data(),
+            if (!base_filter.has_out_ids() && base_filter.id_offset() == 0 &&
+                base_filter.size() == base_filter.num_bits()) {
+                auto write_scope = copied_filter->scoped_write();
+                std::memcpy(write_scope.data(),
                             base_filter.data(),
                             base_filter.byte_size());
             } else {
@@ -305,10 +309,13 @@ struct SearchResult {
                 }
             }
             vector_search_base_filter_ = std::move(copied_filter);
+            vector_search_dense_filter_view_ =
+                vector_search_base_filter_->view();
             vector_search_base_filter_view_ =
                 BitsetView(*vector_search_base_filter_);
         }
-        return vector_search_base_filter_.get();
+        return vector_search_base_filter_ ? &vector_search_dense_filter_view_
+                                          : nullptr;
     }
 
     bool
@@ -397,6 +404,7 @@ struct SearchResult {
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
     FilteredVectorSearchFn filtered_vector_search_fn_{};
     TargetBitmapPtr vector_search_base_filter_{};
+    TargetBitmapView vector_search_dense_filter_view_;
     BitsetView vector_search_base_filter_view_{};
     std::shared_ptr<const void> vector_search_filter_owner_{};
     bool allow_filtered_vector_search_{true};

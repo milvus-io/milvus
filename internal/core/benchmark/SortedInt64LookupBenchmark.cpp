@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#define BITSET_HEADER_ONLY
+
 // Standalone component benchmark: see the IX01 design doc for build/run notes.
 #include <algorithm>
 #include <ctime>

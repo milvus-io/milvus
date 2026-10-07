@@ -246,7 +246,10 @@ class SetElement : public MultiElement {
     // Looks up each data[i] directly in the hash set (zero-copy for strings
     // via transparent hash).
     void
-    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+    FilterChunk(const T* data,
+                const int size,
+                TargetBitmapWriteView res) const {
+        auto res_write_scope = res.scoped_write();
         for (int i = 0; i < size; ++i) {
             if constexpr (std::is_same_v<T, std::string>) {
                 // Use string_view to avoid copying into the hash function
@@ -267,7 +270,8 @@ class SetElement : public MultiElement {
     void
     FilterChunk(const std::string_view* data,
                 const int size,
-                TargetBitmapView res) const {
+                TargetBitmapWriteView res) const {
+        auto res_write_scope = res.scoped_write();
         for (int i = 0; i < size; ++i) {
             if (values_.find(data[i]) != values_.end()) {
                 res[i] = true;
@@ -413,7 +417,10 @@ class SimdBatchElement : public MultiElement {
 
     // Batch SIMD filter — delegates to runtime-dispatched simdFilterChunk().
     void
-    FilterChunk(const T* data, const int size, TargetBitmapView res) const {
+    FilterChunk(const T* data,
+                const int size,
+                TargetBitmapWriteView res) const {
+        auto res_write_scope = res.scoped_write();
         if (vals_.empty() || size <= 0) {
             return;
         }
@@ -437,7 +444,8 @@ class SimdBatchElement : public MultiElement {
         int remaining = size - start;
         if (remaining > 0) {
             uint8_t* bitmap =
-                reinterpret_cast<uint8_t*>(res.data()) + (start + offset) / 8;
+                reinterpret_cast<uint8_t*>(res_write_scope.data()) +
+                (start + offset) / 8;
             simdFilterChunk<T>(data + start,
                                remaining,
                                bitmap,

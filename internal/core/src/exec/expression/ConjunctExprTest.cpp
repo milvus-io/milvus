@@ -133,8 +133,8 @@ TEST(ConjunctExprTest, AndKeepsUnknownRowsActiveForFollowingFalse) {
     ASSERT_NE(output, nullptr);
     ASSERT_TRUE(output->IsBitmap());
 
-    TargetBitmapView data(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& data = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
     ASSERT_EQ(output->size(), 1);
     EXPECT_FALSE(data[0]);
     EXPECT_TRUE(valid[0]);
@@ -163,8 +163,8 @@ TEST(ConjunctExprTest, NullRejectingAndSkipsFollowingForAllUnknown) {
 
     auto output = std::dynamic_pointer_cast<ColumnVector>(result);
     ASSERT_NE(output, nullptr);
-    TargetBitmapView data(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& data = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
     ASSERT_EQ(output->size(), 1);
     // The row stays UNKNOWN, which the null-rejecting consumer treats as
     // FALSE.
@@ -200,8 +200,8 @@ TEST(ConjunctExprTest, NullRejectingAndStillEvaluatesForTrueRows) {
 
     auto output = std::dynamic_pointer_cast<ColumnVector>(result);
     ASSERT_NE(output, nullptr);
-    TargetBitmapView data(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& data = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
     ASSERT_EQ(output->size(), 2);
     // Row 1: TRUE AND FALSE = FALSE.
     EXPECT_FALSE(data[1]);
@@ -229,8 +229,8 @@ TEST(ConjunctExprTest, NullRejectingMatchesDefaultIncludedSet) {
         VectorPtr result;
         conjunct->Eval(eval_context, result);
         auto output = std::dynamic_pointer_cast<ColumnVector>(result);
-        TargetBitmapView data(output->GetRawData(), output->size());
-        TargetBitmapView valid(output->GetValidRawData(), output->size());
+        const auto& data = output->GetBitmap();
+        const auto& valid = output->GetValidBitmap();
         std::vector<bool> included;
         for (size_t i = 0; i < output->size(); ++i) {
             included.push_back(data[i] && valid[i]);
@@ -263,8 +263,8 @@ TEST(ConjunctExprTest, NullRejectingOrKeepsUnknownRowsActive) {
 
     auto output = std::dynamic_pointer_cast<ColumnVector>(result);
     ASSERT_NE(output, nullptr);
-    TargetBitmapView data(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& data = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
     // UNKNOWN OR TRUE = TRUE: the row must be included.
     EXPECT_TRUE(data[0]);
     EXPECT_TRUE(valid[0]);
@@ -298,8 +298,8 @@ TEST(ConjunctExprTest, OffsetInputErasesUnmaterializedReservedLikeSlot) {
 
     auto output = std::dynamic_pointer_cast<ColumnVector>(result);
     ASSERT_NE(output, nullptr);
-    TargetBitmapView data(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& data = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
     ASSERT_EQ(output->size(), 1);
     EXPECT_FALSE(data[0]);
     EXPECT_TRUE(valid[0]);

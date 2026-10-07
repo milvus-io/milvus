@@ -140,7 +140,7 @@ PhyProjectNode::GetOutput() {
     }
     auto col_input = GetColumnVector(input_);
     // raw data view
-    TargetBitmapView raw_data_view(col_input->GetRawData(), col_input->size());
+    const auto& raw_data_view = col_input->GetBitmap();
 
     // When no fields need to be projected (e.g., count(*) only), count valid
     // logical rows directly from the bitmap.  For element-level bitmaps this is
@@ -211,7 +211,7 @@ PhyProjectNode::GetOutput() {
                                                  segment_,
                                                  valid_map,
                                                  true);
-        auto null_count = selected_count - valid_map.count();
+        auto null_count = selected_count - valid_map.view().count();
         auto column_vector = std::make_shared<ColumnVector>(
             std::move(field_data), std::move(valid_map), null_count);
         column_vectors.emplace_back(std::move(column_vector));

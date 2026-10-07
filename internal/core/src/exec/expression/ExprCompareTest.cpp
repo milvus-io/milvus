@@ -127,7 +127,7 @@ TEST_P(ExprTest, TestCall) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -223,7 +223,7 @@ TEST_P(ExprTest, TestCompare) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -354,7 +354,7 @@ TEST_P(ExprTest, TestCompareNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -485,7 +485,7 @@ TEST_P(ExprTest, TestCompareNullable2) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N * num_iters / 2);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -579,7 +579,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
             N,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N / 2);
 
         for (int i = 0; i < N; ++i) {
@@ -711,7 +711,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
             N,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N / 2);
 
         for (int i = 0; i < N; ++i) {
@@ -843,7 +843,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
             N,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
         EXPECT_EQ(view.size(), N / 2);
 
         for (int i = 0; i < N; ++i) {
@@ -922,7 +922,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
     }
     auto col_vec = milvus::test::gen_filter_res(
         plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
     EXPECT_EQ(view.size(), N / 2);
 
     for (int i = 0; i < N; ++i) {
@@ -1090,8 +1090,7 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     milvus::exec::OffsetVector offsets{9, 2, 9, 511, 3, 999};
     auto offset_result = milvus::test::gen_filter_res(
         int64_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
-    BitsetTypeView offset_view(offset_result->GetRawData(),
-                               offset_result->size());
+    const auto& offset_view = offset_result->GetBitmap();
     auto left_values = raw_data.get_col<int64_t>(int64_fid);
     auto right_values = raw_data.get_col<int64_t>(int64_1_fid);
     ASSERT_EQ(offset_view.size(), offsets.size());
@@ -1106,8 +1105,7 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
         DEFAULT_PLANNODE_ID, varchar_expr);
     auto varchar_offset_result = milvus::test::gen_filter_res(
         varchar_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
-    BitsetTypeView varchar_offset_view(varchar_offset_result->GetRawData(),
-                                       varchar_offset_result->size());
+    const auto& varchar_offset_view = varchar_offset_result->GetBitmap();
     auto left_strings = raw_data.get_col<std::string>(str2_fid);
     auto right_strings = raw_data.get_col<std::string>(str3_fid);
     ASSERT_EQ(varchar_offset_view.size(), offsets.size());
@@ -1567,8 +1565,8 @@ TEST_P(ExprTest, TestCompareNullableLeftWithOffsetInputSealed) {
         N,
         MAX_TIMESTAMP,
         &offsets);
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-    BitsetTypeView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
+    const auto& valid_view = col_vec->GetValidBitmap();
     EXPECT_EQ(view.size(), N);
 
     for (int i = 0; i < N; ++i) {

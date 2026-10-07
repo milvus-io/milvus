@@ -65,13 +65,9 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
                     addToGroup(groups[i], 1);
                 }
             } else {
-                // Safe: GetValidRawData() returns CustomBitset::data(), which
-                // exposes storage as uint64_t* per the project-wide bitset
-                // API contract (Bitset::data_impl, CustomBitset.h).
-                const uint64_t* validity = reinterpret_cast<const uint64_t*>(
-                    input_column->GetValidRawData());
+                const auto& validity = input_column->GetValidBitmap();
                 for (auto i = 0; i < input_column->size(); i++) {
-                    if (validity[i >> 6] & (uint64_t(1) << (i & 63))) {
+                    if (validity[i]) {
                         addToGroup(groups[i], 1);
                     }
                 }
@@ -100,7 +96,7 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
         AssertInfo(column != nullptr,
                    "input[0] must be ColumnVector for count aggregation");
         if (column->IsBitmap()) {
-            BitsetTypeView view(column->GetRawData(), column->size());
+            const auto& view = column->GetBitmap();
             addToGroup(group, view.size() - view.count());
         } else {
             addToGroup(

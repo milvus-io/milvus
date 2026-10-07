@@ -139,18 +139,19 @@ PhyRandomSampleNode::GetOutput() {
     RowVectorPtr result = nullptr;
     if (!is_source_node_) {
         auto input_col = GetColumnVector(input_);
-        TargetBitmapView input_data(input_col->GetRawData(), input_col->size());
+        auto input_data = input_col->GetBitmapWriteView();
+        const auto& input_view = input_col->GetBitmap();
         // note: false means the elemnt is hit
-        size_t input_false_count = input_data.size() - input_data.count();
+        size_t input_false_count = input_data.size() - input_view.count();
 
         if (input_false_count > 0) {
             FixedVector<uint32_t> pos{};
             pos.reserve(input_false_count);
-            auto value = input_data.find_first(false);
+            auto value = input_view.find_first(false);
             while (value.has_value()) {
                 auto offset = value.value();
                 pos.push_back(offset);
-                value = input_data.find_next(offset, false);
+                value = input_view.find_next(offset, false);
             }
             assert(pos.size() == input_false_count);
 
@@ -167,8 +168,7 @@ PhyRandomSampleNode::GetOutput() {
     } else {
         auto sample_output = std::make_shared<ColumnVector>(
             TargetBitmap(active_count_), TargetBitmap(active_count_));
-        TargetBitmapView data(sample_output->GetRawData(),
-                              sample_output->size());
+        auto data = sample_output->GetBitmapWriteView();
         // true in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
         // if it's sampled. So we need to flip the bits at last.
         // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
@@ -201,8 +201,7 @@ PhyRandomSampleNode::GetOutput() {
 
     if (result) {
         auto result_col = GetColumnVector(result);
-        TargetBitmapView result_data(result_col->GetRawData(),
-                                     result_col->size());
+        const auto& result_data = result_col->GetBitmap();
         auto sampled_count = result_col->size() - result_data.count();
         tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
                                      sampled_count,

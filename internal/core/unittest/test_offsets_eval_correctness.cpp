@@ -173,8 +173,10 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             null_rows += size;
             processed_cursor += size;
@@ -190,12 +192,8 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
 
     TargetBitmap res(input->size(), false);
     TargetBitmap valid(input->size(), true);
-    const auto processed =
-        segment_expr.ProcessDataByOffsets<T>(evaluate_batch,
-                                             skip_chunk,
-                                             input,
-                                             TargetBitmapView(res),
-                                             TargetBitmapView(valid));
+    const auto processed = segment_expr.ProcessDataByOffsets<T>(
+        evaluate_batch, skip_chunk, input, res, valid);
 
     EXPECT_EQ(processed, int64_t(input->size()));
     EXPECT_EQ(processed_cursor, int64_t(input->size()));
@@ -229,8 +227,10 @@ VerifyElementFullScanSkipCursor(SegmentExpr& segment_expr,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             null_elements += size;
             processed_cursor += size;
@@ -248,10 +248,7 @@ VerifyElementFullScanSkipCursor(SegmentExpr& segment_expr,
     TargetBitmap valid(element_count, true);
     const auto processed =
         segment_expr.ProcessDataChunksForElementLevel<int64_t>(
-            evaluate_batch,
-            skip_chunk,
-            TargetBitmapView(res),
-            TargetBitmapView(valid));
+            evaluate_batch, skip_chunk, res, valid);
 
     EXPECT_EQ(processed, element_count);
     EXPECT_EQ(processed_cursor, element_count);
@@ -325,8 +322,10 @@ VerifyNullableElementFullScanLogicalCount(
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         processed_cursor += size;
         if (data == nullptr) {
             null_elements += size;
@@ -341,10 +340,7 @@ VerifyNullableElementFullScanLogicalCount(
     TargetBitmap valid(logical_elements, true);
     const auto processed =
         segment_expr.ProcessDataChunksForElementLevel<int64_t>(
-            evaluate_batch,
-            skip_chunk,
-            TargetBitmapView(res),
-            TargetBitmapView(valid));
+            evaluate_batch, skip_chunk, res, valid);
 
     EXPECT_EQ(processed, logical_elements);
     EXPECT_EQ(processed_cursor, logical_elements);
@@ -463,8 +459,10 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchDrivesCallbackPerCandidate) {
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         rows_seen += size;
         if (data == nullptr) {
             null_rows += size;
@@ -475,12 +473,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchDrivesCallbackPerCandidate) {
 
     TargetBitmap res(input.size(), false);
     TargetBitmap valid(input.size(), true);
-    auto processed =
-        seg_expr->ProcessDataByOffsets<int64_t>(probe,
-                                                skip_chunk0,
-                                                &input,
-                                                TargetBitmapView(res),
-                                                TargetBitmapView(valid));
+    auto processed = seg_expr->ProcessDataByOffsets<int64_t>(
+        probe, skip_chunk0, &input, res, valid);
 
     EXPECT_EQ(processed, int64_t(input.size()));
     // The contract this fix pins: no candidate row may bypass the callback.
@@ -522,8 +516,10 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchKeepsBitmapCursorAligned) {
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -538,11 +534,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchKeepsBitmapCursorAligned) {
 
     TargetBitmap res(input.size(), false);
     TargetBitmap valid(input.size(), true);
-    seg_expr->ProcessDataByOffsets<int64_t>(probe,
-                                            skip_chunk0,
-                                            &input,
-                                            TargetBitmapView(res),
-                                            TargetBitmapView(valid));
+    seg_expr->ProcessDataByOffsets<int64_t>(
+        probe, skip_chunk0, &input, res, valid);
 
     for (size_t k = 0; k < input.size(); ++k) {
         const bool expected = k >= 4;  // skipped rows false, probed rows true
@@ -595,20 +588,19 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView,
         const int32_t*,
         int size,
-        TargetBitmapView,
-        TargetBitmapView) {
+        TargetBitmapWriteView,
+        TargetBitmapWriteView) {
         processed_cursor += size;
     };
 
     TargetBitmap result(offsets.size(), false);
     TargetBitmap valid(offsets.size(), true);
-    EXPECT_EQ(seg_expr->ProcessDataByOffsetsWithMask<int64_t>(
-                  evaluate_batch,
-                  skip_chunk0,
-                  &offsets,
-                  TargetBitmapView(result),
-                  TargetBitmapView(valid),
-                  candidate_mask),
+    EXPECT_EQ(seg_expr->ProcessDataByOffsetsWithMask<int64_t>(evaluate_batch,
+                                                              skip_chunk0,
+                                                              &offsets,
+                                                              result,
+                                                              valid,
+                                                              candidate_mask),
               static_cast<int64_t>(offsets.size()));
     EXPECT_EQ(processed_cursor, static_cast<int64_t>(offsets.size()));
     EXPECT_TRUE(valid[0])
@@ -648,8 +640,10 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             null_batches += size;
             processed_cursor += size;
@@ -666,11 +660,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     TargetBitmap res(element_ids.size(), false);
     TargetBitmap valid(element_ids.size(), true);
     const auto processed = seg_expr->ProcessElementLevelByOffsets<int64_t>(
-        evaluate_batch,
-        skip_chunk0,
-        &element_ids,
-        TargetBitmapView(res),
-        TargetBitmapView(valid));
+        evaluate_batch, skip_chunk0, &element_ids, res, valid);
 
     EXPECT_EQ(processed, int64_t(element_ids.size()));
     EXPECT_EQ(null_batches, 4);
@@ -718,8 +708,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SealedOffsetTakeAppliesColumnOwnedSkip) {
             ValidityView,
             const int32_t*,
             int size,
-            TargetBitmapView,
-            TargetBitmapView) {
+            TargetBitmapWriteView,
+            TargetBitmapWriteView) {
             if (data == nullptr) {
                 null_rows += size;
             } else {
@@ -734,13 +724,10 @@ TEST_F(OffsetsEvalCorrectnessTest, SealedOffsetTakeAppliesColumnOwnedSkip) {
             skip_checks = 0;
             null_rows = 0;
             data_rows = 0;
-            EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(
-                          evaluate_batch,
-                          reject_every_cell,
-                          &offsets,
-                          TargetBitmapView(result),
-                          TargetBitmapView(valid)),
-                      static_cast<int64_t>(offsets.size()));
+            EXPECT_EQ(
+                seg_expr->ProcessDataByOffsets<int64_t>(
+                    evaluate_batch, reject_every_cell, &offsets, result, valid),
+                static_cast<int64_t>(offsets.size()));
             // Only the first call with metrics may copy the callback into the
             // retained filter. Passing later batches through Take must borrow it.
             EXPECT_EQ(predicate_copies, with_metrics && batch == 0 ? 1 : 0);
@@ -790,19 +777,16 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView,
         const int32_t*,
         int size,
-        TargetBitmapView,
-        TargetBitmapView) {
+        TargetBitmapWriteView,
+        TargetBitmapWriteView) {
         EXPECT_EQ(data, nullptr);
         null_rows += size;
     };
 
     TargetBitmap result(offsets.size(), false);
     TargetBitmap valid(offsets.size(), true);
-    EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(evaluate_batch,
-                                                      reject_every_cell,
-                                                      &offsets,
-                                                      TargetBitmapView(result),
-                                                      TargetBitmapView(valid)),
+    EXPECT_EQ(seg_expr->ProcessDataByOffsets<int64_t>(
+                  evaluate_batch, reject_every_cell, &offsets, result, valid),
               static_cast<int64_t>(offsets.size()));
     EXPECT_EQ(skip_checks, 2);
     EXPECT_EQ(null_rows, static_cast<int64_t>(offsets.size()));
@@ -826,35 +810,29 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanAdvancesGlobalPosition) {
                                     N,
                                     /*batch_size=*/4,
                                     query_context->get_consistency_level());
-    auto evaluate_batch =
-        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
-                                                            ValidityView,
-                                                            const int32_t*,
-                                                            int,
-                                                            TargetBitmapView,
-                                                            TargetBitmapView){};
+    auto evaluate_batch = []<FilterType filter_type = FilterType::sequential>(
+        const int64_t*,
+        ValidityView,
+        const int32_t*,
+        int,
+        TargetBitmapWriteView,
+        TargetBitmapWriteView){};
     std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     TargetBitmap first_res(4, false);
     TargetBitmap first_valid(4, true);
-    EXPECT_EQ(
-        seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                            no_skip,
-                                            TargetBitmapView(first_res),
-                                            TargetBitmapView(first_valid)),
-        4);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, no_skip, first_res, first_valid),
+              4);
     ASSERT_TRUE(seg_expr.DataScanInitialized());
     EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 4);
 
     TargetBitmap second_res(4, false);
     TargetBitmap second_valid(4, true);
-    EXPECT_EQ(
-        seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                            no_skip,
-                                            TargetBitmapView(second_res),
-                                            TargetBitmapView(second_valid)),
-        4);
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, no_skip, second_res, second_valid),
+              4);
     EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), 8);
 }
@@ -880,20 +858,18 @@ TEST_F(OffsetsEvalCorrectnessTest, DirectScanDelegatesPrefetchToColumn) {
                                      N,
                                      /*batch_size=*/4,
                                      query_context->get_consistency_level());
-    auto evaluate_batch =
-        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
-                                                            ValidityView,
-                                                            const int32_t*,
-                                                            int,
-                                                            TargetBitmapView,
-                                                            TargetBitmapView){};
+    auto evaluate_batch = []<FilterType filter_type = FilterType::sequential>(
+        const int64_t*,
+        ValidityView,
+        const int32_t*,
+        int,
+        TargetBitmapWriteView,
+        TargetBitmapWriteView){};
     std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
     TargetBitmap res(4, false);
     TargetBitmap valid(4, true);
-    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                  no_skip,
-                                                  TargetBitmapView(res),
-                                                  TargetBitmapView(valid)),
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, no_skip, res, valid),
               4);
 
     // Scan owns physical Cell access, including warmup. The expression-level
@@ -924,8 +900,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
             ValidityView,
             const int32_t*,
             int size,
-            TargetBitmapView,
-            TargetBitmapView) {
+            TargetBitmapWriteView,
+            TargetBitmapWriteView) {
         ASSERT_NE(data, nullptr);
         callback_sizes.push_back(size);
     };
@@ -933,10 +909,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
 
     TargetBitmap res(20, false);
     TargetBitmap valid(20, true);
-    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                  no_skip,
-                                                  TargetBitmapView(res),
-                                                  TargetBitmapView(valid)),
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, no_skip, res, valid),
               20);
     EXPECT_EQ(callback_sizes, (std::vector<int64_t>{16, 4}));
     EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
@@ -965,8 +939,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanAppliesColumnOwnedSkip) {
             ValidityView,
             const int32_t*,
             int size,
-            TargetBitmapView,
-            TargetBitmapView) {
+            TargetBitmapWriteView,
+            TargetBitmapWriteView) {
         callbacks.emplace_back(data == nullptr, size);
     };
     auto skip_first_cell = [](const milvus::FieldSkipMetricsView&,
@@ -974,10 +948,8 @@ TEST_F(OffsetsEvalCorrectnessTest, SequentialScanAppliesColumnOwnedSkip) {
 
     TargetBitmap res(20, false);
     TargetBitmap valid(20, true);
-    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                  skip_first_cell,
-                                                  TargetBitmapView(res),
-                                                  TargetBitmapView(valid)),
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, skip_first_cell, res, valid),
               20);
     EXPECT_EQ(callbacks,
               (std::vector<std::pair<bool, int64_t>>{{true, 16}, {false, 4}}));
@@ -1025,8 +997,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView,
         const int32_t*,
         int size,
-        TargetBitmapView,
-        TargetBitmapView) {
+        TargetBitmapWriteView,
+        TargetBitmapWriteView) {
         if (processed_cursor < N / 2) {
             EXPECT_EQ(data, nullptr);
         }
@@ -1036,11 +1008,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
     TargetBitmap result(20, false);
     TargetBitmap valid(20, true);
     EXPECT_EQ(
-        seg_expr.ProcessDataChunksWithMask<int64_t>(evaluate_batch,
-                                                    skip_first_cell,
-                                                    TargetBitmapView(result),
-                                                    TargetBitmapView(valid),
-                                                    candidate_mask),
+        seg_expr.ProcessDataChunksWithMask<int64_t>(
+            evaluate_batch, skip_first_cell, result, valid, candidate_mask),
         20);
     EXPECT_EQ(processed_cursor, 20);
     EXPECT_TRUE(valid[0])
@@ -1110,18 +1079,16 @@ TEST_F(OffsetsEvalCorrectnessTest,
             ValidityView,
             const int32_t*,
             int size,
-            TargetBitmapView,
-            TargetBitmapView) {
+            TargetBitmapWriteView,
+            TargetBitmapWriteView) {
         ASSERT_NE(data, nullptr);
         values_seen.insert(values_seen.end(), data, data + size);
     };
     std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
     TargetBitmap res(12, false);
     TargetBitmap valid(12, true);
-    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                  no_skip,
-                                                  TargetBitmapView(res),
-                                                  TargetBitmapView(valid)),
+    EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                  evaluate_batch, no_skip, res, valid),
               12);
     EXPECT_EQ(seg_expr.CurrentExecutionPosition(), N);
     std::vector<int64_t> expected(12);
@@ -1143,22 +1110,20 @@ TEST_F(OffsetsEvalCorrectnessTest,
                                     N,
                                     /*batch_size=*/4,
                                     query_context->get_consistency_level());
-    auto evaluate_batch =
-        []<FilterType filter_type = FilterType::sequential>(const int64_t*,
-                                                            ValidityView,
-                                                            const int32_t*,
-                                                            int,
-                                                            TargetBitmapView,
-                                                            TargetBitmapView){};
+    auto evaluate_batch = []<FilterType filter_type = FilterType::sequential>(
+        const int64_t*,
+        ValidityView,
+        const int32_t*,
+        int,
+        TargetBitmapWriteView,
+        TargetBitmapWriteView){};
     std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     auto process_batch = [&]() {
         TargetBitmap res(4, false);
         TargetBitmap valid(4, true);
-        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                      no_skip,
-                                                      TargetBitmapView(res),
-                                                      TargetBitmapView(valid)),
+        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                      evaluate_batch, no_skip, res, valid),
                   4);
     };
 
@@ -1199,8 +1164,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
                 ValidityView,
                 const int32_t*,
                 int size,
-                TargetBitmapView,
-                TargetBitmapView) {
+                TargetBitmapWriteView,
+                TargetBitmapWriteView) {
             ASSERT_NE(data, nullptr);
             rows_seen += size;
         };
@@ -1209,12 +1174,9 @@ TEST_F(OffsetsEvalCorrectnessTest,
 
         TargetBitmap first_res(4, false);
         TargetBitmap first_valid(4, true);
-        EXPECT_EQ(
-            seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                no_skip,
-                                                TargetBitmapView(first_res),
-                                                TargetBitmapView(first_valid)),
-            4);
+        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                      evaluate_batch, no_skip, first_res, first_valid),
+                  4);
         EXPECT_TRUE(seg_expr.HasRetainedDataScanColumn());
 
         sealed_->DropFieldData(i64_fid_);
@@ -1231,12 +1193,9 @@ TEST_F(OffsetsEvalCorrectnessTest,
 
         TargetBitmap second_res(4, false);
         TargetBitmap second_valid(4, true);
-        EXPECT_EQ(
-            seg_expr.ProcessDataChunks<int64_t>(evaluate_batch,
-                                                no_skip,
-                                                TargetBitmapView(second_res),
-                                                TargetBitmapView(second_valid)),
-            4);
+        EXPECT_EQ(seg_expr.ProcessDataChunks<int64_t>(
+                      evaluate_batch, no_skip, second_res, second_valid),
+                  4);
         EXPECT_EQ(rows_seen, 8);
     }
 
@@ -1311,8 +1270,7 @@ TEST(OffsetsEvalProductionRegressionTest,
     auto full_output = milvus::test::gen_filter_res(
         filter_node.get(), segment.get(), kRowCount, MAX_TIMESTAMP);
     ASSERT_EQ(full_output->size(), kRowCount);
-    TargetBitmapView full_result(full_output->GetRawData(),
-                                 full_output->size());
+    const auto& full_result = full_output->GetBitmap();
     ASSERT_EQ(full_result.count(), 1);
     ASSERT_TRUE(full_result[4]);
 
@@ -1337,8 +1295,8 @@ TEST(OffsetsEvalProductionRegressionTest,
     auto output = milvus::test::GetColumnVectorForTest(results[0]);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), offsets.size());
-    TargetBitmapView result(output->GetRawData(), output->size());
-    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    const auto& result = output->GetBitmap();
+    const auto& valid = output->GetValidBitmap();
 
     EXPECT_FALSE(result[0]);
     EXPECT_FALSE(result[1]);
@@ -1377,8 +1335,8 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView,
         const int32_t*,
         int size,
-        TargetBitmapView,
-        TargetBitmapView) {
+        TargetBitmapWriteView,
+        TargetBitmapWriteView) {
         if (data == nullptr) {
             null_rows += size;
         } else {
@@ -1389,11 +1347,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     TargetBitmap result(offsets.size(), false);
     TargetBitmap valid(offsets.size(), true);
     EXPECT_EQ(seg_expr->ProcessDataByOffsets<std::string_view>(
-                  evaluate_batch,
-                  reject_every_cell,
-                  &offsets,
-                  TargetBitmapView(result),
-                  TargetBitmapView(valid)),
+                  evaluate_batch, reject_every_cell, &offsets, result, valid),
               static_cast<int64_t>(offsets.size()));
     EXPECT_EQ(skip_checks, 2);
     EXPECT_EQ(null_rows, static_cast<int64_t>(offsets.size()));
@@ -1440,18 +1394,15 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView,
         const int32_t*,
         int,
-        TargetBitmapView,
-        TargetBitmapView){};
+        TargetBitmapWriteView,
+        TargetBitmapWriteView){};
     std::function<bool(const milvus::FieldSkipMetricsView&, int64_t)> no_skip;
 
     auto process_batch = [&]() {
         TargetBitmap res(4, false);
         TargetBitmap valid(4, true);
         EXPECT_EQ(seg_expr.ProcessDataChunks<VectorArrayView>(
-                      evaluate_batch,
-                      no_skip,
-                      TargetBitmapView(res),
-                      TargetBitmapView(valid)),
+                      evaluate_batch, no_skip, res, valid),
                   4);
     };
 
@@ -1504,8 +1455,10 @@ TEST_F(OffsetsEvalCorrectnessTest,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             null_rows += size;
             processed_cursor += size;
@@ -1522,11 +1475,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     TargetBitmap res(element_ids.size(), false);
     TargetBitmap valid(element_ids.size(), true);
     const auto processed = seg_expr->ProcessElementLevelByOffsets<int64_t>(
-        evaluate_batch,
-        skip_chunk0,
-        &element_ids,
-        TargetBitmapView(res),
-        TargetBitmapView(valid));
+        evaluate_batch, skip_chunk0, &element_ids, res, valid);
 
     EXPECT_EQ(processed, int64_t(element_ids.size()));
     EXPECT_EQ(processed_cursor, int64_t(element_ids.size()));
@@ -1719,8 +1668,10 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         ValidityView valid_data,
         const int32_t* offsets,
         const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+        TargetBitmapWriteView res,
+        TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             null_rows += size;
             processed_cursor += size;
@@ -1739,12 +1690,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
 
     TargetBitmap res(input.size(), false);
     TargetBitmap valid(input.size(), true);
-    const auto processed =
-        seg_expr->ProcessDataByOffsets<int64_t>(evaluate_batch,
-                                                skip_everything,
-                                                &input,
-                                                TargetBitmapView(res),
-                                                TargetBitmapView(valid));
+    const auto processed = seg_expr->ProcessDataByOffsets<int64_t>(
+        evaluate_batch, skip_everything, &input, res, valid);
 
     EXPECT_EQ(processed, int64_t(input.size()));
     EXPECT_EQ(processed_cursor, int64_t(input.size()));
@@ -2008,8 +1955,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         filter_node.get(), segment.get(), kRowCount, MAX_TIMESTAMP, &input);
     ASSERT_EQ(col_vec->size(), input.size());
 
-    TargetBitmapView result(col_vec->GetRawData(), col_vec->size());
-    TargetBitmapView valid(col_vec->GetValidRawData(), col_vec->size());
+    const auto& result = col_vec->GetBitmap();
+    const auto& valid = col_vec->GetValidBitmap();
     EXPECT_TRUE(result[0]);
     EXPECT_FALSE(result[1]);
     EXPECT_TRUE(result[2]);
@@ -2020,7 +1967,7 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     EXPECT_TRUE(valid[3]);
 }
 
-// A validity-only scan passes the same TargetBitmapView as both destinations.
+// A validity-only scan passes the same Bitset owner as both destinations.
 // Applying the alias optimization must preserve the same mask as distinct
 // result and validity destinations.
 TEST(ScanValidityMaskTest, AliasedDestinationMatchesDistinctMask) {
@@ -2032,8 +1979,8 @@ TEST(ScanValidityMaskTest, AliasedDestinationMatchesDistinctMask) {
     TargetBitmap distinct_res(size, true);
     TargetBitmap distinct_valid(size, true);
     ApplyValidMask(ValidityView::FromExpanded(valid_data),
-                   TargetBitmapView(distinct_res),
-                   TargetBitmapView(distinct_valid),
+                   distinct_res.write_view(0, size),
+                   distinct_valid.write_view(0, size),
                    size);
     for (int i = 0; i < size; ++i) {
         EXPECT_EQ(bool(distinct_res[i]), valid_data[i]);
@@ -2044,8 +1991,8 @@ TEST(ScanValidityMaskTest, AliasedDestinationMatchesDistinctMask) {
     // bitmap is passed for result and validity, and NULLs are cleared once.
     TargetBitmap aliased(size, true);
     ApplyValidMask(ValidityView::FromExpanded(valid_data),
-                   TargetBitmapView(aliased),
-                   TargetBitmapView(aliased),
+                   aliased.write_view(0, size),
+                   aliased.write_view(0, size),
                    size);
     for (int i = 0; i < size; ++i) {
         EXPECT_EQ(bool(aliased[i]), valid_data[i]);
@@ -2064,8 +2011,8 @@ TEST(ScanValidityMaskTest, AliasedPackedDestinationMatchesDistinctMask) {
     TargetBitmap distinct_res(11, true);
     TargetBitmap distinct_valid(11, true);
     ApplyValidMask(validity,
-                   TargetBitmapView(distinct_res),
-                   TargetBitmapView(distinct_valid),
+                   distinct_res.write_view(0, 11),
+                   distinct_valid.write_view(0, 11),
                    11);
     for (int i : {1, 3, 8, 9}) {
         EXPECT_FALSE(distinct_res[i]);
@@ -2078,7 +2025,7 @@ TEST(ScanValidityMaskTest, AliasedPackedDestinationMatchesDistinctMask) {
 
     TargetBitmap aliased(11, true);
     ApplyValidMask(
-        validity, TargetBitmapView(aliased), TargetBitmapView(aliased), 11);
+        validity, aliased.write_view(0, 11), aliased.write_view(0, 11), 11);
     for (int i : {1, 3, 8, 9}) {
         EXPECT_FALSE(aliased[i]);
     }
@@ -2109,15 +2056,17 @@ TEST(ScanValidityMaskTest, CandidateMaskUsesBatchRelativeWordRanges) {
         }
     }
 
+    // Exercise a candidate view with a nonzero physical bit offset.
+    const auto candidate_view = candidates.view(2);
     const auto verify = [&](ValidityView validity) {
         TargetBitmap result(destination_pos + size + 2, true);
         TargetBitmap valid(destination_pos + size + 2, true);
         ApplyValidMaskForCandidates(validity.Subview(validity_pos),
-                                    result.view(destination_pos, size),
-                                    valid.view(destination_pos, size),
+                                    result.write_view(destination_pos, size),
+                                    valid.write_view(destination_pos, size),
                                     size,
-                                    &candidates,
-                                    candidate_pos);
+                                    &candidate_view,
+                                    candidate_pos - 2);
         for (int64_t i = 0; i < size; ++i) {
             const bool expected =
                 !candidates[candidate_pos + i] || expanded[validity_pos + i];
@@ -2128,13 +2077,14 @@ TEST(ScanValidityMaskTest, CandidateMaskUsesBatchRelativeWordRanges) {
         EXPECT_TRUE(result[destination_pos + size]);
 
         TargetBitmap aliased(destination_pos + size + 2, true);
-        auto destination = aliased.view(destination_pos, size);
-        ApplyValidMaskForCandidates(validity.Subview(validity_pos),
-                                    destination,
-                                    destination,
-                                    size,
-                                    &candidates,
-                                    candidate_pos);
+        auto& destination = aliased;
+        ApplyValidMaskForCandidates(
+            validity.Subview(validity_pos),
+            destination.write_view(destination_pos, size),
+            destination.write_view(destination_pos, size),
+            size,
+            &candidate_view,
+            candidate_pos - 2);
         for (int64_t i = 0; i < size; ++i) {
             const bool expected =
                 !candidates[candidate_pos + i] || expanded[validity_pos + i];

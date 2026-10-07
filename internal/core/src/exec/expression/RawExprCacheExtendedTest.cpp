@@ -443,9 +443,8 @@ class RawExprCacheExtendedTest : public ::testing::TestWithParam<Backend> {
             }
             EXPECT_EQ(column->size(),
                       std::min<int64_t>(kBatch, rows - data.size()));
-            data.append(TargetBitmapView(column->GetRawData(), column->size()));
-            valid.append(
-                TargetBitmapView(column->GetValidRawData(), column->size()));
+            data.append(column->GetBitmap());
+            valid.append(column->GetValidBitmap());
         }
         EXPECT_EQ(data.size(), rows);
         return {std::move(data), std::move(valid)};
@@ -527,8 +526,8 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         auto column = std::dynamic_pointer_cast<ColumnVector>(result);
         ASSERT_NE(column, nullptr);
         ASSERT_EQ(column->size(), offsets.size());
-        TargetBitmapView data(column->GetRawData(), column->size());
-        TargetBitmapView valid(column->GetValidRawData(), column->size());
+        const auto& data = column->GetBitmap();
+        const auto& valid = column->GetValidBitmap();
         for (size_t i = 0; i < offsets.size(); ++i) {
             EXPECT_EQ(data[i], (c.result >> (offsets[i] % 8)) & 1);
             EXPECT_EQ(valid[i], (c.valid >> (offsets[i] % 8)) & 1);

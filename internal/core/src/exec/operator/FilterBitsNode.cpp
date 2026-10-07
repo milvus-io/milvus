@@ -56,19 +56,20 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
 }  // namespace
 
 bool
-ConvertPredicateToFilteredBitset(TargetBitmapView data,
-                                 TargetBitmapView valid,
+ConvertPredicateToFilteredBitset(TargetBitmapWriteView data,
+                                 TargetBitmapWriteView valid,
                                  const size_t size) {
-    // FilterBitsNode outputs a filtered-row bitset: 1 means excluded. A SQL-style
-    // predicate passes only when it is definitely TRUE, so UNKNOWN/NULL must be
-    // excluded together with FALSE.
-    if (valid.all()) {
+    // 1 means excluded: only definite TRUE predicates pass the filter.
+    AssertInfo(size <= data.size() && size <= valid.size(),
+               "predicate size exceeds output window");
+    const auto validity = valid.read_view();
+    if (validity.all()) {
         data.flip();
         return true;
     }
-
-    data.inplace_and(valid, size);
-    data.flip();
+    data.inplace_and_flip(validity, size);
+    // Preserve the original FLIP over the entire destination view for a prefix.
+    data.flip(size, data.size() - size);
     valid.set();
     return false;
 }
@@ -211,8 +212,8 @@ PhyFilterBitsNode::GetOutput() {
                    "PhyFilterBitsNode result should be bitmap ColumnVector");
 
         auto col_vec_size = col_vec->size();
-        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-        TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec_size);
+        auto view = col_vec->GetBitmapWriteView();
+        auto valid_view = col_vec->GetValidBitmapWriteView();
         ConvertPredicateToFilteredBitset(view, valid_view, col_vec_size);
         num_processed_rows_ = col_vec_size;
 
@@ -226,8 +227,9 @@ PhyFilterBitsNode::GetOutput() {
                 ExprResCacheManager::Key key{cache_segment->get_segment_id(),
                                              expr_cache_key_};
                 ExprResCacheManager::Value v;
-                v.result = std::make_shared<TargetBitmap>(view);
-                v.valid_result = std::make_shared<TargetBitmap>(valid_view);
+                v.result = std::make_shared<TargetBitmap>(view.read_view());
+                v.valid_result =
+                    std::make_shared<TargetBitmap>(valid_view.read_view());
                 v.active_count = need_process_rows_;
                 ExprResCacheManager::Instance().Put(key, v);
             });
@@ -258,10 +260,9 @@ PhyFilterBitsNode::GetOutput() {
                 std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
-                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+                const auto& view = col_vec->GetBitmap();
                 bitset.append(view);
-                TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                            col_vec_size);
+                const auto& valid_view = col_vec->GetValidBitmap();
                 valid_bitset.append(valid_view);
                 num_processed_rows_ += col_vec_size;
             } else {
@@ -273,8 +274,8 @@ PhyFilterBitsNode::GetOutput() {
                       "PhyFilterBitsNode result should be ColumnVector");
         }
     }
-    TargetBitmapView bitset_view(bitset);
-    TargetBitmapView valid_bitset_view(valid_bitset);
+    auto& bitset_view = bitset;
+    auto& valid_bitset_view = valid_bitset;
     ConvertPredicateToFilteredBitset(
         bitset_view, valid_bitset_view, bitset.size());
 

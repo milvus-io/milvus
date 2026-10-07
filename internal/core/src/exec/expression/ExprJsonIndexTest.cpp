@@ -308,8 +308,8 @@ TEST(JsonIndexTest, JsonSortLikeUsesIndexWithoutRawJson) {
                                                            unary_expr);
         auto result = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
 
         std::vector<bool> expected(json_strs.size(), false);
         for (auto row : matched_rows) {
@@ -446,11 +446,10 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
     auto expect_same = [&](const ColumnVectorPtr& raw,
                            const ColumnVectorPtr& indexed) {
         ASSERT_EQ(raw->size(), indexed->size());
-        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
-        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
-        TargetBitmapView index_result(indexed->GetRawData(), indexed->size());
-        TargetBitmapView index_valid(indexed->GetValidRawData(),
-                                     indexed->size());
+        const auto& raw_result = raw->GetBitmap();
+        const auto& raw_valid = raw->GetValidBitmap();
+        const auto& index_result = indexed->GetBitmap();
+        const auto& index_valid = indexed->GetValidBitmap();
         for (size_t i = 0; i < raw->size(); ++i) {
             EXPECT_EQ(index_valid[i], raw_valid[i]) << "row " << i;
             EXPECT_EQ(index_result[i], raw_result[i]) << "row " << i;
@@ -507,10 +506,8 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
     auto raw_precise = evaluate(precise_expr, raw_segment.get());
     auto indexed_precise = evaluate(precise_expr, precise_number_segment.get());
     expect_same(raw_precise, indexed_precise);
-    TargetBitmapView precise_result(raw_precise->GetRawData(),
-                                    raw_precise->size());
-    TargetBitmapView precise_valid(raw_precise->GetValidRawData(),
-                                   raw_precise->size());
+    const auto& precise_result = raw_precise->GetBitmap();
+    const auto& precise_valid = raw_precise->GetValidBitmap();
     EXPECT_TRUE(precise_valid[8]);
     EXPECT_TRUE(precise_result[8]);
 }
@@ -613,13 +610,10 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
     ASSERT_NE(flat_result, nullptr);
     ASSERT_EQ(raw_result->size(), flat_result->size());
 
-    TargetBitmapView raw_values(raw_result->GetRawData(), raw_result->size());
-    TargetBitmapView raw_validity(raw_result->GetValidRawData(),
-                                  raw_result->size());
-    TargetBitmapView flat_values(flat_result->GetRawData(),
-                                 flat_result->size());
-    TargetBitmapView flat_validity(flat_result->GetValidRawData(),
-                                   flat_result->size());
+    const auto& raw_values = raw_result->GetBitmap();
+    const auto& raw_validity = raw_result->GetValidBitmap();
+    const auto& flat_values = flat_result->GetBitmap();
+    const auto& flat_validity = flat_result->GetValidBitmap();
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_EQ(flat_values[i], raw_values[i]) << "candidate " << i;
         EXPECT_EQ(flat_validity[i], raw_validity[i]) << "candidate " << i;
@@ -700,8 +694,8 @@ TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
                                                            filter_expr);
         auto result = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP);
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_TRUE(valid_view[i]) << "row " << i;
             EXPECT_EQ(result_view[i], expected_result) << "row " << i;
@@ -785,8 +779,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         value,
         std::vector<proto::plan::GenericValue>());
     auto result = evaluate(equal_expr);
-    TargetBitmapView result_view(result->GetRawData(), result->size());
-    TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+    auto result_view = result->GetBitmap();
+    auto valid_view = result->GetValidBitmap();
     for (size_t i = 0; i < result->size(); ++i) {
         EXPECT_TRUE(valid_view[i]);
     }
@@ -799,8 +793,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         std::vector<proto::plan::GenericValue>{value},
         false);
     result = evaluate(term_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
@@ -811,8 +805,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         value,
         std::vector<proto::plan::GenericValue>());
     result = evaluate(greater_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_FALSE(result_view[1]);
     EXPECT_TRUE(result_view[2]);
@@ -824,8 +818,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         true,
         true);
     result = evaluate(between_expr);
-    result_view = TargetBitmapView(result->GetRawData(), result->size());
-    valid_view = TargetBitmapView(result->GetValidRawData(), result->size());
+    result_view = result->GetBitmap();
+    valid_view = result->GetValidBitmap();
     EXPECT_FALSE(result_view[0]);
     EXPECT_TRUE(result_view[1]);
     EXPECT_FALSE(result_view[2]);
@@ -872,8 +866,8 @@ TEST(JsonRawScanTest, EmptyInAndLargeInt64KeepThreeValuedSemantics) {
     auto check = [](const ColumnVectorPtr& result,
                     const std::vector<bool>& expected_result,
                     const std::vector<bool>& expected_valid) {
-        TargetBitmapView result_view(result->GetRawData(), result->size());
-        TargetBitmapView valid_view(result->GetValidRawData(), result->size());
+        const auto& result_view = result->GetBitmap();
+        const auto& valid_view = result->GetValidBitmap();
         for (size_t i = 0; i < result->size(); ++i) {
             EXPECT_EQ(valid_view[i], expected_valid[i]) << "row " << i;
             if (expected_valid[i]) {
@@ -1163,14 +1157,10 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         exec::OffsetVector offsets = {8, 0, 15, 7, 8};
         auto offset_result = milvus::test::gen_filter_res(
             plan.get(), seg.get(), json_strs.size(), MAX_TIMESTAMP, &offsets);
-        TargetBitmapView full_values(full_result->GetRawData(),
-                                     full_result->size());
-        TargetBitmapView full_validity(full_result->GetValidRawData(),
-                                       full_result->size());
-        TargetBitmapView offset_values(offset_result->GetRawData(),
-                                       offset_result->size());
-        TargetBitmapView offset_validity(offset_result->GetValidRawData(),
-                                         offset_result->size());
+        const auto& full_values = full_result->GetBitmap();
+        const auto& full_validity = full_result->GetValidBitmap();
+        const auto& offset_values = offset_result->GetBitmap();
+        const auto& offset_validity = offset_result->GetValidBitmap();
         for (size_t i = 0; i < offsets.size(); ++i) {
             const auto row = offsets[i];
             EXPECT_EQ(offset_values[i], full_values[row]) << "row " << row;

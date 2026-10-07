@@ -144,7 +144,8 @@ class Chunk {
     void
     ApplyValidityMask(int64_t offset,
                       int64_t count,
-                      TargetBitmapView target) const {
+                      TargetBitmapWriteView target) const {
+        auto target_write_scope = target.scoped_write();
         if (!nullable_ || count == 0) {
             return;
         }
@@ -181,7 +182,8 @@ class Chunk {
                 static_cast<int>(std::min<int64_t>(count - i, 64));
             auto word = read_word(validity.bit_offset() + i, bit_count);
             TargetBitmapView validity_word(&word, bit_count);
-            target.view(i).inplace_and(validity_word, bit_count);
+            target.write_view(i, bit_count)
+                .inplace_and(validity_word, bit_count);
         }
     }
 

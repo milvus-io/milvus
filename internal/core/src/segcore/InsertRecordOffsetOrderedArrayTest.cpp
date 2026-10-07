@@ -11,7 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <array>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -446,9 +448,9 @@ TEST_F(VirtualPKOffsetMapTest, FindRange) {
     // Equal
     {
         BitsetType bitset(num);
-        BitsetTypeView view(bitset.data(), num);
+        const auto view = bitset.view();
         map_.find_range(
-            PkType(vpk(50)), proto::plan::OpType::Equal, view, [](int64_t) {
+            PkType(vpk(50)), proto::plan::OpType::Equal, bitset, [](int64_t) {
                 return true;
             });
         EXPECT_TRUE(view[50]);
@@ -463,10 +465,10 @@ TEST_F(VirtualPKOffsetMapTest, FindRange) {
     // GreaterEqual
     {
         BitsetType bitset(num);
-        BitsetTypeView view(bitset.data(), num);
+        const auto view = bitset.view();
         map_.find_range(PkType(vpk(95)),
                         proto::plan::OpType::GreaterEqual,
-                        view,
+                        bitset,
                         [](int64_t) { return true; });
         for (int64_t i = 95; i < num; i++) {
             EXPECT_TRUE(view[i]) << "offset " << i;
@@ -478,9 +480,9 @@ TEST_F(VirtualPKOffsetMapTest, FindRange) {
     // LessThan
     {
         BitsetType bitset(num);
-        BitsetTypeView view(bitset.data(), num);
+        const auto view = bitset.view();
         map_.find_range(
-            PkType(vpk(5)), proto::plan::OpType::LessThan, view, [](int64_t) {
+            PkType(vpk(5)), proto::plan::OpType::LessThan, bitset, [](int64_t) {
                 return true;
             });
         for (int64_t i = 0; i < 5; i++) {
@@ -498,7 +500,7 @@ TEST_F(VirtualPKOffsetMapTest, FindFirstN) {
     {
         BitsetType bitset(num);
         bitset.reset();  // 0 = pass
-        BitsetTypeView view(bitset.data(), num);
+        const auto view = bitset.view();
         auto [offsets, has_more] = map_.find_first_n(10, view);
         ASSERT_EQ(offsets.size(), 10);
         // Should be sorted by PK order = offset order for virtual PKs
@@ -511,7 +513,7 @@ TEST_F(VirtualPKOffsetMapTest, FindFirstN) {
     {
         BitsetType bitset(num);
         bitset.set();  // 1 = filtered out
-        BitsetTypeView view(bitset.data(), num);
+        const auto view = bitset.view();
         auto [offsets, has_more] = map_.find_first_n(10, view);
         EXPECT_EQ(offsets.size(), 0);
         EXPECT_FALSE(has_more);
@@ -530,4 +532,42 @@ TEST_F(VirtualPKOffsetMapTest, EmptyAndSeal) {
     // zero-row map
     VirtualPKOffsetMap empty_map(kSegmentID, 0);
     EXPECT_TRUE(empty_map.empty());
+}
+
+TEST(OffsetMapWriteScopeTest, ReadsRemainLiveAndExceptionsCloseTheBatch) {
+    OffsetOrderedMap<int64_t> growing;
+    OffsetOrderedArray<int64_t> sealed;
+    VirtualPKOffsetMap virtual_pk(0, 4);
+    for (int64_t i = 0; i < 4; ++i) {
+        growing.insert(PkType(i), i);
+        sealed.insert(PkType(i), i);
+    }
+    sealed.seal();
+    const std::array<OffsetMap*, 3> maps{&growing, &sealed, &virtual_pk};
+    for (const auto* map : maps) {
+        BitsetType bitmap(4, false);
+        const auto view = bitmap.read_view();
+        ASSERT_EQ(view.count(), 0);
+        EXPECT_THROW(map->find_range(PkType(int64_t(0)),
+                                     proto::plan::OpType::GreaterEqual,
+                                     bitmap.write_view(),
+                                     [&](int64_t offset) {
+                                         EXPECT_EQ(view.count(), offset);
+                                         if (offset == 2) {
+                                             throw std::runtime_error(
+                                                 "stop after two rows");
+                                         }
+                                         return true;
+                                     }),
+                     std::runtime_error);
+        EXPECT_EQ(view.count(), 2);
+        bitmap.set(3);
+        EXPECT_EQ(view.count(), 3);
+        map->find_range(PkType(int64_t(2)),
+                        proto::plan::OpType::GreaterEqual,
+                        bitmap.write_view(),
+                        [](int64_t) { return true; });
+        EXPECT_TRUE(view.all());
+        EXPECT_EQ(view.count(), 4);
+    }
 }

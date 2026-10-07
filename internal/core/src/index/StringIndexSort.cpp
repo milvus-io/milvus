@@ -1293,6 +1293,7 @@ StringIndexSortMemoryImpl::ApplyMembership(size_t n,
                                            const std::string* values,
                                            TargetBitmap& bitset,
                                            bool in) const {
+    auto write_scope = bitset.scoped_write();
     detail::VisitSortedStringMatches(
         unique_values_.size(),
         n,
@@ -1318,23 +1319,23 @@ const TargetBitmap
 StringIndexSortMemoryImpl::NotIn(size_t n,
                                  const std::string* values,
                                  size_t total_num_rows,
-                                 const TargetBitmap& valid_bitset) {
-    auto bitset = valid_bitset.clone();
+                                 const TargetBitmapView& valid_bitset) {
+    TargetBitmap bitset(valid_bitset);
     ApplyMembership(n, values, bitset, false);
     return bitset;
 }
 
 const TargetBitmap
 StringIndexSortMemoryImpl::IsNull(size_t total_num_rows,
-                                  const TargetBitmap& valid_bitset) {
-    auto result = valid_bitset.clone();
+                                  const TargetBitmapView& valid_bitset) {
+    TargetBitmap result(valid_bitset);
     result.flip();
     return result;
 }
 
 TargetBitmap
-StringIndexSortMemoryImpl::IsNotNull(const TargetBitmap& valid_bitset) {
-    return valid_bitset.clone();
+StringIndexSortMemoryImpl::IsNotNull(const TargetBitmapView& valid_bitset) {
+    return TargetBitmap(valid_bitset);
 }
 
 const TargetBitmap
@@ -1564,7 +1565,7 @@ StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
 std::optional<std::string>
 StringIndexSortMemoryImpl::Reverse_Lookup(size_t offset,
                                           size_t total_num_rows,
-                                          const TargetBitmap& valid_bitset,
+                                          const TargetBitmapView& valid_bitset,
                                           const int32_t* idx_to_offsets_ptr,
                                           size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {
@@ -1813,6 +1814,7 @@ StringIndexSortMmapImpl::ApplyMembership(size_t n,
                                          const std::string* values,
                                          TargetBitmap& bitset,
                                          bool in) const {
+    auto write_scope = bitset.scoped_write();
     detail::VisitSortedStringMatches(
         unique_count_,
         n,
@@ -1837,23 +1839,23 @@ const TargetBitmap
 StringIndexSortMmapImpl::NotIn(size_t n,
                                const std::string* values,
                                size_t total_num_rows,
-                               const TargetBitmap& valid_bitset) {
-    auto bitset = valid_bitset.clone();
+                               const TargetBitmapView& valid_bitset) {
+    TargetBitmap bitset(valid_bitset);
     ApplyMembership(n, values, bitset, false);
     return bitset;
 }
 
 const TargetBitmap
 StringIndexSortMmapImpl::IsNull(size_t total_num_rows,
-                                const TargetBitmap& valid_bitset) {
-    auto null_bitset = valid_bitset.clone();
+                                const TargetBitmapView& valid_bitset) {
+    TargetBitmap null_bitset(valid_bitset);
     null_bitset.flip();
     return null_bitset;
 }
 
 TargetBitmap
-StringIndexSortMmapImpl::IsNotNull(const TargetBitmap& valid_bitset) {
-    return valid_bitset.clone();
+StringIndexSortMmapImpl::IsNotNull(const TargetBitmapView& valid_bitset) {
+    return TargetBitmap(valid_bitset);
 }
 
 const TargetBitmap
@@ -2050,7 +2052,7 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
 std::optional<std::string>
 StringIndexSortMmapImpl::Reverse_Lookup(size_t offset,
                                         size_t total_num_rows,
-                                        const TargetBitmap& valid_bitset,
+                                        const TargetBitmapView& valid_bitset,
                                         const int32_t* idx_to_offsets_ptr,
                                         size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {

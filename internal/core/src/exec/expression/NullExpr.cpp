@@ -198,7 +198,7 @@ PhyNullExpr::ExecVectorNull(OffsetVector* input) {
                                                field_id_,
                                                offsets.data(),
                                                offsets.size(),
-                                               TargetBitmapView(valid_res));
+                                               valid_res.write_view());
         return BuildNullResult(std::move(valid_res));
     }
 
@@ -213,7 +213,7 @@ PhyNullExpr::ExecVectorNull(OffsetVector* input) {
                                            field_id_,
                                            offsets.data(),
                                            offsets.size(),
-                                           TargetBitmapView(valid_res));
+                                           valid_res.write_view());
     current_data_global_pos_ += batch_size;
     return BuildNullResult(std::move(valid_res));
 }

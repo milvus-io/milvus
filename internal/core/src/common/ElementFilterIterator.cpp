@@ -108,7 +108,7 @@ ElementFilterIterator::FetchAndFilterBatch() {
     AssertInfo(col_vec_size == element_ids_buffer_.size(),
                "ElementFilterIterator: evaluation result size mismatch");
 
-    TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+    const auto& bitsetview = col_vec->GetBitmap();
 
     // Step 4: Filter elements based on evaluation results and cache them
     for (size_t i = 0; i < element_ids_buffer_.size(); ++i) {

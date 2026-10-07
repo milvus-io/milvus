@@ -66,10 +66,11 @@ struct BinaryRangeElementFunc {
                const T& val2,
                const T* src,
                size_t n,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         if constexpr (filter_type == FilterType::random ||
                       std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
@@ -164,11 +165,13 @@ struct BinaryRangeElementFuncForJson {
                const milvus::Json* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < n; ++i) {
             auto offset = i;
@@ -203,11 +206,13 @@ struct BinaryRangeElementFuncForArray {
                const milvus::ArrayView* src,
                ValidityView valid_data,
                size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         bool has_bitmap_input = !bitmap_input.empty();
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");

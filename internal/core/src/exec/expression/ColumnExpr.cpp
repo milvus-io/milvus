@@ -95,7 +95,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        auto valid_res = res_vec->GetValidBitmapWriteView();
         valid_res.set();
 
         if constexpr (std::is_same_v<T, std::string>) {
@@ -175,7 +175,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        auto valid_res = res_vec->GetValidBitmapWriteView();
         valid_res.set();
         auto cda = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->GetColumn().data_type_,
@@ -203,7 +203,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         auto res_vec = std::make_shared<ColumnVector>(
             expr_->GetColumn().data_type_, real_batch_size);
         T* res_value = res_vec->RawAsValues<T>();
-        TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+        auto valid_res = res_vec->GetValidBitmapWriteView();
         valid_res.set();
 
         int64_t processed_rows = 0;

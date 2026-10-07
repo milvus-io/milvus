@@ -648,6 +648,8 @@ using SegOffset =
 //using BitsetType = boost::dynamic_bitset<>;
 using BitsetType = CustomBitset;
 using BitsetTypeView = CustomBitsetView;
+using BitsetTypeReadView = CustomBitsetReadView;
+using BitsetTypeWriteView = CustomBitsetWriteView;
 using BitsetTypePtr = std::shared_ptr<BitsetType>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
@@ -660,6 +662,8 @@ using Config = nlohmann::json;
 //using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 using TargetBitmap = CustomBitset;
 using TargetBitmapView = CustomBitsetView;
+using TargetBitmapReadView = CustomBitsetReadView;
+using TargetBitmapWriteView = CustomBitsetWriteView;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;

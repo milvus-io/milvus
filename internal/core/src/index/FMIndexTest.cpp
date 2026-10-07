@@ -67,7 +67,7 @@ namespace {
 // Collect the set-bit positions of a bitmap into a sorted vector, for readable
 // equality assertions against an expected id list.
 std::vector<int64_t>
-SetBits(const TargetBitmap& bitmap) {
+SetBits(const TargetBitmapView& bitmap) {
     std::vector<int64_t> out;
     for (size_t i = 0; i < bitmap.size(); i++) {
         if (bitmap[i]) {
@@ -1187,7 +1187,7 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
             node, segment.get(), nb, MAX_TIMESTAMP);
     };
     auto expect_rows =
-        [&](const BitsetType& got,
+        [&](const BitsetTypeView& got,
             const std::function<bool(const std::string&)>& oracle,
             const char* what) {
             for (size_t i = 0; i < nb; i++) {
@@ -1376,7 +1376,7 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
             node, segment.get(), nb, MAX_TIMESTAMP);
     };
     auto expect_rows =
-        [&](const BitsetType& got,
+        [&](const BitsetTypeView& got,
             const std::function<bool(const std::string&)>& oracle,
             const char* what) {
             for (size_t i = 0; i < nb; i++) {
@@ -1773,7 +1773,7 @@ TEST(FMIndex, ExecutorPathMatchNullableAndOffsets) {
     auto offset_res = milvus::test::gen_filter_res(
         node.get(), loaded.segment.get(), nb, MAX_TIMESTAMP, &offsets);
     ASSERT_EQ(offset_res->size(), offsets.size());
-    TargetBitmapView offset_view(offset_res->GetRawData(), offsets.size());
+    const auto& offset_view = offset_res->GetBitmap();
     for (size_t j = 0; j < offsets.size(); j++) {
         const auto i = static_cast<size_t>(offsets[j]);
         EXPECT_EQ(offset_view[j], full[i]) << "offset row " << i;

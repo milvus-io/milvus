@@ -230,13 +230,13 @@ class StringIndexSortImpl {
     NotIn(size_t n,
           const std::string* values,
           size_t total_num_rows,
-          const TargetBitmap& valid_bitset) = 0;
+          const TargetBitmapView& valid_bitset) = 0;
 
     virtual const TargetBitmap
-    IsNull(size_t total_num_rows, const TargetBitmap& valid_bitset) = 0;
+    IsNull(size_t total_num_rows, const TargetBitmapView& valid_bitset) = 0;
 
     virtual TargetBitmap
-    IsNotNull(const TargetBitmap& valid_bitset) = 0;
+    IsNotNull(const TargetBitmapView& valid_bitset) = 0;
 
     virtual const TargetBitmap
     Range(const std::string& value, OpType op, size_t total_num_rows) = 0;
@@ -259,7 +259,7 @@ class StringIndexSortImpl {
     virtual std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
-                   const TargetBitmap& valid_bitset,
+                   const TargetBitmapView& valid_bitset,
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const = 0;
 
@@ -326,13 +326,14 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     NotIn(size_t n,
           const std::string* values,
           size_t total_num_rows,
-          const TargetBitmap& valid_bitset) override;
+          const TargetBitmapView& valid_bitset) override;
 
     const TargetBitmap
-    IsNull(size_t total_num_rows, const TargetBitmap& valid_bitset) override;
+    IsNull(size_t total_num_rows,
+           const TargetBitmapView& valid_bitset) override;
 
     TargetBitmap
-    IsNotNull(const TargetBitmap& valid_bitset) override;
+    IsNotNull(const TargetBitmapView& valid_bitset) override;
 
     const TargetBitmap
     Range(const std::string& value, OpType op, size_t total_num_rows) override;
@@ -355,7 +356,7 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
-                   const TargetBitmap& valid_bitset,
+                   const TargetBitmapView& valid_bitset,
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const override;
 
@@ -484,13 +485,14 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     NotIn(size_t n,
           const std::string* values,
           size_t total_num_rows,
-          const TargetBitmap& valid_bitset) override;
+          const TargetBitmapView& valid_bitset) override;
 
     const TargetBitmap
-    IsNull(size_t total_num_rows, const TargetBitmap& valid_bitset) override;
+    IsNull(size_t total_num_rows,
+           const TargetBitmapView& valid_bitset) override;
 
     TargetBitmap
-    IsNotNull(const TargetBitmap& valid_bitset) override;
+    IsNotNull(const TargetBitmapView& valid_bitset) override;
 
     const TargetBitmap
     Range(const std::string& value, OpType op, size_t total_num_rows) override;
@@ -513,7 +515,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
-                   const TargetBitmap& valid_bitset,
+                   const TargetBitmapView& valid_bitset,
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const override;
 

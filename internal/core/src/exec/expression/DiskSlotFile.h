@@ -103,8 +103,8 @@ class DiskSlotFile {
     void
     Put(const std::string& signature,
         int64_t active_count,
-        const TargetBitmap& result,
-        const TargetBitmap& valid);
+        const TargetBitmapView& result,
+        const TargetBitmapView& valid);
 
     void
     Close();

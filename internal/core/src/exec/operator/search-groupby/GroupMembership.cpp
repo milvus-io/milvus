@@ -31,7 +31,7 @@ template <typename T>
 using GroupKey = std::optional<T>;
 
 bool
-IsEligible(const TargetBitmap* base_filter, size_t offset) {
+IsEligible(const TargetBitmapView* base_filter, size_t offset) {
     return base_filter == nullptr || !(*base_filter)[offset];
 }
 
@@ -136,7 +136,7 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
                   FieldId field_id,
                   int64_t row_count,
                   const std::vector<GroupKey<T>>& groups,
-                  const TargetBitmap* base_filter,
+                  const TargetBitmapView* base_filter,
                   const segcore::SegmentReadSnapshot* snapshot) {
     if (row_count < 0 || (base_filter && base_filter->size() !=
                                              static_cast<size_t>(row_count))) {
@@ -175,7 +175,7 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
                          FieldId,                                  \
                          int64_t,                                  \
                          const std::vector<std::optional<T>>&,     \
-                         const TargetBitmap*,                      \
+                         const TargetBitmapView*,                  \
                          const segcore::SegmentReadSnapshot*);
 
 INSTANTIATE_GROUP_OFFSETS(bool)

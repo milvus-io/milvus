@@ -55,7 +55,7 @@ TEST_F(FunctionTest, Empty) {
 
     auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
     ASSERT_NE(result_vec, nullptr);
-    TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
+    const auto& bitmap = result_vec->GetBitmap();
     for (int i = 0; i < 15; ++i) {
         EXPECT_TRUE(result_vec->ValidAt(i)) << "i: " << i;
         EXPECT_EQ(bitmap[i], i >= 11) << "i: " << i;
@@ -73,7 +73,7 @@ TEST_F(FunctionTest, EmptyNull) {
 
     auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
     ASSERT_NE(result_vec, nullptr);
-    TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
+    const auto& bitmap = result_vec->GetBitmap();
     for (int i = 0; i < 15; ++i) {
         EXPECT_FALSE(result_vec->ValidAt(i)) << "i: " << i;
     }
@@ -90,7 +90,7 @@ TEST_F(FunctionTest, EmptyConstant) {
 
     auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
     ASSERT_NE(result_vec, nullptr);
-    TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
+    const auto& bitmap = result_vec->GetBitmap();
     for (int i = 0; i < 15; ++i) {
         EXPECT_TRUE(result_vec->ValidAt(i)) << "i: " << i;
         EXPECT_FALSE(bitmap[i]) << "i: " << i;
@@ -130,8 +130,7 @@ InitStrsForStartWith(std::shared_ptr<milvus::ColumnVector> col1) {
     col1_data[0] = "123";
     col1_data[1] = "";
     col1_data[2] = "";
-    TargetBitmapView valid_bitmap_col1(col1->GetValidRawData(), col1->size());
-    valid_bitmap_col1[2] = false;
+    col1->nullAt(2);
     col1_data[3] = "aaabbbaaa";
     col1_data[4] = "aaabbbaaa";
     col1_data[5] = "xx";
@@ -143,7 +142,7 @@ static void
 StartWithCheck(VectorPtr result, bool valid[], bool expected[]) {
     auto result_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(result);
     ASSERT_NE(result_vec, nullptr);
-    TargetBitmapView bitmap(result_vec->GetRawData(), result_vec->size());
+    const auto& bitmap = result_vec->GetBitmap();
     for (int i = 0; i < STARTS_WITH_ROW_COUNT; ++i) {
         EXPECT_EQ(result_vec->ValidAt(i), valid[i]) << "i: " << i;
         EXPECT_EQ(bitmap[i], expected[i]) << "i: " << i;
@@ -167,8 +166,7 @@ TEST_F(FunctionTest, StartsWithColumnVector) {
     col2_data[4] = "aaabbbaax";
     col2_data[5] = "";
     col2_data[6] = "";
-    TargetBitmapView valid_bitmap_col2(col2->GetValidRawData(), col2->size());
-    valid_bitmap_col2[6] = false;
+    col2->nullAt(6);
     col2_data[7] = "124";
     arg_vec.push_back(col2);
 

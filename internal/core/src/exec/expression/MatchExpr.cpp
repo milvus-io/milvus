@@ -145,8 +145,9 @@ ProcessContiguousRows(int64_t row_count,
                       const IArrayOffsets* array_offsets,
                       const TargetBitmapView& match_bitset,
                       const TargetBitmapView& valid_bitset,
-                      TargetBitmapView& result_bitset,
+                      TargetBitmapWriteView result_bitset,
                       int64_t threshold) {
+    auto write_scope = result_bitset.scoped_write();
     if constexpr (match_type == MatchType::MatchAny && all_valid) {
         // Fast path: ANY-semantics reduction over contiguous rows. The match
         // bitmap covers exactly the element ranges of
@@ -185,8 +186,9 @@ ProcessOffsetRows(const OffsetVector* row_offsets,
                   const IArrayOffsets* array_offsets,
                   const TargetBitmapView& match_bitset,
                   const TargetBitmapView& valid_bitset,
-                  TargetBitmapView& result_bitset,
+                  TargetBitmapWriteView result_bitset,
                   int64_t threshold) {
+    auto write_scope = result_bitset.scoped_write();
     // ONE batched virtual call for all requested rows instead of one
     // ElementIDRangeOfRow per row (one lock-free snapshot on growing).
     const auto row_count = static_cast<int64_t>(row_offsets->size());
@@ -219,7 +221,7 @@ DispatchMatchProcessing(bool use_offset_input,
                         const IArrayOffsets* array_offsets,
                         const TargetBitmapView& match_bitset,
                         const TargetBitmapView& valid_bitset,
-                        TargetBitmapView& result_bitset,
+                        TargetBitmapWriteView result_bitset,
                         int64_t threshold) {
     if (use_offset_input) {
         ProcessOffsetRows<match_type, all_valid>(row_offsets,
@@ -287,7 +289,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                             TargetBitmap(batch_rows, true));
 
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
-    TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
+    auto bitset_view = col_vec->GetBitmapWriteView();
 
     auto match_type = expr_->get_match_type();
     int64_t threshold = expr_->get_count();
@@ -324,10 +326,9 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                "Match predicate result size {} should equal element count {}",
                match_result_col_vec->size(),
                elem_count);
-    TargetBitmapView match_result_bitset_view(
-        match_result_col_vec->GetRawData(), match_result_col_vec->size());
-    TargetBitmapView match_result_valid_view(
-        match_result_col_vec->GetValidRawData(), match_result_col_vec->size());
+    const auto& match_result_bitset_view = match_result_col_vec->GetBitmap();
+    const auto& match_result_valid_view =
+        match_result_col_vec->GetValidBitmap();
 
     bool all_valid = match_result_valid_view.all();
 
@@ -423,8 +424,9 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
                                            FieldId field_id,
                                            const OffsetVector* input,
                                            int64_t batch_rows) {
-    TargetBitmapView value_view(col_vec->GetRawData(), col_vec->size());
-    TargetBitmapView valid_view(col_vec->GetValidRawData(), col_vec->size());
+    auto value_view = col_vec->GetBitmapWriteView();
+    auto write_scope = value_view.scoped_write();
+    auto valid_view = col_vec->GetValidBitmapWriteView();
     if (input != nullptr) {
         AssertInfo(static_cast<int64_t>(input->size()) == batch_rows,
                    "offset input size {} does not match batch row count {}",
@@ -451,12 +453,13 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
                        "field {}",
                        row_offset,
                        field_id.get());
-            segment_chunk_reader_.ApplyFieldValidData(op_ctx_,
-                                                      field_id,
-                                                      chunk_id,
-                                                      offset_in_chunk,
-                                                      count,
-                                                      valid_view + processed);
+            segment_chunk_reader_.ApplyFieldValidData(
+                op_ctx_,
+                field_id,
+                chunk_id,
+                offset_in_chunk,
+                count,
+                valid_view.write_view(processed, count));
             processed += count;
             row_offset += count;
         }
