@@ -91,7 +91,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
     Build(size_t n,
           const T* values,
           const bool* valid_data = nullptr) override {
-        SelectIndexBuildType(n, values);
+        SelectIndexBuildType(n, values, valid_data);
         auto index = GetInternalIndex();
         index->Build(n, values, valid_data);
         is_built_ = true;
@@ -212,6 +212,9 @@ class HybridScalarIndex : public ScalarIndex<T> {
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  protected:
+    bool
+    SelectSortForNaN(const std::vector<FieldDataPtr>& field_datas);
+
     ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 
@@ -230,7 +233,7 @@ class HybridScalarIndex : public ScalarIndex<T> {
     SelectBuildTypeForArrayType(const std::vector<FieldDataPtr>& field_datas);
 
     ScalarIndexType
-    SelectIndexBuildType(size_t n, const T* values);
+    SelectIndexBuildType(size_t n, const T* values, const bool* valid_data);
 
     BinarySet
     SerializeIndexType();

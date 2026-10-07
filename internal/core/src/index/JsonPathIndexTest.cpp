@@ -267,6 +267,35 @@ TEST(JsonPathIndexTest, StringToDoubleNaNIsCastFailureWithExistingPath) {
     }
 }
 
+TEST(JsonPathIndexTest, StringToDoubleAllNaNStillBuilds) {
+    auto json_fd = MakeJsonFieldData({R"({"a":"NaN"})",
+                                      R"({"a":"-nan"})",
+                                      R"json({"a":"nan(payload)"})json"});
+    CreateIndexInfo info;
+    info.index_type = ASCENDING_SORT;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("DOUBLE");
+    info.json_path = "/a";
+    info.json_cast_function = "STRING_TO_DOUBLE";
+    info.scalar_index_engine_version = 6;
+    auto index =
+        IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
+    auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
+    ASSERT_NE(scalar, nullptr);
+    ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
+    EXPECT_EQ(scalar->Count(), 3);
+    EXPECT_EQ(scalar->Size(), 0);
+    EXPECT_EQ(scalar->Exists().count(), 3);
+    for (size_t row = 0; row < 3; ++row) {
+        EXPECT_FALSE(scalar->Reverse_Lookup(row).has_value());
+        const auto* source = static_cast<const Json*>(json_fd->RawValue(row));
+        EXPECT_TRUE(source->exist("/a"));
+    }
+    const double query = 2;
+    EXPECT_EQ(scalar->In(1, &query).count(), 0);
+    EXPECT_EQ(scalar->NotIn(1, &query).count(), 0);
+}
+
 TEST(JsonPathIndexTest, StringToDoubleNumericNaNIsCastFailure) {
     const auto cast = JsonCastFunction::FromString("STRING_TO_DOUBLE");
     EXPECT_FALSE(cast.cast<double>(std::numeric_limits<double>::quiet_NaN())

@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -116,6 +117,50 @@ GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+TEST(ScalarIndexNaNResourceEstimate, ReservesNestedRowsAndSyncSidecarCopy) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Double);
+    ctx.indexMeta.build_id = 5397206;
+    ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+    ctx.fieldDataMeta.field_schema.set_element_type(proto::schema::Double);
+    constexpr size_t elements = 1024;
+    const std::vector<double> values(elements,
+                                     std::numeric_limits<double>::quiet_NaN());
+    // Model one struct-array row with 1024 flattened scalar elements.
+    ScalarIndexSort<double> index(ctx, true);
+    index.Build(values.size(), values.data());
+    const auto stats = index.UploadUnified({});
+    const auto files = stats->GetIndexFiles();
+    auto cleanup = folly::makeGuard([&] {
+        for (const auto& file : files) {
+            ctx.chunkManagerPtr->Remove(file);
+        }
+    });
+    const auto index_size = stats->GetSerializedSize();
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, ASCENDING_SORT}, {SCALAR_INDEX_ENGINE_VERSION, "6"}};
+    const auto nan_bytes = elements * sizeof(int32_t);
+    const auto validity_bytes = TargetBitmap(elements).size_in_bytes();
+    for (bool async : {false, true}) {
+        ctx.use_async_load = async;
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "async=" << async << " mmap=" << mmap);
+            const auto resources =
+                IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                    DataType::ARRAY, index_size, params, mmap, 1, files, ctx);
+            const auto resident_bytes = nan_bytes + validity_bytes +
+                                        (mmap ? 0 : elements * sizeof(int32_t));
+            EXPECT_GE(resources.request.final_memory_cost, resident_bytes);
+            if (!async) {
+                EXPECT_GE(resources.request.max_memory_cost,
+                          resources.request.final_memory_cost + nan_bytes);
+            }
+        }
+    }
 }
 
 TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {

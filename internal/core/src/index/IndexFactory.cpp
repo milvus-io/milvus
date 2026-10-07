@@ -35,6 +35,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "common/Consts.h"
@@ -83,6 +84,29 @@
 namespace milvus::index {
 
 namespace {
+
+template <typename T>
+ScalarIndexSortPtr<T>
+CreateVersionedScalarSort(const storage::FileManagerContext& context,
+                          bool is_nested,
+                          int32_t scalar_version) {
+    auto index = CreateScalarIndexSort<T>(context, is_nested);
+    index->SetSupportsUnindexedNaN(scalar_version >=
+                                   kMinScalarIndexVersionForNaNRows);
+    return index;
+}
+
+template <typename T>
+std::unique_ptr<HybridScalarIndex<T>>
+CreateVersionedHybrid(uint32_t tantivy_version,
+                      const storage::FileManagerContext& context,
+                      bool is_nested,
+                      int32_t scalar_version) {
+    auto index = std::make_unique<HybridScalarIndex<T>>(
+        tantivy_version, context, is_nested);
+    index->scalar_index_version_ = scalar_version;
+    return index;
+}
 
 // Bounds for the synchronous encrypted entry-stream implementation.
 struct EntryStreamLoadInfo {
@@ -343,10 +367,16 @@ IndexFactory::CreatePrimitiveScalarIndex(
         return std::make_unique<BitmapIndex<T>>(file_manager_context);
     }
     if (index_type == HYBRID_INDEX_TYPE) {
-        return std::make_unique<HybridScalarIndex<T>>(
-            create_index_info.tantivy_index_version, file_manager_context);
+        return CreateVersionedHybrid<T>(
+            create_index_info.tantivy_index_version,
+            file_manager_context,
+            false,
+            create_index_info.scalar_index_engine_version);
     }
-    return CreateScalarIndexSort<T>(file_manager_context);
+    return CreateVersionedScalarSort<T>(
+        file_manager_context,
+        false,
+        create_index_info.scalar_index_engine_version);
 }
 
 template <>
@@ -377,8 +407,11 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);
     } else if (index_type == HYBRID_INDEX_TYPE) {
-        return std::make_unique<HybridScalarIndex<std::string>>(
-            create_index_info.tantivy_index_version, file_manager_context);
+        return CreateVersionedHybrid<std::string>(
+            create_index_info.tantivy_index_version,
+            file_manager_context,
+            false,
+            create_index_info.scalar_index_engine_version);
     } else if (index_type == MARISA_TRIE || index_type == MARISA_TRIE_UPPER) {
         return CreateStringIndexMarisa(file_manager_context);
     } else if (index_type == ASCENDING_SORT) {
@@ -1036,6 +1069,39 @@ IndexFactory::ScalarIndexFileLoadResource(
                                                        read_peak);
     request.final_memory_cost =
         SaturatingAdd(request.final_memory_cost, bitmap_resident_bytes);
+    if (type == ASCENDING_SORT && directory.HasEntry("nan_rows")) {
+        const auto nan_bytes = directory.At("nan_rows").plaintext_size;
+        const auto sort_rows =
+            ReadRequiredIndexMeta<size_t>(metadata, "num_rows");
+        if (sort_rows >
+            static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "ScalarIndexSort row count exceeds resource policy range");
+        }
+        const auto rows = static_cast<int64_t>(sort_rows);
+        const bool mmap_aux = mmap_enable &&
+                              directory.HasEntry("idx_to_offsets") &&
+                              directory.HasEntry("valid_bitset");
+        const auto aux_bytes =
+            mmap_aux ? ValidityBitmapBytes(rows) : SortLegacyAuxBytes(rows);
+        auto resident_bytes = SaturatingAdd(aux_bytes, nan_bytes);
+        if (!mmap_enable) {
+            resident_bytes = SaturatingAdd(
+                resident_bytes, directory.At("index_data").plaintext_size);
+        }
+        // The generic estimate already includes serialized sidecars or a
+        // conservative legacy-aux allowance. Reserve the actual resident
+        // minimum rather than count nan_rows twice. Nested rows may outnumber
+        // the segment rows supplied by the caller.
+        request.final_memory_cost =
+            std::max(request.final_memory_cost, resident_bytes);
+        if (!use_async_load) {
+            // ReadEntry's byte buffer survives while ReadNaNRows copies it
+            // into the final vector. Async loading fills that vector directly.
+            staging_bytes = SaturatingAdd(staging_bytes, nan_bytes);
+        }
+    }
     if (type == BITMAP_INDEX_TYPE && mmap_enable) {
         request.max_memory_cost = SaturatingAdd(
             request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
@@ -1181,26 +1247,35 @@ IndexBasePtr
 MakeJsonWrapped(const CreateIndexInfo& info,
                 const storage::FileManagerContext& ctx,
                 Args&&... args) {
-    return std::make_unique<JsonScalarIndexWrapper<T, BaseIndex>>(
+    auto index = std::make_unique<JsonScalarIndexWrapper<T, BaseIndex>>(
         info.json_cast_type,
         info.json_path,
         JsonCastFunction::FromString(info.json_cast_function),
         ctx.fieldDataMeta.field_schema,
         ctx,
         std::forward<Args>(args)...);
+    if constexpr (std::is_floating_point_v<T>) {
+        if constexpr (std::is_base_of_v<ScalarIndexSort<T>, BaseIndex>) {
+            index->SetSupportsUnindexedNaN(info.scalar_index_engine_version >=
+                                           kMinScalarIndexVersionForNaNRows);
+        }
+    }
+    return index;
 }
 
 template <typename T>
 IndexBasePtr
 MakeJsonHybrid(const CreateIndexInfo& info,
                const storage::FileManagerContext& ctx) {
-    return std::make_unique<JsonHybridScalarIndex<T>>(
+    auto index = std::make_unique<JsonHybridScalarIndex<T>>(
         info.json_cast_type,
         info.json_path,
         JsonCastFunction::FromString(info.json_cast_function),
         ctx.fieldDataMeta.field_schema,
         info.tantivy_index_version,
         ctx);
+    index->scalar_index_version_ = info.scalar_index_engine_version;
+    return index;
 }
 
 }  // namespace
@@ -1319,7 +1394,8 @@ IndexBasePtr
 IndexFactory::CreateNestedIndex(
     IndexType index_type,
     int32_t tantivy_index_version,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    int32_t scalar_index_version) {
     if (index_type == INVERTED_INDEX_TYPE) {
         return CreateNestedIndexInverted(tantivy_index_version,
                                          file_manager_context);
@@ -1328,11 +1404,12 @@ IndexFactory::CreateNestedIndex(
         return CreateNestedIndexBitmap(file_manager_context);
     }
     if (index_type == HYBRID_INDEX_TYPE) {
-        return CreateNestedIndexHybrid(tantivy_index_version,
-                                       file_manager_context);
+        return CreateNestedIndexHybrid(
+            tantivy_index_version, file_manager_context, scalar_index_version);
     }
 
-    return CreateNestedIndexScalarIndexSort(file_manager_context);
+    return CreateNestedIndexScalarIndexSort(file_manager_context,
+                                            scalar_index_version);
 }
 
 IndexBasePtr
@@ -1408,31 +1485,32 @@ IndexFactory::CreateNestedIndexBitmap(
 
 IndexBasePtr
 IndexFactory::CreateNestedIndexScalarIndexSort(
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    int32_t scalar_index_version) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
         case DataType::BOOL:
-            return std::make_unique<ScalarIndexSort<bool>>(file_manager_context,
-                                                           true);
+            return CreateVersionedScalarSort<bool>(
+                file_manager_context, true, scalar_index_version);
         case DataType::INT8:
-            return std::make_unique<ScalarIndexSort<int8_t>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<int8_t>(
+                file_manager_context, true, scalar_index_version);
         case DataType::INT16:
-            return std::make_unique<ScalarIndexSort<int16_t>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<int16_t>(
+                file_manager_context, true, scalar_index_version);
         case DataType::INT32:
-            return std::make_unique<ScalarIndexSort<int32_t>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<int32_t>(
+                file_manager_context, true, scalar_index_version);
         case DataType::INT64:
-            return std::make_unique<ScalarIndexSort<int64_t>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<int64_t>(
+                file_manager_context, true, scalar_index_version);
         case DataType::FLOAT:
-            return std::make_unique<ScalarIndexSort<float>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<float>(
+                file_manager_context, true, scalar_index_version);
         case DataType::DOUBLE:
-            return std::make_unique<ScalarIndexSort<double>>(
-                file_manager_context, true);
+            return CreateVersionedScalarSort<double>(
+                file_manager_context, true, scalar_index_version);
         case DataType::STRING:
         case DataType::VARCHAR:
             return std::make_unique<StringIndexSort>(file_manager_context,
@@ -1445,35 +1523,52 @@ IndexFactory::CreateNestedIndexScalarIndexSort(
 IndexBasePtr
 IndexFactory::CreateNestedIndexHybrid(
     int32_t tantivy_index_version,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    int32_t scalar_index_version) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
         case DataType::BOOL:
-            return std::make_unique<HybridScalarIndex<bool>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<bool>(tantivy_index_version,
+                                               file_manager_context,
+                                               true,
+                                               scalar_index_version);
         case DataType::INT8:
-            return std::make_unique<HybridScalarIndex<int8_t>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<int8_t>(tantivy_index_version,
+                                                 file_manager_context,
+                                                 true,
+                                                 scalar_index_version);
         case DataType::INT16:
-            return std::make_unique<HybridScalarIndex<int16_t>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<int16_t>(tantivy_index_version,
+                                                  file_manager_context,
+                                                  true,
+                                                  scalar_index_version);
         case DataType::INT32:
-            return std::make_unique<HybridScalarIndex<int32_t>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<int32_t>(tantivy_index_version,
+                                                  file_manager_context,
+                                                  true,
+                                                  scalar_index_version);
         case DataType::INT64:
-            return std::make_unique<HybridScalarIndex<int64_t>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<int64_t>(tantivy_index_version,
+                                                  file_manager_context,
+                                                  true,
+                                                  scalar_index_version);
         case DataType::FLOAT:
-            return std::make_unique<HybridScalarIndex<float>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<float>(tantivy_index_version,
+                                                file_manager_context,
+                                                true,
+                                                scalar_index_version);
         case DataType::DOUBLE:
-            return std::make_unique<HybridScalarIndex<double>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<double>(tantivy_index_version,
+                                                 file_manager_context,
+                                                 true,
+                                                 scalar_index_version);
         case DataType::STRING:
         case DataType::VARCHAR:
-            return std::make_unique<HybridScalarIndex<std::string>>(
-                tantivy_index_version, file_manager_context, true);
+            return CreateVersionedHybrid<std::string>(tantivy_index_version,
+                                                      file_manager_context,
+                                                      true,
+                                                      scalar_index_version);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }
@@ -1489,7 +1584,8 @@ IndexFactory::CreateScalarIndex(
         assert(data_type == DataType::ARRAY);
         return CreateNestedIndex(create_index_info.index_type,
                                  create_index_info.tantivy_index_version,
-                                 file_manager_context);
+                                 file_manager_context,
+                                 create_index_info.scalar_index_engine_version);
     }
 
     switch (data_type) {

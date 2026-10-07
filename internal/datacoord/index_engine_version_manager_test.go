@@ -800,6 +800,48 @@ func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
 	})
 }
 
+func Test_IndexEngineVersionManager_NaNRowsRollingUpgrade(t *testing.T) {
+	paramtable.Init()
+	previousTarget := Params.DataCoordCfg.TargetScalarIndexVersion.GetValue()
+	previousForce := Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetValue()
+	t.Cleanup(func() {
+		Params.Save("dataCoord.targetScalarIndexVersion", previousTarget)
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", previousForce)
+	})
+	Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+	Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+
+	newReaderVersion := common.MinScalarIndexVersionForNaNRows
+	oldReaderVersion := newReaderVersion - 1
+	reader := func(id int64, version int32) *sessionutil.Session {
+		return &sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: id,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+					CurrentIndexVersion: version,
+					MaximumIndexVersion: version,
+				},
+			},
+		}
+	}
+	m := newIndexEngineVersionManager()
+	m.AddNode(reader(1, newReaderVersion))
+	m.AddNode(reader(2, oldReaderVersion))
+	assert.Equal(t, oldReaderVersion, m.ResolveScalarIndexVersion())
+
+	// An explicit target cannot enable NaN metadata while an old reader remains.
+	Params.Save("dataCoord.targetScalarIndexVersion", strconv.Itoa(int(newReaderVersion)))
+	for _, force := range []string{"false", "true"} {
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", force)
+		assert.Equal(t, oldReaderVersion, m.ResolveScalarIndexVersion())
+	}
+
+	m.Update(reader(2, newReaderVersion))
+	Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+	Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+	assert.Equal(t, newReaderVersion, m.ResolveScalarIndexVersion())
+}
+
 func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T) {
 	m := newIndexEngineVersionManager()
 

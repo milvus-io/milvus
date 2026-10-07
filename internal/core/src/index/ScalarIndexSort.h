@@ -49,6 +49,8 @@
 
 namespace milvus::index {
 
+inline constexpr int32_t kMinScalarIndexVersionForNaNRows = 6;
+
 template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
     static_assert(std::is_arithmetic_v<T>,
@@ -97,6 +99,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
+
+    void
+    SetSupportsUnindexedNaN(bool enabled) {
+        supports_unindexed_nan_ = enabled;
+    }
 
     void
     Build(const Config& config = {}) override;
@@ -154,6 +161,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
+        total += nan_rows_.capacity() * sizeof(int32_t);
 
         if (is_mmap_) {
             // mmap mode: add mmap size and filepath
@@ -244,10 +252,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
         if (is_mmap_) {
             data_ptr_ = reinterpret_cast<IndexStructure<T>*>(mmap_data_);
             size_ = data_size_ / sizeof(IndexStructure<T>);
-            end_ptr_ = data_ptr_ + size_;
+            end_ptr_ = size_ == 0 ? data_ptr_ : data_ptr_ + size_;
         } else {
             data_ptr_ = data_.data();
-            end_ptr_ = data_ptr_ + data_.size();
+            end_ptr_ = data_.empty() ? data_ptr_ : data_ptr_ + data_.size();
             size_ = data_.size();
         }
     }
@@ -256,6 +264,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     bool is_nested_index_ = false;
     bool is_array_field_ = false;
+    bool supports_unindexed_nan_ = true;
     bool is_built_ = false;
     Config config_;
     // idx_to_offsets: maps row_id → sorted offset.
@@ -269,6 +278,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
+    // Source-valid NaN rows are absent from the ordered entries. Persisted
+    // validity excludes them for older readers; nan_rows restores it on load.
+    std::vector<int32_t> nan_rows_;
 
     // for ram and also used for building index.
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.

@@ -1164,21 +1164,6 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 		return nil
 	}
-	nanError := func(validData []bool, rowIdx, payloadIdx int) error {
-		elementIdx := payloadIdx
-		// Validity has already been checked against the compact payload length.
-		// Translate only on failure so the client sees the logical array slot.
-		for index, valid := range validData {
-			if valid {
-				if payloadIdx == 0 {
-					elementIdx = index
-					break
-				}
-				payloadIdx--
-			}
-		}
-		return merr.WrapErrParameterInvalidMsg("field %s row %d array element %d is NaN", field.GetName(), rowIdx, elementIdx)
-	}
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
 		for rowIdx, row := range data {
@@ -1249,18 +1234,8 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 				return merr.WrapErrParameterInvalid("float array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			values := row.GetFloatData().GetData()
-			if err := validateValidity(validData, len(values), rowIdx); err != nil {
+			if err := validateValidity(validData, len(row.GetFloatData().GetData()), rowIdx); err != nil {
 				return err
-			}
-			if v.checkNAN {
-				// Element-nullable input is compact: every payload value is valid.
-				// NULL slots are expanded only after field validation.
-				for elementIdx, value := range values {
-					if math.IsNaN(float64(value)) {
-						return nanError(validData, rowIdx, elementIdx)
-					}
-				}
 			}
 		}
 	case schemapb.DataType_Double:
@@ -1274,16 +1249,8 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 				return merr.WrapErrParameterInvalid("double array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
-			values := row.GetDoubleData().GetData()
-			if err := validateValidity(validData, len(values), rowIdx); err != nil {
+			if err := validateValidity(validData, len(row.GetDoubleData().GetData()), rowIdx); err != nil {
 				return err
-			}
-			if v.checkNAN {
-				for elementIdx, value := range values {
-					if math.IsNaN(value) {
-						return nanError(validData, rowIdx, elementIdx)
-					}
-				}
 			}
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:

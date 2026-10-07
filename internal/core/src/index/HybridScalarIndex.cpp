@@ -18,6 +18,7 @@
 #include <string.h>
 #include "common/FastMem.h"
 #include <cstdint>
+#include <cmath>
 #include <exception>
 #include <map>
 #include <optional>
@@ -193,7 +194,19 @@ HybridScalarIndex<T>::SelectIndexTypeByCardinality(size_t cardinality) {
 
 template <typename T>
 ScalarIndexType
-HybridScalarIndex<T>::SelectIndexBuildType(size_t n, const T* values) {
+HybridScalarIndex<T>::SelectIndexBuildType(size_t n,
+                                           const T* values,
+                                           const bool* valid_data) {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (scalar_index_version_ >= kMinScalarIndexVersionForNaNRows) {
+            for (size_t i = 0; i < n; ++i) {
+                if ((!valid_data || valid_data[i]) && std::isnan(values[i])) {
+                    internal_index_type_ = ScalarIndexType::STLSORT;
+                    return internal_index_type_;
+                }
+            }
+        }
+    }
     std::set<T> distinct_vals;
     for (size_t i = 0; i < n; i++) {
         distinct_vals.insert(values[i]);
@@ -202,6 +215,46 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n, const T* values) {
         }
     }
     return SelectIndexTypeByCardinality(distinct_vals.size());
+}
+
+template <typename T>
+bool
+HybridScalarIndex<T>::SelectSortForNaN(
+    const std::vector<FieldDataPtr>& field_datas) {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (scalar_index_version_ < kMinScalarIndexVersionForNaNRows) {
+            return false;
+        }
+        for (const auto& data : field_datas) {
+            for (size_t row = 0; row < data->get_num_rows(); ++row) {
+                if (!data->is_valid(row)) {
+                    continue;
+                }
+                bool has_nan = false;
+                if (data->get_data_type() == DataType::ARRAY) {
+                    if (!is_nested_index_) {
+                        continue;
+                    }
+                    const auto* array =
+                        static_cast<const Array*>(data->RawValue(row));
+                    for (size_t i = 0; i < array->length(); ++i) {
+                        if (std::isnan(array->get_data_unchecked<T>(i))) {
+                            has_nan = true;
+                            break;
+                        }
+                    }
+                } else {
+                    has_nan =
+                        std::isnan(*static_cast<const T*>(data->RawValue(row)));
+                }
+                if (has_nan) {
+                    internal_index_type_ = ScalarIndexType::STLSORT;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 template <typename T>
@@ -268,6 +321,9 @@ template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(
     const std::vector<FieldDataPtr>& field_datas) {
+    if (SelectSortForNaN(field_datas)) {
+        return internal_index_type_;
+    }
     if (IsPrimitiveType(field_type_)) {
         return SelectBuildTypeForPrimitiveType(field_datas);
     } else if (IsArrayType(field_type_)) {
@@ -289,8 +345,11 @@ HybridScalarIndex<T>::GetInternalIndex() {
         internal_index_ = std::make_shared<BitmapIndex<T>>(
             this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
-        internal_index_ = std::make_shared<ScalarIndexSort<T>>(
+        auto index = std::make_shared<ScalarIndexSort<T>>(
             this->file_manager_context_, is_nested_index_);
+        index->SetSupportsUnindexedNaN(scalar_index_version_ >=
+                                       kMinScalarIndexVersionForNaNRows);
+        internal_index_ = std::move(index);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_,

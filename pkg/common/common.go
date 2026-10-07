@@ -135,9 +135,16 @@ const (
 	//   An older QueryNode does not recognize FMINDEX and would fail to load
 	//   such a segment, so creation is gated on the whole cluster reporting >= 5
 	//   (see MinScalarIndexVersionForFMINDEX).
+	//
+	// Scalar index engine version 6:
+	// - STL_SORT excludes NaN from ordered entries while preserving non-null
+	//   source rows through optional nan_rows metadata. Older readers ignore
+	//   this metadata and would treat those rows as NULL, so writers enable it
+	//   only when the negotiated scalar index engine version is at least 6.
+	// - On-disk file format is unchanged from v3.
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(5)
-	MaximumScalarIndexEngineVersion = int32(5)
+	CurrentScalarIndexEngineVersion = int32(6)
+	MaximumScalarIndexEngineVersion = int32(6)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
@@ -156,6 +163,12 @@ const (
 	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
 	// lower version would break rolling upgrade (old QueryNodes cannot load it).
 	MinScalarIndexVersionForFMINDEX = int32(5)
+
+	// MinScalarIndexVersionForNaNRows is the minimum scalar index engine version
+	// that preserves skipped NaN source rows in STL_SORT. Below it, builders
+	// retain the previous representation rather than emit metadata a reader
+	// cannot interpret.
+	MinScalarIndexVersionForNaNRows = int32(6)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
