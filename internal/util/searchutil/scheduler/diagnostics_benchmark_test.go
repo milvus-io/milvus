@@ -13,7 +13,7 @@ var diagnosticBenchmarkInit sync.Once
 
 func initDiagnosticBenchmark() {
 	diagnosticBenchmarkInit.Do(func() {
-		paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Interval(time.Hour)))
+		paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.Interval(time.Hour)))
 	})
 }
 

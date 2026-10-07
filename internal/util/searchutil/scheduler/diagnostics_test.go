@@ -23,7 +23,7 @@ import (
 func diagnosticCollectors() []prometheus.Collector {
 	return []prometheus.Collector{metrics.QueryNodeSchedulerDiagnosticEvents, metrics.QueryNodeSchedulerDiagnosticDuration,
 		metrics.QueryNodeSchedulerDiagnosticSlack, metrics.QueryNodeSchedulerDiagnosticGap, metrics.QueryNodeSchedulerDiagnosticShape,
-		metrics.QueryNodeSchedulerDiagnosticMerge, metrics.QueryNodeSchedulerDiagnosticChoice, metrics.QueryNodeSchedulerDiagnosticCost,
+		metrics.QueryNodeSchedulerDiagnosticMerge, metrics.QueryNodeSchedulerDiagnosticCost,
 		metrics.QueryNodeSchedulerDiagnosticChildren, metrics.QueryNodeSchedulerDiagnosticQueue,
 		metrics.QueryNodeSchedulerDiagnosticCandidateDeadline}
 }
@@ -55,8 +55,9 @@ func diagnosticTask(t *testing.T, d *schedulerDiagnostics, deadline time.Time, m
 	return queued
 }
 
-func TestDiagnosticSeriesBudget(t *testing.T) {
+func TestDiagnosticSeriesBudgetAndPolicyNeutrality(t *testing.T) {
 	paramtable.Init()
+	seriesByPolicy := make(map[string]int)
 	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF} {
 		resetDiagnosticMetrics()
 		newSchedulerDiagnostics(policy, false)
@@ -76,7 +77,10 @@ func TestDiagnosticSeriesBudget(t *testing.T) {
 		}
 		t.Logf("%s: %d series; task observation=%d bytes, queuedTask=%d bytes", policy, series, unsafe.Sizeof(TaskDiagnostics{}), unsafe.Sizeof(queuedTask{}))
 		require.LessOrEqual(t, series, 600)
+		seriesByPolicy[policy] = series
 	}
+	require.Equal(t, seriesByPolicy[schedulePolicyNameFIFO], seriesByPolicy[schedulePolicyNameRequeryEDF],
+		"diagnostics must expose the same schema for every scheduling policy")
 }
 
 func TestDiagnosticsMergeAccounting(t *testing.T) {
@@ -256,7 +260,7 @@ func TestDiagnosticsRuntimeFlushAndExecutor(t *testing.T) {
 func TestDiagnosticsPoolWaitDoesNotChangeCancellation(t *testing.T) {
 	paramtable.Init()
 	resetDiagnosticMetrics()
-	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	s := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy()).(*scheduler)
 	s.diagnostics = newSchedulerDiagnostics(schedulePolicyNameFIFO, false)
 	s.pool.Release()
 	s.pool = conc.NewPool[any](1)
@@ -294,7 +298,6 @@ func TestDiagnosticsOff(t *testing.T) {
 	queued, _, _ := s.setupExecListener(nil, time.Now())
 	require.Nil(t, queued.diagnostics)
 	require.Same(t, task, queued.executionTask())
-	require.Nil(t, s.policy.(*requeryEDFPolicy).diagnostics)
 }
 
 func BenchmarkSchedulerDiagnostics(b *testing.B) {
@@ -327,7 +330,7 @@ func BenchmarkSchedulerDiagnostics(b *testing.B) {
 					var p schedulePolicy = &fifoPolicy{queue: newMergeTaskQueue("")}
 					q := p.(*fifoPolicy).queue
 					if policy == schedulePolicyNameRequeryEDF {
-						p = &requeryEDFPolicy{regular: p.(*fifoPolicy), requery: newMergeTaskQueue(""), diagnostics: d}
+						p = &requeryEDFPolicy{regular: p.(*fifoPolicy), requery: newMergeTaskQueue("")}
 					}
 					q.tasks = make([]*queuedTask, width, width+1)
 					candidateQueued := newQueuedTask(candidate, time.Now())
@@ -407,34 +410,25 @@ func TestDiagnosticsChildContexts(t *testing.T) {
 	}
 }
 
-func TestDiagnosticsEDFChoices(t *testing.T) {
+func TestDiagnosticsTracksGenericRequerySelectionStreak(t *testing.T) {
 	paramtable.Init()
 	resetDiagnosticMetrics()
-	d := newSchedulerDiagnostics(schedulePolicyNameRequeryEDF, false)
-	p := newRequeryEDFPolicy()
-	p.diagnostics = d
+	d := newSchedulerDiagnostics(schedulePolicyNameFIFO, false)
 	now := time.Now()
-	regular := diagnosticTask(t, d, now.Add(time.Minute), false, 1)
-	p.Push(regular)
-	regular.diagnostics.pushed(1, nil)
 	for range 2 {
 		ctx, cancel := context.WithDeadline(context.Background(), now.Add(30*time.Second))
 		defer cancel()
 		task := newMockTask(mockTaskConfig{ctx: contextutil.WithQueryLabel(ctx, metrics.ReQueryLabel)})
 		queued := newQueuedTask(task, now)
 		queued.diagnostics = d.admission(task, now)
-		p.Push(queued)
 		queued.diagnostics.pushed(1, nil)
+		queued.diagnostics.queueEvent(task, readTaskQueueOutcomeScheduled)
 	}
-	for range 3 {
-		selected := p.Pop(now)
-		selected.diagnostics.queueEvent(selected.Task, readTaskQueueOutcomeScheduled)
-	}
-	require.Nil(t, p.Pop(now))
+	regular := diagnosticTask(t, d, now.Add(time.Minute), false, 1)
+	regular.diagnostics.pushed(1, nil)
+	regular.diagnostics.queueEvent(regular.Task, readTaskQueueOutcomeScheduled)
 	d.flush(time.Now())
-	require.EqualValues(t, 2, testutil.ToFloat64(d.choice[1][edfChoiceEarlierDeadline].metric))
-	require.EqualValues(t, 1, testutil.ToFloat64(d.choice[0][edfChoiceOnlyLane].metric))
-	require.Zero(t, testutil.ToFloat64(d.choice[0][edfChoiceEarlierDeadline].metric))
+	require.NotNil(t, d.streak, "generic diagnostics must track the same selection data for every policy")
 	require.EqualValues(t, 2, testutil.ToFloat64(d.streakPeak))
 	require.EqualValues(t, 1, diagnosticHistogram(t, d.streak).GetSampleCount())
 	require.EqualValues(t, 2, diagnosticHistogram(t, d.streak).GetSampleSum())
@@ -525,7 +519,7 @@ func TestDiagnosticCandidateDeadlineBuckets(t *testing.T) {
 func TestDiagnosticsHandoffCancellation(t *testing.T) {
 	paramtable.Init()
 	resetDiagnosticMetrics()
-	s := newScheduler(newFIFOPolicy()).(*scheduler)
+	s := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy()).(*scheduler)
 	s.diagnostics = newSchedulerDiagnostics(schedulePolicyNameFIFO, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	task := newMockTask(mockTaskConfig{ctx: ctx})

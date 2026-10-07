@@ -27,23 +27,13 @@ const (
 )
 
 // newScheduler create a scheduler with given schedule policy.
-func newScheduler(policy schedulePolicy) Scheduler {
+func newScheduler(policyName string, policy schedulePolicy) Scheduler {
 	var diagnostics *schedulerDiagnostics
 	cfg := &paramtable.Get().QueryNodeCfg
 	if cfg.SchedulerDiagnosticsEnabled.GetAsBool() {
-		name := schedulePolicyNameUserTaskPolling
-		switch policy.(type) {
-		case *fifoPolicy:
-			name = schedulePolicyNameFIFO
-		case *requeryEDFPolicy:
-			name = schedulePolicyNameRequeryEDF
-		}
-		diagnostics = newSchedulerDiagnostics(name, cfg.SchedulerDiagnosticsLogEnabled.GetAsBool())
-		if edf, ok := policy.(*requeryEDFPolicy); ok {
-			edf.diagnostics = diagnostics
-		}
+		diagnostics = newSchedulerDiagnostics(policyName, cfg.SchedulerDiagnosticsLogEnabled.GetAsBool())
 		mlog.Info(context.TODO(), "read scheduler diagnostics enabled",
-			mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("policy", name), mlog.String("version", "1"),
+			mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("policy", policyName), mlog.String("version", "1"),
 			mlog.Int64("regularCapacity", cfg.MaxUnsolvedQueueSize.GetAsInt64()),
 			mlog.Int64("requeryCapacity", cfg.RequeryUnsolvedQueueSize.GetAsInt64()),
 			mlog.Int64("maxGroupNQ", cfg.MaxGroupNQ.GetAsInt64()), mlog.Float64("nqMergeRatio", cfg.NQMergeRatio.GetAsFloat()),

@@ -20,12 +20,14 @@ func NewScheduler(policyName string) Scheduler {
 		fallthrough
 	case schedulePolicyNameFIFO:
 		return newScheduler(
+			schedulePolicyNameFIFO,
 			newFIFOPolicy(),
 		)
 	case schedulePolicyNameRequeryEDF:
-		return newScheduler(newRequeryEDFPolicy())
+		return newScheduler(schedulePolicyNameRequeryEDF, newRequeryEDFPolicy())
 	case schedulePolicyNameUserTaskPolling:
 		return newScheduler(
+			schedulePolicyNameUserTaskPolling,
 			newUserTaskPollingPolicy(),
 		)
 	default:

@@ -122,11 +122,9 @@ type schedulerDiagnostics struct {
 	merge                     [mergeReasons]diagnosticCounter
 	shape                     [3][2]prometheus.Observer // start, finish, pre-exec drop; requests/NQ
 	children                  [2][3]prometheus.Counter  // group failed; live/deadline/cancel context
-	choice                    [2][5]diagnosticCounter   // earlier/tie/missing/only/cleanup
 	arrivalDDL                prometheus.Observer
 	candidateDDL              [6]diagnosticCounter // <=10/25/50/100ms, >100ms, sum nanoseconds
 	rootDDL                   prometheus.Observer
-	headGap                   prometheus.Observer
 	batch, scan               prometheus.Observer
 	streak                    prometheus.Observer
 	requeryStreak             int64
@@ -196,17 +194,9 @@ func newSchedulerDiagnostics(policy string, logEnabled bool) *schedulerDiagnosti
 	d.rootDDL = metrics.QueryNodeSchedulerDiagnosticGap.WithLabelValues(nodeID, policy, "search", "root_earliest_deadline")
 	d.batch = metrics.QueryNodeSchedulerDiagnosticShape.WithLabelValues(nodeID, policy, "receive_batch", "requests")
 	d.scan = metrics.QueryNodeSchedulerDiagnosticShape.WithLabelValues(nodeID, policy, "merge_scan", "slots")
-	if policy == schedulePolicyNameRequeryEDF {
-		d.streakCurrent = metrics.QueryNodeSchedulerDiagnosticQueue.WithLabelValues(nodeID, policy, "requery", "streak_current")
-		d.streakPeak = metrics.QueryNodeSchedulerDiagnosticQueue.WithLabelValues(nodeID, policy, "requery", "streak_peak")
-		d.headGap = metrics.QueryNodeSchedulerDiagnosticSlack.WithLabelValues(nodeID, policy, "search_minus_requery", "head_gap")
-		d.streak = metrics.QueryNodeSchedulerDiagnosticShape.WithLabelValues(nodeID, policy, "requery_streak", "groups")
-		for lane, name := range []string{"regular", "requery"} {
-			for reason, reasonName := range []string{"earlier", "equal", "missing", "only", "cleanup"} {
-				d.choice[lane][reason].metric = metrics.QueryNodeSchedulerDiagnosticChoice.WithLabelValues(nodeID, policy, name, reasonName)
-			}
-		}
-	}
+	d.streakCurrent = metrics.QueryNodeSchedulerDiagnosticQueue.WithLabelValues(nodeID, policy, "requery", "streak_current")
+	d.streakPeak = metrics.QueryNodeSchedulerDiagnosticQueue.WithLabelValues(nodeID, policy, "requery", "streak_peak")
+	d.streak = metrics.QueryNodeSchedulerDiagnosticShape.WithLabelValues(nodeID, policy, "requery_streak", "groups")
 	return d
 }
 
@@ -487,11 +477,6 @@ func (d *schedulerDiagnostics) flush(now time.Time) {
 	for i := range d.candidateDDL {
 		d.candidateDDL[i].flush()
 	}
-	for lane := range d.choice {
-		for reason := range d.choice[lane] {
-			d.choice[lane][reason].flush()
-		}
-	}
 	if d.logEnabled && now.Sub(d.lastLog) >= 30*time.Second {
 		d.lastLog = now
 		mlog.RatedInfo(context.TODO(), 1.0/30, "read scheduler diagnostic summary",
@@ -503,7 +488,7 @@ func (d *schedulerDiagnostics) flush(now time.Time) {
 			mlog.Uint64("requerySelected", d.kinds[diagRequery].events[diagSelected][0].value),
 			mlog.Uint64("requeryQueueDeadline", d.kinds[diagRequery].events[diagQueueDeadline][0].value),
 			mlog.Uint64("requeryQueueCanceled", d.kinds[diagRequery].events[diagQueueCanceled][0].value),
-			mlog.Uint64("requeryContendedChoices", d.choice[1][0].value+d.choice[1][1].value+d.choice[1][2].value),
+			mlog.Int64("requerySelectionStreakPeak", d.maxRequeryStreak),
 			mlog.Int64("requeryQueuePeak", d.kinds[diagRequery].peak),
 			mlog.Uint64("newGroupAfterDeadlineReject", d.merge[mergeNewAfterDeadline].value))
 	}

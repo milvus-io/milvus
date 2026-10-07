@@ -23,16 +23,12 @@ var (
 	}, []string{nodeIDLabelName, "policy", "kind", "stage"})
 	QueryNodeSchedulerDiagnosticShape = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: milvusNamespace, Subsystem: "querynode", Name: "scheduler_diagnostic_shape",
-		Help: "Search group requests/NQ by lifecycle stage, or receive batch/merge scan/EDF streak sizes.", Buckets: []float64{1, 4, 8, 16},
+		Help: "Search group requests/NQ by lifecycle stage, or receive batch/merge scan/requery selection streak sizes.", Buckets: []float64{1, 4, 8, 16},
 	}, []string{nodeIDLabelName, "policy", "stage", "unit"})
 	QueryNodeSchedulerDiagnosticMerge = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: milvusNamespace, Subsystem: "querynode", Name: "scheduler_diagnostic_merge_total",
 		Help: "Merge checks by first reached failure; candidate failures are not final input merge failures.",
 	}, []string{nodeIDLabelName, "policy", "reason"})
-	QueryNodeSchedulerDiagnosticChoice = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: milvusNamespace, Subsystem: "querynode", Name: "scheduler_diagnostic_choice_total",
-		Help: "EDF choices; contended, only-lane and cleanup events are separate.",
-	}, []string{nodeIDLabelName, "policy", "lane", "reason"})
 	QueryNodeSchedulerDiagnosticCandidateDeadline = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: milvusNamespace, Subsystem: "querynode", Name: "scheduler_diagnostic_candidate_deadline_total",
 		Help: "Candidate deadline checks: non-cumulative gap buckets or sum in nanoseconds; sum bucket counts for total checks.",
@@ -47,14 +43,14 @@ var (
 	}, []string{nodeIDLabelName, "policy", "context", "group_failed"})
 	QueryNodeSchedulerDiagnosticQueue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: milvusNamespace, Subsystem: "querynode", Name: "scheduler_diagnostic_groups",
-		Help: "Policy queue current/peak, selected-not-started, running groups, or EDF current/peak consecutive requery selections.",
+		Help: "Policy queue current/peak, selected-not-started, running groups, or current/peak consecutive requery selections.",
 	}, []string{nodeIDLabelName, "policy", "kind", "stat"})
 )
 
 func registerSchedulerDiagnostics(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSchedulerDiagnosticEvents, QueryNodeSchedulerDiagnosticDuration,
 		QueryNodeSchedulerDiagnosticSlack, QueryNodeSchedulerDiagnosticGap, QueryNodeSchedulerDiagnosticShape,
-		QueryNodeSchedulerDiagnosticMerge, QueryNodeSchedulerDiagnosticChoice, QueryNodeSchedulerDiagnosticCost,
+		QueryNodeSchedulerDiagnosticMerge, QueryNodeSchedulerDiagnosticCost,
 		QueryNodeSchedulerDiagnosticChildren, QueryNodeSchedulerDiagnosticQueue)
 	registry.MustRegister(QueryNodeSchedulerDiagnosticCandidateDeadline)
 }

@@ -20,7 +20,6 @@ type requeryEDFPolicy struct {
 	regular         *fifoPolicy
 	requery         *mergeTaskQueue
 	requeryCapacity int64
-	diagnostics     *schedulerDiagnostics
 }
 
 func newRequeryEDFPolicy() *requeryEDFPolicy {
@@ -66,52 +65,46 @@ func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
 func (p *requeryEDFPolicy) Pop(now time.Time) *queuedTask {
 	regular, requery := p.regular.queue.front(), p.requery.front()
 	if regular.cleanupReady(now) {
-		return p.recordChoice(p.regular.queue, edfChoiceCleanup).pop()
+		return p.regular.queue.pop()
 	}
 	if requery.cleanupReady(now) {
-		return p.recordChoice(p.requery, edfChoiceCleanup).pop()
+		return p.requery.pop()
 	}
 	switch {
 	case regular.valid() && requery.valid():
 		return p.earlierDeadlineQueue(regular, requery).pop()
 	case regular.valid():
-		return p.recordChoice(p.regular.queue, edfChoiceOnlyLane).pop()
+		return p.regular.queue.pop()
 	case requery.valid():
-		return p.recordChoice(p.requery, edfChoiceOnlyLane).pop()
+		return p.requery.pop()
 	default:
-		if p.diagnostics != nil {
-			p.diagnostics.finishStreak()
-		}
 		return nil
 	}
 }
 
 func (p *requeryEDFPolicy) earlierDeadlineQueue(regular, requery *queuedTask) *mergeTaskQueue {
 	regularDeadline, requeryDeadline := regular.schedulingDeadline, requery.schedulingDeadline
-	if p.diagnostics != nil && !regularDeadline.IsZero() && !requeryDeadline.IsZero() {
-		observeMillis(p.diagnostics.headGap, regularDeadline.Sub(requeryDeadline))
-	}
 	if regularDeadline.IsZero() && requeryDeadline.IsZero() {
 		// Without deadlines, preserve arrival order across the two lanes.
 		if regular.enqueueTime.Before(requery.enqueueTime) || regular.enqueueTime.Equal(requery.enqueueTime) {
-			return p.recordChoice(p.regular.queue, edfChoiceMissingDeadline)
+			return p.regular.queue
 		}
-		return p.recordChoice(p.requery, edfChoiceMissingDeadline)
+		return p.requery
 	}
 	if regularDeadline.IsZero() {
-		return p.recordChoice(p.requery, edfChoiceMissingDeadline)
+		return p.requery
 	}
 	if requeryDeadline.IsZero() {
-		return p.recordChoice(p.regular.queue, edfChoiceMissingDeadline)
+		return p.regular.queue
 	}
 	if regularDeadline.Before(requeryDeadline) {
-		return p.recordChoice(p.regular.queue, edfChoiceEarlierDeadline)
+		return p.regular.queue
 	}
 	// Equal finite deadlines favor completion of an existing search request.
 	if regularDeadline.Equal(requeryDeadline) {
-		return p.recordChoice(p.requery, edfChoiceEqualDeadline)
+		return p.requery
 	}
-	return p.recordChoice(p.requery, edfChoiceEarlierDeadline)
+	return p.requery
 }
 
 func (p *requeryEDFPolicy) Cleanup(now time.Time) []*queuedTask {
@@ -125,24 +118,4 @@ func (p *requeryEDFPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTas
 
 func (p *requeryEDFPolicy) Len() int {
 	return p.regular.Len() + p.requery.len()
-}
-
-const (
-	edfChoiceEarlierDeadline = iota
-	edfChoiceEqualDeadline
-	edfChoiceMissingDeadline
-	edfChoiceOnlyLane
-	edfChoiceCleanup
-)
-
-// Record only the decision already made; diagnostics never choose a queue.
-func (p *requeryEDFPolicy) recordChoice(queue *mergeTaskQueue, reason int) *mergeTaskQueue {
-	if p.diagnostics != nil {
-		lane := 0
-		if queue == p.requery {
-			lane = 1
-		}
-		p.diagnostics.choice[lane][reason].value++
-	}
-	return queue
 }

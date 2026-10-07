@@ -32,7 +32,7 @@ func TestScheduler(t *testing.T) {
 		testScheduler(t, newRequeryEDFPolicy())
 	})
 	t.Run("scheduler_not_working", func(t *testing.T) {
-		scheduler := newScheduler(newFIFOPolicy())
+		scheduler := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy())
 
 		task := newMockTask(mockTaskConfig{
 			nq:          1,
@@ -56,7 +56,7 @@ func TestScheduler(t *testing.T) {
 
 func testScheduler(t *testing.T, policy schedulePolicy) {
 	// start a new scheduler
-	scheduler := newScheduler(policy)
+	scheduler := newScheduler("test", policy)
 	scheduler.Start()
 
 	var cnt atomic.Int32
@@ -438,7 +438,7 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	metrics.QueryNodeReadTaskExecuteDuration.Reset()
 	defer metrics.QueryNodeReadTaskExecuteDuration.Reset()
 
-	scheduler := newScheduler(newFIFOPolicy())
+	scheduler := newScheduler(schedulePolicyNameFIFO, newFIFOPolicy())
 	scheduler.Start()
 	defer scheduler.Stop()
 
