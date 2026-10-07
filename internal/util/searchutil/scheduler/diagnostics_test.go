@@ -58,7 +58,8 @@ func diagnosticTask(t *testing.T, d *schedulerDiagnostics, deadline time.Time, m
 func TestDiagnosticSeriesBudgetAndPolicyNeutrality(t *testing.T) {
 	paramtable.Init()
 	seriesByPolicy := make(map[string]int)
-	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF} {
+	policies := []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF, schedulePolicyNameRequeryPriority}
+	for _, policy := range policies {
 		resetDiagnosticMetrics()
 		newSchedulerDiagnostics(policy, false)
 		registry := prometheus.NewRegistry()
@@ -79,8 +80,10 @@ func TestDiagnosticSeriesBudgetAndPolicyNeutrality(t *testing.T) {
 		require.LessOrEqual(t, series, 600)
 		seriesByPolicy[policy] = series
 	}
-	require.Equal(t, seriesByPolicy[schedulePolicyNameFIFO], seriesByPolicy[schedulePolicyNameRequeryEDF],
-		"diagnostics must expose the same schema for every scheduling policy")
+	for _, policy := range policies[1:] {
+		require.Equal(t, seriesByPolicy[schedulePolicyNameFIFO], seriesByPolicy[policy],
+			"diagnostics must expose the same schema for every scheduling policy")
+	}
 }
 
 func TestDiagnosticsMergeAccounting(t *testing.T) {
@@ -233,7 +236,7 @@ func TestDiagnosticsRuntimeFlushAndExecutor(t *testing.T) {
 	cfg := &paramtable.Get().QueryNodeCfg
 	require.NoError(t, paramtable.Get().Save(cfg.SchedulerDiagnosticsEnabled.Key, "true"))
 	t.Cleanup(func() { paramtable.Get().Reset(cfg.SchedulerDiagnosticsEnabled.Key) })
-	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF} {
+	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF, schedulePolicyNameRequeryPriority} {
 		t.Run(policy, func(t *testing.T) {
 			resetDiagnosticMetrics()
 			s := NewScheduler(policy).(*scheduler)
@@ -302,7 +305,7 @@ func TestDiagnosticsOff(t *testing.T) {
 
 func BenchmarkSchedulerDiagnostics(b *testing.B) {
 	initDiagnosticBenchmark()
-	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF} {
+	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF, schedulePolicyNameRequeryPriority} {
 		for _, mode := range []string{"off", "metrics", "summary"} {
 			for _, scenario := range []string{"merge", "deadline", "business", "scan1024", "cancel"} {
 				b.Run(strings.Join([]string{policy, mode, scenario}, "/"), func(b *testing.B) {
@@ -333,6 +336,11 @@ func BenchmarkSchedulerDiagnostics(b *testing.B) {
 						p = &requeryEDFPolicy{requeryLanes: &requeryLanes{
 							regular: p.(*fifoPolicy), requery: newMergeTaskQueue(""),
 						}}
+					} else if policy == schedulePolicyNameRequeryPriority {
+						p = &requeryPriorityPolicy{
+							requeryLanes:     &requeryLanes{regular: p.(*fifoPolicy), requery: newMergeTaskQueue("")},
+							configuredCredit: 3, remainingCredit: 3,
+						}
 					}
 					q.tasks = make([]*queuedTask, width, width+1)
 					candidateQueued := newQueuedTask(candidate, time.Now())
@@ -434,6 +442,49 @@ func TestDiagnosticsTracksGenericRequerySelectionStreak(t *testing.T) {
 	require.EqualValues(t, 2, testutil.ToFloat64(d.streakPeak))
 	require.EqualValues(t, 1, diagnosticHistogram(t, d.streak).GetSampleCount())
 	require.EqualValues(t, 2, diagnosticHistogram(t, d.streak).GetSampleSum())
+}
+
+func diagnosticSelectionOrder(t *testing.T, policyName string, enabled bool) []string {
+	t.Helper()
+	cfg := &paramtable.Get().QueryNodeCfg
+	value := "false"
+	if enabled {
+		value = "true"
+	}
+	old := cfg.SchedulerDiagnosticsEnabled.SwapTempValue(value)
+	defer cfg.SchedulerDiagnosticsEnabled.SwapTempValue(old)
+	s := NewScheduler(policyName).(*scheduler)
+	defer s.Stop()
+	now := time.Now()
+	for _, requery := range []bool{false, true, false, true} {
+		ctx := context.Background()
+		if requery {
+			ctx = contextutil.WithQueryLabel(ctx, metrics.ReQueryLabel)
+		}
+		errCh := make(chan error, 1)
+		s.handleAddTaskRequest(addTaskReq{task: newMockTask(mockTaskConfig{ctx: ctx}), err: errCh}, now)
+		require.NoError(t, <-errCh)
+	}
+	order := make([]string, 0, 4)
+	for range 4 {
+		task, nq, _ := s.setupExecListener(nil, now)
+		require.True(t, task.valid())
+		order = append(order, priorityTaskLane(task))
+		s.onTaskServed(task)
+		s.updateWaitingTaskCounter(-1, -nq)
+	}
+	return order
+}
+
+func TestDiagnosticsDoNotChangeSelectionOrder(t *testing.T) {
+	paramtable.Init()
+	for _, policy := range []string{schedulePolicyNameFIFO, schedulePolicyNameRequeryEDF, schedulePolicyNameRequeryPriority} {
+		t.Run(policy, func(t *testing.T) {
+			withoutDiagnostics := diagnosticSelectionOrder(t, policy, false)
+			withDiagnostics := diagnosticSelectionOrder(t, policy, true)
+			require.Equal(t, withoutDiagnostics, withDiagnostics)
+		})
+	}
 }
 
 func TestDiagnosticsRejectionsAndQueueCancellation(t *testing.T) {

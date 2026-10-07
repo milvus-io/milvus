@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -121,5 +123,58 @@ func BenchmarkDiagnosticsSummaryOnce(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		d.flush(time.Now())
+	}
+}
+
+func BenchmarkRequeryPriorityPolicy(b *testing.B) {
+	initDiagnosticBenchmark()
+	regularTask := newMockTask(mockTaskConfig{})
+	requeryCtx := contextutil.WithQueryLabel(context.Background(), metrics.ReQueryLabel)
+	requeryTask := newMockTask(mockTaskConfig{ctx: requeryCtx})
+	now := time.Now()
+	for _, scenario := range []string{"regular_only", "requery_only", "contended", "full_requery"} {
+		b.Run(scenario, func(b *testing.B) {
+			width := 64
+			if scenario == "full_requery" {
+				width = 1024
+			}
+			regularSlots := make([]*queuedTask, width)
+			requerySlots := make([]*queuedTask, width)
+			policy := &requeryPriorityPolicy{
+				requeryLanes: &requeryLanes{
+					regular: &fifoPolicy{queue: newMergeTaskQueue("")},
+					requery: newMergeTaskQueue(metrics.ReQueryLabel), requeryCapacity: 1024,
+				},
+				configuredCredit: 3, remainingCredit: 3,
+			}
+			resetQueues := func() {
+				if scenario == "regular_only" || scenario == "contended" {
+					for i := range regularSlots {
+						regularSlots[i] = &queuedTask{Task: regularTask, enqueueTime: now}
+					}
+					policy.regular.queue.tasks = regularSlots
+					policy.regular.queue.count = len(regularSlots)
+				}
+				if scenario != "regular_only" {
+					for i := range requerySlots {
+						requerySlots[i] = &queuedTask{Task: requeryTask, enqueueTime: now}
+					}
+					policy.requery.tasks = requerySlots
+					policy.requery.count = len(requerySlots)
+				}
+			}
+			resetQueues()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if policy.Len() == 0 || scenario == "contended" && (policy.regular.Len() == 0 || policy.requery.len() == 0) {
+					b.StopTimer()
+					resetQueues()
+					b.StartTimer()
+				}
+				task := policy.Pop(now)
+				policy.onTaskServed(task)
+			}
+		})
 	}
 }
