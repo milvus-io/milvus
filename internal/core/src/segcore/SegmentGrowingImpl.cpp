@@ -1465,6 +1465,46 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
 }
 
 void
+SegmentGrowingImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    (void)op_ctx;
+    if (count == 0) {
+        return;
+    }
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            vec_index->ApplyValidDataByRange(
+                logical_offset, count, valid_result);
+            return;
+        }
+    }
+
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid_range(logical_offset, count, valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (!valid_data[i]) {
+            valid_result[i] = false;
+        }
+    }
+}
+
+void
 SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1488,11 +1528,7 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
         auto indexing = field_indexing.get_segment_indexing();
         auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
         if (vec_index != nullptr && vec_index->HasValidData()) {
-            for (int64_t i = 0; i < count; ++i) {
-                if (!vec_index->IsRowValid(offsets[i])) {
-                    valid_result[i] = false;
-                }
-            }
+            vec_index->ApplyValidDataByOffsets(offsets, count, valid_result);
             return;
         }
     }

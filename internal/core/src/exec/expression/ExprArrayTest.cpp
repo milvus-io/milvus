@@ -203,6 +203,30 @@ MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
         knowhere::IdMapData::FromValidData(valid_data_bool.get(), row_count));
     vec_indexing->GetIdMap().FinalizeVectorIds();
 
+    TargetBitmap range_storage(row_count + 6, false);
+    auto range_result = range_storage.view(3, row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        range_result[i] = true;
+    }
+    vec_indexing->ApplyValidDataByRange(0, row_count, range_result);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(range_result[i], valid_data[i]) << "range row " << i;
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_FALSE(range_storage[i]);
+        EXPECT_FALSE(range_storage[row_count + 3 + i]);
+    }
+
+    const std::vector<int64_t> offsets = {-1, 0, 1, row_count - 1, row_count};
+    TargetBitmap offset_result(offsets.size(), true);
+    vec_indexing->ApplyValidDataByOffsets(
+        offsets.data(), offsets.size(), TargetBitmapView(offset_result));
+    EXPECT_FALSE(offset_result[0]);
+    EXPECT_EQ(offset_result[1], valid_data[0]);
+    EXPECT_EQ(offset_result[2], valid_data[1]);
+    EXPECT_EQ(offset_result[3], valid_data[row_count - 1]);
+    EXPECT_FALSE(offset_result[4]);
+
     auto sealed_segment = CreateSealedSegment(schema);
     LoadIndexInfo load_index_info;
     load_index_info.collection_id = kCollectionID;
