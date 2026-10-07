@@ -171,6 +171,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.singlePolicy.remainingCapacity = m.inspector.getRemainingCapacity
 
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)

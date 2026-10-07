@@ -1235,6 +1235,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(true).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1248,6 +1249,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2, before Trigger). Trigger() errors → no notify().
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1262,6 +1264,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2 gate before Trigger). Trigger returns nil → no notify.
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1276,6 +1279,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// stubDispatchableView.Trigger() returns nil, so notify() short-circuits
 		// before reaching SubmitBumpSchemaVersionViewToScheduler. We only care here that
 		// isFull was consulted and the dispatch path was entered.

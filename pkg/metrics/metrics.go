@@ -112,7 +112,11 @@ const (
 
 	Pending   = "pending"
 	Executing = "executing"
-	Done      = "done"
+
+	// outcome of the single compaction admission limiter for a candidate
+	SingleCompactionAdmitted = "admitted"
+	SingleCompactionDeferred = "deferred"
+	Done                     = "done"
 
 	ImportStagePending      = "pending"
 	ImportStagePreImport    = "preimport"

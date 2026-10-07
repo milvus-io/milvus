@@ -93,6 +93,10 @@ func (h *spyCompactionInspector) isFull() bool {
 	return false
 }
 
+func (h *spyCompactionInspector) getRemainingCapacity() int {
+	return -1
+}
+
 func (h *spyCompactionInspector) start() {}
 
 func (h *spyCompactionInspector) stop() {}
@@ -2418,6 +2422,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
@@ -2434,6 +2439,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
@@ -2462,6 +2468,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
@@ -2491,6 +2498,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		// s.allocator.EXPECT().AllocID(mock.Anything).Return(20000, nil)
 		start := int64(20000)
@@ -2618,6 +2626,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		err := tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -2630,6 +2639,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
@@ -2650,6 +2660,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2667,6 +2678,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		start := int64(20000)
 		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
@@ -2747,6 +2759,7 @@ func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection(
 		addEnabledCollection()
 
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(skipped, nil)
 		enabledLookups := 0
 		s.handler.EXPECT().GetCollection(mock.Anything, enabledCollectionID).
@@ -2823,6 +2836,7 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
 
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(coll, nil)
 		return s.tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -3957,6 +3971,7 @@ func TestHasTooManyDeletions(t *testing.T) {
 		Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetValue(),
 		Params.DataCoordCfg.SingleCompactionRatioThreshold.Key:  Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue(),
 		Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key: Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetValue(),
+		Params.DataCoordCfg.SingleCompactionThresholdJitter.Key: Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue(),
 	}
 	defer func() {
 		for k, v := range saveKeys {
@@ -3966,6 +3981,7 @@ func TestHasTooManyDeletions(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "10")
 	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
 	Params.Save(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key, "1024")
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 
 	cases := []struct {
 		name    string
@@ -4025,4 +4041,48 @@ func TestHasTooManyDeletions(t *testing.T) {
 			assert.Equal(t, tc.want, hasTooManyDeletions(segment))
 		})
 	}
+}
+
+// The TTL-field expiry ratio shares the per-segment jitter, so same-aged
+// segments do not expire into compaction simultaneously.
+func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_Jitter(t *testing.T) {
+	trigger := &compactionTrigger{}
+	for _, item := range []*paramtable.ParamItem{
+		&Params.DataCoordCfg.SingleCompactionRatioThreshold,
+		&Params.DataCoordCfg.SingleCompactionThresholdJitter,
+	} {
+		origin := item.GetValue()
+		defer Params.Save(item.Key, origin)
+	}
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+
+	ts := time.Now()
+	// Only the first quantile has expired. At ratio 0.2 the first quantile is
+	// consulted and the segment triggers; a jittered ratio of 0.4 or more
+	// consults the second one, which has not expired.
+	newSegment := func(id int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             id,
+			NumOfRows:      100,
+			ExpirQuantiles: []int64{ts.Add(-time.Hour).UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
+		}}
+	}
+	ct := &compactTime{startTime: tsoutil.ComposeTSByTime(ts)}
+
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "2")
+	var high, low int64
+	for id := int64(1); id < 10000 && (high == 0 || low == 0); id++ {
+		switch m := singleCompactionThresholdMultiplier(id); {
+		case m >= 2.0 && high == 0:
+			high = id
+		case m < 1.9 && low == 0:
+			low = id
+		}
+	}
+	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(high)), "ratio pushed to the next quantile by jitter")
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(low)))
+
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(high)))
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(low)))
 }
