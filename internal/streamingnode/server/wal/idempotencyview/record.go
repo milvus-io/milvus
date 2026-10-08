@@ -34,10 +34,8 @@ type Record struct {
 	// producer client rejects a response without it.
 	LastConfirmedMessageID *commonpb.MessageID
 
-	// IdempotencyKey is empty for a write no view remembers. Such a record is
-	// never staged for a chunk: it materializes nothing for any consumer, and the
-	// WAL consume checkpoint -- not a chunk -- is what records how far the vchannel
-	// has advanced.
+	// IdempotencyKey is empty for a write without a local dedup identity.
+	// Summary still records its WAL positions, but the dedup window ignores it.
 	IdempotencyKey string
 
 	// InsertResult is what a duplicate append replays back to the client. Its two

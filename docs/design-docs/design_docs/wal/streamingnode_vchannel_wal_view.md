@@ -74,7 +74,11 @@ VChannel observation. RecoveryStorage installs Summary records before VChannel s
 snapshot capture and runtime registration preserve the same no-gap guarantee.
 
 Protect the history before GC can remove it and hold that requirement through
-preparation. An already truncated start is an error, not an empty replay.
+preparation. The current adaptor accepts a start below Summary's lower bound
+and replays the retained suffix. This can complete an entirely skipped interval
+without entries; it does not prove the skipped interval had no Deletes. The
+[reliable retention TODO](summary.md#todo-reliable-retention-for-query-recovery)
+tracks the full recovery/GC guarantee.
 Neither L0 completion nor a subscription's delivery cursor proves that retained
 QueryViews no longer need historical Delete data.
 
@@ -151,8 +155,9 @@ There is no second recovery checkpoint tied to this lifecycle classification.
    Delete entries. `start` is the maximum of the earliest retained segment's
    creation TimeTick minus one (zero for missing legacy timestamps) and the
    QueryView's transform start. With no visible segments, start equals T.
-   Bounded replay waits for coverage through T; truncated history fails with
-   `ErrTransformLogStartPointTruncated` and the view becomes Unrecoverable.
+   The adaptor clamps start to Summary's lower bound, then waits for and delivers
+   the retained interval through T. If T is at or below that bound, it completes
+   without entries at T. Missing/corrupt retained resources still fail preparation.
    The current consumer buffers the full interval before applying entries;
    bounded replay here refers to the interval, not total consumer memory. The
    [incremental replay memory TODO](transform_log.md#9-todo-bound-sn-bootstrap-consumer-memory-deferred)
@@ -204,8 +209,9 @@ Each failed attempt closes its partial modules and buffered events outside the
 owner/manager locks. The next attempt captures a fresh snapshot and installs a
 fresh QueryRuntime under the same VChannel lock. It never reuses partially
 prepared modules. A released/cancelled build cannot install a replacement or
-report Ready for a later acquisition. Truncated TransformLog history and explicit
-data-integrity failures report Unrecoverable; owner cancellation stops the build.
+report Ready for a later acquisition. Explicit data-integrity failures report
+Unrecoverable; owner cancellation stops the build. An older TransformLog start
+is accepted under the lower-bound compatibility policy described above.
 
 ### Preparation failure ownership
 

@@ -41,8 +41,8 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // contiguous dense span of the pchannel log kept in two forms:
 //
 //   - in memory: the records of the span not yet sealed into a chunk.
-//     ObserveMessage builds the record of every message that carries an
-//     idempotency key immediately and copies it into the pending buffer; the
+//     ObserveMessage builds records for committed Inserts and Deletes
+//     immediately and copies them into the pending buffer; the
 //     WAL message itself is never retained.
 //   - in object storage: sealed chunks, an append-only time-ordered log of
 //     per-vchannel records, indexed by the manifest.
@@ -136,7 +136,7 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		return
 	}
 
-	idempotency, insert := idempotencyHalvesOf(msg)
+	idempotency, insert := insertSummaryOf(msg)
 	var entry *streamingpb.TransformLogEntry
 	// Barriers only advance the consumer window; Summary stores Delete payloads,
 	// not payload-free BarrierEntries.
@@ -204,38 +204,30 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 	return size
 }
 
-// idempotencyHalvesOf builds what the idempotency sections remember about a
-// message, or nil when the message is not one the append path deduplicates.
-//
-// Only a write carrying a client key is staged. A keyless committed write
-// materializes nothing for any consumer today -- the insert section is written
-// for it only when it accompanies a keyed write in the same chunk -- and
-// staging every insert would put the whole write path's primary keys into
-// object storage for nobody to read.
-func idempotencyHalvesOf(msg message.ImmutableMessage) (
+// insertSummaryOf records every committed insert unit. Keyless writes retain
+// their WAL positions without acquiring an idempotency identity. Optional
+// results come from headers; recording an insert never decodes its Body.
+func insertSummaryOf(msg message.ImmutableMessage) (
 	*streamingpb.VChannelSummaryIdempotencyRecord,
 	*streamingpb.VChannelSummaryInsertRecord,
 ) {
-	key := idempotencyKeyOf(msg)
-	if key == "" {
+	result, hasInsert := insertResultOf(msg)
+	if !hasInsert {
 		return nil, nil
 	}
+	key := idempotencyKeyOf(msg)
 	insert := &streamingpb.VChannelSummaryInsertRecord{
 		SourceMessageId:        messageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
 		LastConfirmedMessageId: messageIDProto(msg.LastConfirmedMessageID()),
 	}
-	keys := &streamingpb.VChannelSummaryIdempotencyRecord{Key: key}
-	result, hasResult := idempotentInsertResultOf(msg)
-	if !hasResult && msg.MessageType() == message.MessageTypeTxn {
-		// A keyed txn whose per-body results could not be rebuilt (corrupt or
-		// absent headers) must produce NO record. Staging the key with nil Ids
-		// would make a post-restart duplicate answer success with no primary
-		// keys at all; producing nothing only costs the dedup opportunity,
-		// which degrades to the behavior without this feature.
-		return nil, nil
+	if result == nil && msg.MessageType() == message.MessageTypeTxn {
+		// Keep the write fact, but never restore a duplicate response from an
+		// incomplete transaction result.
+		key = ""
 	}
-	if hasResult {
+	keys := &streamingpb.VChannelSummaryIdempotencyRecord{Key: key}
+	if result != nil {
 		insert.Ids = result.GetIds()
 		keys.RowOffsets = result.GetRowOffsets()
 	}
@@ -260,7 +252,7 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	// goes through a scanner that assembles transactions (the live flusher and
 	// the recovery stream share one txn buffer), so a commit always arrives
 	// wrapped in MessageTypeTxn and a CommitTxn case could never fire. Worse
-	// than unreachable: idempotentInsertResultOf has no CommitTxn case either,
+	// than unreachable: insertResultOf has no CommitTxn case either,
 	// so if one ever did arrive it would stage a record with nil Ids and answer
 	// a later duplicate with no primary keys.
 	switch msg.MessageType() {
@@ -288,8 +280,9 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	}
 }
 
-// idempotentInsertResultOf returns what a duplicate append replays back to the
-// client, when the message carries one.
+// insertResultOf reports whether the message contains committed inserts and
+// returns their optional header result. Replicated writes do not restore
+// source-cluster results; missing results do not erase the write fact.
 //
 // For a transaction it is REBUILT from the insert bodies rather than read off
 // the commit: the interceptor merges the per-body results in memory and hands
@@ -299,25 +292,32 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 // through MergeIdempotentInsertResults over the bodies in append order), which
 // is what makes a post-restart duplicate answer with the same primary keys the
 // first attempt returned.
-func idempotentInsertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
-	if msg.ReplicateHeader() != nil {
-		return nil, false
-	}
+func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
+	replicated := msg.ReplicateHeader() != nil
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
+		if replicated {
+			return nil, true
+		}
 		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
-			return nil, false
+			return nil, true
 		}
-		return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
+		result, _ := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
+		return result, true
 	case message.MessageTypeTxn:
 		txnMsg := message.AsImmutableTxnMessage(msg)
 		if txnMsg == nil {
 			return nil, false
 		}
 		var results []*messagespb.IdempotentInsertResult
+		hasInsert := false
 		_ = txnMsg.RangeOver(func(sub message.ImmutableMessage) error {
 			if sub.MessageType() != message.MessageTypeInsert {
+				return nil
+			}
+			hasInsert = true
+			if replicated {
 				return nil
 			}
 			insertMsg, err := message.AsImmutableInsertMessageV1(sub)
@@ -329,15 +329,11 @@ func idempotentInsertResultOf(msg message.ImmutableMessage) (*messagespb.Idempot
 			}
 			return nil
 		})
-		merged, hadAny, err := message.MergeIdempotentInsertResults(results...)
-		if err != nil || !hadAny {
-			// Corruption and "no payload" are both answered as "no result" here
-			// rather than by staging a half-record: a record whose Ids are nil
-			// would answer a later duplicate with no primary keys at all, which
-			// is worse than not recognizing the duplicate.
-			return nil, false
+		merged, _, err := message.MergeIdempotentInsertResults(results...)
+		if err != nil {
+			return nil, hasInsert
 		}
-		return merged, true
+		return merged, hasInsert
 	default:
 		return nil, false
 	}

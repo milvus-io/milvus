@@ -2,6 +2,7 @@ package walsummary
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -61,26 +62,67 @@ func TestQueryStreamWaitsForBoundedCoverage(t *testing.T) {
 	}
 }
 
-func TestQueryStreamRejectsTruncatedHistoryAndCancelsTail(t *testing.T) {
-	manager := NewManager(ManagerConfig{})
-	manager.manifest.TransformFastForwardTimeTick = map[string]uint64{"v1": 10}
-	stream := NewStream(manager)
-	handler := newRecordingTransformHandler()
-	sub, err := stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: 20, Handler: handler})
-	require.NoError(t, err)
-	select {
-	case <-handler.done:
-	case <-time.After(time.Second):
-		t.Fatal("truncated read did not stop")
+func TestQueryStreamStartsAtRetainedBoundary(t *testing.T) {
+	for _, end := range []uint64{5, 10, 20} {
+		t.Run(fmt.Sprint(end), func(t *testing.T) {
+			manager := NewManager(ManagerConfig{})
+			manager.InitLastAcked(10)
+			stream := NewStream(manager)
+			defer stream.Close()
+			handler := newRecordingTransformHandler()
+			sub, err := stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: end, Handler: handler})
+			require.NoError(t, err)
+			defer sub.Close()
+			if end > 10 {
+				// Clamping the start must not manufacture coverage through a future end.
+				select {
+				case event := <-handler.events:
+					t.Fatalf("premature completion: %v", event)
+				case <-time.After(20 * time.Millisecond):
+				}
+				manager.ObserveMessage(context.Background(), newTestDeleteMessage(t, "v1", 20, 1, 20))
+				require.Equal(t, uint64(20), nextTransformEvent(t, handler).Entry.GetTimeTick())
+			}
+			event := nextTransformEvent(t, handler)
+			require.NoError(t, event.Err)
+			require.NotNil(t, event.SyncUp)
+			require.Equal(t, end, event.SyncUp.TimeTick)
+			select {
+			case <-handler.done:
+			case <-time.After(time.Second):
+				t.Fatal("bounded replay did not finish")
+			}
+		})
 	}
-	require.ErrorIs(t, (<-handler.events).Err, wal.ErrTransformLogStartPointTruncated)
-	require.NoError(t, sub.Close())
-	tail := newRecordingTransformHandler()
-	_, err = stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v2", EndTimeTick: 20, Handler: tail})
+}
+
+func TestQueryStreamResumesAfterGC(t *testing.T) {
+	ctx := context.Background()
+	manager, store := newTestManagerWithStore(t)
+	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 10, 1, 10))
+	require.NoError(t, persistSummary(ctx, manager))
+	manager.AdvanceGCTimeTick("v1", 10)
+	manager.cfg.RetentionMaxBytes = 1
+	require.NoError(t, gcSummary(ctx, manager))
+	// Exercise the durable GC boundary, not only an in-memory notification.
+	restored := newTestManager(t, nextTermStore(store), 1<<30)
+	require.NoError(t, restored.Restore(ctx))
+	restored.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 20, 1, 20))
+	require.NoError(t, persistSummary(ctx, restored))
+	stream := NewStream(restored)
+	defer stream.Close()
+	handler := newRecordingTransformHandler()
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: handler})
 	require.NoError(t, err)
+	defer sub.Close()
+	require.Equal(t, uint64(20), nextTransformEvent(t, handler).Entry.GetTimeTick())
+	require.Equal(t, uint64(20), nextTransformEvent(t, handler).SyncUp.TimeTick)
+	restored.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 30, 1, 30))
+	require.Equal(t, uint64(30), nextTransformEvent(t, handler).Entry.GetTimeTick())
+	require.Equal(t, uint64(30), nextTransformEvent(t, handler).SyncUp.TimeTick)
 	require.NoError(t, stream.Close())
-	require.ErrorIs(t, (<-tail.events).Err, context.Canceled)
-	_, err = stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: tail})
+	require.ErrorIs(t, nextTransformEvent(t, handler).Err, context.Canceled)
+	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: handler})
 	require.ErrorIs(t, err, context.Canceled)
 }
 
