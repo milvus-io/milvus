@@ -147,9 +147,8 @@ PhyVectorSearchNode::GetOutput() {
         // path or when ElementFilterBitsNode is not present.
         if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
             auto col_input = GetColumnVector(input_);
-            TargetBitmapView view(col_input->GetRawData(), col_input->size());
-            TargetBitmapView valid_view(col_input->GetValidRawData(),
-                                        col_input->size());
+            const auto& view = col_input->GetBitmap();
+            const auto& valid_view = col_input->GetValidBitmap();
 
             auto [element_bitset, valid_element_bitset] =
                 array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
@@ -169,7 +168,7 @@ PhyVectorSearchNode::GetOutput() {
         }
 
         auto col_input = GetColumnVector(input_);
-        TargetBitmapView view(col_input->GetRawData(), col_input->size());
+        const auto& view = col_input->GetBitmap();
 
         if (view.all()) {
             auto search_result = empty_search_result(num_queries);
@@ -180,8 +179,7 @@ PhyVectorSearchNode::GetOutput() {
         }
 
         // TODO: uniform knowhere BitsetView and milvus BitsetView
-        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
-                                         col_input->size());
+        search_view = milvus::BitsetView(view);
         data_cnt = search_view.size();
     }
 

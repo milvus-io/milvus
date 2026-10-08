@@ -152,8 +152,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
@@ -164,9 +164,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const std::string& pointer) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -235,7 +237,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                 Assert(index.get() != nullptr);
 
                 TargetBitmap res(active_count_);
-                TargetBitmapView res_view(res);
+                auto& res_view = res;
 
                 // process shredding data
                 {
@@ -247,9 +249,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         index->GetShreddingFieldsWithPrefix(pointer);
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
-                        TargetBitmapView temp_valid_view(temp_valid);
+                        TargetBitmapWriteView temp_valid_view(temp_valid);
                         index->ExecutorForGettingValid(
-                            op_ctx_, field, temp_valid_view);
+                            op_ctx_, field, temp_valid);
                         res_view |= temp_valid_view;
                     }
                 }

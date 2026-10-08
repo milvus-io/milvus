@@ -235,7 +235,7 @@ ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
         "query expr operator's result vector's children size not equal one");
     auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
     BitsetType query_view(view);
     query_view.flip();
     return query_view;

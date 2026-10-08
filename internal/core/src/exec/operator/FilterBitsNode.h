@@ -30,8 +30,8 @@ namespace milvus {
 namespace exec {
 
 bool
-ConvertPredicateToFilteredBitset(TargetBitmapView data,
-                                 TargetBitmapView valid,
+ConvertPredicateToFilteredBitset(TargetBitmapWriteView data,
+                                 TargetBitmapWriteView valid,
                                  size_t size);
 
 class PhyFilterBitsNode : public Operator {

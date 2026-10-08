@@ -51,7 +51,7 @@ constexpr double kRoaringInvDensityMin = 0.97;  // >= 97% → invert + Roaring
 // ---- Roaring V2 zero-copy encode ----
 
 std::vector<char>
-CacheCompressor::CompressRoaring(const TargetBitmap& bset, bool inverted) {
+CacheCompressor::CompressRoaring(const TargetBitmapView& bset, bool inverted) {
     using namespace roaring::internal;
 
     const uint64_t* words = reinterpret_cast<const uint64_t*>(bset.data());
@@ -154,7 +154,8 @@ CacheCompressor::DecompressRoaring(const char* data,
     }
 
     TargetBitmap result(num_bits, false);
-    auto* words = reinterpret_cast<uint64_t*>(result.data());
+    auto write_scope = result.scoped_write();
+    auto* words = static_cast<uint64_t*>(write_scope.data());
     const auto& containers = r->high_low_container;
     // Write containers directly into the output. Expanding all set positions
     // to uint32_t would require up to 32 times the bitmap's memory as scratch.
@@ -212,9 +213,18 @@ CacheCompressor::DecompressRoaring(const char* data,
 // ---- Public API ----
 
 CompressedData
-CacheCompressor::Compress(const TargetBitmap& result,
-                          const TargetBitmap& valid,
+CacheCompressor::Compress(const TargetBitmapView& result,
+                          const TargetBitmapView& valid,
                           bool compression_enabled) {
+    if (result.offset() != 0 || valid.offset() != 0) {
+        auto packed_result = std::make_shared<TargetBitmap>(result);
+        auto packed_valid = std::make_shared<TargetBitmap>(valid);
+        auto out = Compress(
+            packed_result->view(), packed_valid->view(), compression_enabled);
+        out.packed_result_owner = std::move(packed_result);
+        out.packed_valid_owner = std::move(packed_valid);
+        return out;
+    }
     CompressedData out;
     const uint32_t result_bits = static_cast<uint32_t>(result.size());
     const uint32_t valid_bits = static_cast<uint32_t>(valid.size());
@@ -230,20 +240,21 @@ CacheCompressor::Compress(const TargetBitmap& result,
     std::memcpy(out.header, &result_bits, 4);
     std::memcpy(out.header + 4, &valid_bits_header, 4);
 
-    auto select_encoding = [compression_enabled](const TargetBitmap& bitmap) {
-        if (!compression_enabled || bitmap.size() == 0) {
+    auto select_encoding =
+        [compression_enabled](const TargetBitmapView& bitmap) {
+            if (!compression_enabled || bitmap.size() == 0) {
+                return kCompTypeRaw;
+            }
+            const double density =
+                static_cast<double>(bitmap.count()) / bitmap.size();
+            if (density <= kRoaringDensityMax) {
+                return kCompTypeRoaring;
+            }
+            if (density >= kRoaringInvDensityMin) {
+                return kCompTypeRoaringInv;
+            }
             return kCompTypeRaw;
-        }
-        const double density =
-            static_cast<double>(bitmap.count()) / bitmap.size();
-        if (density <= kRoaringDensityMax) {
-            return kCompTypeRoaring;
-        }
-        if (density >= kRoaringInvDensityMin) {
-            return kCompTypeRoaringInv;
-        }
-        return kCompTypeRaw;
-    };
+        };
     out.result_comp_type = select_encoding(result);
     out.valid_comp_type =
         valid_all_ones ? kCompTypeRaw : select_encoding(valid);
@@ -273,8 +284,8 @@ CacheCompressor::Compress(const TargetBitmap& result,
 
 // Flatten both bitmap representations without copying Raw bytes into scratch.
 std::vector<char>
-CacheCompressor::Compress(const TargetBitmap& result,
-                          const TargetBitmap& valid,
+CacheCompressor::Compress(const TargetBitmapView& result,
+                          const TargetBitmapView& valid,
                           bool compression_enabled,
                           uint8_t& out_comp_type) {
     auto cd = Compress(result, valid, compression_enabled);
@@ -312,7 +323,8 @@ CacheCompressor::DecompressBitmap(const char* data,
         }
         TargetBitmap result(num_bits, false);
         if (bytes > 0) {
-            std::memcpy(result.data(), data, bytes);
+            auto write_scope = result.scoped_write();
+            std::memcpy(write_scope.data(), data, bytes);
         }
         out = std::move(result);
         return true;
@@ -420,8 +432,8 @@ CacheCompressor::Decompress(const char* data,
 
     out_result = TargetBitmap(result_bits, false);
     if (result_bytes > 0) {
-        std::memcpy(
-            reinterpret_cast<char*>(out_result.data()), raw, result_bytes);
+        auto write_scope = out_result.scoped_write();
+        std::memcpy(write_scope.data(), raw, result_bytes);
     }
 
     if (valid_all_ones) {
@@ -432,9 +444,8 @@ CacheCompressor::Decompress(const char* data,
     } else {
         out_valid = TargetBitmap(valid_bits, false);
         if (valid_bytes > 0) {
-            std::memcpy(reinterpret_cast<char*>(out_valid.data()),
-                        raw + result_bytes,
-                        valid_bytes);
+            auto write_scope = out_valid.scoped_write();
+            std::memcpy(write_scope.data(), raw + result_bytes, valid_bytes);
         }
     }
     return true;

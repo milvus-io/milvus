@@ -160,7 +160,7 @@ TEST_P(ExprTest, TestRange) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
 
         EXPECT_EQ(final.size(), N * num_iters);
         EXPECT_EQ(view.size(), num_iters);
@@ -354,7 +354,7 @@ TEST_P(ExprTest, TestRangeNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
 
         EXPECT_EQ(final.size(), N * num_iters);
         EXPECT_EQ(view.size(), int(N * num_iters / 2));
@@ -400,7 +400,7 @@ TEST_P(ExprTest, TestRangeNullable) {
             N * num_iters,
             MAX_TIMESTAMP,
             &offsets);
-        BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+        const auto& view = col_vec->GetBitmap();
 
         EXPECT_EQ(final.size(), N * num_iters);
         EXPECT_EQ(view.size(), int(N * num_iters / 2));

@@ -451,14 +451,14 @@ CheckVectorOutputCellsLoaded(int64_t segment_id,
                              int64_t count);
 
 static inline void
-set_bit(BitsetType& bitset, FieldId field_id, bool flag = true) {
+set_bit(BitsetTypeWriteView bitset, FieldId field_id, bool flag = true) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
     bitset[pos] = flag;
 }
 
 static inline bool
-get_bit(const BitsetType& bitset, FieldId field_id) {
+get_bit(const BitsetTypeView& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
 
@@ -466,7 +466,7 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
 }
 
 static inline bool
-get_bit_if_present(const BitsetType& bitset, FieldId field_id) {
+get_bit_if_present(const BitsetTypeView& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     return pos >= 0 && static_cast<size_t>(pos) < bitset.size() && bitset[pos];
 }
@@ -478,13 +478,13 @@ field_exists_in_schema(const SchemaPtr& schema, FieldId field_id) {
 }
 
 static inline bool
-has_bit_position(const BitsetType& bitset, FieldId field_id) {
+has_bit_position(const BitsetTypeView& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     return pos >= 0 && static_cast<size_t>(pos) < bitset.size();
 }
 
 static inline void
-clear_bit_if_present(BitsetType& bitset, FieldId field_id) {
+clear_bit_if_present(BitsetTypeWriteView bitset, FieldId field_id) {
     if (has_bit_position(bitset, field_id)) {
         set_bit(bitset, field_id, false);
     }
@@ -3857,7 +3857,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
     int64_t chunk_id,
     int64_t offset,
     int64_t size,
-    TargetBitmapView valid_result) const {
+    TargetBitmapWriteView valid_result) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
     if (size == 0) {
         return;
     }
@@ -3883,7 +3884,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     FieldId field_id,
     const int64_t* offsets,
     int64_t count,
-    TargetBitmapView valid_result) const {
+    TargetBitmapWriteView valid_result) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
     if (count == 0) {
         return;
     }
@@ -4209,7 +4211,7 @@ ChunkedSegmentSealedImpl::get_deleted_count() const {
 }
 
 void
-ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
+ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeWriteView bitset,
                                            int64_t ins_barrier,
                                            Timestamp timestamp) const {
     deleted_record_.Query(bitset, ins_barrier, timestamp);
@@ -4740,14 +4742,14 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
 }
 
 void
-ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
+ChunkedSegmentSealedImpl::search_pks(BitsetTypeWriteView bitset,
                                      const std::vector<PkType>& pks) const {
     if (pks.empty()) {
         return;
     }
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
-    BitsetTypeView bitset_view(bitset);
+    auto& bitset_view = bitset;
 
     // See Contain() — same zero-storage pk2offset fast path.
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
@@ -4995,7 +4997,7 @@ void
 ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
                                    proto::plan::OpType op,
                                    const PkType& pk,
-                                   BitsetTypeView& bitset) const {
+                                   BitsetTypeWriteView bitset) const {
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     // See Contain() — same zero-storage pk2offset fast path.
@@ -5022,7 +5024,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(
     milvus::OpContext* op_ctx,
     proto::plan::OpType op,
     const PkType& pk,
-    BitsetTypeView& bitset,
+    BitsetTypeWriteView bitset,
     const std::shared_ptr<const PublishedSegmentState>& snapshot) const {
     auto schema_snapshot = snapshot->schema;
     auto pk_field_id =
@@ -5055,7 +5057,7 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
                                           bool lower_inclusive,
                                           const PkType& upper_pk,
                                           bool upper_inclusive,
-                                          BitsetTypeView& bitset) const {
+                                          BitsetTypeWriteView bitset) const {
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     // See Contain() — same zero-storage pk2offset fast path.
@@ -5065,7 +5067,7 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
         auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
                                         : proto::plan::OpType::LessThan;
         BitsetType upper_result(bitset.size());
-        auto upper_view = upper_result.view();
+        auto& upper_view = upper_result;
         runtime->virtual_pk2offset->find_range(
             lower_pk, lower_op, bitset, [](int64_t) { return true; });
         runtime->virtual_pk2offset->find_range(
@@ -5083,7 +5085,7 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
         auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
                                         : proto::plan::OpType::LessThan;
         BitsetType upper_result(bitset.size());
-        auto upper_view = upper_result.view();
+        auto& upper_view = upper_result;
         pk_cell->pk2offset().find_range(
             lower_pk, lower_op, bitset, [](int64_t offset) { return true; });
         pk_cell->pk2offset().find_range(
@@ -7000,7 +7002,7 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
 }
 
 void
-ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
+ChunkedSegmentSealedImpl::search_ids(BitsetTypeWriteView bitset,
                                      const IdArray& id_array) const {
     auto schema_snapshot = CaptureSchemaSnapshot();
     auto field_id =
@@ -7141,7 +7143,7 @@ scan_timestamp_range(const ChunkedColumnInterface& column,
 }
 
 void
-ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
+ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeWriteView bitset_chunk,
                                                Timestamp timestamp,
                                                Timestamp collection_ttl) const {
     auto snapshot = CapturePublishedState();

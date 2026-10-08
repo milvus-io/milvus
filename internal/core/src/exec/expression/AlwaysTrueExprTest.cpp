@@ -92,7 +92,7 @@ TEST_P(ExprAlwaysTrueTest, AlwaysTrue) {
                                                 N * num_iters,
                                                 MAX_TIMESTAMP,
                                                 &offsets);
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
     EXPECT_EQ(view.size(), N * num_iters / 2);
 
     for (int i = 0; i < N * num_iters; ++i) {

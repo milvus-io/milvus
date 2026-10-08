@@ -105,7 +105,7 @@ TEST(Util_Segcore, GetDeleteBitmap) {
     auto insert_barrier = get_barrier(insert_record, query_timestamp);
     BitsetType res_bitmap(insert_barrier);
     BitsetTypeView res_view(res_bitmap);
-    delete_record.Query(res_view, insert_barrier, query_timestamp);
+    delete_record.Query(res_bitmap, insert_barrier, query_timestamp);
     ASSERT_EQ(res_view.count(), 0);
 }
 
@@ -538,4 +538,51 @@ TEST(UtilSegcore, CheckCancellationCancelAfterCheck) {
     // Second check should throw
     EXPECT_THROW(CheckCancellation(&op_ctx, 123, "TestOperation"),
                  SegcoreError);
+}
+
+TEST(Util_Segcore, SearchViewStatisticsRespectKnownZeroAndBackendDomain) {
+    milvus::BitsetType bits(17, false);
+    milvus::BitsetView view(bits.view());
+    view.set_filter_count(0);
+    EXPECT_TRUE(view.empty());
+    EXPECT_FALSE(view.all());
+    EXPECT_TRUE(view.none());
+    bits.set(8);
+    EXPECT_FALSE(view.none());
+    auto tail = view.subview(8, 9);
+    EXPECT_TRUE(tail.test(0));
+    EXPECT_FALSE(tail.all());
+    EXPECT_FALSE(tail.none());
+    view.set_id_offset(16);
+    view.set_vector_count(3);
+    EXPECT_FALSE(view.all());
+    EXPECT_FALSE(view.none());  // backend IDs 1 and 2 lie beyond public rows
+    bits.set(16);
+    EXPECT_TRUE(view.all());
+    view.set_id_offset(0);
+    std::vector<int32_t> ids{8, 0, -1, 19};
+    knowhere::IdArray mapped(ids.data(), ids.size());
+    view.set_out_ids(mapped, ids.size());
+    view.set_vector_count(ids.size());
+    EXPECT_FALSE(view.all());
+    EXPECT_FALSE(view.none());
+    bits.set(0);
+    EXPECT_TRUE(view.all());
+    auto mapped_tail = view.subview(1, 3);
+    EXPECT_TRUE(mapped_tail.test(0));
+    EXPECT_TRUE(mapped_tail.test(1));
+    EXPECT_TRUE(mapped_tail.test(2));
+    EXPECT_TRUE(mapped_tail.all());
+    EXPECT_FALSE(mapped_tail.none());
+    EXPECT_FALSE(mapped_tail.has_known_count());
+}
+
+TEST(Util_Segcore, EmptySearchWindowAllowsUnalignedBitOffset) {
+    milvus::BitsetType bits(17, false);
+    milvus::BitsetView empty(bits.view(3, 0));
+    EXPECT_TRUE(empty.empty());
+    EXPECT_EQ(empty.size(), 0);
+    EXPECT_EQ(empty.count(), 0);
+    EXPECT_TRUE(empty.all());
+    EXPECT_TRUE(empty.none());
 }

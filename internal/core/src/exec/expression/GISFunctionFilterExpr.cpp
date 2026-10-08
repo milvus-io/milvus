@@ -48,9 +48,11 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
+        auto res_write_scope = res.scoped_write();                               \
+        auto valid_res_write_scope = valid_res.scoped_write();                   \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
@@ -115,9 +117,11 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res,             \
                                     const Geometry& right_source) {              \
+        auto res_write_scope = res.scoped_write();                               \
+        auto valid_res_write_scope = valid_res.scoped_write();                   \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
@@ -178,8 +182,10 @@ namespace exec {
                                     const int32_t* offsets,                      \
                                     const int32_t* segment_offsets,              \
                                     const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res) {                \
+                                    TargetBitmapWriteView res,                   \
+                                    TargetBitmapWriteView valid_res) {           \
+        auto res_write_scope = res.scoped_write();                               \
+        auto valid_res_write_scope = valid_res.scoped_write();                   \
         AssertInfo(segment_offsets != nullptr,                                   \
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
@@ -266,8 +272,8 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     }
     auto res_vec = std::make_shared<ColumnVector>(
         TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
     valid_res.set();
 
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
@@ -590,7 +596,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         // Lambda: Collect hit offsets from coarse bitmap
         auto collect_hits = [&coarse]() -> std::vector<int64_t> {
             std::vector<int64_t> hit_offsets;
-            hit_offsets.reserve(coarse.count());
+            hit_offsets.reserve(coarse.view().count());
             for (size_t i = 0; i < coarse.size(); ++i) {
                 if (coarse[i]) {
                     hit_offsets.emplace_back(static_cast<int64_t>(i));

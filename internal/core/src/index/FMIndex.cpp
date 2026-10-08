@@ -63,7 +63,7 @@ constexpr size_t kFMIndexMmapPadding = 64;
 // Pack a per-row null bitmap (bit i set iff row i is null) into bytes, LSB-first
 // within each byte, for on-disk persistence. total_rows bits -> ceil/8 bytes.
 inline std::vector<uint8_t>
-PackNullBitmap(const TargetBitmap& null_bitmap, int64_t total_rows) {
+PackNullBitmap(const TargetBitmapView& null_bitmap, int64_t total_rows) {
     const auto packed_size = static_cast<size_t>(total_rows / 8) +
                              static_cast<size_t>(total_rows % 8 != 0);
     std::vector<uint8_t> packed(packed_size, 0);

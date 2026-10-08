@@ -234,7 +234,11 @@ void inline SetDocIdBits(TargetBitmap* bitmap,
         return masks;
     }();
 
-    auto* words = bitmap->data();
+    if (n == 0) {
+        return;
+    }
+    auto write_scope = bitmap->scoped_write();
+    auto* words = static_cast<word_t*>(write_scope.data());
     const auto bitmap_size = bitmap->size();
 
     uintptr_t i = 0;

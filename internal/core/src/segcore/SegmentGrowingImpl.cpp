@@ -476,7 +476,7 @@ SegmentGrowingImpl::PreInsert(int64_t size) {
 }
 
 void
-SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
+SegmentGrowingImpl::mask_with_delete(BitsetTypeWriteView bitset,
                                      int64_t ins_barrier,
                                      Timestamp timestamp) const {
     deleted_record_.Query(bitset, ins_barrier, timestamp);
@@ -1522,12 +1522,14 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
 }
 
 void
-SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
-                                        FieldId field_id,
-                                        int64_t chunk_id,
-                                        int64_t offset,
-                                        int64_t size,
-                                        TargetBitmapView valid_result) const {
+SegmentGrowingImpl::ApplyFieldValidData(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    int64_t offset,
+    int64_t size,
+    TargetBitmapWriteView valid_result) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
     (void)op_ctx;
     if (size == 0) {
         return;
@@ -1555,7 +1557,8 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     FieldId field_id,
     const int64_t* offsets,
     int64_t count,
-    TargetBitmapView valid_result) const {
+    TargetBitmapWriteView valid_result) const {
+    auto valid_result_write_scope = valid_result.scoped_write();
     (void)op_ctx;
     if (count == 0) {
         return;
@@ -2693,7 +2696,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 }
 
 void
-SegmentGrowingImpl::search_ids(BitsetType& bitset,
+SegmentGrowingImpl::search_ids(BitsetTypeWriteView bitset,
                                const IdArray& id_array) const {
     auto schema = get_schema_snapshot();
     auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
@@ -2704,10 +2707,8 @@ SegmentGrowingImpl::search_ids(BitsetType& bitset,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    BitsetTypeView bitset_view(bitset);
     for (auto& pk : pks) {
-        insert_record_.search_pk_range(
-            pk, proto::plan::OpType::Equal, bitset_view);
+        insert_record_.search_pk_range(pk, proto::plan::OpType::Equal, bitset);
     }
 }
 
@@ -2724,7 +2725,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
+SegmentGrowingImpl::mask_with_timestamps(BitsetTypeWriteView bitset_chunk,
                                          Timestamp timestamp,
                                          Timestamp collection_ttl) const {
     if (collection_ttl > 0) {

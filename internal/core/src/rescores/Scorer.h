@@ -55,12 +55,12 @@ class Scorer {
     // filter result of offset[i] was bitmap[offset[i]]
     // add boost score for idx[i] if bitmap[i] was true
     virtual void
-    batch_score(milvus::OpContext* op_ctx,
-                const segcore::SegmentInternalInterface* segment,
-                const proto::plan::FunctionMode& mode,
-                const FixedVector<int32_t>& offsets,
-                const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) = 0;
+    batch_score_by_offsets(milvus::OpContext* op_ctx,
+                           const segcore::SegmentInternalInterface* segment,
+                           const proto::plan::FunctionMode& mode,
+                           const FixedVector<int32_t>& offsets,
+                           const TargetBitmapView& bitmap,
+                           std::vector<std::optional<float>>& boost_scores) = 0;
 
     // score for all offset
     // used when no filter
@@ -94,12 +94,13 @@ class WeightScorer : public Scorer {
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(milvus::OpContext* op_ctx,
-                const segcore::SegmentInternalInterface* segment,
-                const proto::plan::FunctionMode& mode,
-                const FixedVector<int32_t>& offsets,
-                const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+    batch_score_by_offsets(
+        milvus::OpContext* op_ctx,
+        const segcore::SegmentInternalInterface* segment,
+        const proto::plan::FunctionMode& mode,
+        const FixedVector<int32_t>& offsets,
+        const TargetBitmapView& bitmap,
+        std::vector<std::optional<float>>& boost_scores) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,
@@ -168,12 +169,13 @@ class RandomScorer : public Scorer {
                 std::vector<std::optional<float>>& boost_scores) override;
 
     void
-    batch_score(milvus::OpContext* op_ctx,
-                const segcore::SegmentInternalInterface* segment,
-                const proto::plan::FunctionMode& mode,
-                const FixedVector<int32_t>& offsets,
-                const TargetBitmap& bitmap,
-                std::vector<std::optional<float>>& boost_scores) override;
+    batch_score_by_offsets(
+        milvus::OpContext* op_ctx,
+        const segcore::SegmentInternalInterface* segment,
+        const proto::plan::FunctionMode& mode,
+        const FixedVector<int32_t>& offsets,
+        const TargetBitmapView& bitmap,
+        std::vector<std::optional<float>>& boost_scores) override;
 
     void
     batch_score(milvus::OpContext* op_ctx,

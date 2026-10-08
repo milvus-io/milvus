@@ -118,10 +118,9 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 2: Prepare doc bitset
     auto col_input = GetColumnVector(input_);
-    TargetBitmapView doc_bitset(col_input->GetRawData(), col_input->size());
-    TargetBitmapView doc_bitset_valid(col_input->GetValidRawData(),
-                                      col_input->size());
-    doc_bitset.flip();
+    const auto& doc_bitset = col_input->GetBitmap();
+    const auto& doc_bitset_valid = col_input->GetValidBitmap();
+    col_input->GetBitmapWriteView().flip();
 
     // Step 3: Evaluate element expression
     // Use offset mode or full mode based on selectivity
@@ -141,7 +140,7 @@ PhyElementFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(total_cost /
                                                                  1000);
 
-    auto filtered_count = expr_result.count();
+    auto filtered_count = expr_result.view().count();
     tracer::AddEvent(
         fmt::format("struct_name: {}, total_elements: {}, output_rows: {}, "
                     "filtered: {}, cost_us: {}",
@@ -225,7 +224,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         }
 
         auto col_vec_size = col_vec->size();
-        TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+        const auto& bitsetview = col_vec->GetBitmap();
 
         AssertInfo(col_vec_size == element_offsets.size(),
                    "ElementFilterBitsNode result size mismatch: {} vs {}",
@@ -280,7 +279,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             }
 
             auto col_vec_size = col_vec->size();
-            TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+            const auto& view = col_vec->GetBitmap();
             eval_bitset.append(view);
             num_processed_elements += col_vec_size;
         }

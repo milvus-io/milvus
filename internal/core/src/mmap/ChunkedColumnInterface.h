@@ -207,7 +207,8 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                           int64_t chunk_id,
                           int64_t offset,
                           int64_t size,
-                          TargetBitmapView valid_result) const {
+                          TargetBitmapWriteView valid_result) const {
+        auto valid_result_write_scope = valid_result.scoped_write();
         if (!IsNullable() || size == 0) {
             return;
         }

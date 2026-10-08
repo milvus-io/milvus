@@ -242,8 +242,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto lower_bound = expr_->lower_val_;
     auto upper_bound = expr_->upper_val_;
@@ -265,8 +265,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res) {
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -455,7 +457,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             cached_result_ = std::make_shared<TargetBitmap>(
                 execute_sub_batch(index_ptr, val1, val2));
             cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
+                GetCachedIndexValidBitmap(index_ptr));
             AssertInfo(
                 cached_result_->size() == static_cast<size_t>(active_count_),
                 "index range result size {} does not match row count {}",
@@ -513,8 +515,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
@@ -524,10 +526,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -666,8 +670,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -693,10 +697,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const ValueType& val1,
             const ValueType& val2) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -822,8 +828,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
             std::make_shared<TargetBitmap>(active_count_);
-        TargetBitmapView res_view(*cached_index_chunk_res_);
-        TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
+        auto& res_view = *cached_index_chunk_res_;
+        auto& valid_res_view = *cached_index_chunk_valid_res_;
 
         // process shredding data
         const auto& lower_bound = expr_->lower_val_;
@@ -834,9 +840,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
             if (!target_field.empty()) {
                 using ColType = decltype(GetType);
                 TargetBitmap target_res(active_count_, false);
-                TargetBitmapView target_res_view(target_res);
+                auto& target_res_view = target_res;
                 TargetBitmap target_valid(active_count_, true);
-                TargetBitmapView target_valid_view(target_valid);
+                auto& target_valid_view = target_valid;
                 auto shredding_executor = [val1,
                                            val2,
                                            lower_inclusive,
@@ -846,8 +852,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
                                               const ColType* src,
                                               ValidityView valid,
                                               size_t size,
-                                              TargetBitmapView res,
-                                              TargetBitmapView valid_res) {
+                                              TargetBitmapWriteView res,
+                                              TargetBitmapWriteView valid_res) {
+                    auto res_write_scope = res.scoped_write();
+                    auto valid_res_write_scope = valid_res.scoped_write();
                     for (size_t i = 0; i < size; ++i) {
                         if (valid && !valid[i]) {
                             res[i] = valid_res[i] = false;
@@ -893,7 +901,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
                                                      active_count_);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
-                          res_view.count());
+                          res_view.view().count());
             }
         };
 
@@ -1017,8 +1025,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    auto res = res_vec->GetBitmapWriteView();
+    auto valid_res = res_vec->GetValidBitmapWriteView();
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -1044,11 +1052,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
+            TargetBitmapWriteView res,
+            TargetBitmapWriteView valid_res,
             const ValueType& val1,
             const ValueType& val2,
             int index) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");
         // If data is nullptr, this chunk was skipped by SkipIndex.
@@ -1168,7 +1178,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
     if (cached_index_chunk_id_ != 0) {
         cached_index_chunk_id_ = 0;
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
-        auto cache_view = cached_index_chunk_res_->view();
+        auto& cache_view = *cached_index_chunk_res_;
 
         PkType lower_pk = lower_arg_.GetValue<PkInnerType>();
         PkType upper_pk = upper_arg_.GetValue<PkInnerType>();

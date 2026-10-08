@@ -1936,7 +1936,7 @@ TEST(CApiTest, RangeSearchWithRadiusAndRangeFilter) {
 }
 
 std::vector<SegOffset>
-search_id(const BitsetType& bitset,
+search_id(const BitsetTypeView& bitset,
           Timestamp* timestamps,
           Timestamp timestamp,
           bool use_find) {

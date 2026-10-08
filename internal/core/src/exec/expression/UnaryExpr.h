@@ -127,7 +127,8 @@ struct UnaryElementFuncForMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res) {
+               TargetBitmapWriteView res) {
+        auto res_write_scope = res.scoped_write();
         static_assert(
             filter_type == FilterType::sequential,
             "this override operator() of UnaryElementFuncForMatch does "
@@ -154,10 +155,11 @@ struct UnaryElementFuncForMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
             std::unique_ptr<LikePatternMatcher> local_matcher;
@@ -199,7 +201,8 @@ struct UnaryElementFuncForRegexMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res) {
+               TargetBitmapWriteView res) {
+        auto res_write_scope = res.scoped_write();
         static_assert(
             filter_type == FilterType::sequential,
             "this override operator() of UnaryElementFuncForRegexMatch does "
@@ -234,10 +237,11 @@ struct UnaryElementFuncForRegexMatch {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         if constexpr (std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
             std::unique_ptr<PartialRegexMatcher> local_matcher;
@@ -285,8 +289,9 @@ struct UnaryElementFunc {
     void
     operator()(const T* src,
                size_t size,
-               TargetBitmapView res,
+               TargetBitmapWriteView res,
                const IndexInnerType& val) {
+        auto res_write_scope = res.scoped_write();
         static_assert(filter_type == FilterType::sequential,
                       "this override operator() of UnaryElementFunc does not "
                       "support FilterType::random");
@@ -359,10 +364,11 @@ struct UnaryElementFunc {
     operator()(const T* src,
                size_t size,
                const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         bool has_bitmap_input = !bitmap_input.empty();
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T, filter_type> func;
@@ -505,11 +511,13 @@ struct UnaryElementFuncForArray {
                size_t size,
                const ValueType& val,
                int index,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         bool has_bitmap_input = !bitmap_input.empty();
         // Pre-construct LikePatternMatcher/PartialRegexMatcher before the loop
         // to avoid re-parsing the pattern on every row.
@@ -759,7 +767,8 @@ BatchUnaryCompare(const T* src,
                   size_t size,
                   U& val,
                   proto::plan::OpType op_type,
-                  TargetBitmapView res) {
+                  TargetBitmapWriteView res) {
+    auto res_write_scope = res.scoped_write();
     if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T>) {
         using milvus::bitset::CompareOpType;
         switch (op_type) {
@@ -869,8 +878,10 @@ class ShreddingExecutor {
     operator()(const GetType* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
             ThrowInfo(ErrorCode::UnexpectedError,
                       "need using ShreddingArrayBsonExecutor for array type in "
@@ -883,7 +894,10 @@ class ShreddingExecutor {
 
  private:
     void
-    ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
+    ExecuteOperation(const GetType* src,
+                     size_t size,
+                     TargetBitmapWriteView res) {
+        auto res_write_scope = res.scoped_write();
         if constexpr (std::is_same_v<InnerType, std::string>) {
             // Compile on the first evaluated batch, then reuse for this
             // executor's remaining windows. Empty/skipped scans do not
@@ -932,8 +946,10 @@ class ShreddingArrayBsonExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;

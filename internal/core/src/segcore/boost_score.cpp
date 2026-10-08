@@ -209,6 +209,9 @@ ComputeScorerScoresOnPreparedChunks(
     std::unique_ptr<milvus::exec::ExprSet> filter_expr_set;
     auto filter_bitset = milvus::rescores::ComputeNonNativeFilterBitset(
         &exec_context, scorer, &filter_expr_set);
+    std::optional<milvus::TargetBitmapView> filter_view;
+    if (filter_bitset.has_value())
+        filter_view.emplace(filter_bitset->view());
 
     for (auto chunk_idx = 0; chunk_idx < scorer_offset_chunks.size();
          ++chunk_idx) {
@@ -226,7 +229,7 @@ ComputeScorerScoresOnPreparedChunks(
             scorer_offsets,
             output_score_chunks[chunk_idx],
             output_has_score_chunks[chunk_idx],
-            filter_bitset.has_value() ? &filter_bitset.value() : nullptr,
+            filter_view.has_value() ? &filter_view.value() : nullptr,
             filter_expr_set.get());
     }
 }

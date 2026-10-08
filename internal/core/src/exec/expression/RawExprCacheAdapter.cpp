@@ -279,8 +279,8 @@ RawExprCacheAdapter::CaptureResult(EvalCtx& context,
     }
 
     try {
-        TargetBitmapView result_view(column->GetRawData(), result_size);
-        TargetBitmapView valid_view(column->GetValidRawData(), result_size);
+        const auto& result_view = column->GetBitmap();
+        const auto& valid_view = column->GetValidBitmap();
         state_.captured_result.append(result_view);
         state_.captured_valid_result.append(valid_view);
         state_.eval_duration_us += std::max<int64_t>(elapsed_us, 1);

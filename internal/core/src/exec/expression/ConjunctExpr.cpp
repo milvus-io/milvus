@@ -61,8 +61,8 @@ PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
     //   can stop. A NULL row can still become TRUE (NULL OR TRUE = TRUE),
     //   so null-rejection does not shrink the active set for OR.
     const size_t size = vec->size();
-    TargetBitmapView data(vec->GetRawData(), size);
-    TargetBitmapView valid(vec->GetValidRawData(), size);
+    const auto& data = vec->GetBitmap();
+    const auto& valid = vec->GetValidBitmap();
     if (is_and_) {
         if (null_rejecting_) {
             TargetBitmap active_rows(data);
@@ -199,7 +199,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // batch-level early exit, and the same bitmap becomes the row-level
         // input of the next expression.
         auto active_rows = BuildActiveBitmap(all_flat_result);
-        if (active_rows.none()) {
+        if (active_rows.view().none()) {
             SkipFollowingExprs(i + 1);
             ClearBitmapInput(context);
             return;

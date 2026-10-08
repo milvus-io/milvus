@@ -46,8 +46,10 @@ class ShreddingArrayBsonContainsArrayExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -94,8 +96,10 @@ class ShreddingArrayBsonContainsAllArrayExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -146,8 +150,10 @@ class ShreddingArrayBsonContainsAnyExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -200,8 +206,10 @@ class ShreddingArrayBsonContainsAllExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -254,8 +262,10 @@ class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
@@ -359,8 +369,10 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
     operator()(const std::string_view* src,
                ValidityView valid,
                size_t size,
-               TargetBitmapView res,
-               TargetBitmapView valid_res) {
+               TargetBitmapWriteView res,
+               TargetBitmapWriteView valid_res) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         for (size_t i = 0; i < size; ++i) {
             if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;

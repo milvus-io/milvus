@@ -280,7 +280,7 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // refined_rows: an all-ones coarse still returns correct results, so
         // without that a permanently degraded deployment is indistinguishable
         // from a healthy one.
-        st_->coarse_selected = static_cast<int64_t>(cand.count());
+        st_->coarse_selected = static_cast<int64_t>(cand.view().count());
         st_->coarse_candidates =
             std::make_shared<TargetBitmap>(std::move(cand));
         st_->coarse_done = true;
@@ -422,7 +422,8 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         survivors &= coarse_slice;
     }
 
-    if (!survivors.none()) {
+    const auto survivors_view = survivors.view();
+    if (!survivors_view.none()) {
         // Build per-thread query geometries + prepared forms ONCE per batch.
         // qgeoms is reserved so it never reallocates (prepared references it).
         GEOSContextHandle_t qctx = GetThreadLocalGEOSContext();
@@ -451,14 +452,14 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // Collect surviving absolute offsets within this batch.
         std::vector<int64_t> hit_local;
         std::vector<int64_t> hit_abs;
-        hit_local.reserve(survivors.count());
-        hit_abs.reserve(survivors.count());
+        hit_local.reserve(survivors_view.count());
+        hit_abs.reserve(survivors_view.count());
         // Accumulated across batches: the number of rows this node actually
         // builds a geometry for and evaluates. This is the pruning contract
         // made observable -- see GISGroupState::refined_rows.
-        st_->refined_rows += static_cast<int64_t>(survivors.count());
+        st_->refined_rows += static_cast<int64_t>(survivors_view.count());
         for (int64_t i = 0; i < real_batch_size; ++i) {
-            if (survivors[i]) {
+            if (survivors_view[i]) {
                 hit_local.emplace_back(i);
                 hit_abs.emplace_back(seg_offset + i);
             }

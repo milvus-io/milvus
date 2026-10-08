@@ -94,10 +94,11 @@ struct CompareElementFunc {
     operator()(const T* left,
                const U* right,
                size_t size,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               TargetBitmapWriteView res,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         // This is the original code, kept here for the documentation purposes
         // also, used for iterative filter
         if constexpr (filter_type == FilterType::random) {
@@ -347,9 +348,11 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunks(FUNC func,
-                          TargetBitmapView res,
-                          TargetBitmapView valid_res,
+                          TargetBitmapWriteView res,
+                          TargetBitmapWriteView valid_res,
                           const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
@@ -365,9 +368,11 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsetsByTake(FUNC func,
                                    OffsetVector* input,
-                                   TargetBitmapView res,
-                                   TargetBitmapView valid_res,
+                                   TargetBitmapWriteView res,
+                                   TargetBitmapWriteView valid_res,
                                    const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         auto left_column = CaptureDataColumn(left_field_);
         auto right_column = CaptureDataColumn(right_field_);
         if (left_column == nullptr || right_column == nullptr) {
@@ -451,9 +456,11 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsetsByChunkFallback(FUNC func,
                                             OffsetVector* input,
-                                            TargetBitmapView res,
-                                            TargetBitmapView valid_res,
+                                            TargetBitmapWriteView res,
+                                            TargetBitmapWriteView valid_res,
                                             const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         int64_t size = input->size();
         int64_t processed_size = 0;
         if (segment_chunk_reader_.segment_->is_chunked() ||
@@ -574,9 +581,11 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     ProcessBothDataByOffsets(FUNC func,
                              OffsetVector* input,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmapWriteView res,
+                             TargetBitmapWriteView valid_res,
                              const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         const auto processed_size = ProcessBothDataByOffsetsByTake<T, U>(
             func, input, res, valid_res, values...);
         if (processed_size >= 0) {
@@ -604,9 +613,11 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForSingleChunk(FUNC func,
-                                        TargetBitmapView res,
-                                        TargetBitmapView valid_res,
+                                        TargetBitmapWriteView res,
+                                        TargetBitmapWriteView valid_res,
                                         const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         int64_t processed_size = 0;
 
         const auto active_count = segment_chunk_reader_.active_count_;
@@ -666,9 +677,11 @@ class PhyCompareFilterExpr : public Expr {
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
     ProcessBothDataChunksForMultipleChunk(FUNC func,
-                                          TargetBitmapView res,
-                                          TargetBitmapView valid_res,
+                                          TargetBitmapWriteView res,
+                                          TargetBitmapWriteView valid_res,
                                           const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         int64_t processed_size = 0;
         while (processed_size < batch_size_ &&
                left_current_chunk_id_ < left_num_chunk_ &&
@@ -754,10 +767,12 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     TryProcessBothDataByScan(FUNC func,
                              int64_t real_batch_size,
-                             TargetBitmapView res,
-                             TargetBitmapView valid_res,
+                             TargetBitmapWriteView res,
+                             TargetBitmapWriteView valid_res,
                              size_t& processed_cursor,
                              const ValTypes&... values) {
+        auto res_write_scope = res.scoped_write();
+        auto valid_res_write_scope = valid_res.scoped_write();
         if (!data_scan_initialized_) {
             data_scan_initialized_ = true;
             left_data_column_ = CaptureDataColumn(left_field_);

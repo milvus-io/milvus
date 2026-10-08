@@ -170,8 +170,8 @@ class EntryPool {
     Put(int64_t segment_id,
         const std::string& signature,
         int64_t active_count,
-        const TargetBitmap& result,
-        const TargetBitmap& valid,
+        const TargetBitmapView& result,
+        const TargetBitmapView& valid,
         int64_t eval_duration_us = 0);
 
     // Erase all entries belonging to a segment. Returns number erased.

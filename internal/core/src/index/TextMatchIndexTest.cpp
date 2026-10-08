@@ -2629,7 +2629,7 @@ ExecuteFilterBitsWithFullCache(
                "ExecuteTask returned null row vector for query expression");
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+    const auto& view = col_vec->GetBitmap();
     BitsetType query_view(view);
     query_view.flip();
     return query_view;

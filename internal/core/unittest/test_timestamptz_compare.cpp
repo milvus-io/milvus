@@ -166,7 +166,7 @@ class TimestamptzCompareCorrectnessTest : public ::testing::Test {
             DEFAULT_PLANNODE_ID, typed_expr);
         auto col_vec = milvus::test::gen_filter_res(
             filter_node.get(), segment, N, MAX_TIMESTAMP, &offsets);
-        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        const auto& res = col_vec->GetBitmap();
         ASSERT_EQ(res.size(), offsets.size());
 
         for (size_t k = 0; k < offsets.size(); ++k) {

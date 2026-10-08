@@ -61,11 +61,12 @@ PhyLikeConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // Phase 1: Execute once for entire segment (no bitmap_input needed)
     if (cached_phase1_res_ == nullptr) {
         TargetBitmap candidates(active_count_, true);
+        const auto candidates_view = candidates.view();
 
         // Execute all ngram index queries, AND merge results
         for (auto& expr : ngram_exprs_) {
             expr->ExecuteNgramPhase1(candidates);
-            if (candidates.none()) {
+            if (candidates_view.none()) {
                 break;
             }
         }
@@ -89,12 +90,14 @@ PhyLikeConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         batch_candidates &= bitmap_input;
     }
 
+    const auto batch_candidates_view = batch_candidates.view();
+
     // Execute Phase2 (post-filter) on this batch
-    if (!batch_candidates.none()) {
+    if (!batch_candidates_view.none()) {
         for (auto& expr : ngram_exprs_) {
             expr->ExecuteNgramPhase2(
                 batch_candidates, current_pos_, real_batch_size);
-            if (batch_candidates.none()) {
+            if (batch_candidates_view.none()) {
                 break;
             }
         }

@@ -142,10 +142,10 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
     auto valid_data = MutableFieldDataRowValidData(&data_array);
-    const uint8_t* src_bitmap =
-        static_cast<const uint8_t*>(column_vector->GetValidRawData());
+    const uint8_t* src_bitmap = reinterpret_cast<const uint8_t*>(
+        column_vector->GetValidBitmap().data());
     AssertInfo(src_bitmap,
-               "GetValidRawData() returned null, ColumnVector validity data "
+               "valid bitmap data is null, ColumnVector validity data "
                "should always be initialized");
     // Process 8 bits at a time for better performance
     size_t full_bytes = column_data_size / 8;
@@ -330,7 +330,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                "children inside row vector must be of column vector for now");
     tmp_retrieve_result.total_data_cnt_ = first_column->size();
     if (first_column->IsBitmap()) {
-        BitsetTypeView view(first_column->GetRawData(), first_column->size());
+        const auto& view = first_column->GetBitmap();
         if (query_context->bitset_is_element_level()) {
             // Element-level query: bitset is element-level, need to convert to (doc_id, element_index)
             tmp_retrieve_result.element_level_ = true;
@@ -454,7 +454,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                 auto col_vec = std::dynamic_pointer_cast<ColumnVector>(
                     result->childrens()[0]);
                 if (col_vec != nullptr) {
-                    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+                    const auto& view = col_vec->GetBitmap();
                     // Bitset convention: bit=1 means the row is filtered OUT
                     // (excluded). So valid rows = total active rows minus the
                     // set bits.  Do NOT invert this subtraction.

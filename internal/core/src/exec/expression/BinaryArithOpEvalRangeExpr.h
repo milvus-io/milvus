@@ -136,8 +136,9 @@ struct ArithOpElementFunc {
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
-               TargetBitmapView res,
+               TargetBitmapWriteView res,
                const int32_t* offsets = nullptr) {
+        auto res_write_scope = res.scoped_write();
         // Validate divisor for division/modulo operations
         if constexpr (arith_op == proto::plan::ArithOpType::Div ||
                       arith_op == proto::plan::ArithOpType::Mod) {
