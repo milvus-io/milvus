@@ -45,7 +45,7 @@ func TestProtoContract_ReleaseFieldKindsPinned(t *testing.T) {
 		kinds := make(map[int]string)
 		for i := 0; i < fields.Len(); i++ {
 			field := fields.Get(i)
-			kinds[int(field.Number())] = string(field.Kind().String())
+			kinds[int(field.Number())] = field.Kind().String()
 		}
 		for _, number := range fieldNumbers(c.message) {
 			parts = append(parts, fmt.Sprintf("%d=%s", number, kinds[number]))
