@@ -51,6 +51,7 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -376,6 +377,106 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
     }
+}
+
+TEST_F(CacheRawDataToDiskTest, ManifestRangesPreserveTypedRowOrder) {
+    auto check_type = [&](auto value, DataType type) {
+        using T = decltype(value);
+        constexpr int64_t dim = 8;
+        const std::vector<int64_t> file_rows{17, 23};
+        auto schema = std::make_shared<Schema>();
+        const auto field = schema->AddDebugField("vec", type, dim, "L2");
+        const auto base = "manifest_ranges_" + std::to_string(int(type));
+        auto txn_result =
+            milvus_storage::api::transaction::Transaction::Open(fs_, base);
+        ASSERT_TRUE(txn_result.ok()) << txn_result.status().ToString();
+        auto txn = std::move(txn_result).ValueOrDie();
+        std::vector<T> expected;
+        for (size_t i = 0; i < file_rows.size(); ++i) {
+            // Separate writers guarantee two physical files with unequal
+            // row counts; the range below must cross their boundary.
+            milvus::test::V3SegmentTestData part(
+                schema,
+                1,
+                file_rows[i],
+                dim,
+                path_,
+                base + "_part_" + std::to_string(i));
+            // AppendFiles expects paths relative to the new manifest's
+            // _data directory. Copy the tiny fixture files into that root.
+            const auto data_root =
+                std::filesystem::path(path_) / base / "_data";
+            std::filesystem::create_directories(data_root);
+            for (auto& group : *part.GetColumnGroups()) {
+                for (auto& file : group->files) {
+                    const auto name =
+                        std::filesystem::path(file.path).filename();
+                    std::filesystem::copy_file(
+                        std::filesystem::path(path_) / file.path,
+                        data_root / name);
+                    file.path = name.string();
+                }
+            }
+            txn->AppendFiles(*part.GetColumnGroups());
+            auto source = milvus::segcore::DataGen(schema, file_rows[i], 42);
+            const auto vectors = source.template get_col<T>(field);
+            expected.insert(expected.end(), vectors.begin(), vectors.end());
+        }
+        auto commit_result = txn->Commit();
+        ASSERT_TRUE(commit_result.ok()) << commit_result.status().ToString();
+        const auto manifest =
+            nlohmann::json{{"base_path", base},
+                           {"ver", commit_result.ValueOrDie()}}
+                .dump();
+
+        auto field_meta = gen_field_meta(collection_id,
+                                         partition_id,
+                                         segment_id,
+                                         field.get(),
+                                         type,
+                                         DataType::NONE,
+                                         false);
+        auto index_meta = gen_index_meta(
+            segment_id, field.get(), index_build_id, index_version);
+        storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
+        ctx.set_loon_ffi_properties(MakeInternalPropertiesFromStorageConfig(
+            ToCStorageConfig(gen_local_storage_config(path_))));
+        storage::MemFileManagerImpl file_manager(ctx);
+        Config config;
+        config[STORAGE_VERSION_KEY] = STORAGE_V3;
+        config[SEGMENT_MANIFEST_KEY] = manifest;
+        config[DATA_TYPE_KEY] = type;
+        config[ELEMENT_TYPE_KEY] = DataType::NONE;
+        config[DIM_KEY] = dim;
+        // Full read, intra-chunk slice, cross-file slice, exact boundary,
+        // clipped tail and past-the-end reads must all preserve source order.
+        for (const auto& [offset, count] :
+             std::vector<std::pair<int64_t, int64_t>>{
+                 {0, 0}, {3, 9}, {13, 11}, {17, 6}, {35, 10}, {40, 1}}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "type=" << int(type) << " offset=" << offset
+                         << " count=" << count);
+            config[OFFSET_KEY] = offset;
+            config[NUM_ROWS_KEY] = count;
+            auto fields = file_manager.CacheRawDataToMemory(config);
+            const int64_t rows = count == 0 ? 40 : std::min(count, 40 - offset);
+            int64_t copied = 0;
+            for (const auto& data : fields) {
+                ASSERT_EQ(data->get_data_type(), type);
+                ASSERT_LE(copied + data->get_num_rows(), rows);
+                const auto bytes = data->get_num_rows() * dim * sizeof(T);
+                ASSERT_EQ(std::memcmp(data->Data(),
+                                      expected.data() + (offset + copied) * dim,
+                                      bytes),
+                          0);
+                copied += data->get_num_rows();
+            }
+            ASSERT_EQ(copied, rows);
+        }
+    };
+    check_type(float{}, DataType::VECTOR_FLOAT);
+    check_type(float16{}, DataType::VECTOR_FLOAT16);
+    check_type(bfloat16{}, DataType::VECTOR_BFLOAT16);
 }
 
 // The storage-v2 pagination parameters (num_rows / offset) are assembled by
