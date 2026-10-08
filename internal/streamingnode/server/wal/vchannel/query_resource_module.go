@@ -162,7 +162,12 @@ func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
 	if m.summaryManager == nil {
 		return
 	}
-	floor := m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
+	// A fresh module exists before it observes CreateCollection. Pin the
+	// unknown prefix until that message establishes the collection origin.
+	var floor uint64
+	if m.vchannelView != nil {
+		floor = m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
+	}
 	for _, segment := range m.segments {
 		created := segment.CreateTimeTick()
 		if created == 0 {
