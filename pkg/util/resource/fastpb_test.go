@@ -17,12 +17,12 @@
 package resource
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/mem"
 	"google.golang.org/protobuf/encoding/protowire"
