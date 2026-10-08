@@ -44,6 +44,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/StringIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -3735,6 +3736,109 @@ TEST(Expr, TestArrayContainsForStruct) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
                 << "Distances should be sorted in ascending order (with index)";
+        }
+    }
+}
+
+TEST(Expr, OrdinaryArraySortedIndexContainsMatchesRaw) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid =
+        schema->AddDebugField("tags", DataType::ARRAY, DataType::VARCHAR, true);
+    schema->set_primary_field_id(pk);
+    const std::vector<std::vector<std::string>> rows{
+        {"ignored"},
+        {},
+        {"apple", "banana", "apple"},
+        {"banana", "cherry"},
+        {"apple"},
+        {},
+        {"other"}};
+    const int64_t n = rows.size();
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto scalar;
+        auto* strings = scalar.mutable_string_data();
+        for (const auto& value : row) {
+            strings->add_data(value);
+        }
+        arrays.emplace_back(scalar);
+    }
+    const uint8_t valid_bitmap = 0x7e;
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::VARCHAR, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_segment = CreateSealedSegment(schema);
+    auto index_segment = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
+    raw_segment->LoadFieldData(field_info);
+    index_segment->LoadFieldData(field_info);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("tags");
+    field_schema.set_fieldid(fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::VarChar);
+    field_schema.set_nullable(true);
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4010, 4010};
+    auto sorted = std::make_unique<index::StringIndexSort>(ctx);
+    EXPECT_FALSE(sorted->HasRawData());
+    sorted->BuildWithFieldData({field_data});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = DataType::ARRAY;
+    info.element_type = DataType::VARCHAR;
+    info.num_rows = n;
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index =
+        CreateTestCacheIndex("array_sorted_contains", std::move(sorted));
+    index_segment->LoadIndex(info);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& targets :
+             std::vector<std::vector<std::string>>{{},
+                                                   {"apple"},
+                                                   {"apple", "banana", "apple"},
+                                                   {"apple", "missing"}}) {
+            std::vector<proto::plan::GenericValue> values;
+            for (const auto& target : targets) {
+                proto::plan::GenericValue value;
+                value.set_string_val(target);
+                values.push_back(std::move(value));
+            }
+            auto expr = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(
+                    fid, DataType::ARRAY, DataType::VARCHAR, {}, true),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expr);
+            auto raw = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), n, MAX_TIMESTAMP);
+            auto indexed = milvus::test::gen_filter_res(
+                plan.get(), index_segment.get(), n, MAX_TIMESTAMP);
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+            BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                       indexed->size());
+            ASSERT_EQ(raw->size(), n);
+            ASSERT_EQ(indexed->size(), n);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(index_bits[i], raw_bits[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], raw_valid[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], i != 0) << "row " << i;
+            }
         }
     }
 }

@@ -301,6 +301,10 @@ StringIndexSort::BuildWithFieldData(
         static_cast<StringIndexSortMemoryImpl*>(impl_.get())
             ->BuildFromArrayDataNested(
                 field_datas, total_num_rows_, valid_bitset_, idx_to_offsets_);
+    } else if (is_array_field_) {
+        static_cast<StringIndexSortMemoryImpl*>(impl_.get())
+            ->BuildFromArrayData(
+                field_datas, total_num_rows_, valid_bitset_, idx_to_offsets_);
     } else {
         static_cast<StringIndexSortMemoryImpl*>(impl_.get())
             ->BuildFromFieldData(
@@ -565,6 +569,10 @@ StringIndexSort::PatternMatch(const std::string& pattern,
 
 std::optional<std::string>
 StringIndexSort::Reverse_Lookup(size_t offset) const {
+    // A row may contain several values; the scalar lookup cannot reconstruct it.
+    if (is_array_field_ && !is_nested_index_) {
+        return std::nullopt;
+    }
     assert(impl_ != nullptr);
     return impl_->Reverse_Lookup(offset,
                                  total_num_rows_,
@@ -1091,6 +1099,39 @@ StringIndexSortMemoryImpl::BuildFromFieldData(
 }
 
 void
+StringIndexSortMemoryImpl::BuildFromArrayData(
+    const std::vector<FieldDataPtr>& field_datas,
+    size_t total_num_rows,
+    TargetBitmap& valid_bitset,
+    std::vector<int32_t>& idx_to_offsets) {
+    std::map<std::string, PostingList> map;
+    size_t row_id = 0;
+    for (const auto& field_data : field_datas) {
+        for (size_t i = 0; i < field_data->get_num_rows(); ++i, ++row_id) {
+            if (!field_data->is_valid(i)) {
+                continue;
+            }
+            // Empty arrays are valid rows even though they have no postings.
+            valid_bitset.set(row_id);
+            auto* array =
+                reinterpret_cast<const Array*>(field_data->RawValue(i));
+            for (size_t j = 0; j < array->length(); ++j) {
+                if (!array->is_element_valid(j)) {
+                    continue;
+                }
+                auto value = array->get_data_unchecked<std::string>(j);
+                auto& postings = map[value];
+                // Duplicate elements in a row only need one posting.
+                if (postings.empty() || postings.back() != row_id) {
+                    postings.push_back(static_cast<uint32_t>(row_id));
+                }
+            }
+        }
+    }
+    BuildFromMap(std::move(map), total_num_rows, idx_to_offsets);
+}
+
+void
 StringIndexSortMemoryImpl::BuildFromArrayDataNested(
     const std::vector<FieldDataPtr>& field_datas,
     size_t total_num_rows,
@@ -1109,9 +1150,12 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
             auto* array =
                 reinterpret_cast<const Array*>(field_data->RawValue(i));
             for (int64_t j = 0; j < array->length(); j++) {
-                auto value = array->get_data_unchecked<std::string>(j);
-                map[value].push_back(static_cast<int32_t>(element_id));
-                valid_bitset.set(element_id);
+                if (array->is_element_valid(j)) {
+                    auto value = array->get_data_unchecked<std::string>(j);
+                    map[value].push_back(static_cast<int32_t>(element_id));
+                    valid_bitset.set(element_id);
+                }
+                // Null members still occupy a flattened element offset.
                 element_id++;
             }
         }

@@ -132,39 +132,16 @@ VisitSortedMatches(Iterator first,
                                 upper_bound_match);
         }
     } else {
-        if constexpr (std::is_floating_point_v<Value>) {
-            // NaN is not a strict weak ordering operand. Preserve the original
-            // lower/upper-bound behavior (and validator diagnostics) for these
-            // exceptional queries instead of feeding NaNs into sort/unique.
-            // Stored entries have the existing sorted-index precondition;
-            // inserting NaNs is rejected by scalar input validation.
-            if (std::any_of(values, values + n, [](Value value) {
-                    return std::isnan(value);
-                })) {
-                for (size_t i = 0; i < n; ++i) {
-                    auto lb =
-                        std::lower_bound(first,
-                                         last,
-                                         values[i],
-                                         [](const auto& entry, Value value) {
-                                             return entry.a_ < value;
-                                         });
-                    auto ub =
-                        std::upper_bound(lb,
-                                         last,
-                                         values[i],
-                                         [](Value value, const auto& entry) {
-                                             return value < entry.a_;
-                                         });
-                    for (; lb != ub; ++lb) {
-                        validate(values[i], *lb);
-                        visit(lb->idx_);
-                    }
-                }
-                return;
-            }
-        }
         std::vector<Value> queries(values, values + n);
+        if constexpr (std::is_floating_point_v<Value>) {
+            // IEEE equality never matches NaN, and NaN cannot participate in
+            // the strict weak ordering required by sorting and lower bounds.
+            queries.erase(
+                std::remove_if(queries.begin(),
+                               queries.end(),
+                               [](Value value) { return std::isnan(value); }),
+                queries.end());
+        }
         std::sort(queries.begin(), queries.end());
         queries.erase(std::unique(queries.begin(), queries.end()),
                       queries.end());

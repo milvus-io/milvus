@@ -16,6 +16,7 @@
 
 #include "index/IndexLoadUtils.h"
 #include <algorithm>
+#include <cmath>
 #include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
 #include <bit>
@@ -275,6 +276,9 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
+                    if (!array->is_element_valid(j)) {
+                        continue;
+                    }
                     auto val = array->get_data_unchecked<T>(j);
                     data_[val].add(offset);
                 }
@@ -290,6 +294,7 @@ void
 BitmapIndex<T>::BuildArrayFieldNested(
     const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
+    std::vector<int64_t> null_elements;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
@@ -304,6 +309,10 @@ BitmapIndex<T>::BuildArrayFieldNested(
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
+                if (!array->is_element_valid(j)) {
+                    null_elements.push_back(offset++);
+                    continue;
+                }
                 auto val = array->get_data_unchecked<T>(j);
                 data_[val].add(offset++);
             }
@@ -316,6 +325,9 @@ BitmapIndex<T>::BuildArrayFieldNested(
     }
     total_num_rows_ = offset;
     valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    for (const auto null_element : null_elements) {
+        valid_bitset_.reset(null_element);
+    }
 }
 
 template <typename T>
@@ -433,7 +445,7 @@ BitmapIndex<T>::Serialize(const Config& config) {
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         ret_set.Append(
             BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
@@ -881,6 +893,11 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     if (is_mmap_) {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
+            if constexpr (std::is_floating_point_v<T>) {
+                if (std::isnan(val)) {
+                    continue;
+                }
+            }
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -893,6 +910,11 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
+            if constexpr (std::is_floating_point_v<T>) {
+                if (std::isnan(val)) {
+                    continue;
+                }
+            }
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -903,6 +925,11 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     } else {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
+            if constexpr (std::is_floating_point_v<T>) {
+                if (std::isnan(val)) {
+                    continue;
+                }
+            }
             auto it = bitsets_.find(val);
             if (it != bitsets_.end()) {
                 res |= it->second;
@@ -924,6 +951,11 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (is_mmap_) {
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
+            if constexpr (std::is_floating_point_v<T>) {
+                if (std::isnan(val)) {
+                    continue;
+                }
+            }
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -936,6 +968,11 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
+            if constexpr (std::is_floating_point_v<T>) {
+                if (std::isnan(val)) {
+                    continue;
+                }
+            }
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -947,6 +984,11 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     }
     for (size_t i = 0; i < n; ++i) {
         const auto& val = values[i];
+        if constexpr (std::is_floating_point_v<T>) {
+            if (std::isnan(val)) {
+                continue;
+            }
+        }
         auto it = bitsets_.find(val);
         if (it != bitsets_.end()) {
             res -= it->second;
@@ -1040,6 +1082,12 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::Range(const T& value, OpType op) {
+    AssertInfo(is_built_, "index has not been built");
+    if constexpr (std::is_floating_point_v<T>) {
+        if (std::isnan(value)) {
+            return TargetBitmap(total_num_rows_);
+        }
+    }
     if (is_mmap_) {
         return std::move(RangeForMmap(value, op));
     }
@@ -1242,6 +1290,12 @@ BitmapIndex<T>::Range(const T& lower_value,
                       bool lb_inclusive,
                       const T& upper_value,
                       bool ub_inclusive) {
+    AssertInfo(is_built_, "index has not been built");
+    if constexpr (std::is_floating_point_v<T>) {
+        if (std::isnan(lower_value) || std::isnan(upper_value)) {
+            return TargetBitmap(total_num_rows_);
+        }
+    }
     if (is_mmap_) {
         return RangeForMmap(
             lower_value, lb_inclusive, upper_value, ub_inclusive);
@@ -1570,7 +1624,7 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     uint8_t* data_ptr = index_data.get();
     SerializeIndexData(data_ptr);
     writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
                            valid_bitset.first.get(),

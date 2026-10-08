@@ -1623,4 +1623,53 @@ TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
     EXPECT_FALSE(final[14]);
     EXPECT_FALSE(final[15]);
 }
+TEST(JsonFlatIndexFloatingQueryTest, NaNDoesNotMatchAndSignedZerosAreEqual) {
+    auto index = BuildInMemoryJsonFlatIndex({R"({"a": -1.0})",
+                                             R"({"a": -0.0})",
+                                             R"({"a": 0.0})",
+                                             R"({"a": 1.0})",
+                                             R"({"a": "NaN"})",
+                                             R"({"a": null})",
+                                             R"({})"});
+    std::string path = "/a";
+    auto executor = index->create_executor<double>(path);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_EQ(executor->In(1, &nan).count(), 0);
+    EXPECT_EQ(executor->NotIn(1, &nan).count(), 4);
+    for (double zero : {-0.0, 0.0}) {
+        auto hit = executor->In(1, &zero);
+        EXPECT_EQ(hit.count(), 2);
+        EXPECT_TRUE(hit[1]);
+        EXPECT_TRUE(hit[2]);
+        EXPECT_EQ(executor->Range(zero, OpType::LessThan).count(), 1);
+        EXPECT_EQ(executor->Range(zero, OpType::LessEqual).count(), 3);
+        EXPECT_EQ(executor->Range(zero, OpType::GreaterThan).count(), 1);
+        EXPECT_EQ(executor->Range(zero, OpType::GreaterEqual).count(), 3);
+        EXPECT_EQ(executor->Range(zero, true, zero, true).count(), 2);
+    }
+    for (auto op : {OpType::LessThan,
+                    OpType::LessEqual,
+                    OpType::GreaterThan,
+                    OpType::GreaterEqual}) {
+        EXPECT_EQ(executor->Range(nan, op).count(), 0);
+    }
+    EXPECT_EQ(executor->Range(nan, true, 1.0, true).count(), 0);
+    EXPECT_EQ(executor->Range(-1.0, true, nan, true).count(), 0);
+    auto integer_executor = index->create_executor<int64_t>(path);
+    const int64_t int_zero = 0;
+    EXPECT_EQ(integer_executor->In(1, &int_zero).count(), 2);
+    EXPECT_EQ(integer_executor->Range(int_zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(integer_executor->Range(int_zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(integer_executor->Range(int_zero, OpType::GreaterThan).count(),
+              1);
+    EXPECT_EQ(integer_executor->Range(int_zero, OpType::GreaterEqual).count(),
+              3);
+    EXPECT_EQ(integer_executor->Range(int_zero, true, int_zero, true).count(),
+              2);
+    const double mixed[] = {nan, 1.0, nan};
+    auto hit = executor->In(3, mixed);
+    EXPECT_EQ(hit.count(), 1);
+    EXPECT_TRUE(hit[3]);
+}
+
 }  // namespace milvus::test

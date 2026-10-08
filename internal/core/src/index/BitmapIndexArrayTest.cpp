@@ -20,12 +20,14 @@
 #include <stdlib.h>
 #include <iosfwd>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "common/Array.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
@@ -35,6 +37,7 @@
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "index/InvertedIndexTantivy.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -1810,9 +1813,8 @@ MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
 // Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
 // sort index can serve high-cardinality data: STL_SORT must replace INVERTED
 // once distinct values reach the bitmap cardinality limit (default 100) AND
-// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
-// fields keep INVERTED regardless of version because the sort index cannot
-// handle array values.
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Ordinary arrays
+// require the separate version 6 threshold for parent-row sorted postings.
 TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
     auto root_path =
         fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
@@ -1829,8 +1831,7 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
                   std::vector<FieldDataPtr>{high_card_field_data}),
               ScalarIndexType::STLSORT);
 
-    // Regular (non-nested) array fields must stay on INVERTED at high
-    // cardinality, even at/above the nested STL_SORT version threshold.
+    // Ordinary arrays retain INVERTED until their own sorted-index threshold.
     TestHybridScalarIndexString regular(7, ctx, false);
     regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(regular.SelectIndexBuildTypePublic(
@@ -1851,6 +1852,87 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
                   std::vector<FieldDataPtr>{low_card_field_data}),
               ScalarIndexType::BITMAP);
 
+    boost::filesystem::remove_all(root_path);
+}
+
+// The array switch must preserve old readers and the nested v4 behavior.
+TEST(BitmapIndexArrayNestedTest, HybridOrdinaryArrayStlsortVersionGate) {
+    auto root_path =
+        fmt::format("{}/hybrid_array_high_card_stlsort", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3142);
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+    auto low_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(10, 1));
+
+    for (int32_t version : {kNestedHybridStlSortMinVersion,
+                            kArrayHybridStlSortMinVersion - 1,
+                            kArrayHybridStlSortMinVersion}) {
+        TestHybridScalarIndexString regular(7, ctx, false);
+        regular.scalar_index_version_ = version;
+        EXPECT_EQ(regular.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  version >= kArrayHybridStlSortMinVersion
+                      ? ScalarIndexType::STLSORT
+                      : ScalarIndexType::INVERTED)
+            << "scalar_index_version=" << version;
+
+        TestHybridScalarIndexString nested(7, ctx, true);
+        nested.scalar_index_version_ = version;
+        EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  ScalarIndexType::STLSORT);
+
+        for (bool is_nested : {false, true}) {
+            TestHybridScalarIndexString low(7, ctx, is_nested);
+            low.scalar_index_version_ = version;
+            EXPECT_EQ(low.SelectIndexBuildTypePublic(
+                          std::vector<FieldDataPtr>{low_card_field_data}),
+                      ScalarIndexType::BITMAP);
+        }
+    }
+    boost::filesystem::remove_all(root_path);
+}
+
+// Nullable array cardinality counts valid parent rows only. RawValue for a
+// compact nullable field returns nullptr for NULL, so it must not be read.
+TEST(BitmapIndexArrayNestedTest, HybridNullableArrayCardinalitySelection) {
+    auto root_path = fmt::format("{}/hybrid_nullable_array", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, true, 3143);
+    std::vector<ScalarFieldProto> rows(4);
+    for (int i = 0; i < 120; ++i) {
+        rows[0].mutable_string_data()->add_data(fmt::format("ignored_{}", i));
+    }
+    rows[1].mutable_string_data()->add_data("apple");
+    rows[1].mutable_string_data()->add_data("banana");
+    rows[2].mutable_string_data();
+    rows[3].mutable_string_data()->add_data("apple");
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        arrays.emplace_back(row);
+    }
+    const uint8_t valid_bitmap = 0x0a;
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, rows.size(), 0);
+    for (int32_t version :
+         {kArrayHybridStlSortMinVersion - 1, kArrayHybridStlSortMinVersion}) {
+        for (bool is_nested : {false, true}) {
+            TestHybridScalarIndexString hybrid(7, ctx, is_nested);
+            hybrid.scalar_index_version_ = version;
+            // The NULL row's 120 distinct strings must not select high cardinality.
+            hybrid.bitmap_index_cardinality_limit_ = 3;
+            EXPECT_EQ(hybrid.SelectIndexBuildTypePublic({field_data}),
+                      ScalarIndexType::BITMAP);
+            hybrid.bitmap_index_cardinality_limit_ = 2;
+            EXPECT_EQ(hybrid.SelectIndexBuildTypePublic({field_data}),
+                      is_nested || version >= kArrayHybridStlSortMinVersion
+                          ? ScalarIndexType::STLSORT
+                          : ScalarIndexType::INVERTED);
+        }
+    }
     boost::filesystem::remove_all(root_path);
 }
 
@@ -1881,4 +1963,560 @@ TEST(BitmapIndexArrayNestedTest,
     }
 
     boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+class TestHybridScalarIndexDouble : public index::HybridScalarIndex<double> {
+ public:
+    using index::HybridScalarIndex<double>::HybridScalarIndex;
+    ScalarIndexType
+    SelectPublic(const std::vector<FieldDataPtr>& fields) {
+        return SelectIndexBuildType(fields);
+    }
+    void
+    BuildPublic(const std::vector<FieldDataPtr>& fields) {
+        SelectIndexBuildType(fields);
+        BuildInternal(fields);
+    }
+};
+}  // namespace
+
+TEST(BitmapIndexArrayNestedTest, HybridArrayNaNFirstStillSelectsStlsort) {
+    auto root_path = fmt::format("{}/hybrid_array_nan_first", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Double, false, 3144);
+    ctx.fieldDataMeta.field_schema.set_name("array");
+    ScalarFieldProto scalar;
+    scalar.mutable_double_data()->add_data(
+        std::numeric_limits<double>::quiet_NaN());
+    for (int i = 0; i < 120; ++i) {
+        scalar.mutable_double_data()->add_data(i);
+    }
+    Array array(scalar);
+    auto field =
+        storage::CreateFieldData(DataType::ARRAY, DataType::DOUBLE, false);
+    field->FillFieldData(&array, 1);
+    TestHybridScalarIndexDouble hybrid(7, ctx, false);
+    hybrid.scalar_index_version_ = kArrayHybridStlSortMinVersion;
+    EXPECT_EQ(hybrid.SelectPublic({field}), ScalarIndexType::STLSORT);
+    hybrid.BuildPublic({field});
+    EXPECT_EQ(hybrid.Count(), 1);
+    const double finite = 119;
+    auto found = hybrid.In(1, &finite);
+    ASSERT_EQ(found.size(), 1);
+    EXPECT_TRUE(found[0]);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_EQ(hybrid.In(1, &nan).count(), 0);
+    boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+template <typename T>
+void
+AddNullableMemberValue(ScalarFieldProto& scalar, double value) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        scalar.mutable_string_data()->add_data(
+            std::to_string(static_cast<int>(value)));
+    } else if constexpr (std::is_same_v<T, double>) {
+        scalar.mutable_double_data()->add_data(value);
+    } else {
+        scalar.mutable_int_data()->add_data(static_cast<int32_t>(value));
+    }
+}
+
+template <typename T>
+T
+NullableMemberQuery(int value) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        return std::to_string(value);
+    } else {
+        return T(value);
+    }
+}
+
+template <typename T>
+FieldDataPtr
+NullableMemberArrayField() {
+    std::vector<ScalarFieldProto> rows(4);
+    AddNullableMemberValue<T>(rows[0], 13);  // NULL parent: hidden payload.
+    rows[0].add_valid_data(true);
+    AddNullableMemberValue<T>(rows[1],
+                              std::is_same_v<T, double>
+                                  ? std::numeric_limits<double>::quiet_NaN()
+                                  : 42);
+    AddNullableMemberValue<T>(rows[1], 7);
+    AddNullableMemberValue<T>(rows[1], 99);
+    for (bool valid : {false, true, false}) {
+        rows[1].add_valid_data(valid);
+    }
+    AddNullableMemberValue<T>(rows[3], 8);
+    rows[3].add_valid_data(true);
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        arrays.emplace_back(row, true);
+    }
+    auto field =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    const uint8_t parents = 0x0e;
+    field->FillFieldData(arrays.data(), &parents, arrays.size(), 0);
+    return field;
+}
+
+template <typename T>
+void
+CheckNullableMemberArray(index::ScalarIndex<T>& index, bool nested) {
+    ASSERT_EQ(index.Count(), 4);
+    auto valid = index.IsNotNull();
+    EXPECT_FALSE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+    EXPECT_EQ(valid[2], !nested);  // Empty parent vs invalid member slot.
+    EXPECT_TRUE(valid[3]);
+    EXPECT_EQ(index.IsNull().count(), nested ? 2 : 1);
+    const T seven = NullableMemberQuery<T>(7);
+    auto hits = index.In(1, &seven);
+    ASSERT_EQ(hits.size(), 4);
+    EXPECT_EQ(hits.count(), 1);
+    EXPECT_TRUE(hits[1]);
+    EXPECT_EQ(index.NotIn(1, &seven).count(), nested ? 1 : 2);
+    const T hidden = NullableMemberQuery<T>(99);
+    EXPECT_EQ(index.In(1, &hidden).count(), 0);
+    const T eight = NullableMemberQuery<T>(8);
+    EXPECT_TRUE(index.In(1, &eight)[3]);
+}
+
+template <typename T>
+class NullableArrayIndexDomainTest : public testing::Test {};
+using NullableArrayDomainTypes = testing::Types<int32_t, double, std::string>;
+TYPED_TEST_SUITE(NullableArrayIndexDomainTest, NullableArrayDomainTypes);
+}  // namespace
+
+TYPED_TEST(NullableArrayIndexDomainTest,
+           BitmapPreservesParentAndMemberDomains) {
+    using T = TypeParam;
+    constexpr auto elem =
+        std::is_same_v<T, std::string> ? proto::schema::DataType::VarChar
+        : std::is_same_v<T, double>    ? proto::schema::DataType::Double
+                                       : proto::schema::DataType::Int32;
+    auto field = NullableMemberArrayField<T>();
+    for (bool nested : {false, true}) {
+        auto ctx = MakeNestedCtx(
+            fmt::format("{}/nullable_bitmap_domain_{}", TestLocalPath, nested),
+            elem,
+            true,
+            3150 + nested);
+        index::BitmapIndex<T> built(ctx, nested);
+        built.BuildWithFieldData({field});
+        CheckNullableMemberArray(built, nested);
+        auto binary = built.Serialize({});
+        index::BitmapIndex<T> loaded(ctx, nested);
+        loaded.Load(binary, {});
+        CheckNullableMemberArray(loaded, nested);
+    }
+}
+
+TYPED_TEST(NullableArrayIndexDomainTest,
+           InvertedPreservesParentAndMemberDomainsAfterReload) {
+    using T = TypeParam;
+    constexpr auto elem =
+        std::is_same_v<T, std::string> ? proto::schema::DataType::VarChar
+        : std::is_same_v<T, double>    ? proto::schema::DataType::Double
+                                       : proto::schema::DataType::Int32;
+    auto field = NullableMemberArrayField<T>();
+    for (bool nested : {false, true}) {
+        for (bool single : {false, true}) {
+            for (bool unified : {false, true}) {
+                const auto key =
+                    int(nested) * 4 + int(single) * 2 + int(unified);
+                auto ctx = MakeNestedCtx(
+                    fmt::format(
+                        "{}/nullable_inverted_domain_{}", TestLocalPath, key),
+                    elem,
+                    true,
+                    3160 + key);
+                const uint32_t tantivy_version = single ? 5 : 7;
+                index::InvertedIndexTantivy<T> built(
+                    tantivy_version, ctx, single, true, nested);
+                built.BuildWithFieldData({field});
+                const bool sliced = nested && !single && !unified;
+                const auto old_slice_size = FILE_SLICE_SIZE.load();
+                auto slice_guard = folly::makeGuard([old_slice_size] {
+                    FILE_SLICE_SIZE.store(old_slice_size);
+                });
+                if (sliced) {
+                    FILE_SLICE_SIZE.store(sizeof(size_t));
+                }
+                auto meta = built.Serialize({});
+                if (sliced) {
+                    EXPECT_TRUE(meta.Contains(INDEX_FILE_SLICE_META));
+                } else if (nested) {
+                    EXPECT_TRUE(meta.Contains(
+                        index::INDEX_NULL_ELEMENT_OFFSET_FILE_NAME));
+                    EXPECT_FALSE(
+                        meta.Contains(index::INDEX_NULL_OFFSET_FILE_NAME));
+                }
+                auto stats =
+                    unified ? built.UploadUnified({}) : built.Upload({});
+                Config config;
+                config[index::INDEX_FILES] = stats->GetIndexFiles();
+                config[ENABLE_MMAP] = false;
+                ctx.set_for_loading_index(true);
+                for (bool async : {false, true}) {
+                    if (!unified && async) {
+                        continue;
+                    }
+                    ctx.use_async_load = async;
+                    index::InvertedIndexTantivy<T> loaded(
+                        tantivy_version, ctx, single, true, nested);
+                    if (unified) {
+                        loaded.LoadUnified(config);
+                    } else {
+                        loaded.Load(tracer::TraceContext{}, config);
+                    }
+                    CheckNullableMemberArray(loaded, nested);
+                }
+            }
+        }
+    }
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     InvertedNestedMemberNullRequiresNewReaderVersion) {
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/nested_inverted_member_version", TestLocalPath),
+        proto::schema::DataType::Int32,
+        true,
+        3170);
+    auto field = NullableMemberArrayField<int32_t>();
+    index::InvertedIndexTantivy<int32_t> old_writer(7, ctx, false, true, true);
+    old_writer.SetSupportsNestedElementNulls(false);
+    EXPECT_THROW(old_writer.BuildWithFieldData({field}), milvus::SegcoreError);
+    old_writer.SetSupportsNestedElementNulls(true);
+    EXPECT_NO_THROW(old_writer.BuildWithFieldData({field}));
+}
+
+namespace {
+class LegacyNestedInvertedFixture
+    : public index::InvertedIndexTantivy<int32_t> {
+ public:
+    using index::InvertedIndexTantivy<int32_t>::InvertedIndexTantivy;
+    void
+    SeedLegacyParentNullOffset() {
+        null_offsets_are_elements_ = false;
+        null_offset_ = {0};
+    }
+};
+}  // namespace
+
+// A pre-marker nested sidecar contains parent offsets, not member offsets.
+// Preserve the baseline all-valid member interpretation when loading it.
+TEST(BitmapIndexArrayNestedTest,
+     InvertedAbsentDomainMarkerKeepsLegacyValidity) {
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/nested_inverted_legacy_domain", TestLocalPath),
+        proto::schema::DataType::Int32,
+        true,
+        3171);
+    std::vector<ScalarFieldProto> rows(2);
+    rows[0].mutable_int_data()->add_data(7);
+    rows[1].mutable_int_data()->add_data(8);
+    auto field = MakeIntArrayFieldData(rows, false, nullptr);
+    LegacyNestedInvertedFixture built(7, ctx, false, true, true);
+    built.BuildWithFieldData({field});
+    built.SeedLegacyParentNullOffset();
+    auto binary = built.Serialize({});
+    EXPECT_TRUE(binary.Contains(index::INDEX_NULL_OFFSET_FILE_NAME));
+    EXPECT_FALSE(binary.Contains(index::INDEX_NULL_ELEMENT_OFFSET_FILE_NAME));
+    auto stats = built.Upload({});
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    ctx.set_for_loading_index(true);
+    index::InvertedIndexTantivy<int32_t> loaded(7, ctx, false, true, true);
+    loaded.Load(tracer::TraceContext{}, config);
+    EXPECT_EQ(loaded.IsNull().count(), 0);
+    EXPECT_EQ(loaded.IsNotNull().count(), 2);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     NonNullableParentsPreserveNullableMembersOnReload) {
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/bitmap_nullable_members_nonnullable_parent",
+                    TestLocalPath),
+        proto::schema::DataType::Double,
+        false,
+        3180);
+    ScalarFieldProto members;
+    members.mutable_double_data()->add_data(
+        std::numeric_limits<double>::quiet_NaN());
+    members.add_valid_data(false);
+    for (int i = 0; i < 600; ++i) {
+        members.mutable_double_data()->add_data(i);
+        members.add_valid_data(true);
+    }
+    Array array(members, true);
+    auto field =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+    field->FillFieldData(&array, 1);
+    index::BitmapIndex<double> built(ctx, true);
+    built.BuildWithFieldData({field});
+    auto check = [](index::BitmapIndex<double>& index) {
+        EXPECT_EQ(index.Count(), 601);
+        EXPECT_EQ(index.IsNull().count(), 1);
+        EXPECT_TRUE(index.IsNull()[0]);
+        EXPECT_EQ(index.IsNotNull().count(), 600);
+        const double target = 42;
+        const auto hit = index.In(1, &target);
+        EXPECT_EQ(hit.count(), 1);
+        EXPECT_TRUE(hit[43]);
+        EXPECT_EQ(index.NotIn(1, &target).count(), 599);
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        EXPECT_EQ(index.In(1, &nan).count(), 0);
+        EXPECT_EQ(index.NotIn(1, &nan).count(), 600);
+        const double mixed[] = {nan, target, nan};
+        EXPECT_EQ(index.In(3, mixed).count(), 1);
+        EXPECT_EQ(index.NotIn(3, mixed).count(), 599);
+        EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 0);
+        EXPECT_EQ(index.Range(target, true, nan, true).count(), 0);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    ASSERT_TRUE(binary.Contains(BITMAP_INDEX_VALID_BITSET));
+    for (bool mmap : {false, true}) {
+        Config config;
+        if (mmap) {
+            config[MMAP_FILE_PATH] =
+                ctx.chunkManagerPtr->GetRootPath() + "/legacy.mmap";
+        }
+        index::BitmapIndex<double> loaded(ctx, true);
+        loaded.Load(binary, config);
+        check(loaded);
+    }
+    auto stats = built.UploadUnified({});
+    for (bool mmap : {false, true}) {
+        for (bool async : {false, true}) {
+            Config config;
+            config[index::INDEX_FILES] = stats->GetIndexFiles();
+            if (mmap) {
+                config[MMAP_FILE_PATH] =
+                    ctx.chunkManagerPtr->GetRootPath() + "/packed.mmap";
+            }
+            auto load_ctx = ctx;
+            load_ctx.use_async_load = async;
+            index::BitmapIndex<double> loaded(load_ctx, true);
+            loaded.LoadUnified(config);
+            check(loaded);
+        }
+    }
+}
+
+TEST(BitmapIndexArrayNestedTest, InvertedFactoryGatesNullableMembersByVersion) {
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/nested_inverted_factory_member_version", TestLocalPath),
+        proto::schema::DataType::Int32,
+        true,
+        3182);
+    auto field = NullableMemberArrayField<int32_t>();
+    for (int32_t version : {5, 6}) {
+        auto index =
+            index::IndexFactory::GetInstance().CreateNestedIndexInverted(
+                7, ctx, version);
+        auto* scalar = dynamic_cast<index::ScalarIndex<int32_t>*>(index.get());
+        ASSERT_NE(scalar, nullptr);
+        if (version == 5) {
+            EXPECT_THROW(scalar->BuildWithFieldData({field}),
+                         milvus::SegcoreError);
+        } else {
+            EXPECT_NO_THROW(scalar->BuildWithFieldData({field}));
+        }
+    }
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     InvertedNullParentsDoNotMaskValidElementSlots) {
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/nested_inverted_parent_null_domain", TestLocalPath),
+        proto::schema::DataType::Int32,
+        true,
+        3183);
+    std::vector<ScalarFieldProto> rows(4);
+    rows[0].mutable_int_data()->add_data(99);  // Hidden NULL parent payload.
+    rows[1].mutable_int_data()->add_data(7);
+    rows[1].mutable_int_data()->add_data(8);
+    const uint8_t parents = 0x06;  // NULL, two valid members, empty, NULL.
+    auto field = MakeIntArrayFieldData(rows, true, &parents);
+    index::InvertedIndexTantivy<int32_t> built(7, ctx, false, true, true);
+    built.BuildWithFieldData({field});
+    EXPECT_FALSE(built.Serialize({}).Contains(
+        index::INDEX_NULL_ELEMENT_OFFSET_FILE_NAME));
+    auto stats = built.UploadUnified({});
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    ctx.set_for_loading_index(true);
+    index::InvertedIndexTantivy<int32_t> loaded(7, ctx, false, true, true);
+    loaded.LoadUnified(config);
+    ASSERT_EQ(loaded.Count(), 2);
+    EXPECT_EQ(loaded.IsNull().count(), 0);
+    EXPECT_EQ(loaded.IsNotNull().count(), 2);
+    const int32_t seven = 7, eight = 8;
+    EXPECT_TRUE(loaded.In(1, &seven)[0]);
+    EXPECT_TRUE(loaded.In(1, &eight)[1]);
+}
+
+namespace {
+template <typename T>
+class FloatingIndexNaNQueryTest : public testing::Test {};
+using FloatingNaNQueryTypes = testing::Types<float, double>;
+TYPED_TEST_SUITE(FloatingIndexNaNQueryTest, FloatingNaNQueryTypes);
+
+template <typename T>
+void
+CheckFloatingNaNQueries(index::ScalarIndex<T>& index) {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    ASSERT_EQ(index.Count(), 6);
+    EXPECT_EQ(index.In(1, &nan).count(), 0);
+    EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
+    const T mixed[] = {nan, T(1), nan};
+    auto hit = index.In(3, mixed);
+    EXPECT_EQ(hit.count(), 1);
+    EXPECT_TRUE(hit[3]);
+    EXPECT_EQ(index.NotIn(3, mixed).count(), 4);
+    for (const T zero : {T(0), -T(0)}) {
+        const auto zeros = index.In(1, &zero);
+        EXPECT_EQ(zeros.count(), 2);
+        EXPECT_TRUE(zeros[1]);
+        EXPECT_TRUE(zeros[2]);
+    }
+    EXPECT_EQ(index.In(1, &inf).count(), 1);
+    for (auto op : {OpType::LessThan,
+                    OpType::LessEqual,
+                    OpType::GreaterThan,
+                    OpType::GreaterEqual}) {
+        EXPECT_EQ(index.Range(nan, op).count(), 0);
+    }
+    EXPECT_EQ(index.Range(nan, true, inf, true).count(), 0);
+    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 0);
+    const T zero = 0;
+    EXPECT_EQ(index.Range(zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(index.Range(zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(index.Range(-zero, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(-zero, OpType::GreaterEqual).count(), 4);
+    EXPECT_EQ(index.Range(-zero, true, zero, true).count(), 2);
+}
+
+template <typename T>
+std::pair<storage::FileManagerContext, FieldDataPtr>
+MakeFloatingNaNQueryFixture(const std::string& name, int64_t index_id) {
+    constexpr auto dtype = std::is_same_v<T, float>
+                               ? proto::schema::DataType::Float
+                               : proto::schema::DataType::Double;
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/{}", TestLocalPath, name), dtype, true, index_id);
+    ctx.fieldDataMeta.field_schema.set_name("scalar");
+    ctx.fieldDataMeta.field_schema.set_data_type(dtype);
+    ctx.fieldDataMeta.field_schema.set_element_type(
+        proto::schema::DataType::None);
+    const T inf = std::numeric_limits<T>::infinity();
+    const T values[] = {
+        -inf, -T(0), T(0), T(1), inf, std::numeric_limits<T>::quiet_NaN()};
+    auto field =
+        std::make_shared<FieldData<T>>(static_cast<DataType>(dtype), true);
+    const uint8_t validity = 0x1f;
+    field->FillFieldData(values, &validity, std::size(values), 0);
+    return {ctx, field};
+}
+}  // namespace
+
+TYPED_TEST(FloatingIndexNaNQueryTest,
+           BitmapNaNQueriesIgnoreTargetsAndKeepValidity) {
+    using T = TypeParam;
+    auto [ctx, field] =
+        MakeFloatingNaNQueryFixture<T>("bitmap_nan_query", 3190);
+    index::BitmapIndex<T> built(ctx);
+    built.BuildWithFieldData({field});
+    CheckFloatingNaNQueries(built);
+    auto binary = built.Serialize({});
+    index::BitmapIndex<T> loaded(ctx);
+    loaded.Load(binary, {});
+    CheckFloatingNaNQueries(loaded);
+}
+
+TYPED_TEST(FloatingIndexNaNQueryTest,
+           InvertedNaNQueriesIgnoreTargetsAndKeepValidity) {
+    using T = TypeParam;
+    auto [ctx, field] =
+        MakeFloatingNaNQueryFixture<T>("inverted_nan_query", 3191);
+    index::InvertedIndexTantivy<T> built(7, ctx);
+    built.BuildWithFieldData({field});
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.LoadUnified(config);
+    CheckFloatingNaNQueries(loaded);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T query[] = {nan, T(1)};
+    EXPECT_EQ(
+        loaded.InApplyFilter(2, query, [](size_t) { return true; }).count(), 1);
+    size_t callbacks = 0;
+    loaded.InApplyCallback(1, &nan, [&](size_t) { ++callbacks; });
+    EXPECT_EQ(callbacks, 0);
+    loaded.InApplyCallback(2, query, [&](size_t row) {
+        EXPECT_EQ(row, 3);
+        ++callbacks;
+    });
+    EXPECT_EQ(callbacks, 1);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     LowCardinalityHybridNaNQueryUsesBitmapCorrectly) {
+    auto [ctx, field] =
+        MakeFloatingNaNQueryFixture<double>("hybrid_bitmap_nan_query", 3192);
+    TestHybridScalarIndexDouble hybrid(7, ctx);
+    hybrid.scalar_index_version_ = 6;
+    EXPECT_EQ(hybrid.SelectPublic({field}), ScalarIndexType::BITMAP);
+    hybrid.BuildPublic({field});
+    CheckFloatingNaNQueries(hybrid);
+}
+
+TYPED_TEST(FloatingIndexNaNQueryTest,
+           InvertedNumericRangesExcludeBothNaNEncodings) {
+    using T = TypeParam;
+    auto [ctx, ignored] =
+        MakeFloatingNaNQueryFixture<T>("inverted_nan_range_domain", 3193);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
+    const uint8_t validity = 0x7f;
+    constexpr auto dtype =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto field = std::make_shared<FieldData<T>>(dtype, true);
+    field->FillFieldData(values, &validity, std::size(values), 0);
+    index::InvertedIndexTantivy<T> built(7, ctx);
+    built.BuildWithFieldData({field});
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.LoadUnified(config);
+    ASSERT_EQ(loaded.Count(), 8);
+    EXPECT_EQ(loaded.In(1, &nan).count(), 0);
+    EXPECT_EQ(loaded.NotIn(1, &nan).count(), 7);
+    const T zero = 0;
+    EXPECT_EQ(loaded.Range(zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(loaded.Range(zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(loaded.Range(zero, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(loaded.Range(zero, OpType::GreaterEqual).count(), 4);
+    EXPECT_EQ(loaded.Range(-inf, OpType::LessEqual).count(), 1);
+    EXPECT_EQ(loaded.Range(inf, OpType::GreaterEqual).count(), 1);
+    auto all_numeric = loaded.Range(-inf, true, inf, true);
+    EXPECT_EQ(all_numeric.count(), 5);
+    EXPECT_FALSE(all_numeric[0]);
+    EXPECT_FALSE(all_numeric[6]);
+    EXPECT_FALSE(all_numeric[7]);
 }

@@ -2539,3 +2539,31 @@ func Test_mapVectorMetricToEmbListMetric(t *testing.T) {
 		})
 	}
 }
+
+func TestJSONAutoIndexRoutesTypedArraysToInverted(t *testing.T) {
+	paramtable.Init()
+	key := Params.AutoIndexConfig.ScalarAutoIndexParams.Key
+	Params.Save(key, `{"int":"HYBRID","varchar":"HYBRID","bool":"BITMAP","float":"HYBRID","json":"HYBRID","geometry":"RTREE","timestamptz":"STL_SORT"}`)
+	defer Params.Reset(key)
+	for _, castType := range []string{"JSON", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR", "DOUBLE", "VARCHAR", "BOOL"} {
+		t.Run(castType, func(t *testing.T) {
+			cit := &createIndexTask{
+				req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+					{Key: common.JSONCastTypeKey, Value: castType},
+					{Key: common.JSONPathKey, Value: `json["a"]`},
+				}},
+				fieldSchema: &schemapb.FieldSchema{FieldID: 101, Name: "json", DataType: schemapb.DataType_JSON},
+			}
+			if !assert.NoError(t, cit.parseIndexParams(context.TODO())) {
+				return
+			}
+			expected := indexparamcheck.IndexHybrid
+			if castType == "JSON" || strings.HasPrefix(castType, "ARRAY_") {
+				expected = indexparamcheck.IndexINVERTED
+			}
+			assert.Contains(t, cit.newIndexParams, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: expected})
+			assert.True(t, cit.isAutoIndex)
+		})
+	}
+}

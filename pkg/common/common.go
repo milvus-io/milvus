@@ -141,6 +141,10 @@ const (
 	//   source rows through optional nan_rows metadata. Older readers ignore
 	//   this metadata and would treat those rows as NULL, so writers enable it
 	//   only when the negotiated scalar index engine version is at least 6.
+	// - Ordinary ARRAY HYBRID supports high-cardinality sorted parent-row
+	//   postings, retaining BITMAP for low cardinality without NaN.
+	// - Nested INVERTED can preserve nullable member offsets and persist their
+	//   element-domain marker; older build targets reject that new metadata.
 	// - On-disk file format is unchanged from v3.
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(6)

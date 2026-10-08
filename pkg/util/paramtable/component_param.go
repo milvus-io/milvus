@@ -7111,7 +7111,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
 		Version:      "2.6.10",
 		DefaultValue: "STL_SORT",
-		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Doc:          "Index type for high cardinality fields in hybrid index. Array types use STL_SORT when supported by the resolved scalar index version (nested arrays from version 4, ordinary arrays from version 6), otherwise INVERTED.",
 		Export:       false,
 	}
 	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)

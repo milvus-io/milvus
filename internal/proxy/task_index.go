@@ -235,10 +235,13 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			}
 
 			if typeutil.IsJSONType(cit.fieldSchema.DataType) && indexType == indexparamcheck.IndexHybrid {
-				// Full JSON cast is only implemented by the inverted JSON
-				// index; HYBRID supports typed JSON path indexes.
-				if castType, ok := indexParamsMap[common.JSONCastTypeKey]; ok && strings.EqualFold(castType, "JSON") {
-					indexType = indexparamcheck.IndexINVERTED
+				// Full JSON and typed JSON arrays require the inverted JSON
+				// index. HYBRID currently supports scalar typed paths only.
+				if castType, ok := indexParamsMap[common.JSONCastTypeKey]; ok {
+					switch strings.ToUpper(castType) {
+					case "JSON", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR":
+						indexType = indexparamcheck.IndexINVERTED
+					}
 				}
 			}
 			indexParamsMap[common.IndexTypeKey] = indexType

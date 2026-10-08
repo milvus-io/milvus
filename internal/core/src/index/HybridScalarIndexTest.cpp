@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <map>
@@ -33,6 +34,7 @@
 #include <vector>
 
 #include "common/Consts.h"
+#include "common/Array.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
@@ -40,6 +42,7 @@
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
+#include "index/ScalarIndexSort.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -1508,3 +1511,96 @@ INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackNullBinlog,
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackDefaultValueBinlog,
                                HybridIndexTestV4,
                                BitmapType);
+
+namespace {
+template <typename T>
+class ExposedHybridNaNSelection : public HybridScalarIndex<T> {
+ public:
+    using HybridScalarIndex<T>::HybridScalarIndex;
+    using HybridScalarIndex<T>::SelectSortForNaN;
+};
+
+template <typename T>
+FieldDataPtr
+HybridNaNArrayData(bool valid_nan) {
+    ScalarFieldProto values;
+    const auto nan = std::numeric_limits<T>::quiet_NaN();
+    if constexpr (std::is_same_v<T, float>) {
+        values.mutable_float_data()->add_data(nan);
+        values.mutable_float_data()->add_data(T(3));
+    } else {
+        values.mutable_double_data()->add_data(nan);
+        values.mutable_double_data()->add_data(T(3));
+    }
+    values.add_valid_data(valid_nan);
+    values.add_valid_data(true);
+    std::vector<Array> arrays{Array(values, true)};
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    field->FillFieldData(arrays.data(), arrays.size());
+    return field;
+}
+}  // namespace
+
+using HybridNaNTypes = testing::Types<float, double>;
+template <typename T>
+class HybridNaNVersionGuardTest : public testing::Test {};
+TYPED_TEST_SUITE(HybridNaNVersionGuardTest, HybridNaNTypes);
+
+TYPED_TEST(HybridNaNVersionGuardTest, RawBuildRejectsUnsupportedValidNaN) {
+    using T = TypeParam;
+    const T values[] = {std::numeric_limits<T>::quiet_NaN(), T(3)};
+    ExposedHybridNaNSelection<T> legacy(2);
+    legacy.scalar_index_version_ = 5;
+    try {
+        legacy.Build(2, values);
+        FAIL() << "NaN must not reach legacy bitmap cardinality selection";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+    }
+    ExposedHybridNaNSelection<T> current(2);
+    current.scalar_index_version_ = kMinScalarIndexVersionForNaNRows;
+    ASSERT_NO_THROW(current.Build(2, values));
+    EXPECT_EQ(current.internal_index_type_, ScalarIndexType::STLSORT);
+    EXPECT_EQ(current.Count(), 2);
+    EXPECT_EQ(current.Size(), 1);
+    EXPECT_EQ(current.IsNotNull().count(), 2);
+    auto* sorted =
+        dynamic_cast<ScalarIndexSort<T>*>(current.internal_index_.get());
+    ASSERT_NE(sorted, nullptr);
+    for (const auto& entry : *sorted) {
+        EXPECT_FALSE(std::isnan(entry.a_));
+    }
+    const bool valid[] = {false, true};
+    ExposedHybridNaNSelection<T> hidden(2);
+    hidden.scalar_index_version_ = 5;
+    ASSERT_NO_THROW(hidden.Build(2, values, valid));
+    EXPECT_EQ(hidden.internal_index_type_, ScalarIndexType::BITMAP);
+    EXPECT_EQ(hidden.IsNotNull().count(), 1);
+}
+
+TYPED_TEST(HybridNaNVersionGuardTest,
+           OrdinaryAndNestedArrayIgnoreHiddenMemberNaN) {
+    using T = TypeParam;
+    for (bool nested : {false, true}) {
+        for (int32_t version : {5, kMinScalarIndexVersionForNaNRows}) {
+            ExposedHybridNaNSelection<T> valid(2, {}, nested);
+            valid.scalar_index_version_ = version;
+            if (version < kMinScalarIndexVersionForNaNRows) {
+                try {
+                    valid.SelectSortForNaN({HybridNaNArrayData<T>(true)});
+                    FAIL() << "Unsupported array NaN must not reach std::set";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+                }
+            } else {
+                EXPECT_TRUE(
+                    valid.SelectSortForNaN({HybridNaNArrayData<T>(true)}));
+                EXPECT_EQ(valid.internal_index_type_, ScalarIndexType::STLSORT);
+            }
+            ExposedHybridNaNSelection<T> hidden(2, {}, nested);
+            hidden.scalar_index_version_ = version;
+            EXPECT_FALSE(
+                hidden.SelectSortForNaN({HybridNaNArrayData<T>(false)}));
+        }
+    }
+}

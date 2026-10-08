@@ -219,7 +219,12 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     for (size_t i = 0; i < n; ++i, ++p) {
         if (!valid_data || valid_data[i]) {
             valid_bitset_.set(i);
-            if (supports_unindexed_nan_ && IsScalarSortNaN(*p)) {
+            if (IsScalarSortNaN(*p)) {
+                if (!supports_unindexed_nan_) {
+                    ThrowInfo(Unsupported,
+                              "STL_SORT cannot preserve NaN source rows below "
+                              "scalar index version 6");
+                }
                 nan_rows_.push_back(i);
             } else {
                 data_.emplace_back(IndexStructure(*p, i));
@@ -245,6 +250,11 @@ ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
     index_build_begin_ = std::chrono::system_clock::now();
 
+    if (is_array_field_ && !is_nested_index_) {
+        BuildWithArrayData(field_datas);
+        return;
+    }
+
     if (is_nested_index_) {
         BuildWithArrayDataNested(field_datas);
         return;
@@ -268,7 +278,12 @@ ScalarIndexSort<T>::BuildWithFieldData(
             if (data->is_valid(i)) {
                 auto value = reinterpret_cast<const T*>(data->RawValue(i));
                 valid_bitset_.set(offset);
-                if (supports_unindexed_nan_ && IsScalarSortNaN(*value)) {
+                if (IsScalarSortNaN(*value)) {
+                    if (!supports_unindexed_nan_) {
+                        ThrowInfo(Unsupported,
+                                  "STL_SORT cannot preserve NaN source rows "
+                                  "below scalar index version 6");
+                    }
                     nan_rows_.push_back(offset);
                 } else {
                     data_.emplace_back(IndexStructure(*value, offset));
@@ -295,6 +310,60 @@ ScalarIndexSort<T>::BuildWithFieldData(
 
 template <typename T>
 void
+ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
+    total_num_rows_ = 0;
+    for (const auto& data : datas) {
+        total_num_rows_ += data->get_num_rows();
+    }
+    if (total_num_rows_ == 0) {
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build zero rows!");
+    }
+    data_.clear();
+    nan_rows_.clear();
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    int64_t row = 0;
+    for (const auto& data : datas) {
+        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++row) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
+            // Empty arrays are valid rows even though they have no postings.
+            valid_bitset_.set(row);
+            const auto* array =
+                reinterpret_cast<const Array*>(data->RawValue(i));
+            for (int64_t j = 0; j < array->length(); ++j) {
+                if (!array->is_element_valid(j)) {
+                    continue;
+                }
+                auto value = array->get_data_unchecked<T>(j);
+                if constexpr (std::is_floating_point_v<T>) {
+                    // NaN cannot match equality or range predicates. Excluding
+                    // it also keeps the sorted postings strictly ordered.
+                    if (std::isnan(value)) {
+                        if (!supports_unindexed_nan_) {
+                            ThrowInfo(Unsupported,
+                                      "STL_SORT cannot preserve NaN source "
+                                      "rows below scalar index version 6");
+                        }
+                        continue;
+                    }
+                }
+                data_.emplace_back(IndexStructure(value, row));
+            }
+        }
+    }
+    std::sort(data_.begin(), data_.end());
+    // Ordinary arrays cannot be reconstructed with scalar Reverse_Lookup.
+    idx_to_offsets_.assign(total_num_rows_, -1);
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
+    is_built_ = true;
+    setup_data_pointers();
+    ComputeByteSize();
+}
+
+template <typename T>
+void
 ScalarIndexSort<T>::BuildWithArrayDataNested(
     const std::vector<FieldDataPtr>& datas) {
     // calculate total_num_rows_
@@ -315,8 +384,8 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     }
 
     data_.reserve(total_num_rows_);
-    // all values are valid for nested index because any given slot in a valid_bitset_ denotes one element in a valid row
-    valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    // Slots retain their flattened offsets, including nullable Struct members.
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
     int64_t offset = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
@@ -327,8 +396,18 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
+                if (!array->is_element_valid(j)) {
+                    ++offset;
+                    continue;
+                }
+                valid_bitset_.set(offset);
                 auto value = array->get_data_unchecked<T>(j);
-                if (supports_unindexed_nan_ && IsScalarSortNaN(value)) {
+                if (IsScalarSortNaN(value)) {
+                    if (!supports_unindexed_nan_) {
+                        ThrowInfo(Unsupported,
+                                  "STL_SORT cannot preserve NaN source rows "
+                                  "below scalar index version 6");
+                    }
                     nan_rows_.push_back(offset);
                 } else {
                     data_.emplace_back(IndexStructure(value, offset));
@@ -383,6 +462,18 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> nan_rows(new uint8_t[bytes]);
         milvus::fastmem::FastMemcpy(nan_rows.get(), nan_rows_.data(), bytes);
         res_set.Append("nan_rows", nan_rows, bytes);
+    }
+
+    if (is_array_field_ || is_nested_index_) {
+        auto indexed_validity = valid_bitset_.clone();
+        for (const auto row : nan_rows_) {
+            indexed_validity.reset(row);
+        }
+        const auto bytes = indexed_validity.size_in_bytes();
+        std::shared_ptr<uint8_t[]> validity(new uint8_t[bytes]);
+        milvus::fastmem::FastMemcpy(
+            validity.get(), indexed_validity.data(), bytes);
+        res_set.Append("valid_bitset", validity, bytes);
     }
 
     milvus::Disassemble(res_set);
@@ -531,6 +622,13 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
     idx_to_offsets_size_ = idx_to_offsets_.size();
 
+    if (index_binary.Contains("valid_bitset")) {
+        const auto validity = index_binary.GetByName("valid_bitset");
+        AssertInfo(validity->size == valid_bitset_.size_in_bytes(),
+                   "invalid ScalarIndexSort validity bitmap size");
+        milvus::fastmem::FastMemcpy(
+            valid_bitset_.data(), validity->data.get(), validity->size);
+    }
     nan_rows_.clear();
     if (index_binary.Contains("nan_rows")) {
         const auto rows = index_binary.GetByName("nan_rows");
@@ -636,6 +734,9 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
+    if (IsScalarSortNaN(value)) {
+        return TargetBitmap(Count());
+    }
     auto lb = begin();
     auto ub = end();
     if (ShouldSkip(value, value, op)) {
@@ -663,7 +764,7 @@ ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         for (const auto row : nan_rows_) {
@@ -695,6 +796,10 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
                           const T& upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
+    if (IsScalarSortNaN(lower_bound_value) ||
+        IsScalarSortNaN(upper_bound_value)) {
+        return TargetBitmap(Count());
+    }
     if (lower_bound_value > upper_bound_value ||
         (lower_bound_value == upper_bound_value &&
          !(lb_inclusive && ub_inclusive))) {
@@ -725,7 +830,7 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         for (const auto row : nan_rows_) {
@@ -753,6 +858,9 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 template <typename T>
 std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
+    if (is_array_field_ && !is_nested_index_) {
+        return std::nullopt;
+    }
     AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 

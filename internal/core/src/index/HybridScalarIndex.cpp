@@ -198,17 +198,23 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n,
                                            const T* values,
                                            const bool* valid_data) {
     if constexpr (std::is_floating_point_v<T>) {
-        if (scalar_index_version_ >= kMinScalarIndexVersionForNaNRows) {
-            for (size_t i = 0; i < n; ++i) {
-                if ((!valid_data || valid_data[i]) && std::isnan(values[i])) {
-                    internal_index_type_ = ScalarIndexType::STLSORT;
-                    return internal_index_type_;
+        for (size_t i = 0; i < n; ++i) {
+            if ((!valid_data || valid_data[i]) && std::isnan(values[i])) {
+                if (scalar_index_version_ < kMinScalarIndexVersionForNaNRows) {
+                    ThrowInfo(Unsupported,
+                              "HYBRID cannot preserve NaN source rows below "
+                              "scalar index version 6");
                 }
+                internal_index_type_ = ScalarIndexType::STLSORT;
+                return internal_index_type_;
             }
         }
     }
     std::set<T> distinct_vals;
     for (size_t i = 0; i < n; i++) {
+        if (valid_data && !valid_data[i]) {
+            continue;
+        }
         distinct_vals.insert(values[i]);
         if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
             break;
@@ -222,9 +228,6 @@ bool
 HybridScalarIndex<T>::SelectSortForNaN(
     const std::vector<FieldDataPtr>& field_datas) {
     if constexpr (std::is_floating_point_v<T>) {
-        if (scalar_index_version_ < kMinScalarIndexVersionForNaNRows) {
-            return false;
-        }
         for (const auto& data : field_datas) {
             for (size_t row = 0; row < data->get_num_rows(); ++row) {
                 if (!data->is_valid(row)) {
@@ -232,13 +235,11 @@ HybridScalarIndex<T>::SelectSortForNaN(
                 }
                 bool has_nan = false;
                 if (data->get_data_type() == DataType::ARRAY) {
-                    if (!is_nested_index_) {
-                        continue;
-                    }
                     const auto* array =
                         static_cast<const Array*>(data->RawValue(row));
                     for (size_t i = 0; i < array->length(); ++i) {
-                        if (std::isnan(array->get_data_unchecked<T>(i))) {
+                        if (array->is_element_valid(i) &&
+                            std::isnan(array->get_data_unchecked<T>(i))) {
                             has_nan = true;
                             break;
                         }
@@ -248,6 +249,12 @@ HybridScalarIndex<T>::SelectSortForNaN(
                         std::isnan(*static_cast<const T*>(data->RawValue(row)));
                 }
                 if (has_nan) {
+                    if (scalar_index_version_ <
+                        kMinScalarIndexVersionForNaNRows) {
+                        ThrowInfo(Unsupported,
+                                  "HYBRID cannot preserve NaN source rows "
+                                  "below scalar index version 6");
+                    }
                     internal_index_type_ = ScalarIndexType::STLSORT;
                     return true;
                 }
@@ -265,6 +272,9 @@ HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
             auto val = reinterpret_cast<const T*>(data->RawValue(i));
             distinct_vals.insert(*val);
             if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
@@ -283,10 +293,24 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
             auto array =
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             for (size_t j = 0; j < array->length(); ++j) {
+                if (!array->is_element_valid(j)) {
+                    continue;
+                }
                 auto val = array->template get_data_unchecked<T>(j);
+                if constexpr (std::is_floating_point_v<T>) {
+                    if (!is_nested_index_ &&
+                        scalar_index_version_ >=
+                            kArrayHybridStlSortMinVersion &&
+                        std::isnan(val)) {
+                        continue;
+                    }
+                }
                 distinct_vals.insert(val);
 
                 // Limit the bitmap index cardinality because of memory usage
@@ -296,21 +320,15 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
             }
         }
     }
-    // For array types, always use BITMAP for low cardinality. For high
-    // cardinality, nested indexes index the flattened scalar elements, so the
-    // sort index can serve them and STL_SORT replaces INVERTED once the whole
-    // cluster is guaranteed to run scalar_index_version_ >=
-    // kNestedHybridStlSortMinVersion; below that, an older reader's
-    // ScalarIndexSort predates nested-index support and cannot load a nested
-    // STL_SORT physical index. Regular array fields keep INVERTED because the
-    // sort index cannot handle array values. These are hardcoded and config
-    // parameters don't apply to arrays.
+    // Nested arrays use element offsets; ordinary arrays use parent-row
+    // postings supported from version 6. Older readers retain INVERTED.
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        internal_index_type_ =
-            (is_nested_index_ &&
-             scalar_index_version_ >= kNestedHybridStlSortMinVersion)
-                ? ScalarIndexType::STLSORT
-                : ScalarIndexType::INVERTED;
+        const auto min_sort_version = is_nested_index_
+                                          ? kNestedHybridStlSortMinVersion
+                                          : kArrayHybridStlSortMinVersion;
+        internal_index_type_ = scalar_index_version_ >= min_sort_version
+                                   ? ScalarIndexType::STLSORT
+                                   : ScalarIndexType::INVERTED;
     } else {
         internal_index_type_ = ScalarIndexType::BITMAP;
     }
@@ -351,12 +369,15 @@ HybridScalarIndex<T>::GetInternalIndex() {
                                        kMinScalarIndexVersionForNaNRows);
         internal_index_ = std::move(index);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
+        auto index = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_,
             this->file_manager_context_,
             false,
             true,
             is_nested_index_);
+        index->SetSupportsNestedElementNulls(scalar_index_version_ >=
+                                             kArrayHybridStlSortMinVersion);
+        internal_index_ = std::move(index);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -381,12 +402,15 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
         internal_index_ = std::make_shared<StringIndexSort>(
             this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
+        auto index = std::make_shared<InvertedIndexTantivy<std::string>>(
             tantivy_index_version_,
             this->file_manager_context_,
             false,
             true,
             is_nested_index_);
+        index->SetSupportsNestedElementNulls(scalar_index_version_ >=
+                                             kArrayHybridStlSortMinVersion);
+        internal_index_ = std::move(index);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");

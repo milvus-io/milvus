@@ -189,6 +189,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
+    void
+    BuildWithArrayData(const std::vector<FieldDataPtr>& datas);
+
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
