@@ -138,7 +138,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_begin(cBasePath, cProperties,
+	res := C.loon_transaction_open(cBasePath, cProperties,
 		C.int64_t(baseVersion),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
@@ -226,6 +226,10 @@ func resolveDropIndexes(basePath string, baseVersion int64,
 	if err != nil {
 		return nil, merr.Wrap(err, "resolve manifest index drops")
 	}
+	return resolveManifestIndexDrops(manifestPath, current, drops)
+}
+
+func resolveManifestIndexDrops(manifestPath string, current []ManifestIndexInfo, drops []DropIndexEntry) ([]int64, error) {
 	buildIDs := make(map[int64]int64, len(current))
 	for _, index := range current {
 		buildIDs[index.IndexID] = index.BuildID

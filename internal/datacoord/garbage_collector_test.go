@@ -3076,7 +3076,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_ManifestUnreadable(t *test
 		}), 3001
 	}
 
-	readErr := mockey.Mock(packed.GetManifestIndexInfos).
+	readErr := mockey.Mock(packed.GetManifestIndexInfosAsync).
 		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
 	defer readErr.UnPatch()
 
@@ -5471,7 +5471,7 @@ func setupV3SegIndexGC(t *testing.T) (*meta, string, string) {
 
 func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 	t.Helper()
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               400,
 		BuildID:               4100,
 		FieldID:               101,
@@ -5487,7 +5487,7 @@ func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 	}}, nil).Build()
 	t.Cleanup(func() { infos.UnPatch() })
 
-	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).Return(newManifest, nil).Build()
 	t.Cleanup(func() { commit.UnPatch() })
 
 	blocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
@@ -5561,13 +5561,13 @@ func TestGarbageCollector_recycleUnusedSegIndexes_BatchCommitsOnlyDeletedFiles(t
 	m, newManifest, _ := setupV3SegIndexGC(t)
 	addV3GCFinishedIndex(t, m, 401, 4200)
 
-	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{
 		v3GCManifestIndex(400, 4100),
 		v3GCManifestIndex(401, 4200),
 	}, nil).Build().UnPatch()
 	defer mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build().UnPatch()
-	defer mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	defer mockey.Mock(packed.CommitManifestUpdatesAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			require.Equal(t, []packed.DropIndexEntry{{IndexID: 400, ExpectedBuildID: 4100}}, updates.DropIndexes)
 			return newManifest, nil
 		}).Build().UnPatch()
@@ -5710,8 +5710,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes_UnmarkedUsesLegacyPathWithoutM
 	m, _, _ := setupV3SegIndexGC(t)
 	m.GetSegment(context.TODO(), 4001).ManifestHasIndex = false
 	manifestReads := 0
-	defer mockey.Mock(packed.GetManifestIndexInfos).To(
-		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 			manifestReads++
 			return nil, errors.New("unexpected manifest read")
 		}).Build().UnPatch()
@@ -5800,7 +5800,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_V3FileDeletionFailureRetriesFr
 // plain RemoveSegmentIndex path.
 func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t *testing.T) {
 	m, _, _ := setupV3SegIndexGC(t)
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, nil).Build()
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, nil).Build()
 	defer infos.UnPatch()
 	blocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
 	defer blocked.UnPatch()
@@ -5821,6 +5821,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 // projection after checking it was restored: the manifest remains authoritative
 // when a caller has an incomplete record view.
 func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	withSegmentIndexManifestWrites(t, true)
 
 	const segmentID = int64(3101)
@@ -5839,7 +5840,7 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 		ManifestHasIndex: true,
 	})))
 
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               500,
 		BuildID:               5300,
 		FieldID:               101,
@@ -5909,7 +5910,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
 	}))
 
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               601,
 		BuildID:               6200,
 		FieldID:               101,
@@ -5962,7 +5963,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks
 	})))
 
 	// A path-escaping file key fails manifestIndexFilePathInfo validation.
-	infos := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{
+	infos := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{
 		IndexID:               700,
 		BuildID:               7100,
 		FieldID:               101,
@@ -6013,7 +6014,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_SkipsUnmarkedManifestWhenD
 	})))
 
 	// Every read fails; not blocking proves no read was attempted.
-	readErr := mockey.Mock(packed.GetManifestIndexInfos).
+	readErr := mockey.Mock(packed.GetManifestIndexInfosAsync).
 		Return(nil, merr.WrapErrIoFailedReason("throttled")).Build()
 	defer readErr.UnPatch()
 

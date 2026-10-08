@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
@@ -43,7 +45,7 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 	m := &meta{}
 	entered := make(chan struct{}, 8)
 	release := make(chan struct{})
-	reader := mockey.Mock(packed.GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 		entered <- struct{}{}
 		<-release
 		return nil, nil
@@ -80,6 +82,7 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 }
 
 func TestEmptyManifestMarkerNormalizedAcrossRestarts(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	ctx := context.Background()
 	catalog := catalogkv.NewCatalog(NewMetaMemoryKV(), "", "")
 	m := bootMetaForRestart(t, catalog, 300)
@@ -88,7 +91,10 @@ func TestEmptyManifestMarkerNormalizedAcrossRestarts(t *testing.T) {
 		ID: 8001, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, ManifestPath: manifest, ManifestHasIndex: true,
 	})))
 	reads := 0
-	reader := mockey.Mock(packed.GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) { reads++; return nil, nil }).Build()
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		reads++
+		return nil, nil
+	}).Build()
 	defer reader.UnPatch()
 	failure := mockey.Mock((*catalogkv.Catalog).AlterSegments).Return(merr.ErrServiceUnavailable).Build()
 	t.Cleanup(func() { failure.UnPatch() })
@@ -130,7 +136,7 @@ func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 	require.NoError(t, drop(1))
 	require.True(t, m.GetSegment(ctx, 8001).GetManifestHasIndex(), "one index remains")
 	previous := m.GetSegment(ctx, 8001).GetManifestPath()
-	readFailure := mockey.Mock((*meta).readManifestIndexes).Return([]packed.ManifestIndexInfo(nil), merr.ErrServiceUnavailable).Build()
+	readFailure := mockey.Mock((*meta).readManifestIndexesWithIO).Return([]packed.ManifestIndexInfo(nil), merr.ErrServiceUnavailable).Build()
 	t.Cleanup(func() { readFailure.UnPatch() })
 	require.ErrorIs(t, drop(2), merr.ErrServiceUnavailable)
 	readFailure.UnPatch()
@@ -148,7 +154,7 @@ func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 	entries, err := packed.GetManifestIndexInfos(current.GetManifestPath(), cfg)
 	require.NoError(t, err)
 	require.Empty(t, entries)
-	reader := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrServiceUnavailable).Build()
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 	defer reader.UnPatch()
 	restarted := bootMetaForRestart(t, catalog, 300)
 	require.False(t, restarted.GetSegment(ctx, 8001).GetManifestHasIndex(), "restart must skip the verified empty revision")
@@ -194,4 +200,122 @@ func TestRejectedCopyCleanupSurvivesRestartAndDeleteFailure(t *testing.T) {
 	data, err := cm.Read(ctx, foreign)
 	require.NoError(t, err)
 	require.Equal(t, []byte("keep"), data)
+}
+
+// A delayed first read must not impose a barrier on subsequent segments.
+func TestManifestRecoveryContinuouslySchedulesReads(t *testing.T) {
+	mockManifestIndexSubmissions(t)
+	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	for i := int64(1); i <= 5; i++ {
+		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: i, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3, ManifestHasIndex: true,
+			ManifestPath: packed.MarshalManifestPath("/tmp/recovery", i),
+		})))
+	}
+	var calls atomic.Int32
+	slow := make(chan struct{})
+	release := make(chan struct{})
+	var unblock sync.Once
+	defer unblock.Do(func() { close(release) })
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		if calls.Add(1) == 1 {
+			close(slow)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return nil, nil
+	}).Build()
+	defer reader.UnPatch()
+	done := make(chan error, 1)
+	go func() { done <- m.reloadSegmentIndexesFromManifests(context.Background()) }()
+	<-slow
+	require.Eventually(t, func() bool { return calls.Load() == 5 }, time.Second, time.Millisecond,
+		"the free worker should read all remaining manifests while one is stalled")
+	unblock.Do(func() { close(release) })
+	require.NoError(t, <-done)
+	for i := int64(1); i <= 5; i++ {
+		require.False(t, m.GetSegment(context.Background(), i).GetManifestHasIndex())
+	}
+}
+
+func TestManifestRecoverySingleExecutor(t *testing.T) {
+	oldRead := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("1")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(oldRead)
+	oldCommit := Params.DataCoordCfg.L0ManifestUpdatePoolSize.SwapTempValue("16")
+	defer Params.DataCoordCfg.L0ManifestUpdatePoolSize.SwapTempValue(oldCommit)
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	root := t.TempDir()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	m.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	config := mockey.Mock(createStorageConfig).Return(cfg).Build()
+	defer config.UnPatch()
+	for i := int64(1); i <= 5; i++ {
+		base := path.Join(root, "insert_log", metautil.JoinIDPath(300, 30, i))
+		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+			DeltaLogs: []packed.DeltaLogEntry{{Path: "delta", NumEntries: 1}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: i, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3, ManifestHasIndex: true, ManifestPath: manifest,
+		})))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, m.reloadSegmentIndexesFromManifests(ctx))
+	for i := int64(1); i <= 5; i++ {
+		require.False(t, m.GetSegment(ctx, i).GetManifestHasIndex())
+	}
+}
+
+func TestManifestRecoveryFailureDrainsAcceptedReads(t *testing.T) {
+	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	for i := int64(1); i <= 5; i++ {
+		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: i, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3, ManifestHasIndex: true,
+			ManifestPath: packed.MarshalManifestPath("/tmp/recovery", i),
+		})))
+	}
+	type pendingRead struct {
+		ctx      context.Context
+		complete func([]packed.ManifestIndexInfo, error)
+	}
+	pending := make(chan pendingRead, 5)
+	reader := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+		pending <- pendingRead{ctx, complete}
+		return nil
+	}).Build()
+	defer reader.UnPatch()
+	done := make(chan error, 1)
+	go func() { done <- m.reloadSegmentIndexesFromManifests(context.Background()) }()
+	first, second := <-pending, <-pending
+	first.complete(nil, retry.Unrecoverable(merr.ErrServiceUnavailable))
+	select {
+	case <-second.ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed read did not cancel accepted peers")
+	}
+	select {
+	case <-done:
+		t.Fatal("recovery returned before accepted callback drained")
+	case <-time.After(20 * time.Millisecond):
+	}
+	second.complete(nil, context.Canceled)
+	require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
+	require.Empty(t, pending, "failure must stop replenishing reads")
+	for i := int64(1); i <= 5; i++ {
+		require.True(t, m.GetSegment(context.Background(), i).GetManifestHasIndex())
+	}
 }

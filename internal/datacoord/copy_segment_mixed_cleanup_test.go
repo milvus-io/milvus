@@ -71,7 +71,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			require.NoError(t, m.chunkManager.Write(ctx, path.Join(root, "insert_log/100/10/2001/_data/data.parquet"), []byte("V3 output")))
 			artifact := path.Join(root, "index_v1/100/10/2002/6/1/index.bin")
 			require.NoError(t, m.chunkManager.Write(ctx, artifact, []byte("completed V2 copy artifact")))
-			patch := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrServiceUnavailable).Build()
+			patch := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 			defer patch.UnPatch()
 			err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
 				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,

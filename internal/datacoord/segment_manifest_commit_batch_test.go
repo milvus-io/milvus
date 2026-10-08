@@ -60,8 +60,8 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 // bumpVersionMock mocks the loon transaction to return the next revision of the
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
-	return mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	return mockey.Mock(packed.CommitManifestUpdatesAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			return packed.MarshalManifestPath(base, version+1), nil
 		},
 	).Build()
@@ -314,8 +314,8 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	mock := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mock := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
 			entered <- struct{}{}
 			<-release
 			return packed.MarshalManifestPath(base, version+2), nil

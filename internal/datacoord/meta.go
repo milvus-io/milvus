@@ -105,12 +105,13 @@ type meta struct {
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
-	segmentManifestLocks *lock.KeyLock[int64]
-	copyResultLocksOnce  sync.Once
-	copyResultLocks      *lock.KeyLock[int64]
-	manifestReadOnce     sync.Once
-	manifestReadSlots    *semaphore.Weighted
-	dataViewManager      DataViewManager
+	segmentManifestLocks   *lock.KeyLock[int64]
+	copyResultLocksOnce    sync.Once
+	copyResultLocks        *lock.KeyLock[int64]
+	manifestCommitExecutor *manifestCommitExecutor
+	manifestReadOnce       sync.Once
+	manifestReadSlots      *semaphore.Weighted
+	dataViewManager        DataViewManager
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -277,6 +278,12 @@ func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, erro
 	return collectionIDs, nil
 }
 
+func (m *meta) closeManifestCommitExecutor() {
+	if m.manifestCommitExecutor != nil {
+		m.manifestCommitExecutor.close()
+	}
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
 	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
@@ -298,7 +305,9 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
+	commitConcurrency := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
 	mt := &meta{
+		manifestCommitExecutor:   newManifestCommitExecutor(commitConcurrency),
 		ctx:                      ctx,
 		catalog:                  catalog,
 		collections:              typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
@@ -311,6 +320,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		stagedSegmentToGroup:     make(map[int64]int64),
 		supersededSegmentToGroup: make(map[int64]int64),
 	}
+
+	initialized := false
+	defer func() {
+		if !initialized {
+			mt.closeManifestCommitExecutor()
+		}
+	}()
 
 	g, _ := errgroup.WithContext(ctx)
 
@@ -418,6 +434,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.stagedSegmentToGroup = stag
 	mt.supersededSegmentToGroup = sup
 
+	initialized = true
 	return mt, nil
 }
 
@@ -1404,11 +1421,11 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	return true
 }
 
-func (u *l0ManifestUpdate) commitManifest() error {
+func (u *l0ManifestUpdate) commitManifest(ctx context.Context, io *packed.ManifestIOContext) error {
 	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
 		return nil
 	}
-	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	manifestPath, err := packed.AddDeltaLogsToManifestOverwriteAsync(ctx, io, u.segment.GetManifestPath(), u.storageConfig, u.entries)
 	if err != nil {
 		return err
 	}
@@ -1416,7 +1433,7 @@ func (u *l0ManifestUpdate) commitManifest() error {
 	return nil
 }
 
-func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
+func commitL0ManifestUpdates(ctx context.Context, executor *manifestCommitExecutor, updates []*l0ManifestUpdate) error {
 	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
 		return update.segment.GetManifestPath() != ""
 	})
@@ -1429,14 +1446,13 @@ func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
 		groups[update.segmentID] = append(groups[update.segmentID], update)
 	}
 
-	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
-	if poolSize < 1 {
-		poolSize = 1
-	}
-	if poolSize > len(groups) {
-		poolSize = len(groups)
-	}
+	poolSize := min(executor.concurrency, len(groups))
 
+	io, releaseIO, err := executor.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseIO()
 	pool := conc.NewPool[struct{}](poolSize)
 	defer pool.Release()
 
@@ -1444,10 +1460,10 @@ func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
 	for _, group := range groups {
 		group := group
 		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			return struct{}{}, commitL0ManifestUpdateGroup(group)
+			return struct{}{}, commitL0ManifestUpdateGroup(ctx, io, group)
 		}))
 	}
-	err := conc.BlockOnAll(futures...)
+	err = conc.BlockOnAll(futures...)
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
 			update.committedV3Manifests[update.segmentID] = update.manifestPath
@@ -1456,7 +1472,7 @@ func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
 	return err
 }
 
-func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
+func commitL0ManifestUpdateGroup(ctx context.Context, io *packed.ManifestIOContext, updates []*l0ManifestUpdate) error {
 	for _, update := range updates {
 		if update.manifestPath != "" {
 			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
@@ -1467,7 +1483,7 @@ func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
 		if len(update.entries) == 0 {
 			continue
 		}
-		if err := update.commitManifest(); err != nil {
+		if err := update.commitManifest(ctx, io); err != nil {
 			return err
 		}
 		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
@@ -2260,7 +2276,7 @@ func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOpe
 			return nil, updatePack.err
 		}
 	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return nil, err
 	}
 	for _, update := range updatePack.l0ManifestUpdates {

@@ -118,8 +118,8 @@ func TestCommitBumpV3MaterializationHappyPath(t *testing.T) {
 	// DataCoord must run the loon transaction on the segment's CURRENT manifest
 	// (version 5), not on the datanode's plan-time base, and stage the shipped
 	// column-group descriptors.
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			assert.Equal(t, basePath, base)
 			assert.EqualValues(t, 5, version)
 			require.Len(t, updates.ColumnGroups, 1)
@@ -172,8 +172,8 @@ func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 	addMaterializationSegment(t, meta, currentManifest, 7)
 
 	called := false
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
 			called = true
 			return "", nil
 		},

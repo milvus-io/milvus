@@ -34,7 +34,7 @@ GcpNativeClientManager::GcpNativeClientManager(
     } else {
         if (gcp_credential_json.empty()) {
             ThrowInfo(
-                ErrorCode::ConfigInvalid,
+                milvus::ErrorCode::ConfigInvalid,
                 "{}",
                 std::string(
                     "GCP native error: GCS service account credentials are "

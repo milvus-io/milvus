@@ -96,6 +96,7 @@ func TestManifestReadConcurrencyUsesStorageBudget(t *testing.T) {
 func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 	for _, mode := range []string{"transient", "persistent", "invalid", "collection-reload", "dataview-reload", "dataview-failure"} {
 		t.Run(mode, func(t *testing.T) {
+			mockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			kv := NewMetaMemoryKV()
@@ -113,7 +114,7 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			reads := make(map[string]int)
 			good := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5001)), 1)
 			bad := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5002)), 1)
-			reader := mockey.Mock(packed.GetManifestIndexInfos).To(func(pointer string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, pointer string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				reads[pointer]++
@@ -211,7 +212,7 @@ func TestManifestGCRejectsForeignArtifactDirectory(t *testing.T) {
 		IndexID: 4, BuildID: 5, IndexName: "idx", IndexType: "HNSW",
 		Path: path.Dir(foreign), IndexFileKeys: []string{"index.bin"},
 	}
-	reader := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
 	defer reader.UnPatch()
 	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm})
 	gc.recycleDroppedSegment(ctx, segment.GetID(), segment)

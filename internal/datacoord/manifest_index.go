@@ -20,7 +20,6 @@ import (
 	"context"
 	"path"
 	"sort"
-	"time"
 
 	"golang.org/x/sync/semaphore"
 
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -170,8 +168,8 @@ func manifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.Segmen
 	return manifestIndexFilePathInfo(segment.GetID(), entry)
 }
 
-// Every read blocks a native thread. Bound it by both the configured scan
-// concurrency and the storage connection budget.
+// Bound outstanding reads by both the configured scan concurrency and the
+// storage connection budget.
 func segmentIndexManifestReadConcurrency() int {
 	params := paramtable.Get()
 	limit := params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt()
@@ -181,9 +179,15 @@ func segmentIndexManifestReadConcurrency() int {
 	return max(1, limit)
 }
 
-// readManifestIndexes shares a native-thread budget across startup, restore and GC.
+// readManifestIndexes shares a read budget across startup, restore and GC.
 // Waiting for admission is cancellable and does not enter cgo.
 func (m *meta) readManifestIndexes(ctx context.Context, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
+	return m.readManifestIndexesWithIO(ctx, io, manifestPath, config)
+}
+
+func (m *meta) readManifestIndexesWithIO(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(segmentIndexManifestReadConcurrency())) })
 	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {
 		return nil, err
@@ -192,7 +196,25 @@ func (m *meta) readManifestIndexes(ctx context.Context, manifestPath string, con
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return packed.GetManifestIndexInfos(manifestPath, config)
+	return packed.GetManifestIndexInfosAsync(ctx, io, manifestPath, config)
+}
+
+// submitManifestIndexRead shares the read budget with runtime reads. Completion
+// releases admission on the executor, so a submitting coordinator never needs
+// another goroutine to consume completions just to unblock admission.
+func (m *meta) submitManifestIndexRead(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(segmentIndexManifestReadConcurrency())) })
+	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	err := packed.SubmitManifestIndexInfos(ctx, io, manifestPath, config, func(entries []packed.ManifestIndexInfo, err error) {
+		defer m.manifestReadSlots.Release(1)
+		complete(entries, err)
+	})
+	if err != nil {
+		m.manifestReadSlots.Release(1)
+	}
+	return err
 }
 
 // validateManifestIndexPublishable is the writer-side twin of
@@ -270,101 +292,84 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 		rootPath = m.chunkManager.RootPath()
 	}
 	concurrency := min(len(segments), segmentIndexManifestReadConcurrency())
-	pool := conc.NewPool[any](concurrency)
-	defer pool.Release()
+	reader := m.newManifestIndexReader(ctx, segments, concurrency, storageConfig)
+	defer reader.close()
 	installed := 0
-	// Retain futures and result slices only for the active batch. Completed
-	// records are installed before proceeding to the next batch; newMeta does
-	// not expose this metadata until the entire scan succeeds.
-	for start := 0; start < len(segments); start += concurrency {
-		batch := segments[start:min(start+concurrency, len(segments))]
-		recovered := make([][]*model.SegmentIndex, len(batch))
-		removedManifests := make([]bool, len(batch))
-		futures := make([]*conc.Future[any], 0, len(batch))
-		for i, segment := range batch {
-			i, segment := i, segment
-			futures = append(futures, pool.Submit(func() (any, error) {
-				// Retry only this segment. newMeta prevents a failed scan
-				// from being replayed by initMeta's metastore retry loop.
-				var entries []packed.ManifestIndexInfo
-				err := retry.Do(ctx, func() error {
-					var readErr error
-					entries, readErr = m.readManifestIndexes(ctx, segment.GetManifestPath(), storageConfig)
-					return readErr
-				}, retry.Attempts(3), retry.Sleep(200*time.Millisecond))
-				if err != nil {
-					// GC removes files before the catalog row. A restart in that
-					// window must let the remaining Dropped row finish GC, but a
-					// read error alone cannot prove the manifest was removed.
-					if segment.GetState() == commonpb.SegmentState_Dropped && m.chunkManager != nil {
-						manifestFile, pathErr := packed.ManifestFilePath(segment.GetManifestPath())
-						if pathErr != nil {
-							return nil, merr.Wrap(pathErr, "resolve dropped segment manifest during recovery")
-						}
-						exists, existErr := m.chunkManager.Exist(ctx, manifestFile)
-						if existErr != nil {
-							return nil, merr.Wrap(existErr, "check dropped segment manifest during recovery")
-						}
-						if !exists {
-							removedManifests[i] = true
-							mlog.Info(ctx, "dropped segment manifest already removed before recovery",
-								mlog.FieldSegmentID(segment.GetID()))
-							return nil, nil
-						}
-					}
-					// Do not let initMeta replay the entire metastore load after the
-					// per-segment retries are exhausted. A second newMeta attempt would
-					// repeat every catalog read and can expose a partially initialized
-					// state; the caller can retry the startup as a whole instead.
-					return nil, retry.Unrecoverable(merr.Wrapf(err,
-						"recover segment %d indexes from manifest %s", segment.GetID(), segment.GetManifestPath()))
-				}
-				for _, entry := range entries {
-					if _, ok := manifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
-						return nil, merr.Wrapf(merr.ErrDataIntegrity,
-							"segment %d manifest holds an unusable index entry: indexID %d buildID %d",
-							segment.GetID(), entry.IndexID, entry.BuildID)
-					}
-					recovered[i] = append(recovered[i], segmentIndexFromManifest(segment, entry))
-				}
-				return nil, nil
-			}))
+	var emptyMarkers []UpdateOperator
+	flushMarkers := func(markers []UpdateOperator) error {
+		if len(markers) == 0 {
+			return nil
 		}
-		// Drain all in-flight reads before returning or releasing the pool.
-		if err := conc.BlockOnAll(futures...); err != nil {
+		return m.UpdateSegmentsInfo(ctx, markers...)
+	}
+	for {
+		result, err := reader.next()
+		if err != nil {
 			return merr.Wrap(err, "recover segment indexes from manifests")
 		}
-		// Normalize historical sticky markers once. Persist before exposing meta;
-		// a catalog failure leaves the conservative true marker for the next start.
-		var emptyMarkers []UpdateOperator
-		for i, indexes := range recovered {
-			if len(indexes) == 0 && !removedManifests[i] {
-				emptyMarkers = append(emptyMarkers, clearEmptyManifestIndexMarker(batch[i].GetID(), batch[i].GetManifestPath()))
-			}
+		if result == nil {
+			break
 		}
-		if len(emptyMarkers) > 0 {
-			if err := m.UpdateSegmentsInfo(ctx, emptyMarkers...); err != nil {
-				return merr.Wrap(err, "persist empty manifest index markers")
-			}
+		indexes, removed, err := m.recoverManifestIndexes(ctx, result.request.segment, result.entries, result.err, rootPath)
+		if err != nil {
+			return merr.Wrap(err, "recover segment indexes from manifests")
 		}
-		for _, indexes := range recovered {
-			for _, segIdx := range indexes {
-				if _, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID); ok {
-					continue
+		if len(indexes) == 0 && !removed {
+			emptyMarkers = append(emptyMarkers, clearEmptyManifestIndexMarker(result.request.segment.GetID(), result.request.segment.GetManifestPath()))
+			if len(emptyMarkers) == reader.limit {
+				if err := flushMarkers(emptyMarkers); err != nil {
+					return merr.Wrap(err, "persist empty manifest index markers")
 				}
-				// Definitions may have been dropped: keep their records so GC
-				// can still find and retire the manifest artifacts.
-				m.indexMeta.updateSegmentIndex(segIdx)
-				m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
-					float64(segIdx.IndexSerializedSize))
-				installed++
+				emptyMarkers = nil
 			}
+		}
+		for _, segIdx := range indexes {
+			if _, ok := m.indexMeta.segmentBuildInfo.Get(segIdx.BuildID); ok {
+				continue
+			}
+			m.indexMeta.updateSegmentIndex(segIdx)
+			m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
+			installed++
 		}
 	}
+	if err := flushMarkers(emptyMarkers); err != nil {
+		return merr.Wrap(err, "persist empty manifest index markers")
+	}
+
 	mlog.Info(ctx, "recovered segment indexes from manifests",
 		mlog.Int("manifestsRead", len(segments)), mlog.Int("recoveredIndexes", installed),
 		mlog.Duration("duration", record.ElapseSpan()))
 	return nil
+}
+
+// recoverManifestIndexes validates a completed read. Missing dropped manifests
+// retain their catalog row for GC; any other unreadable manifest fails startup.
+func (m *meta) recoverManifestIndexes(ctx context.Context, segment *SegmentInfo, entries []packed.ManifestIndexInfo, err error, rootPath string) ([]*model.SegmentIndex, bool, error) {
+	if err != nil {
+		if segment.GetState() == commonpb.SegmentState_Dropped && m.chunkManager != nil {
+			manifestFile, pathErr := packed.ManifestFilePath(segment.GetManifestPath())
+			if pathErr != nil {
+				return nil, false, merr.Wrap(pathErr, "resolve dropped segment manifest during recovery")
+			}
+			exists, existErr := m.chunkManager.Exist(ctx, manifestFile)
+			if existErr != nil {
+				return nil, false, merr.Wrap(existErr, "check dropped segment manifest during recovery")
+			}
+			if !exists {
+				return nil, true, nil
+			}
+		}
+		return nil, false, retry.Unrecoverable(merr.Wrapf(err, "recover segment %d indexes from manifest %s", segment.GetID(), segment.GetManifestPath()))
+	}
+	indexes := make([]*model.SegmentIndex, 0, len(entries))
+	for _, entry := range entries {
+		if _, ok := manifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
+			return nil, false, merr.Wrapf(merr.ErrDataIntegrity,
+				"segment %d manifest holds an unusable index entry: indexID %d buildID %d", segment.GetID(), entry.IndexID, entry.BuildID)
+		}
+		indexes = append(indexes, segmentIndexFromManifest(segment, entry))
+	}
+	return indexes, false, nil
 }
 
 // segmentIndexFromManifest projects a manifest index entry back into the

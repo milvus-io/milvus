@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,11 +35,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ManifestMutationType is deliberately a closed set.  Callers supply data;
@@ -277,15 +276,23 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 	}
 
-	manifestPath, err := commitManifestMutation(segment.GetManifestPath(), commit)
+	io, releaseIO, err := m.manifestCommitExecutor.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseIO()
+	manifestPath, err := m.commitManifestMutation(ctx, io, segment.GetManifestPath(), commit)
 	if err != nil {
 		return err
 	}
 
-	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, segment, manifestPath, commit)
+	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, io, segment, manifestPath, commit)
 	if err != nil {
 		return err
 	}
+
+	// Release the executor before publication, which may enter other meta paths.
+	releaseIO()
 
 	// Re-enter segMu only for the final full-record publication. Ordinary
 	// segment writers may have changed unrelated fields during manifest I/O, so
@@ -539,7 +546,7 @@ func (m *meta) getSegmentManifestLocks() *lock.KeyLock[int64] {
 // Derive emptiness from the final immutable revision, never from the number
 // of requested drops (which may be stale/no-ops). A failed read prevents
 // publication, so the old pointer and its recovery marker remain authoritative.
-func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, segment *SegmentInfo, manifestPath string, commit SegmentManifestCommit) (*bool, error) {
+func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, io *packed.ManifestIOContext, segment *SegmentInfo, manifestPath string, commit SegmentManifestCommit) (*bool, error) {
 	if manifestMutationAddsIndexEntry(commit.Mutation) {
 		value := true
 		return &value, nil
@@ -549,7 +556,7 @@ func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, segment *Se
 		(len(updates.DropIndexes) == 0 && len(updates.ColumnGroups) == 0 && updates.NewFiles == nil) {
 		return nil, nil
 	}
-	entries, err := m.readManifestIndexes(ctx, manifestPath, commit.StorageConfig)
+	entries, err := m.readManifestIndexesWithIO(ctx, io, manifestPath, commit.StorageConfig)
 	if err != nil {
 		return nil, merr.Wrap(err, "verify manifest index marker before publication")
 	}
@@ -557,7 +564,7 @@ func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, segment *Se
 	return &value, nil
 }
 
-func commitManifestMutation(baseManifest string, commit SegmentManifestCommit) (string, error) {
+func (m *meta) commitManifestMutation(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, commit SegmentManifestCommit) (string, error) {
 	switch commit.Mutation.Type {
 	case ManifestMutationCommitUpdates:
 		if baseManifest == "" {
@@ -570,7 +577,7 @@ func commitManifestMutation(baseManifest string, commit SegmentManifestCommit) (
 		if err != nil {
 			return "", merr.Wrap(err, "parse expected manifest")
 		}
-		manifestPath, err := packed.CommitManifestUpdates(basePath, version, commit.StorageConfig, commit.Mutation.Updates)
+		manifestPath, err := packed.CommitManifestUpdatesAsync(ctx, io, basePath, version, commit.StorageConfig, commit.Mutation.Updates)
 		if err != nil {
 			return "", merr.Wrap(err, "commit segment manifest")
 		}
@@ -953,33 +960,43 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 	}
 	m.segMu.RUnlock()
 
-	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
-	if poolSize < 1 {
-		poolSize = 1
-	}
-	if poolSize > len(commits) {
-		poolSize = len(commits)
-	}
-	pool := conc.NewPool[*preparedSegmentManifest](poolSize)
-	defer pool.Release()
-
-	futures := make([]*conc.Future[*preparedSegmentManifest], 0, len(commits))
-	for i := range commits {
-		commit := commits[i]
-		snapshot := snapshots[commit.SegmentID]
-		futures = append(futures, pool.Submit(func() (*preparedSegmentManifest, error) {
-			return m.prepareSegmentManifest(ctx, commit, snapshot)
-		}))
-	}
-	if err := conc.BlockOnAll(futures...); err != nil {
+	poolSize := min(m.manifestCommitExecutor.concurrency, len(commits))
+	io, releaseIO, err := m.manifestCommitExecutor.acquire(ctx)
+	if err != nil {
 		return nil, err
 	}
-	prepared := make([]preparedSegmentManifest, 0, len(futures))
-	for _, future := range futures {
-		if result := future.Value(); result != nil {
+	defer releaseIO()
+	group, workCtx := errgroup.WithContext(ctx)
+	group.SetLimit(poolSize)
+	results := make([]*preparedSegmentManifest, len(commits))
+	for i := range commits {
+		if workCtx.Err() != nil {
+			break
+		}
+		i := i
+		group.Go(func() error {
+			if err := workCtx.Err(); err != nil {
+				return err
+			}
+			result, err := m.prepareSegmentManifest(workCtx, io, commits[i], snapshots[commits[i].SegmentID])
+			results[i] = result
+			return err
+		})
+	}
+	// Wait for every accepted callback before releasing any segment lock.
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	prepared := make([]preparedSegmentManifest, 0, len(results))
+	for _, result := range results {
+		if result != nil {
 			prepared = append(prepared, *result)
 		}
 	}
+
 	return prepared, nil
 }
 
@@ -987,7 +1004,7 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 // run the manifest mutation to produce the prepared revision. A dropped/unhealthy
 // segment returns (nil, nil) to be skipped; a stale CAS or I/O error returns a real
 // error to abort the batch.
-func (m *meta) prepareSegmentManifest(ctx context.Context, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
+func (m *meta) prepareSegmentManifest(ctx context.Context, io *packed.ManifestIOContext, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
 	if snapshot == nil || !isSegmentHealthy(snapshot) {
 		mlog.Warn(ctx, "segment dropped or unhealthy before batch manifest generation; skipping",
 			mlog.Int64("segmentID", commit.SegmentID))
@@ -999,11 +1016,11 @@ func (m *meta) prepareSegmentManifest(ctx context.Context, commit SegmentManifes
 	if !matchesExpectedManifest(commit.ExpectedManifest, snapshot.GetManifestPath()) {
 		return nil, staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
 	}
-	manifestPath, err := commitManifestMutation(snapshot.GetManifestPath(), commit)
+	manifestPath, err := m.commitManifestMutation(ctx, io, snapshot.GetManifestPath(), commit)
 	if err != nil {
 		return nil, err
 	}
-	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, snapshot, manifestPath, commit)
+	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, io, snapshot, manifestPath, commit)
 	if err != nil {
 		return nil, err
 	}

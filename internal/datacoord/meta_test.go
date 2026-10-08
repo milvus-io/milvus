@@ -3958,8 +3958,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			require.Equal(t, oldManifest, manifestPath)
 			require.NotNil(t, storageConfig)
 			require.Len(t, deltaLogs, 1)
@@ -4030,8 +4030,8 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			return newManifest, nil
 		},
 	).Build()
@@ -4091,8 +4091,8 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	}}
 
 	var commitCalls int
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			commitCalls++
 			return newManifest, nil
 		},
@@ -4147,8 +4147,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 
 	entered := make(chan string, 2)
 	release := make(chan struct{})
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			entered <- manifestPath
 			<-release
 			switch manifestPath {
@@ -4212,8 +4212,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 
 	var mu sync.Mutex
 	calls := make([]string, 0, 2)
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, manifestPath)
@@ -4298,8 +4298,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 	})))
 
 	calls := 0
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			calls++
 			return "", errors.New("should not be called")
 		},
