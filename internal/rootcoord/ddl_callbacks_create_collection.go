@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -83,9 +82,8 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		return err
 	}
 
-	// set up the broadcast virtual channels and control channel, then make a broadcast message.
-	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum+1)
-	broadcastChannel = append(broadcastChannel, streaming.WAL().ControlChannel())
+	// set up the broadcast virtual channels, then make a broadcast message.
+	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum)
 	for i := 0; i < int(createCollectionTask.Req.ShardsNum); i++ {
 		broadcastChannel = append(broadcastChannel, createCollectionTask.body.VirtualChannelNames[i])
 	}

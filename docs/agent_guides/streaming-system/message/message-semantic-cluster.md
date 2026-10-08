@@ -9,8 +9,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | FlushAll | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterReplicateConfig | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterWAL | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
-| AlterResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
-| DropResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
+| AlterResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
+| DropResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 
 - **FlushAll**: Flushes ALL growing segments across ALL collections on ALL PChannels.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
@@ -21,4 +21,4 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 ## Key Invariants
 
 - FlushAll, AlterReplicateConfig, AlterWAL act as **global barriers**: no other messages can be in flight on any PChannel.
-- AlterResourceGroup, DropResourceGroup are serialized via ExclusiveCluster but are CChannel-only (no PChannel-level exclusive lock).
+- AlterResourceGroup, DropResourceGroup are serialized via ExclusiveCluster but are CChannel-only (no PChannel-level exclusive lock). Resource groups describe the nodes of one cluster, so these messages are issued through `StartUnreplicableBroadcastWithResourceKeys` on any replicate role, written to the local WAL, and never replicated.
