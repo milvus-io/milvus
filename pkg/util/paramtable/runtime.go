@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -33,6 +34,7 @@ const (
 
 var (
 	once         sync.Once
+	initialized  atomic.Bool
 	params       ComponentParam
 	runtimeParam = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
@@ -55,6 +57,7 @@ func Init() {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
@@ -64,11 +67,21 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
 func Get() *ComponentParam {
 	Init()
+	return &params
+}
+
+// GetIfInitialized returns the shared parameters after initialization has completed.
+// Unlike Get, it does not initialize configuration or start configuration sources.
+func GetIfInitialized() *ComponentParam {
+	if !initialized.Load() {
+		return nil
+	}
 	return &params
 }
 
