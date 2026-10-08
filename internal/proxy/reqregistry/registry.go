@@ -48,6 +48,10 @@ const (
 	StateQueued = "Queued"
 	// StateRunning: at least one task of the request has started executing.
 	StateRunning = "Running"
+	// StateCanceling: Cancel was called and the request is on its way out. It
+	// stops at its next cancellation check and is then unregistered; until
+	// then it is still listed, in this state.
+	StateCanceling = "Canceling"
 )
 
 // Request types registered on the proxy.
@@ -142,6 +146,9 @@ func (e *Entry) snapshotLocked(now time.Time) Info {
 	info := e.info
 	info.TaskIDs = append([]int64(nil), e.info.TaskIDs...)
 	info.ElapsedMS = now.Sub(info.StartTime).Milliseconds()
+	if e.canceled {
+		info.State = StateCanceling
+	}
 	return info
 }
 
@@ -173,18 +180,20 @@ func (e *Entry) MarkRunning(queued time.Duration) {
 }
 
 // Cancel cancels the request's context with merr.ErrRequestCanceled as the
-// cause. It returns the snapshot taken at the moment of cancellation and true
-// on the first call; later calls return false and do nothing, so an operator
-// canceling twice is reported once.
+// cause. On the first call it returns the snapshot taken just before the
+// cancellation, with the state the request was in (queued or running), and
+// true. A later call does nothing more and returns the current snapshot, in
+// state Canceling, and false: the caller still learns what the id is, but
+// knows not to audit or count the cancellation a second time.
 func (e *Entry) Cancel(operator, reason string, now time.Time) (Info, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.canceled {
-		return Info{}, false
+		return e.snapshotLocked(now), false
 	}
+	snapshot := e.snapshotLocked(now)
 	e.canceled = true
 	e.canceledAt = now
-	snapshot := e.snapshotLocked(now)
 	e.cancel(merr.WrapErrRequestCanceled(operator, reason))
 	return snapshot, true
 }
@@ -286,15 +295,18 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 	return result
 }
 
-// Cancel cancels every request in requestIDs that this registry holds and
-// returns their snapshots taken at cancellation, plus the ids it does not
-// hold. An id whose request was already canceled counts as canceled again
-// but is not reported a second time.
+// Cancel cancels every request in requestIDs that this registry holds. Every
+// id ends up in exactly one of the three results: canceled holds the
+// snapshots of the requests this call stopped, taken just before the
+// cancellation; repeated holds the requests an earlier call had already
+// stopped and that have not left yet, in state Canceling, so that canceling
+// twice still tells the caller what the id is; notFound holds the ids this
+// registry does not hold.
 //
 // A non-empty owner restricts the cancel to requests issued by that user: the
 // id of another user's request is reported as not held, so a caller limited
 // to their own requests learns nothing about anyone else's.
-func (r *Registry) Cancel(requestIDs []int64, owner, operator, reason string, now time.Time) (canceled []Info, notFound []int64) {
+func (r *Registry) Cancel(requestIDs []int64, owner, operator, reason string, now time.Time) (canceled, repeated []Info, notFound []int64) {
 	for _, id := range requestIDs {
 		e, ok := r.entries.Get(id)
 		if !ok || (owner != "" && e.User() != owner) {
@@ -303,7 +315,9 @@ func (r *Registry) Cancel(requestIDs []int64, owner, operator, reason string, no
 		}
 		if snapshot, first := e.Cancel(operator, reason, now); first {
 			canceled = append(canceled, snapshot)
+		} else {
+			repeated = append(repeated, snapshot)
 		}
 	}
-	return canceled, notFound
+	return canceled, repeated, notFound
 }
