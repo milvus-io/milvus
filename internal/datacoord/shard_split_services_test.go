@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -875,7 +876,7 @@ func TestCommitShardSplitMarksTargetsAddedBeforeSeeding(t *testing.T) {
 	seed := mockey.Mock((*meta).UpdateChannelCheckpoints).Origin(&seedOrigin).
 		To(func(m *meta, ctx context.Context, positions []*msgpb.MsgPosition) error {
 			for _, position := range positions {
-				assert.True(t, svr.meta.catalog.ChannelExists(ctx, position.GetChannelName()),
+				assert.True(t, channelExists(t, svr.meta.catalog, position.GetChannelName()),
 					"target %s must be marked added before its checkpoint is seeded", position.GetChannelName())
 			}
 			return seedOrigin(m, ctx, positions)
@@ -887,11 +888,11 @@ func TestCommitShardSplitMarksTargetsAddedBeforeSeeding(t *testing.T) {
 	require.NoError(t, merr.Error(status))
 	assert.Equal(t, 1, seed.MockTimes())
 
-	assert.True(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget0))
-	assert.True(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget1))
+	assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget0))
+	assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
 	// The source was marked when its collection was created; the commit is
 	// not what marks it.
-	assert.False(t, svr.meta.catalog.ChannelExists(ctx, splitTestSource))
+	assert.False(t, channelExists(t, svr.meta.catalog, splitTestSource))
 	assert.NotNil(t, svr.meta.GetChannelCheckpoint(splitTestTarget0))
 	assert.NotNil(t, svr.meta.GetChannelCheckpoint(splitTestTarget1))
 }
@@ -903,8 +904,8 @@ func TestCommitShardSplitRedeliveryKeepsTheTargetMarks(t *testing.T) {
 		status, err := svr.CommitShardSplit(ctx, splitTestCommitRequest())
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(status))
-		assert.True(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget0))
-		assert.True(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget1))
+		assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget0))
+		assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
 	}
 	persisted, err := svr.meta.catalog.ListSplitShardTask(ctx)
 	require.NoError(t, err)
@@ -941,8 +942,8 @@ func TestCommitShardSplitDoesNotReviveADroppedTarget(t *testing.T) {
 	require.NoError(t, merr.Error(status))
 
 	assert.True(t, svr.meta.catalog.ShouldDropChannel(ctx, splitTestTarget0))
-	assert.False(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget0))
-	assert.True(t, svr.meta.catalog.ChannelExists(ctx, splitTestTarget1))
+	assert.False(t, channelExists(t, svr.meta.catalog, splitTestTarget0))
+	assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
 }
 
 // The guard itself, on a real catalog: a compacted-away segment on a committed
@@ -1113,4 +1114,13 @@ func TestCommitShardSplitRedeliveryKeepsTheRecordedSourceFields(t *testing.T) {
 	assert.Equal(t, uint64(2000), merged.GetSources()[0].GetSwitchTimeTick(), "the first recorded T_switch is kept")
 	assert.Equal(t, unknown, []byte(merged.GetSources()[0].ProtoReflect().GetUnknown()),
 		"the redelivery erased a field of the recorded source it does not carry")
+}
+
+// channelExists reads the catalog's channel mark, which master's GC guard now
+// reports with a separate lookup error.
+func channelExists(t *testing.T, catalog metastore.DataCoordCatalog, channel string) bool {
+	t.Helper()
+	exists, err := catalog.ChannelExists(context.TODO(), channel)
+	require.NoError(t, err)
+	return exists
 }
