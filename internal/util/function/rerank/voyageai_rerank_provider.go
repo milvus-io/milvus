@@ -92,9 +92,7 @@ func (provider *voyageaiProvider) Rerank(ctx context.Context, query string, docs
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, result := range rerankResp.Data {
-		scores[i] = result.RelevanceScore
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(rerankResp.Data), func(i int) (int, float32) {
+		return rerankResp.Data[i].Index, rerankResp.Data[i].RelevanceScore
+	})
 }
