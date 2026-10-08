@@ -25,16 +25,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -243,7 +240,7 @@ func TestMetaTable_DropCollectionCatalogFailureAndRetry(t *testing.T) {
 	}
 }
 
-func TestMetaTable_CollectionGCLeavesRecreatedCollectionGrants(t *testing.T) {
+func TestMetaTable_CollectionGCCleansGrantsAfterRecreation(t *testing.T) {
 	ctx := context.Background()
 	meta, catalog := newCollectionGCMeta(t, pb.CollectionState_CollectionDropping)
 	catalog.On("CreateCollection", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
@@ -254,86 +251,77 @@ func TestMetaTable_CollectionGCLeavesRecreatedCollectionGrants(t *testing.T) {
 	catalog.On("DropCollection", mock.Anything, mock.MatchedBy(func(coll *model.Collection) bool {
 		return coll.CollectionID == 100
 	}), mock.Anything).Return(nil).Once()
+	catalog.On("DeleteGrantByCollectionName", mock.Anything, util.DefaultTenant, util.DefaultDBName, "first").Return(nil).Once()
 	require.NoError(t, meta.RemoveCollection(ctx, 100, 30))
-	catalog.AssertNotCalled(t, "DeleteGrantByCollectionName", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	assert.Equal(t, int64(300), meta.GetCollectionID(ctx, util.DefaultDBName, "first"))
 	assert.NotContains(t, meta.collID2Meta, int64(100))
 }
 
-func TestMetaTable_CollectionGCCatalogAllowsMetadataProgress(t *testing.T) {
-	for _, change := range []string{"create", "drop", "recreate", "rename", "legacy recreate"} {
-		t.Run(change, func(t *testing.T) {
+func TestMetaTable_CollectionGCCatalogSerializesRecreation(t *testing.T) {
+	for _, dbName := range []string{util.DefaultDBName, ""} {
+		t.Run("db="+dbName, func(t *testing.T) {
 			ctx := context.Background()
 			meta, catalog := newCollectionGCMeta(t, pb.CollectionState_CollectionDropping)
-			if change == "legacy recreate" {
-				meta.collID2Meta[100].DBName = ""
+			meta.collID2Meta[100].DBName = dbName
+			if dbName == "" {
 				meta.collID2Meta[100].DBID = util.NonDBID
 			}
 			started, proceed := make(chan struct{}), make(chan struct{})
 			release := sync.OnceFunc(func() { close(proceed) })
 			catalog.On("DropCollection", mock.Anything, mock.MatchedBy(func(coll *model.Collection) bool {
 				return coll.CollectionID == 100 && len(coll.Aliases) == 0 && len(coll.Partitions) == 2
-			}), mock.Anything).Run(func(mock.Arguments) { close(started); <-proceed }).Return(nil).Once()
-			if change == "create" || change == "drop" {
-				catalog.On("DeleteGrantByCollectionName", mock.Anything, util.DefaultTenant, util.DefaultDBName, "first").Return(nil).Once()
-			}
+			}), mock.Anything).Run(func(mock.Arguments) {
+				if meta.ddLock.TryRLock() {
+					meta.ddLock.RUnlock()
+					t.Error("collection catalog deletion must exclude recreation")
+				}
+				close(started)
+				<-proceed
+			}).Return(nil).Once()
+			grantsCleaned := make(chan struct{})
+			catalog.On("DeleteGrantByCollectionName", mock.Anything, util.DefaultTenant, dbName, "first").
+				Run(func(mock.Arguments) { close(grantsCleaned) }).Return(nil).Once()
+			catalog.On("CreateCollection", mock.Anything, mock.Anything, mock.Anything).
+				Run(func(mock.Arguments) {
+					select {
+					case <-grantsCleaned:
+					default:
+						t.Error("same-name recreation reached the catalog before GC grant cleanup")
+					}
+				}).Return(nil).Once()
 			gc := startCollectionGCCall(t, release, func() error { return meta.RemoveCollection(ctx, 100, 0) })
 			waitCollectionGCCatalog(t, started)
-			reader := startCollectionGCCall(t, release, func() error {
-				_, err := meta.GetDatabaseByName(ctx, util.DefaultDBName, typeutil.MaxTimestamp)
-				return err
+			createStarted := make(chan struct{})
+			create := startCollectionGCCall(t, release, func() error {
+				close(createStarted)
+				return meta.AddCollection(ctx, &model.Collection{
+					CollectionID: 300, DBID: util.DefaultDBID, DBName: util.DefaultDBName,
+					Name: "first", State: pb.CollectionState_CollectionCreated,
+				})
 			})
-			waitCollectionGCCall(t, reader)
-			var publish func() error
-			replacementID := int64(300)
-			switch change {
-			case "drop":
-				catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, mock.Anything, false).Return(nil).Once()
-				catalog.On("DeleteGrantByCollectionName", mock.Anything, util.DefaultTenant, util.DefaultDBName, "second").Return(nil).Once()
-				publish = func() error { return meta.DropCollection(ctx, 200, 40) }
-			case "rename":
-				replacementID = 200
-				catalog.On("AlterCollection", mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, mock.Anything, false).Return(nil).Once()
-				catalog.On("MigrateGrantCollectionName", mock.Anything, util.DefaultTenant, util.DefaultDBName, "second", util.DefaultDBName, "first").Return(nil).Once()
-				control := funcutil.GetControlChannel("gc-test")
-				result := message.BroadcastResultAlterCollectionMessageV2{
-					Message: message.MustAsBroadcastAlterCollectionMessageV2(message.NewAlterCollectionMessageBuilderV2().
-						WithHeader(&message.AlterCollectionMessageHeader{
-							CollectionId: 200, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}},
-						}).WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{CollectionName: "first"}}).
-						WithBroadcast([]string{control}).MustBuildBroadcast()),
-					Results: map[string]*message.AppendResult{control: {TimeTick: 40}},
-				}
-				publish = func() error { return meta.AlterCollection(ctx, result) }
-			default:
-				name := "first"
-				if change == "create" {
-					name = "new"
-				}
-				catalog.On("CreateCollection", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-				publish = func() error {
-					return meta.AddCollection(ctx, &model.Collection{
-						CollectionID: replacementID, DBID: util.DefaultDBID, DBName: util.DefaultDBName,
-						Name: name, State: pb.CollectionState_CollectionCreated,
-					})
-				}
-			}
-			writer := startCollectionGCCall(t, release, publish)
-			waitCollectionGCCall(t, writer)
+			waitCollectionGCCatalog(t, createStarted)
+			catalog.AssertNotCalled(t, "CreateCollection", mock.Anything, mock.Anything, mock.Anything)
 			release()
 			waitCollectionGCCall(t, gc)
+			waitCollectionGCCall(t, create)
+			assert.Equal(t, int64(300), meta.GetCollectionID(ctx, util.DefaultDBName, "first"))
 			assert.NotContains(t, meta.collID2Meta, int64(100))
 			assert.NotContains(t, meta.partitionName2ID, int64(100))
-			if change != "create" && change != "drop" {
-				assert.Equal(t, replacementID, meta.GetCollectionID(ctx, util.DefaultDBName, "first"))
-				catalog.AssertNotCalled(t, "DeleteGrantByCollectionName", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
-			} else {
-				_, exists := meta.names.get(util.DefaultDBName, "first")
-				assert.False(t, exists)
-			}
-			if change == "drop" {
-				assert.Equal(t, pb.CollectionState_CollectionDropping, meta.collID2Meta[200].State)
-			}
+		})
+	}
+}
+
+func TestMetaTable_CollectionGCGrantFailureMatchesMaster(t *testing.T) {
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			ctx := context.Background()
+			meta, catalog := newCollectionGCMeta(t, pb.CollectionState_CollectionDropping)
+			catalog.On("DropCollection", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.On("DeleteGrantByCollectionName", mock.Anything, util.DefaultTenant, util.DefaultDBName, "first").Return(failure).Once()
+			require.NoError(t, meta.RemoveCollection(ctx, 100, 0))
+			assert.NotContains(t, meta.collID2Meta, int64(100))
+			assert.NotContains(t, meta.partitionName2ID, int64(100))
+			assert.Equal(t, InvalidCollectionID, meta.GetCollectionID(ctx, util.DefaultDBName, "first"))
 		})
 	}
 }

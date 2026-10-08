@@ -96,8 +96,6 @@ type IMetaTable interface {
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
 	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
-	// RemoveCollection and RemovePartition must be serialized by their caller,
-	// the single tombstone sweeper, because legacy partition GC rewrites collections.
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
 	// If the collection does not exist, it will return InvalidCollectionID.
@@ -809,43 +807,23 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
-	dropFromCatalog := func() error {
-		if len(aliases) == 0 {
-			// Dropping collections no longer accept DDL: broadcaster resource
-			// locks order prior updates before Drop. The single tombstone sweeper
-			// serializes collection and partition GC, including legacy partition
-			// GC that rewrites the collection record. With no alias keys,
-			// the catalog deletes only keys scoped to this collection ID, so
-			// unrelated DDL and same-name recreation can proceed during I/O.
-			// Historical collections with aliases retain ddLock to protect
-			// alias keys against concurrent rebinding.
-			mt.ddLock.Unlock()
-			defer mt.ddLock.Lock()
-		}
-		return mt.catalog.DropCollection(ctx1, newColl, ts)
-	}
-	if err := dropFromCatalog(); err != nil {
+	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
 		return err
 	}
 
-	dbName := coll.DBName
-	if dbName == "" {
-		dbName = util.DefaultDBName
-	}
-	// A replacement collection may already own this name. Its grants must
-	// survive the old collection's GC; ddLock keeps this check and cleanup
-	// ordered with name publication and rename.
-	if owner, exists := mt.names.get(dbName, coll.Name); !exists || owner == collectionID {
-		if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, dbName, coll.Name); err != nil {
-			mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-				mlog.String("dbName", coll.DBName), mlog.String("collectionName", coll.Name), mlog.Err(err))
-		}
+	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", coll.DBName), mlog.String("collectionName", coll.Name), mlog.Err(err))
 	}
 
 	allNames := common.CloneStringList(aliases)
 	allNames = append(allNames, coll.Name)
 
 	// We cannot delete the name directly, since newly collection with same name may be created.
+	dbName := coll.DBName
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	mt.removeAllNamesIfMatchedInternal(ctx, dbName, collectionID, allNames)
 	mt.removeCollectionByIDInternal(ctx, collectionID)
 

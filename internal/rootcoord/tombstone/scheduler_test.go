@@ -193,8 +193,7 @@ func TestTombstoneSweeper_RemovalsAreSerial(t *testing.T) {
 	}
 	first := waitStarted()
 	// Neither the other tombstone nor a later tick may enter Remove until the
-	// current catalog operation completes. Collection GC relies on this when
-	// it releases ddLock during I/O; legacy partition GC can rewrite its record.
+	// current catalog operation completes.
 	select {
 	case id := <-started:
 		t.Fatalf("removal %s overlapped blocked removal %s", id, first)
