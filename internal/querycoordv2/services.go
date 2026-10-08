@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -100,7 +101,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
 	for _, collectionID := range collections {
-		cfg := configs[collectionID]
+		progress, err := s.qviewsLoadProgress(ctx, collectionID)
+		if err != nil {
+			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
+		}
+		cfg := progress.Config
 		if cfg == nil {
 			if isGetAll {
 				// The collection is released during this,
@@ -139,9 +144,9 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		}
 
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
-		percentage := s.qviewsLoadPercentage(cfg)
+		percentage := progress.Percentage()
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, percentage)
-		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, percentage == 100)
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, progress.Ready())
 		resp.RefreshProgress = append(resp.RefreshProgress, 0)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
 			Data: qviewsLoadFieldIDs(cfg),
@@ -163,7 +168,11 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
-	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
+	progress, err := s.qviewsLoadProgress(ctx, req.GetCollectionID())
+	if err != nil {
+		return &querypb.ShowPartitionsResponse{Status: merr.Status(err)}, nil
+	}
+	cfg := progress.Config
 	if cfg == nil {
 		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 		if err != nil {
@@ -187,7 +196,7 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 
 	loadedPartitions := typeutil.NewUniqueSet(cfg.PartitionIDs...)
-	loadPercentage := s.qviewsLoadPercentage(cfg)
+	loadPercentage := progress.Percentage()
 	for _, partitionID := range partitions {
 		if !loadedPartitions.Contain(partitionID) {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
@@ -223,26 +232,17 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}, nil
 }
 
-func (s *Server) qviewsLoadPercentage(cfg *loadmgr.LoadConfig) int64 {
-	replicaIDs := typeutil.NewUniqueSet()
-	for _, replica := range cfg.Replicas {
-		replicaIDs.Insert(replica.ReplicaID)
+// qviewsLoadProgress is shared by collection and partition status reporting.
+func (s *Server) qviewsLoadProgress(ctx context.Context, collectionID int64) (loadstatus.Progress, error) {
+	store := s.qviewsRuntime.loadConfigStore
+	if !store.Contains(collectionID) {
+		return loadstatus.Progress{}, nil
 	}
-	total := int64(0)
-	loaded := int64(0)
-	for shardID, stats := range s.qviewsRuntime.shardViewRegistry.Snapshot().StatsMap() {
-		if !replicaIDs.Contain(shardID.ReplicaID) {
-			continue
-		}
-		total++
-		if stats != nil && stats.UpVersion != nil {
-			loaded++
-		}
+	collection, err := s.broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		return loadstatus.Progress{}, err
 	}
-	if total == 0 {
-		return 0
-	}
-	return loaded * 100 / total
+	return loadstatus.Get(store, s.qviewsRuntime.shardViewRegistry, collectionID, collection.GetVirtualChannelNames()), nil
 }
 
 func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {

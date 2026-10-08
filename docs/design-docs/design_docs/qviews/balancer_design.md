@@ -373,9 +373,23 @@ info used when the local state machine acquires resources.
 **Release semantics (Option A)**: `ReleaseCollection` immediately removes the LoadConfig and triggers Balancer. Orphan views (view exists but no config) are naturally detected by reconcile Phase 1 and released via `RequestRelease`. No "releasing" state needed. Crash recovery is handled uniformly by reconcile.
 
 **Load status derivation**: `LoadStatus` and `LoadPercentage` are derived from view states:
-- **Loaded**: All shards for the collection have an Up view.
-- **Loading**: At least one shard has no Up view.
-- **LoadPercentage**: `count(shards with Up view) / count(total shards) * 100`.
+- **Expected shards**: The collection's complete metadata vchannel list crossed
+  with the current LoadConfig replica list, including shards not yet registered.
+- **Loaded**: Every expected shard has an Up view whose `UpLoadInfoVersion`
+  equals the current collection `ConfigVersion`.
+- **Loading**: At least one expected shard is absent, has no Up view, or has an
+  Up view built against another load-config version. An empty expected set does
+  not count as loaded.
+- **LoadPercentage**: `count(current-config Up expected shards) / count(expected shards) * 100`.
+
+`loadstatus.Get` is the shared progress/readiness calculation. Collection and
+partition status use it; readiness consumers, including AutoLoad when integrated,
+should use its `Ready()` result. It reads LoadConfig and its version atomically,
+reads one scoped Registry snapshot, then rechecks the config version. If the
+version changed, it reports zero progress for the current configuration (or no
+configuration after release). Store versions increase across release/reload, so
+old Up views cannot satisfy the new load. A successful check describes a point
+in time during the call; subsequent configuration changes require a new poll.
 
 **Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
 

@@ -200,8 +200,8 @@ func (s *LoadConfigStore) GetConfig(collectionID int64) *LoadConfig {
 
 // GetConfigVersion returns the version of the live load config for a single
 // collection without materializing the full balancer snapshot. It is the
-// O(1) counterpart of LoadConfigSnapshot.ConfigVersion and is safe to pair
-// with GetConfig when a caller needs a config and its version together.
+// O(1) counterpart of LoadConfigSnapshot.ConfigVersion. Use GetConfigWithVersion
+// when a caller needs a config and its version atomically.
 func (s *LoadConfigStore) GetConfigVersion(collectionID int64) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
