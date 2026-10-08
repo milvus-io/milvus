@@ -41,10 +41,14 @@ segments register with that buffer rather than opening their own subscriptions.
   zero requests continuous delivery.
 - Delete entries use the outer committed transaction TimeTick when applicable.
   Plain inserts do not produce Delete entries.
-- `SyncUp(T)` certifies successful delivery through T, including empty intervals.
-  It does not certify persistence, L0 materialization, or segment application.
-- The adaptor rejects missing history with `ErrTransformLogStartPointTruncated`.
-  It never reports a successful catch-up across a truncated interval.
+- `SyncUp(T)` certifies delivery of the retained suffix through T, including
+  empty intervals after the adjusted start. It does not certify persistence,
+  L0 materialization, segment application, or delivery below Summary's lower bound.
+- The adaptor accepts Summary's `FastForwardTimeTick` and resumes at that
+  retained lower bound. A bounded interval entirely below the bound completes
+  without entries. This compatibility behavior does not establish that skipped
+  Deletes were applied; complete query recovery still requires the retention
+  guarantees below. See [the adaptor contract](../wal/transform_log.md).
 - The summary reader provides bounded pages and scoped change notifications.
   No independent subscriber backlog is persisted on SN.
 - The QN buffer applies entries to each registered segment and advances that
