@@ -18,21 +18,23 @@ func newBroadcasterMetrics() *broadcasterMetrics {
 		metrics.NodeIDLabelName: paramtable.GetStringNodeID(),
 	}
 	return &broadcasterMetrics{
-		taskTotal:           metrics.StreamingCoordBroadcasterTaskTotal.MustCurryWith(constLabel),
-		executionDuration:   metrics.StreamingCoordBroadcasterTaskExecutionDurationSeconds.MustCurryWith(constLabel),
-		broadcastDuration:   metrics.StreamingCoordBroadcasterTaskBroadcastDurationSeconds.MustCurryWith(constLabel),
-		ackCallbackDuration: metrics.StreamingCoordBroadcasterTaskAckCallbackDurationSeconds.MustCurryWith(constLabel),
-		acquireLockDuration: metrics.StreamingCoordBroadcasterTaskAcquireLockDurationSeconds.MustCurryWith(constLabel),
+		taskTotal:                metrics.StreamingCoordBroadcasterTaskTotal.MustCurryWith(constLabel),
+		executionDuration:        metrics.StreamingCoordBroadcasterTaskExecutionDurationSeconds.MustCurryWith(constLabel),
+		broadcastDuration:        metrics.StreamingCoordBroadcasterTaskBroadcastDurationSeconds.MustCurryWith(constLabel),
+		ackCallbackDuration:      metrics.StreamingCoordBroadcasterTaskAckCallbackDurationSeconds.MustCurryWith(constLabel),
+		acquireLockDuration:      metrics.StreamingCoordBroadcasterTaskAcquireLockDurationSeconds.MustCurryWith(constLabel),
+		appendUnrecoverableTotal: metrics.StreamingCoordBroadcasterAppendUnrecoverableTotal.MustCurryWith(constLabel),
 	}
 }
 
 // broadcasterMetrics is the metrics of the broadcaster.
 type broadcasterMetrics struct {
-	taskTotal           *prometheus.GaugeVec
-	executionDuration   prometheus.ObserverVec
-	broadcastDuration   prometheus.ObserverVec
-	ackCallbackDuration prometheus.ObserverVec
-	acquireLockDuration prometheus.ObserverVec
+	taskTotal                *prometheus.GaugeVec
+	executionDuration        prometheus.ObserverVec
+	broadcastDuration        prometheus.ObserverVec
+	ackCallbackDuration      prometheus.ObserverVec
+	acquireLockDuration      prometheus.ObserverVec
+	appendUnrecoverableTotal *prometheus.CounterVec
 }
 
 // ObserveAcquireLockDuration observes the acquire lock duration.
@@ -96,6 +98,14 @@ func (g *taskMetricsGuard) ObserveAckCallbackBegin() {
 // ObserveAckCallbackDone observes the ack callback done.
 func (g *taskMetricsGuard) ObserveAckCallbackDone() {
 	g.ackCallbackDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.ackCallbackBegin).Seconds())
+}
+
+// ObserveAppendUnrecoverable counts one replica append of this task that a
+// StreamingNode refused with an unrecoverable streaming code. The task retries
+// it anyway; the counter is what makes a task that will never be accepted
+// visible.
+func (g *taskMetricsGuard) ObserveAppendUnrecoverable(code streamingpb.StreamingCode) {
+	g.appendUnrecoverableTotal.WithLabelValues(g.messageType.String(), code.String()).Inc()
 }
 
 // formatResourceKeys formats the resource keys.

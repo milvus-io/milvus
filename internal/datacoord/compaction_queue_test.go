@@ -327,3 +327,27 @@ func TestCompactionQueue_SyncPrioritizer(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+// A shard split rewrite runs while its source is frozen for every other
+// compaction, and the split cannot finish without it: it goes first under
+// either level prioritizer.
+func TestHashSplitRewriteIsDequeuedFirst(t *testing.T) {
+	newTask := func(planID int64, kind datapb.CompactionType) CompactionTask {
+		return newMixCompactionTask(&datapb.CompactionTask{PlanID: planID, Type: kind}, nil, nil, nil)
+	}
+	for _, prioritizer := range []Prioritizer{LevelPrioritizer, MixFirstPrioritizer} {
+		cq := NewCompactionQueue(5, prioritizer)
+		for i, kind := range []datapb.CompactionType{
+			datapb.CompactionType_ClusteringCompaction,
+			datapb.CompactionType_MixCompaction,
+			datapb.CompactionType_Level0DeleteCompaction,
+			datapb.CompactionType_BumpSchemaVersionCompaction,
+			datapb.CompactionType_HashSplitCompaction,
+		} {
+			assert.NoError(t, cq.Enqueue(newTask(int64(i+1), kind)))
+		}
+		task, err := cq.Dequeue()
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.CompactionType_HashSplitCompaction, task.GetTaskProto().GetType())
+	}
+}

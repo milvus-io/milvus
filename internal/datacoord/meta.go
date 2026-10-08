@@ -3129,6 +3129,14 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 			newSegments, metricMutation, retErr = m.completeSortCompactionMutation(t, result)
 		case datapb.CompactionType_BumpSchemaVersionCompaction:
 			newSegments, metricMutation, retErr = m.completeBumpSchemaVersionCompactionMutation(t, result)
+		case datapb.CompactionType_HashSplitCompaction:
+			// Not the mix mutation: a rewrite's outputs belong to other
+			// vchannels (meta_hash_split.go). It is deliberately outside the
+			// applied-result short-circuit above, which only covers the
+			// compactions whose outputs land on the plan's own channel; a
+			// re-run of a torn rewrite commit is recognized by
+			// isOwnHashSplitOutput instead.
+			newSegments, metricMutation, retErr = m.completeHashSplitCompactionMutation(t, result)
 		default:
 			retErr = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 		}
@@ -3693,6 +3701,12 @@ func (m *meta) GetCompactionTasks(ctx context.Context) map[int64][]*datapb.Compa
 
 func (m *meta) GetCompactionTasksByTriggerID(ctx context.Context, triggerID int64) []*datapb.CompactionTask {
 	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
+}
+
+// GetCompactionTaskDigestsByTriggerID returns the progress digests of every
+// compaction task of a trigger, without cloning the tasks.
+func (m *meta) GetCompactionTaskDigestsByTriggerID(ctx context.Context, triggerID int64) []compactionTaskDigest {
+	return m.compactionTaskMeta.GetCompactionTaskDigestsByTriggerID(triggerID)
 }
 
 func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {

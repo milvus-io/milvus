@@ -633,6 +633,16 @@ func (c *importChecker) stampIDRangesOntoStats(job ImportJob, lacks []*datapb.Im
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
+	// WithRequestSource() skips any ImportTaskV2 whose Source is
+	// ImportTaskSourceV2_L0Compaction, so such a task does not count towards
+	// "every task is Completed" here. Nothing sets that source today, which is
+	// what makes "a Completed job has no task still writing" true -- and a
+	// shard split's rewrite relies on exactly that when it decides an import
+	// can no longer publish an L0 on a source it is retiring
+	// (importMayPublishLevelZero). Setting that source would reopen the
+	// window: a job would reach Completed with such a task still writing. The
+	// rewrite's recorded L0 set bounds the damage, but this filter would have
+	// to be revisited with it.
 	tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(ImportTaskType), WithRequestSource())
 	for _, t := range tasks {
 		if t.GetState() != datapb.ImportTaskStateV2_Completed {
