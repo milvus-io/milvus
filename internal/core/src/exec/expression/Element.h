@@ -409,11 +409,6 @@ class SimdBatchElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         T v = std::get<T>(value);
-        if constexpr (std::is_floating_point_v<T>) {
-            if (std::isnan(v)) {
-                return false;
-            }
-        }
         return std::binary_search(vals_.begin(), vals_.end(), v);
     }
 
