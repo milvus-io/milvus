@@ -344,9 +344,13 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
   flag) and ClickHouse (`KILL QUERY` is `ASYNC` by default and
   `system.processes` has `is_cancelled`). `canceled` in the answer means the
   request was told to stop; it stops at its next cancellation check and then
-  leaves the list. Until then `List` shows it in state `Canceling`, so an
-  operator who lists right after canceling sees that the cancel took effect
-  rather than a request that looks untouched.
+  leaves the list. Until then `List` shows it in state `Canceling`. On the
+  proxy this window is usually milliseconds, since the gRPC method returns
+  as soon as its ctx is canceled (a probe polling `List` from four threads
+  around a cancel saw 472 rows, none of them `Canceling`), so the state is
+  mostly seen in the answer to a repeated cancel, and on a request that is
+  stuck before its first cancellation check; what it rules out is a canceled
+  request ever being shown as if it were untouched.
 - Canceling an id again before the request has left is harmless and still
   answered: the id is returned in `canceled` once more, in state `Canceling`,
   and is neither audited nor counted a second time. Without this a repeated
