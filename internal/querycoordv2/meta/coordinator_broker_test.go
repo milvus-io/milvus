@@ -101,6 +101,37 @@ func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionSchema() {
 	})
 }
 
+// DescribeCollectionInternal goes to rootcoord's internal describe, which also
+// answers for a collection that is not available any more.
+func (s *CoordinatorBrokerRootCoordSuite) TestDescribeCollectionInternal() {
+	ctx := context.Background()
+	collectionID := int64(100)
+
+	s.Run("normal case", func() {
+		s.mixcoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				CollectionName: "dropping",
+			}, nil)
+
+		resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+		s.NoError(err)
+		s.Equal("dropping", resp.GetCollectionName())
+		s.resetMock()
+	})
+
+	s.Run("return_failure_status", func() {
+		s.mixcoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(collectionID)),
+			}, nil)
+
+		_, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+		s.ErrorIs(err, merr.ErrCollectionNotFound)
+		s.resetMock()
+	})
+}
+
 func (s *CoordinatorBrokerRootCoordSuite) TestGetPartitions() {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)

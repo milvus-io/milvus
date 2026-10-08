@@ -282,6 +282,28 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
 	sd.deleteMut.Lock()
+	// shard-split fronting: a split child forwards every delete it consumes (all
+	// past T_switch, since its WAL is born past the fence) to its source
+	// delegator, which applies it to the sealed and pre-switch growing segments it
+	// serves. Forwarding must run AFTER this child releases its own delete lock —
+	// the parent's apply does remote (retried) segment deletes, and holding the
+	// child's deleteMut across that would couple the child's ingest (and the
+	// merged shard's serviceable timestamp) to the parent's worker-delete latency.
+	// This defer is registered before the unlock defer, so LIFO runs it after the
+	// unlock. In a cascaded split the parent is itself fronted and forwards the
+	// same batches on (v3 -> v1 -> v0); forwarding only ever goes up the family
+	// tree, and every hop starts after the forwarding delegator has released its
+	// own deleteMut, so no delete lock is held across a hop and there is no lock
+	// cycle.
+	var forwardParent ShardDelegator
+	defer func() {
+		if forwardParent != nil {
+			// Forward the same batches this child consumed, preserving each
+			// batch's own Ts (master refactored ProcessDelete(deleteData, ts)
+			// into a thin wrapper over ProcessDeleteBatches).
+			forwardParent.ProcessDeleteBatches(batches)
+		}
+	}()
 	defer sd.deleteMut.Unlock()
 
 	log := sd.getLogger(context.Background())
@@ -305,9 +327,15 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 			})
 		}
 
+		sd.deleteSeq++
+		if batch.Ts < sd.maxBufferedDeleteTs {
+			sd.deletesUnordered = true
+		}
+		sd.maxBufferedDeleteTs = max(sd.maxBufferedDeleteTs, batch.Ts)
 		sd.deleteBuffer.Put(&deletebuffer.Item{
 			Ts:   batch.Ts,
 			Data: cacheItems,
+			Seq:  sd.deleteSeq,
 		})
 		allDeleteData = append(allDeleteData, batch.Data...)
 	}
@@ -315,6 +343,9 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	if len(allDeleteData) > 0 {
 		sd.forwardStreamingDeletion(context.Background(), allDeleteData)
 	}
+
+	// hand the forward to the deferred call above, to run after deleteMut is released.
+	forwardParent = sd.frontingParent
 
 	metrics.QueryNodeProcessCost.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -1014,6 +1045,32 @@ func (sd *shardDelegator) processDeleteRecords(
 type segDeleteSnapshot struct {
 	records       []*deletebuffer.Item // copied slice of delete buffer entries
 	snapshotMaxTs uint64               // max Item.Ts in snapshot, used for timestamp-based catch-up
+	snapshotSeq   uint64               // deleteSeq when the snapshot was taken, used for sequence-based catch-up
+}
+
+// listDeletesSince lists the buffered deletes a loading segment has not been
+// given yet, under deleteMut (either lock), and returns the delete sequence
+// they bring it up to.
+//
+// While every item was put in timestamp order, "not given yet" is exactly "at
+// or after tsCursor", the cheap binary search. Once the buffer has been fed out
+// of order (deletesUnordered: a split source receiving deletes its children
+// forward from different WALs), a delete that arrives later can be OLDER than
+// ones the segment already got, and a timestamp cursor never looks back at it.
+// It is then found by arrival: every item from the segment's effective
+// timestamp on whose Seq is past seqCursor.
+func (sd *shardDelegator) listDeletesSince(effectiveTs, tsCursor, seqCursor uint64) ([]*deletebuffer.Item, uint64) {
+	if !sd.deletesUnordered {
+		return sd.deleteBuffer.ListAfter(tsCursor), sd.deleteSeq
+	}
+	items := sd.deleteBuffer.ListAfter(effectiveTs)
+	pending := make([]*deletebuffer.Item, 0)
+	for _, item := range items {
+		if item.Seq > seqCursor {
+			pending = append(pending, item)
+		}
+	}
+	return pending, sd.deleteSeq
 }
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
@@ -1057,6 +1114,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		snapshots[i] = segDeleteSnapshot{
 			records:       copied,
 			snapshotMaxTs: maxTs,
+			snapshotSeq:   sd.deleteSeq,
 		}
 	}
 	sd.deleteMut.RUnlock()
@@ -1106,16 +1164,21 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		}
 	}
 
-	// Per-segment catch-up cursors. Timestamp-based catch-up is robust against
-	// delete buffer eviction (Put → evict discards old tail while we run
-	// lock-free). Item.Ts comes from WAL TSO, monotonically increasing, so
-	// ListAfter(lastTs + 1) precisely captures only newer records.
+	// Per-segment catch-up cursors. Both are robust against delete buffer
+	// eviction (Put → evict discards old tail while we run lock-free). While the
+	// buffer is fed from this delegator's own WAL alone, Item.Ts arrives in TSO
+	// order, so ListAfter(lastTs + 1) precisely captures only newer records. A
+	// shard split source is also fed by its children, each from its own WAL, so
+	// a newer arrival can carry an older Ts; catch-up then goes by the arrival
+	// sequence instead (see listDeletesSince).
 	catchUpTs := make([]uint64, len(infos))
+	catchUpSeq := make([]uint64, len(infos))
 	for i, info := range infos {
 		catchUpTs[i] = segmentEffectiveTs(info)
 		if snapshots[i].snapshotMaxTs > 0 {
 			catchUpTs[i] = snapshots[i].snapshotMaxTs + 1
 		}
+		catchUpSeq[i] = snapshots[i].snapshotSeq
 	}
 
 	// === Phase 3: catch-up the live delete stream, then publish. ===
@@ -1138,11 +1201,12 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	// locked barrier.
 	const maxLockFreeCatchUpRounds = 5
 	pending := make([][]*deletebuffer.Item, len(infos))
+	pendingSeq := make([]uint64, len(infos))
 	for round := 0; ; round++ {
 		sd.deleteMut.RLock()
 		remaining := 0
-		for i := range infos {
-			pending[i] = sd.deleteBuffer.ListAfter(catchUpTs[i])
+		for i, info := range infos {
+			pending[i], pendingSeq[i] = sd.listDeletesSince(segmentEffectiveTs(info), catchUpTs[i], catchUpSeq[i])
 			remaining += len(pending[i])
 		}
 
@@ -1213,6 +1277,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				return err
 			}
 			catchUpTs[i] = pending[i][len(pending[i])-1].Ts + 1
+			catchUpSeq[i] = pendingSeq[i]
 			log.Info(ctx, "forward delete to worker (phase 3: lock-free catch-up)...",
 				mlog.String("channel", info.InsertChannel),
 				mlog.FieldSegmentID(info.GetSegmentID()),
@@ -1324,6 +1389,16 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
 	sd.distribution.SyncTargetVersion(action, partitions)
+	// Carry the partition set down to the children this shard answers for.
+	// querycoord syncs the source and does not yet know the children exist, so
+	// this is their only way to hear about a partition created after the fence —
+	// and without it a child rejects a request the source has already admitted,
+	// which surfaces as "partition not loaded" for the whole fronting window.
+	// Only the membership is copied: the segments and target version of a child
+	// are its own.
+	for _, child := range sd.frontingChildren() {
+		child.distribution.SyncPartitions(partitions)
+	}
 	// clean delete buffer after distribution becomes serviceable
 	if sd.distribution.queryView.Serviceable() {
 		checkpoint := action.GetCheckpoint()

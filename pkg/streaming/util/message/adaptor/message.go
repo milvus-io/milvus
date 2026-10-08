@@ -169,6 +169,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewCreateIndexMessageBody(msg)
 	case message.MessageTypeRecoveryBarrier:
 		tsMsg = newTimeTickMessageBody(msg)
+	case message.MessageTypeSplitShard:
+		tsMsg, err = NewSplitShardMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}

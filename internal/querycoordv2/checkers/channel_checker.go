@@ -25,6 +25,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -50,6 +51,11 @@ type ChannelChecker struct {
 	scheduler    task.Scheduler
 	assignPolicy assign.AssignPolicy
 
+	// splitState skips watching a collection's not-yet-adopted split targets
+	// (ShardState_ShardCreating): they are fronted in-process by the source
+	// delegator and must not be picked up by querycoord until adoption. May be nil.
+	splitState *meta.ShardSplitStateCache
+
 	// version cache for fast skip when nothing changed
 	versionCache map[int64]*collectionVersionCache
 }
@@ -60,6 +66,7 @@ func NewChannelChecker(
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	splitState *meta.ShardSplitStateCache,
 ) *ChannelChecker {
 	// Create RoundRobin assign policy in constructor to maximize loading speed
 	// Note: RoundRobin may break short-term balance but prioritizes loading speed
@@ -73,6 +80,7 @@ func NewChannelChecker(
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
+		splitState:        splitState,
 		versionCache:      make(map[int64]*collectionVersionCache),
 	}
 }
@@ -266,7 +274,15 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 	nextTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 
-	// get channels which exists on dist, but not exist on current and next
+	// get channels which exists on dist, but not exist on current and next.
+	//
+	// This is also what releases a shard split source, and only at the right
+	// time. Adoption delists the source from the collection, so the next
+	// target pulled after it no longer lists the source, but the current
+	// target keeps listing it until it flips to that pull -- and the flip
+	// needs every target delegator synced and data-ready. GetShardLeaders
+	// enumerates the current target, so releasing the source any earlier would
+	// leave a channel with no leader and fail every read of the collection.
 	for _, ch := range dist {
 		_, existOnCurrent := currentTargetMap[ch.GetChannelName()]
 		_, existOnNext := nextTargetMap[ch.GetChannelName()]
@@ -275,15 +291,66 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
-	// get channels which exists on next target, but not on dist
+	// get channels which exists on next target, but not on dist. The shard
+	// split rule needs a read of the shard states, so it is only looked up
+	// once there is a channel to watch.
+	var watchable func(string) bool
 	for name, channel := range nextTargetMap {
-		_, existOnDist := distMap[name]
-		if !existOnDist {
+		if _, existOnDist := distMap[name]; existOnDist {
+			continue
+		}
+		if watchable == nil {
+			watchable = c.shardSplitWatchable(ctx, collectionID)
+		}
+		if watchable(name) {
 			toLoad = append(toLoad, channel)
 		}
 	}
 
 	return toLoad, toRelease
+}
+
+// shardSplitWatchable returns which channels of the collection's next target a
+// shard split allows querycoord to watch now.
+//
+//   - A not-yet-adopted split target is fronted in-process by its source's
+//     delegator; watching it would build a fresh delegator and replay the WAL,
+//     or adopt the child before its split was adopted. It is held back while
+//     the shard states call it Creating, AND while the next target marks it as
+//     a split window target. The mark comes from a fresh read taken before the
+//     pull and never misses a target still Creating in it, whereas the cached
+//     states can be up to their TTL old. It also keeps an adopted target from
+//     being watched off the window snapshot, which attributes the target's
+//     data to its source: the window-end re-pull lists it unmarked.
+//   - A vchannel the collection no longer lists is a split source retired by an
+//     adoption, which the next target may still list until the window-end
+//     re-pull. It is never watched again (meta.ShardStates.CheckWatchable); the
+//     flip releases it.
+//
+// Without a read of the shard states a Creating target cannot be told from any
+// other channel, so nothing of the collection is watched until one succeeds.
+// That only happens before the first read of a collection succeeds (the cache
+// keeps its last read on a failed refresh), and the watch describes the
+// collection first anyway, so it could not have succeeded either.
+func (c *ChannelChecker) shardSplitWatchable(ctx context.Context, collectionID int64) func(channel string) bool {
+	if c.splitState == nil {
+		return func(string) bool { return true }
+	}
+	states, ok := c.splitState.ChannelStates(ctx, collectionID)
+	if !ok {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching channels: the collection's shard states are unknown",
+			mlog.FieldCollectionID(collectionID))
+		return func(string) bool { return false }
+	}
+	window := c.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	return func(channel string) bool {
+		if err := states.CheckWatchable(channel); err != nil {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching a channel a shard split does not allow to watch yet",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel), mlog.Err(err))
+			return false
+		}
+		return !window.Contain(channel)
+	}
 }
 
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
@@ -308,10 +375,60 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		}
 	}
 
-	return dupChannels
+	if len(dupChannels) == 0 || c.splitState == nil {
+		return dupChannels
+	}
+	return c.keepOlderSplitDelegators(ctx, replica, delegatorList, dupChannels)
+}
+
+// keepOlderSplitDelegators revises which duplicated delegators to release for
+// a shard split's channels. Anywhere else the newest delegator is kept. A
+// split's source is duplicated only by a re-watch that the distribution did not
+// show the original delegator to (a node not heard from yet); the original
+// consumed the fence and fronts the split's in-process children, which the
+// newer one never had. So for a split's channel the OLDEST delegator is kept.
+// When the split's channels cannot be told, nothing of the collection is
+// released this round: a surplus delegator costs resources, releasing the
+// wrong one loses the children.
+func (c *ChannelChecker) keepOlderSplitDelegators(ctx context.Context, replica *meta.Replica,
+	delegators, dupChannels []*meta.DmChannel,
+) []*meta.DmChannel {
+	freeze := meta.EvalShardSplitFreeze(ctx, c.splitState, c.targetMgr, replica.GetCollectionID())
+	if !freeze.Known() {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "hold duplicated delegators until the shard split states can be read",
+			mlog.FieldCollectionID(replica.GetCollectionID()), mlog.Err(freeze.CheckCollection()))
+		return nil
+	}
+	released := lo.Filter(dupChannels, func(ch *meta.DmChannel, _ int) bool {
+		return !freeze.InFamily(ch.GetChannelName())
+	})
+	oldest := make(map[string]*meta.DmChannel)
+	for _, delegator := range delegators {
+		name := delegator.GetChannelName()
+		if !freeze.InFamily(name) {
+			continue
+		}
+		if kept, ok := oldest[name]; !ok || delegator.Version < kept.Version {
+			oldest[name] = delegator
+		}
+	}
+	for _, delegator := range delegators {
+		if kept, ok := oldest[delegator.GetChannelName()]; ok && delegator != kept {
+			mlog.Info(ctx, "release the newer delegator of a duplicated shard split channel, keep the one that fronts its children",
+				mlog.FieldCollectionID(replica.GetCollectionID()), mlog.String("channel", delegator.GetChannelName()),
+				mlog.Int64("releasedNode", delegator.Node), mlog.Int64("keptNode", kept.Node))
+			released = append(released, delegator)
+		}
+	}
+	return released
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
+	if len(channels) == 0 {
+		// nothing to place: in particular, no shard-state read for the
+		// adopted-target affinity.
+		return []task.Task{}
+	}
 	// Group channels by their candidate node set and hand each group to the
 	// assign policy in one call. Assigning channel by channel lets every call
 	// observe the same node scores (the tasks of this round are not in the
@@ -322,6 +439,8 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	}
 	groups := make(map[string]*channelGroup)
 	groupKeys := make([]string, 0)
+	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
+	affinity := c.splitSourceAffinity(ctx, replica)
 	for _, ch := range channels {
 		var rwNodes []int64
 		if streamingutil.UseStreamingQueryNodeAsDelegator() {
@@ -330,6 +449,10 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
 				rwNodes = replica.GetRWNodes()
 			}
+		}
+		if node, ok := affinity(ch.GetChannelName(), rwNodes); ok {
+			plans = append(plans, assign.ChannelAssignPlan{Channel: ch, From: -1, To: node})
+			continue
 		}
 		key := nodesGroupKey(rwNodes)
 		group, ok := groups[key]
@@ -341,7 +464,6 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		group.channels = append(group.channels, ch)
 	}
 
-	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
 	for _, key := range groupKeys {
 		group := groups[key]
 		plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
@@ -356,6 +478,74 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	// consistently exceeds ChannelTaskTimeout never converges: killed and
 	// rebuilt with the same budget every check tick, no backoff or retry cap.
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+// splitSourceAffinity returns where a newly adopted shard split target of the
+// replica must be watched, if anywhere in particular: on the node serving its
+// retired source, as long as the current target still lists that source.
+//
+// The source's delegator still fronts the target's in-process child there, and
+// a watch on that node converts the child in place: it is adopted with the
+// growing data it has consumed since the fence. A watch anywhere else builds a
+// fresh delegator that reloads the target's half of the shard, while the child
+// is never adopted and the source's reads never reach the handover.
+//
+// Which source fronts which target is the split task's provenance and is not in
+// the collection meta. A target not yet in the current target, while the
+// current target lists a retired source, is such a target; with every retired
+// source served by one node in the replica, that node is its fronting source's.
+// With retired sources on several nodes (concurrent splits, which
+// dataCoord.shardSplit.maxConcurrentTasks=1 rules out by default) the pairing
+// is not derivable here, and nothing is pinned.
+//
+// The affinity also yields to the normal placement when that node is not a
+// read-write node of the replica, or not a Normal node; the target is then
+// watched fresh, which is correct, only slower.
+func (c *ChannelChecker) splitSourceAffinity(ctx context.Context, replica *meta.Replica) func(channel string, rwNodes []int64) (int64, bool) {
+	none := func(string, []int64) (int64, bool) { return 0, false }
+	if c.splitState == nil {
+		return none
+	}
+	collectionID := replica.GetCollectionID()
+	states, ok := c.splitState.ChannelStates(ctx, collectionID)
+	if !ok {
+		return none
+	}
+	current := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	retired := states.Delisted(current)
+	if len(retired) == 0 {
+		return none
+	}
+	hosts := typeutil.NewUniqueSet()
+	for _, source := range retired {
+		if leader := c.dist.ChannelDistManager.GetShardLeader(source, replica); leader != nil {
+			hosts.Insert(leader.Node)
+		}
+	}
+	if hosts.Len() != 1 {
+		if hosts.Len() > 1 {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "retired shard split sources are served by several nodes; adopted targets are placed normally",
+				mlog.FieldCollectionID(collectionID), mlog.Int64("replicaID", replica.GetID()),
+				mlog.Strings("retiredSources", retired), mlog.Int64s("nodes", hosts.Collect()))
+		}
+		return none
+	}
+	host := hosts.Collect()[0]
+	return func(channel string, rwNodes []int64) (int64, bool) {
+		if _, inCurrent := current[channel]; inCurrent {
+			return 0, false
+		}
+		info := c.nodeMgr.Get(host)
+		if !lo.Contains(rwNodes, host) || info == nil || info.GetState() != session.NodeStateNormal {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "the retired split source's node cannot take the adopted target; place it normally",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel), mlog.Int64("sourceNode", host))
+			return 0, false
+		}
+		mlog.Info(ctx, "place an adopted split target on its fronting source's node, to convert the in-process child in place",
+			mlog.FieldCollectionID(collectionID), mlog.Int64("replicaID", replica.GetID()),
+			mlog.String("channel", channel), mlog.Int64("node", host))
+		return host, true
+	}
 }
 
 // nodesGroupKey returns an order-insensitive key of a node set.

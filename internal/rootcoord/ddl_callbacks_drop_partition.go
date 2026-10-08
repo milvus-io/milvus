@@ -58,10 +58,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		return errIgnoredDropPartition
 	}
 
-	channels := make([]string, 0, collMeta.ShardsNum)
-	for i := 0; i < int(collMeta.ShardsNum); i++ {
-		channels = append(channels, collMeta.VirtualChannelNames[i])
-	}
+	channels := partitionDDLBroadcastChannels(collMeta.VirtualChannelNames)
 
 	msg := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{

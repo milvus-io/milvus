@@ -393,6 +393,10 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	// check every collection before moving anything, so a refused request moves nothing.
+	if err := s.checkShardSplitMovable(ctx, lo.Map(replicas, func(r *meta.Replica, _ int) int64 { return r.GetCollectionID() })...); err != nil {
+		return merr.Status(err), nil
+	}
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
@@ -472,6 +476,10 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	}
 
 	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
+	// check every collection before moving anything, so a refused request moves nothing.
+	if err := s.checkShardSplitMovable(ctx, lo.Map(replicas, func(r *meta.Replica, _ int) int64 { return r.GetCollectionID() })...); err != nil {
+		return merr.Status(err), nil
+	}
 	for _, replica := range replicas {
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()

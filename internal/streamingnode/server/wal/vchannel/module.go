@@ -195,6 +195,8 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleSchemaChangeMessage(message.MustAsImmutableSchemaChangeMessageV2(msg))
 	case message.MessageTypeAlterCollection:
 		m.handleAlterCollectionMessage(ctx, retained)
+	case message.MessageTypeSplitShard:
+		m.handleSplitShardMessage(ctx, retained)
 	case message.MessageTypeDropCollection:
 		m.handleDropCollectionMessage(ctx, retained)
 	case message.MessageTypeDropPartition:
@@ -345,10 +347,76 @@ func (m *VChannelRecoveryModule) handleAlterCollectionMessage(
 ) {
 	msg := message.MustAsImmutableAlterCollectionMessageV2(owned.Message())
 	if m.vchannelView != nil {
+		// A shard split's routing commit whose post-image no longer names this
+		// vchannel retires it: the same broadcast that grows the collection's
+		// vchannel list with the split's targets delists the spent source. That
+		// is a drop of THIS vchannel, not a change to the collection's state.
+		if m.vchannelView.ObserveRetireVChannel(msg) {
+			m.pendingDrops = append(m.pendingDrops, owned.Clone())
+			// L0 completion is VChannel-wide, so every earlier L1 blocker must
+			// flush before the drop can complete.
+			m.flushAllSegmentsCreatedBefore(ctx, owned)
+			return
+		}
 		m.vchannelView.ObserveAlterCollectionMessageV2(msg)
 	}
 	if messageutil.IsSchemaChange(msg.Header()) {
 		m.flushAllSegmentsCreatedBefore(ctx, owned)
+	}
+}
+
+// handleSplitShardMessage handles one replica of a SplitShard broadcast by the
+// role this module's vchannel plays in it.
+//
+//   - SOURCE: the write fence. Its growing L1 is sealed at the fence tick --
+//     this message IS the seal record, there is no ManualFlush before it -- and
+//     the fence itself is recorded in the vchannel meta so it survives a
+//     restart. The vchannel stays NORMAL; adoption retires it later.
+//   - TARGET: the genesis of a new vchannel, which the manager created this
+//     module for. It seeds the meta exactly as CreateCollection does.
+//
+// A replica on any other vchannel was never a destination of the broadcast.
+// The append path refuses it, so one reaching here is a coordinator bug;
+// nothing is done for it rather than fencing or registering a stranger.
+//
+// Nothing serializes the source replica against the target replicas here --
+// observation is per-vchannel and each module has its own lock -- and nothing
+// needs to. The broadcaster appends and persists the source replica before any
+// target replica (append_first_vchannels), every module observes its own
+// vchannel's WAL in order, and a target's first tick is therefore above
+// T_switch. The fence and the genesis are facts about different vchannels; they
+// never read each other's state.
+func (m *VChannelRecoveryModule) handleSplitShardMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableSplitShardMessageV2(owned.Message())
+	switch message.SplitShardRoleOf(msg.Header(), m.vchannel) {
+	case message.SplitShardRoleSource:
+		// Before the fence is recorded: once the view is fenced the segments
+		// are still flushed by tick, but keeping the order makes a replay that
+		// recreated a growing segment after the fence seal it again.
+		m.flushAllSegmentsCreatedBefore(ctx, owned)
+		if m.vchannelView != nil {
+			m.vchannelView.ObserveSplitShardSourceMessageV2(msg)
+		}
+	case message.SplitShardRoleTarget:
+		if m.vchannelView == nil {
+			m.vchannelView = NewVChannelViewFromSplitShardTargetMessage(msg)
+			return
+		}
+		// An existing view means a replay of the genesis, or a target vchannel
+		// name reused after its predecessor was collected. Only the latter may
+		// start a new lifetime, and only past the retained checkpoint.
+		if m.vchannelView.CanStartNewCollectionAt(msg.TimeTick()) {
+			m.vchannelView = NewVChannelViewFromSplitShardTargetMessage(msg)
+		}
+	default:
+		mlog.Warn(ctx, "split shard replica of unknown role is ignored",
+			mlog.String("pchannel", m.pchannel),
+			mlog.String("vchannel", m.vchannel),
+			mlog.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
+			mlog.Uint64("timetick", msg.TimeTick()))
 	}
 }
 
