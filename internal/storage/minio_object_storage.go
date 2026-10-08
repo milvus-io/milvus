@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"io"
+	"net/http"
 
 	"github.com/minio/minio-go/v7"
 
@@ -125,7 +126,22 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	if isDeleteSucceededWithOK(err) {
+		return nil
+	}
 	return mapObjectStorageError(objectName, err)
+}
+
+// isDeleteSucceededWithOK reports whether a RemoveObject error only says that the
+// store answered DeleteObject with HTTP 200. The S3 API specifies 204 for a
+// successful delete and minio-go reports every other status as an error, but
+// some S3-compatible stores answer 200 and have deleted the object. A
+// conforming store never answers 200 here, so this changes nothing for them.
+func isDeleteSucceededWithOK(err error) bool {
+	if err == nil {
+		return false
+	}
+	return minio.ToErrorResponse(err).StatusCode == http.StatusOK
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
