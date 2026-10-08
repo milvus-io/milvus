@@ -53,6 +53,12 @@ not align: both use absolute segment row IDs. The stats object is selected
 once during getter construction under the existing sealed search lease;
 there is no per-candidate segment snapshot capture.
 
+The reader honors the same switch as JSON stats filters:
+`common.usingJSONShreddingForQuery`, or its per-request override, reaches
+the group-by node as the `expr_use_json_stats` plan option. When it is off,
+the getter does not fetch JSON stats at all, so it neither reads typed
+columns nor triggers deferred stats initialization.
+
 This reader uses the current raw Chunk API because streamed ANN candidates
 arrive incrementally. The finite-offset Take API would require gathering
 unknown future candidates or recreating a one-element result per Get.

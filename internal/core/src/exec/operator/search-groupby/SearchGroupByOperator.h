@@ -244,7 +244,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      std::optional<std::string> json_path,
                      std::optional<DataType> json_type,
                      bool strict_cast,
-                     const segcore::SegmentReadSnapshot* snapshot = nullptr)
+                     const segcore::SegmentReadSnapshot* snapshot = nullptr,
+                     bool use_json_stats = true)
         : op_ctx_(op_ctx),
           segment_(segment),
           snapshot_(snapshot),
@@ -266,7 +267,10 @@ class SealedDataGetter : public DataGetter<OutputType> {
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
         if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
-            if (from_data_ && json_path.has_value() && json_type.has_value()) {
+            // Honor the same JSON stats switch as filter expressions. When it
+            // is off, do not even fetch stats, which could initialize them.
+            if (use_json_stats && from_data_ && json_path.has_value() &&
+                json_type.has_value()) {
                 auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
                 if (stats != nullptr) {
                     constexpr auto type =
@@ -392,7 +396,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
               std::optional<std::string> json_path = std::nullopt,
               std::optional<DataType> json_type = std::nullopt,
               bool strict_cast = false,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr) {
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true) {
     if (json_path.has_value()) {
         auto json_path_tokens = milvus::parse_json_pointer(json_path.value());
         json_path = milvus::Json::pointer(json_path_tokens);
@@ -415,7 +420,8 @@ GetDataGetter(milvus::OpContext* op_ctx,
             json_path,
             json_type,
             strict_cast,
-            snapshot);
+            snapshot,
+            use_json_stats);
     } else {
         ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
@@ -487,7 +493,8 @@ class MultiFieldDataGetter {
         const std::optional<std::string>& json_path = std::nullopt,
         const std::optional<DataType>& json_type = std::nullopt,
         bool strict_cast = false,
-        const segcore::SegmentReadSnapshot* snapshot = nullptr);
+        const segcore::SegmentReadSnapshot* snapshot = nullptr,
+        bool use_json_stats = true);
 
     void
     GetInto(int64_t idx, CompositeGroupKey& out) const;
@@ -509,7 +516,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<size_t>& topk_per_nq_prefix_sum,
               std::vector<int32_t>* element_indices = nullptr,
               SearchResult* search_result = nullptr,
-              const segcore::SegmentReadSnapshot* snapshot = nullptr);
+              const segcore::SegmentReadSnapshot* snapshot = nullptr,
+              bool use_json_stats = true);
 
 bool
 TryStrictGroupFilteredSearch(

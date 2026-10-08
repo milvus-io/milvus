@@ -123,9 +123,11 @@ class JsonColumnSegment : public segcore::ChunkedSegmentSealedImpl {
 
     bool hide_column = false;
     std::shared_ptr<index::JsonKeyStats> json_stats;
+    mutable int json_stats_requests = 0;
 
     std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext*, FieldId) const override {
+        ++json_stats_requests;
         return json_stats;
     }
 
@@ -232,9 +234,16 @@ class GroupByJsonGetterTest
     std::shared_ptr<DataGetter<T>>
     MakeGetter(std::optional<DataType> type,
                bool strict_cast = false,
-               const std::string& path = "/value") {
-        return GetDataGetter<T, Json>(
-            nullptr, *segment_, field_id_, path, type, strict_cast);
+               const std::string& path = "/value",
+               bool use_json_stats = true) {
+        return GetDataGetter<T, Json>(nullptr,
+                                      *segment_,
+                                      field_id_,
+                                      path,
+                                      type,
+                                      strict_cast,
+                                      nullptr,
+                                      use_json_stats);
     }
 
     std::optional<std::string>
@@ -529,6 +538,23 @@ TEST_P(GroupByJsonGetterTest, UnsupportedPathsStayRaw) {
     ASSERT_NE(reader, nullptr);
     EXPECT_THROW(reader->Get(nullptr, -1), SegcoreError);
     EXPECT_THROW(reader->Get(nullptr, 4200), SegcoreError);
+}
+
+TEST_P(GroupByJsonGetterTest, DisabledJsonStatsKeepRawReads) {
+    auto typed = InstallShreddedStrings();
+    auto getter =
+        MakeGetter<std::string>(DataType::VARCHAR, false, "/value", false);
+    for (auto row : {1, 73, 61, 4093}) {
+        EXPECT_EQ(getter->Get(row), expected_[row]);
+    }
+    // The switch also prevents fetching stats, which could initialize them.
+    EXPECT_EQ(segment_->json_stats_requests, 0);
+    EXPECT_TRUE(typed->pinned_chunks.empty());
+    EXPECT_FALSE(stats_->pinned_chunks.empty());
+
+    MakeGetter<std::string>(DataType::VARCHAR)->Get(1);
+    EXPECT_EQ(segment_->json_stats_requests, 1);
+    EXPECT_EQ(typed->pinned_chunks, (std::vector<int64_t>{0}));
 }
 
 TEST_P(GroupByJsonGetterTest, ShreddingReadErrorsNeverFallBackToRaw) {
