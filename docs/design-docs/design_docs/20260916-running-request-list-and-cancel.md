@@ -133,7 +133,7 @@ message RunningRequestInfo {
   int64 start_time_ms = 11;
   int64 queued_ms = 12;        // queue time of the first task
   int64 elapsed_ms = 13;
-  string state = 14;           // Queued | Running
+  string state = 14;           // Queued | Running | Canceling
   repeated int64 task_ids = 15;
   string trace_id = 16;
   bool cancellable = 17;       // always true for the three registered types
@@ -332,12 +332,26 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
 | Where | The first line of `Proxy.Search`, `Proxy.HybridSearch` and `Proxy.Query`. Not in `node.search` or `node.query`: the former is called repeatedly by the retry wrapper, the latter is shared by Query, requery and search by primary key; registering there would register one request several times. |
 | Cancel handle | `ctx, cancel := context.WithCancelCause(ctx)`; `cancel` is stored in the record. The cause is `merr.ErrRequestCanceled` carrying the operator's user name and the reason. |
 | Request id | `MetaCache.AllocID` (`internal/proxy/metacache/meta_cache.go:1595`), backed by `rowIDAllocator`, which prefetches a batch of ids from RootCoord and hands them out locally. Cluster-unique, independent of TSO, available at registration time. |
-| Fields | request id, proxy id, type, db, collection, user, client address (gRPC peer), nq, topk, first 256 bytes of expr, start time, queue time of the first task, state (Queued / Running), task ids, trace id. Elapsed time is computed at list time. |
+| Fields | request id, proxy id, type, db, collection, user, client address (gRPC peer), nq, topk, first 256 bytes of expr, start time, queue time of the first task, state (Queued / Running / Canceling), task ids, trace id. Elapsed time is computed at list time. |
 | Link to tasks | A pointer to the record is placed in the ctx. `Enqueue` appends the task id after allocating it; `AddActiveTask` sets the state to Running. |
-| Removal | A `defer` right after registration removes the record and calls `cancel` when the gRPC method returns. Normal return, error return, panic unwinding and a client disconnect that cancels the ctx all go through it. After a cancellation the row disappears immediately; the QueryNode's wind-down is not reflected in the list. The ctx and any unfinished task still hold the pointer; the record is garbage collected when those tasks end. |
+| Removal | A `defer` right after registration removes the record and calls `cancel` when the gRPC method returns. Normal return, error return, panic unwinding and a client disconnect that cancels the ctx all go through it. Between the cancel and that return the request is still listed, in state `Canceling`; the QueryNode's wind-down after the return is not reflected in the list. The ctx and any unfinished task still hold the pointer; the record is garbage collected when those tasks end. |
 | Capacity | No separate limit. The record count equals the number of DQL requests in flight on the proxy, bounded by the gRPC server's concurrent request limit; once in the scheduler queue it is further bounded by `proxy.maxTaskNum` (1024). A request whose client set no deadline and which is stuck stays in the table; it is a running request, not a leak, and disappears as soon as an operator cancels it. |
 
 ### Cancellation semantics
+
+- Cancellation is asynchronous, as in Elasticsearch (whose task cancel
+  returns before the task stops and whose task info carries a `cancelled`
+  flag) and ClickHouse (`KILL QUERY` is `ASYNC` by default and
+  `system.processes` has `is_cancelled`). `canceled` in the answer means the
+  request was told to stop; it stops at its next cancellation check and then
+  leaves the list. Until then `List` shows it in state `Canceling`, so an
+  operator who lists right after canceling sees that the cancel took effect
+  rather than a request that looks untouched.
+- Canceling an id again before the request has left is harmless and still
+  answered: the id is returned in `canceled` once more, in state `Canceling`,
+  and is neither audited nor counted a second time. Without this a repeated
+  id was in none of the answer's lists; now every requested id is in exactly
+  one of `canceled`, `not_found` and `undetermined`.
 
 - Before returning, each of the three gRPC methods checks `ctx.Err() != nil`
   and then `context.Cause(ctx)`. If the cause is `ErrRequestCanceled` it is
