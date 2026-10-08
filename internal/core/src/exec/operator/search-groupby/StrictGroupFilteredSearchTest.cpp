@@ -228,7 +228,8 @@ TEST(StrictGroupSearchEligibilityTest,
     EXPECT_FALSE(query::CanUseStrictGroupSearch(eligible, 2));
 
     auto element_level = eligible;
-    element_level.array_offsets_ = std::make_shared<ArrayOffsetsSealed>();
+    element_level.struct_element_offsets_ =
+        std::make_shared<StructElementOffsetsSealed>();
     EXPECT_FALSE(query::CanUseStrictGroupSearch(element_level, 1));
 }
 

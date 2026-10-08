@@ -274,14 +274,14 @@ VerifyNullableElementFullScanLogicalCount(
     int64_t expected_live_elements) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment, row_count, MAX_TIMESTAMP);
-    auto array_offsets = segment->GetArrayOffsets(array_fid);
-    ASSERT_NE(array_offsets, nullptr);
-    ASSERT_EQ(array_offsets->GetTotalElementCount(),
+    auto struct_element_offsets = segment->GetStructElementOffsets(array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(),
               expected_skipped_elements + expected_live_elements);
 
     // DataGen keeps a physical payload for nullable ARRAY rows in growing
     // storage even when the row validity bit is false. Sealed binlog
-    // serialization may discard that payload, but ArrayOffsets maps the NULL
+    // serialization may discard that payload, but StructElementOffsets maps the NULL
     // row to zero logical elements in either layout.
     if (segment->type() == SegmentType::Sealed) {
         auto pw = segment->get_batch_views<ArrayView>(
@@ -299,7 +299,7 @@ VerifyNullableElementFullScanLogicalCount(
         EXPECT_FALSE(chunk.is_valid(1));
         EXPECT_EQ(chunk.data()[1].length(), 2);
     }
-    const auto null_row_range = array_offsets->ElementIDRangeOfRow(1);
+    const auto null_row_range = struct_element_offsets->ElementIDRangeOfRow(1);
     EXPECT_EQ(null_row_range.first, null_row_range.second);
 
     SegmentExpr segment_expr(std::vector<ExprPtr>{},
@@ -336,7 +336,8 @@ VerifyNullableElementFullScanLogicalCount(
         res.set(0, size, true);
     };
 
-    const auto logical_elements = array_offsets->GetTotalElementCount();
+    const auto logical_elements =
+        struct_element_offsets->GetTotalElementCount();
     TargetBitmap res(logical_elements, false);
     TargetBitmap valid(logical_elements, true);
     const auto processed =
@@ -403,12 +404,12 @@ class OffsetsEvalCorrectnessTest : public ::testing::Test {
                          dataset.row_ids_.data(),
                          dataset.timestamps_.data(),
                          dataset.raw_);
-        ASSERT_NE(growing_->GetArrayOffsets(array_fid_), nullptr);
+        ASSERT_NE(growing_->GetStructElementOffsets(array_fid_), nullptr);
 
         auto sealed_first = DataGen(schema_, N / 2, 43, 0, 1, 1);
         auto sealed_second = DataGen(schema_, N / 2, 44, 0, 1, 1);
         sealed_ = CreateTwoChunkSealed(schema_, sealed_first, sealed_second);
-        ASSERT_NE(sealed_->GetArrayOffsets(array_fid_), nullptr);
+        ASSERT_NE(sealed_->GetStructElementOffsets(array_fid_), nullptr);
     }
 
     std::shared_ptr<SegmentExpr>

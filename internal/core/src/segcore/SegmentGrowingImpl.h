@@ -39,7 +39,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "segcore/TextLobSpillover.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
@@ -450,7 +450,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               segment_id) {
         this->CreateTextIndexes();
         this->InitializeTextLobSpillovers();
-        this->InitializeArrayOffsets();
+        this->InitializeStructElementOffsets();
         this->UpdateResourceTracking();
     }
 
@@ -603,10 +603,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         return insert_record_.pk2offset_->find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     bool
@@ -651,11 +651,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return nullptr;
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
-        std::shared_lock lock(array_offsets_map_mutex_);
-        auto it = array_offsets_map_.find(field_id);
-        if (it != array_offsets_map_.end()) {
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const override {
+        std::shared_lock lock(struct_element_offsets_map_mutex_);
+        auto it = struct_element_offsets_map_.find(field_id);
+        if (it != struct_element_offsets_map_.end()) {
             return it->second;
         }
         return nullptr;
@@ -779,13 +779,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     fill_empty_field(const FieldMeta& field_meta);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count,
-                                     const Schema& schema);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count,
+                                       const Schema& schema);
 
     /**
      * @brief Update resource tracking by refunding old estimate and charging new
@@ -874,7 +874,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t row_limit);
 
     void
-    InitializeArrayOffsets();
+    InitializeStructElementOffsets();
 
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
@@ -905,16 +905,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
 
-    // field_id -> ArrayOffsetsGrowing (for fast lookup via GetArrayOffsets)
-    // Multiple field_ids from the same struct point to the same ArrayOffsetsGrowing
-    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsGrowing>>
-        array_offsets_map_;
+    // field_id -> StructElementOffsetsGrowing (for fast lookup via GetStructElementOffsets)
+    // Multiple field_ids from the same struct point to the same StructElementOffsetsGrowing
+    std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsGrowing>>
+        struct_element_offsets_map_;
 
     // Representative field_id for each struct (used to extract array lengths during Insert)
     // One field_id per struct, since all fields in the same struct have identical array lengths
     std::unordered_set<FieldId> struct_representative_fields_;
 
-    mutable std::shared_mutex array_offsets_map_mutex_;
+    mutable std::shared_mutex struct_element_offsets_map_mutex_;
 
     // Tracked resource usage for refund-then-charge pattern
     // This stores the last estimated resource usage that was charged to the cache manager

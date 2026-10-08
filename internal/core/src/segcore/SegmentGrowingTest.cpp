@@ -375,7 +375,7 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
     });
 }
 
-TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+TEST(Growing, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
     auto pk = old_schema->AddDebugField("pk", DataType::INT64);
@@ -404,7 +404,7 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          false);
     segment->Reopen(new_schema);
 
-    auto offsets = segment->GetArrayOffsets(label);
+    auto offsets = segment->GetStructElementOffsets(label);
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
@@ -415,7 +415,7 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     }
 }
 
-TEST(Growing, LoadMissingStructArrayOffsetsReturnsEmptyForOldRows) {
+TEST(Growing, LoadMissingStructElementOffsetsReturnsEmptyForOldRows) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
@@ -440,9 +440,9 @@ TEST(Growing, LoadMissingStructArrayOffsetsReturnsEmptyForOldRows) {
     growing->FillAbsentFields();
     ASSERT_EQ(growing->get_row_count(), row_count);
 
-    auto offsets = growing->GetArrayOffsets(label);
+    auto offsets = growing->GetStructElementOffsets(label);
     ASSERT_NE(offsets, nullptr);
-    auto score_offsets = growing->GetArrayOffsets(score);
+    auto score_offsets = growing->GetStructElementOffsets(score);
     ASSERT_NE(score_offsets, nullptr);
     EXPECT_EQ(offsets.get(), score_offsets.get());
     EXPECT_EQ(offsets->GetRowCount(), row_count);

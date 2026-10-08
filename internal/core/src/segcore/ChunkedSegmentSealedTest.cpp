@@ -522,7 +522,7 @@ TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {
                  SegcoreError);
 }
 
-TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+TEST(test_chunk_segment, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
     auto pk = old_schema->AddDebugField("pk", DataType::INT64);
@@ -558,7 +558,7 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          false);
     segment->Reopen(new_schema);
 
-    auto offsets = segment->GetArrayOffsets(label);
+    auto offsets = segment->GetStructElementOffsets(label);
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
@@ -592,9 +592,10 @@ TEST(test_chunk_segment,
                                     array_len);
     auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
 
-    auto old_offsets = segment->GetArrayOffsets(old_label);
+    auto old_offsets = segment->GetStructElementOffsets(old_label);
     ASSERT_NE(old_offsets, nullptr);
-    ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
+    ASSERT_EQ(old_offsets.get(),
+              segment->GetStructElementOffsets(old_score).get());
     // DataGen marks alternating rows valid for nullable scalar fields, starting
     // with row 0. Sealed binlog serialization drops payloads from null rows, so
     // only the three valid rows contribute elements to the shared offsets.
@@ -625,14 +626,15 @@ TEST(test_chunk_segment,
     // name is unchanged, while every child field ID belongs to a new generation.
     segment->Reopen(new_schema);
 
-    auto new_offsets = segment->GetArrayOffsets(new_label);
+    auto new_offsets = segment->GetStructElementOffsets(new_label);
     ASSERT_NE(new_offsets, nullptr);
     EXPECT_NE(new_offsets.get(), old_offsets.get());
-    EXPECT_EQ(new_offsets.get(), segment->GetArrayOffsets(new_score).get());
+    EXPECT_EQ(new_offsets.get(),
+              segment->GetStructElementOffsets(new_score).get());
     EXPECT_EQ(new_offsets->GetRowCount(), row_count);
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
-    EXPECT_EQ(segment->GetArrayOffsets(old_label), nullptr);
-    EXPECT_EQ(segment->GetArrayOffsets(old_score), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {

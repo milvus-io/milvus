@@ -324,7 +324,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
         const bool is_element_level_search =
             data_type == DataType::VECTOR_ARRAY &&
-            info.array_offsets_ != nullptr;
+            info.struct_element_offsets_ != nullptr;
         search_result.element_level_ = is_element_level_search;
         const auto has_offset_mapping =
             offset_mapping.IsEnabled() && !is_element_level_search;
@@ -397,7 +397,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                              iter_data_type);
             cached_iter.NextBatch(info, search_result);
             FinalizeVectorSearchOffsets(search_result,
-                                        info.array_offsets_.get());
+                                        info.struct_element_offsets_.get());
             // The iterator is consumed and destroyed above, so nothing borrows
             // the chunks past this point today. Pin the generation anyway: the
             // brute-force branch below has to, and a future change that lets
@@ -412,7 +412,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         // Track cumulative element offset for element-level search.
         // begin_id must be the cumulative element count (not row offset),
-        // because ArrayOffsets maps global element IDs to row IDs.
+        // because StructElementOffsets maps global element IDs to row IDs.
         int64_t cumulative_element_offset = 0;
         int bf_chunk_count = 0;
 
@@ -546,10 +546,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         } else {
             // See FinalizeVectorSearchOffsets for the rationale:
             // element-level and row-level remapping are mutually exclusive.
-            if (info.array_offsets_ != nullptr) {
+            if (info.struct_element_offsets_ != nullptr) {
                 auto [seg_offsets, elem_indicies] =
                     final_qr.convert_to_element_offsets(
-                        info.array_offsets_.get());
+                        info.struct_element_offsets_.get());
                 search_result.seg_offsets_ = std::move(seg_offsets);
                 search_result.element_indices_ = std::move(elem_indicies);
                 search_result.element_level_ = true;

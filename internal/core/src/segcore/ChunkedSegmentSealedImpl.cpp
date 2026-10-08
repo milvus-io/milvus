@@ -55,7 +55,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/FastMem.h"
@@ -1364,8 +1364,8 @@ ChunkedSegmentSealedImpl::CloneRuntimeResourceState(
         return state;
     }
     state->fields = current->fields;
-    state->struct_to_array_offsets = current->struct_to_array_offsets;
-    state->array_offsets_map = current->array_offsets_map;
+    state->struct_to_element_offsets = current->struct_to_element_offsets;
+    state->struct_element_offsets_map = current->struct_element_offsets_map;
     state->scalar_indexings = current->scalar_indexings;
     state->vector_indexings = current->vector_indexings;
     state->vec_binlog_config = current->vec_binlog_config;
@@ -1758,8 +1758,8 @@ ChunkedSegmentSealedImpl::FreezeRuntimeResourceState(
     const RuntimeResourceState& current) {
     auto runtime = std::make_shared<RuntimeResourceState>();
     runtime->fields = current.fields;
-    runtime->struct_to_array_offsets = current.struct_to_array_offsets;
-    runtime->array_offsets_map = current.array_offsets_map;
+    runtime->struct_to_element_offsets = current.struct_to_element_offsets;
+    runtime->struct_element_offsets_map = current.struct_element_offsets_map;
     runtime->scalar_indexings = current.scalar_indexings;
     runtime->vector_indexings = current.vector_indexings;
     runtime->vec_binlog_config = current.vec_binlog_config;
@@ -4643,7 +4643,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
     if (runtime != nullptr) {
         runtime->fields.erase(field_id);
         runtime->geometry_caches.erase(field_id);
-        runtime->array_offsets_map.erase(field_id);
+        runtime->struct_element_offsets_map.erase(field_id);
         runtime->mmap_field_ids.erase(field_id);
         // Average size describes the retrievable field value, not the
         // resident raw column. Keep it when an index with raw data remains
@@ -4655,7 +4655,7 @@ ChunkedSegmentSealedImpl::DropFieldData(
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
         next_runtime->fields.erase(field_id);
         next_runtime->geometry_caches.erase(field_id);
-        next_runtime->array_offsets_map.erase(field_id);
+        next_runtime->struct_element_offsets_map.erase(field_id);
         next_runtime->mmap_field_ids.erase(field_id);
         // See the staged-runtime branch above: only schema removal retires
         // field-level size metadata.
@@ -5176,13 +5176,13 @@ std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
 ChunkedSegmentSealedImpl::find_first_n_element(
     int64_t limit,
     const BitsetTypeView& element_bitset,
-    const IArrayOffsets* array_offsets,
+    const IStructElementOffsets* struct_element_offsets,
     const std::optional<QueryIteratorCursor>& cursor) const {
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         return runtime->virtual_pk2offset->find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
     if (!is_sorted_by_pk_) {
         auto pk_index = PinPkIndex(runtime, nullptr);
@@ -5190,7 +5190,7 @@ ChunkedSegmentSealedImpl::find_first_n_element(
         AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
         return pk_cell->pk2offset().find_first_n_element(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     // Sorted by PK, element_id order = (PK, element_index) order
@@ -5243,7 +5243,8 @@ ChunkedSegmentSealedImpl::find_first_n_element(
     std::optional<size_t> elem_opt = element_bitset.find_first(false);
     while (elem_opt.has_value() && hit_num < limit) {
         int64_t elem_id = static_cast<int64_t>(elem_opt.value());
-        auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
+        auto [doc_id, elem_idx] =
+            struct_element_offsets->ElementIDToRowID(elem_id);
         if (cursor_doc_offset.has_value() &&
             doc_id == cursor_doc_offset.value() &&
             elem_idx <= cursor->last_element_offset) {
@@ -7617,28 +7618,34 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         staged_geometry_cache = BuildGeometryCacheDetached(field_id, column);
     }
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto prepare_array_offsets = [&](RuntimeResourceState& target_runtime) {
-        if (auto parsed_struct_name = GetStructNameForArrayField(field_meta);
-            parsed_struct_name.has_value()) {
-            auto& struct_name = *parsed_struct_name;
-            auto it = target_runtime.struct_to_array_offsets.find(struct_name);
-            if (it != target_runtime.struct_to_array_offsets.end()) {
-                target_runtime.array_offsets_map[field_id] = it->second;
-                return;
-            }
+    auto prepare_struct_element_offsets =
+        [&](RuntimeResourceState& target_runtime) {
+            if (auto parsed_struct_name =
+                    GetStructNameForArrayField(field_meta);
+                parsed_struct_name.has_value()) {
+                auto& struct_name = *parsed_struct_name;
+                auto it =
+                    target_runtime.struct_to_element_offsets.find(struct_name);
+                if (it != target_runtime.struct_to_element_offsets.end()) {
+                    target_runtime.struct_element_offsets_map[field_id] =
+                        it->second;
+                    return;
+                }
 
-            auto new_offsets = ArrayOffsetsSealed::BuildFromColumn(
-                *column, field_meta, num_rows);
-            target_runtime.struct_to_array_offsets[struct_name] = new_offsets;
-            target_runtime.array_offsets_map[field_id] = new_offsets;
-        }
-    };
+                auto new_offsets = StructElementOffsetsSealed::BuildFromColumn(
+                    *column, field_meta, num_rows);
+                target_runtime.struct_to_element_offsets[struct_name] =
+                    new_offsets;
+                target_runtime.struct_element_offsets_map[field_id] =
+                    new_offsets;
+            }
+        };
 
     auto apply_loaded_column =
         [&](RuntimeResourceState& target_runtime,
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
-            prepare_array_offsets(target_runtime);
+            prepare_struct_element_offsets(target_runtime);
 
             if (data_type == DataType::GEOMETRY) {
                 if (staged_geometry_cache != nullptr) {
@@ -7791,12 +7798,12 @@ ChunkedSegmentSealedImpl::PrepareSchemaForReopen(const SchemaPtr& sch) {
 }
 
 void
-ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
+ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
     const SchemaPtr& current_schema,
     const SchemaPtr& target_schema,
     RuntimeResourceState& runtime) {
-    if (runtime.struct_to_array_offsets.empty() &&
-        runtime.array_offsets_map.empty()) {
+    if (runtime.struct_to_element_offsets.empty() &&
+        runtime.struct_element_offsets_map.empty()) {
         return;
     }
 
@@ -7822,10 +7829,10 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
         }
     }
 
-    for (auto it = runtime.struct_to_array_offsets.begin();
-         it != runtime.struct_to_array_offsets.end();) {
+    for (auto it = runtime.struct_to_element_offsets.begin();
+         it != runtime.struct_to_element_offsets.end();) {
         if (surviving_structs.find(it->first) == surviving_structs.end()) {
-            it = runtime.struct_to_array_offsets.erase(it);
+            it = runtime.struct_to_element_offsets.erase(it);
         } else {
             ++it;
         }
@@ -7833,11 +7840,11 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructArrayOffsets(
 
     // Remove aliases for child fields that no longer exist in the target
     // schema. Otherwise their shared_ptrs keep retired StructArray offsets
-    // reachable through GetArrayOffsets().
-    for (auto it = runtime.array_offsets_map.begin();
-         it != runtime.array_offsets_map.end();) {
+    // reachable through GetStructElementOffsets().
+    for (auto it = runtime.struct_element_offsets_map.begin();
+         it != runtime.struct_element_offsets_map.end();) {
         if (!target_schema->has_field(it->first)) {
-            it = runtime.array_offsets_map.erase(it);
+            it = runtime.struct_element_offsets_map.erase(it);
         } else {
             ++it;
         }
@@ -8175,7 +8182,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
 
     auto next_runtime = CloneMutableRuntimeResourceState();
-    InvalidateStaleStructArrayOffsets(current_schema, sch, *next_runtime);
+    InvalidateStaleStructElementOffsets(current_schema, sch, *next_runtime);
     auto staged = ClonePublishedState(current);
     staged->schema = sch;
     staged->load_info = std::make_shared<const SegmentLoadInfo>(new_local);
@@ -8254,7 +8261,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     auto next_runtime = CloneMutableRuntimeResourceState();
     if (has_schema_update) {
-        InvalidateStaleStructArrayOffsets(
+        InvalidateStaleStructElementOffsets(
             current_schema, target_schema, *next_runtime);
     }
     auto staged = ClonePublishedState(current);
@@ -8387,7 +8394,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 }
 
 void
-ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
+ChunkedSegmentSealedImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta,
     int64_t row_count,
     RuntimeResourceState& runtime) {
@@ -8396,15 +8403,16 @@ ChunkedSegmentSealedImpl::EnsureArrayOffsetsForStructField(
         return;
     }
 
-    auto it = runtime.struct_to_array_offsets.find(*struct_name);
-    if (it == runtime.struct_to_array_offsets.end()) {
-        auto array_offsets = ArrayOffsetsSealed::BuildAllZeros(row_count);
-        it =
-            runtime.struct_to_array_offsets.emplace(*struct_name, array_offsets)
-                .first;
+    auto it = runtime.struct_to_element_offsets.find(*struct_name);
+    if (it == runtime.struct_to_element_offsets.end()) {
+        auto struct_element_offsets =
+            StructElementOffsetsSealed::BuildAllZeros(row_count);
+        it = runtime.struct_to_element_offsets
+                 .emplace(*struct_name, struct_element_offsets)
+                 .first;
     }
 
-    runtime.array_offsets_map[field_meta.get_id()] = it->second;
+    runtime.struct_element_offsets_map[field_meta.get_id()] = it->second;
 }
 
 void
@@ -8440,7 +8448,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         const auto& field_meta = schema_snapshot->operator[](field_id);
         fill_empty_field(
             field_meta, schema_snapshot, segment_load_info, *target_runtime);
-        EnsureArrayOffsetsForStructField(
+        EnsureStructElementOffsetsForField(
             field_meta, target_runtime->row_count, *target_runtime);
         filled_fields.push_back(field_id);
     }
@@ -8566,7 +8574,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
             } else {
                 runtime.mmap_field_ids.erase(field_id);
             }
-            EnsureArrayOffsetsForStructField(
+            EnsureStructElementOffsetsForField(
                 field_meta, runtime.row_count, runtime);
             LOG_INFO(
                 "fill empty field {} (data type {}) for growing segment {} "

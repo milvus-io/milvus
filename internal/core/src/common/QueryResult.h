@@ -30,7 +30,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "pb/schema.pb.h"
@@ -392,7 +392,8 @@ struct SearchResult {
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
     FilteredVectorSearchFn filtered_vector_search_fn_{};

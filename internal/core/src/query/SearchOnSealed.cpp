@@ -20,7 +20,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -129,7 +129,8 @@ SearchOnSealedIndex(const Schema& schema,
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
-    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        search_info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     BitsetView search_bitset = bitset;
 
@@ -138,7 +139,7 @@ SearchOnSealedIndex(const Schema& schema,
             *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
-                                    search_info.array_offsets_.get());
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -156,7 +157,7 @@ SearchOnSealedIndex(const Schema& schema,
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        use_iterator ? nullptr : search_info.array_offsets_.get());
+        use_iterator ? nullptr : search_info.struct_element_offsets_.get());
     if (use_iterator) {
         search_result.resource_pins_.emplace_back(std::move(accessor));
     }
@@ -237,8 +238,9 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    const bool is_element_level_search = data_type == DataType::VECTOR_ARRAY &&
-                                         search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        data_type == DataType::VECTOR_ARRAY &&
+        search_info.struct_element_offsets_ != nullptr;
     // Nullable vector chunks scan compacted physical rows. Row-level searches
     // need p2l ids; element-level VECTOR_ARRAY searches map element ids later.
     const bool needs_offset_mapping =
@@ -284,7 +286,8 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_bitview,
                                          data_type);
         cached_iter.NextBatch(search_info, result);
-        FinalizeVectorSearchOffsets(result, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(result,
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -377,10 +380,10 @@ SearchOnSealedColumn(const Schema& schema,
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
         // and row-level remapping are mutually exclusive.
-        if (search_info.array_offsets_ != nullptr) {
+        if (search_info.struct_element_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
                 final_qr.convert_to_element_offsets(
-                    search_info.array_offsets_.get());
+                    search_info.struct_element_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
             result.element_level_ = true;
