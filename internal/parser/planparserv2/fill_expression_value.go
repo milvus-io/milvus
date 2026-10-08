@@ -92,7 +92,7 @@ func fillExpressionValueWithBudgetAndSchema(
 	}
 	for _, value := range templateValues {
 		if queryValueHasNaN(value) {
-			return errNaNQuery
+			return newNaNQueryError()
 		}
 	}
 	if budget == nil {
