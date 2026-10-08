@@ -310,6 +310,33 @@ class FieldMeta {
         return type_ == DataType::ARRAY && element_type_ == DataType::ARRAY;
     }
 
+    // Whether this Array field uses the Arrow list storage format introduced
+    // for element-level nulls and nested Arrays, as opposed to the legacy
+    // formats. It selects the new storage, load and chunk paths, and it is
+    // the C++ twin of Go typeutil.IsNativeListArrayField.
+    //
+    // True for:
+    //   - element_nullable scalar Array<T>: Arrow list<T>, loaded into
+    //     ColumnarArrayChunk;
+    //   - nested scalar Array<Array<T>>, whichever level is nullable: Arrow
+    //     list<list<T>>, loaded into ColumnarArrayChunk;
+    //   - element_nullable ArrayOfVector: Arrow list<Binary>, a null child is
+    //     a null vector, loaded into VectorArrayChunk.
+    // False for:
+    //   - single-level scalar Array<T> with element_nullable=false: one
+    //     protobuf-serialized ScalarField per row in an Arrow Binary column,
+    //     loaded into ArrayChunk;
+    //   - ArrayOfVector with element_nullable=false: Arrow
+    //     list<FixedSizeBinary>. It is an Arrow list too, but it is the
+    //     released format. VectorArrayChunk loads both vector formats; for
+    //     ArrayOfVector this predicate is equivalent to element_nullable;
+    //   - every non-Array type.
+    //
+    // This is a transitional concept. It only exists because the legacy and
+    // the new Array formats coexist. Once arbitrary Struct/Array nesting is
+    // modeled as a recursive column tree, every Array level will be an Arrow
+    // list with its own offsets and validity, and this predicate should go
+    // away together with the legacy formats.
     bool
     is_native_list_array() const {
         return (type_ == DataType::ARRAY &&
