@@ -22,7 +22,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -47,7 +46,7 @@ func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleR
 			RoleEntity: in.GetEntity(),
 		}).
 		WithBody(&message.AlterRoleMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -72,7 +71,7 @@ func (c *Core) broadcastAlterRole(ctx context.Context, in *milvuspb.AlterRoleReq
 			},
 		}).
 		WithBody(&message.AlterRoleMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -106,7 +105,7 @@ func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleReque
 			RoleName: in.RoleName,
 		}).
 		WithBody(&message.DropRoleMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -154,7 +153,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 				},
 			}).
 			WithBody(&message.AlterUserRoleMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
 		msg = message.NewDropUserRoleMessageBuilderV2().
@@ -165,7 +164,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 				},
 			}).
 			WithBody(&message.DropUserRoleMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate user role type")

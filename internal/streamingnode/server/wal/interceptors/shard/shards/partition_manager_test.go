@@ -5,9 +5,14 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
@@ -17,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -205,4 +211,57 @@ func (m *mockedTxnManager) RecoverDone() <-chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
 	return ch
+}
+
+// A pending async Flush has already registered the segment's metrics. A later
+// collection-wide fence or drop must remove it without recording it again.
+func TestPartitionFlushMetricsRecordedOnce(t *testing.T) {
+	paramtable.Init()
+	for _, drop := range []bool{false, true} {
+		name := "fence"
+		if drop {
+			name = "drop"
+		}
+		t.Run(name, func(t *testing.T) {
+			resource.InitForTest(t)
+			manager := newShardManagerWithGrowingSegment(t, 1, 2, 1001)
+			defer manager.Close()
+			pm := manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}]
+			segment := pm.GetSegmentManager(1001)
+			pendingFlush := mockey.Mock((*partitionManager).asyncFlushSegment).Return().Build()
+			defer pendingFlush.UnPatch()
+
+			labels := []string{paramtable.GetStringNodeID(), manager.Channel().Name}
+			growing := metrics.WALSegmentAllocTotal.WithLabelValues(labels...)
+			flushed := metrics.WALSegmentFlushedTotal.WithLabelValues(append(labels, string(policy.PolicyNameCapacity))...)
+			require.Equal(t, float64(1), testutil.ToFloat64(growing))
+			signal := utils.SealSegmentSignal{
+				SegmentBelongs: utils.SegmentBelongs{SegmentID: 1001},
+				SealPolicy:     policy.PolicyCapacity(),
+			}
+			require.NoError(t, pm.AsyncFlushSegment(signal))
+			require.NoError(t, pm.AsyncFlushSegment(signal))
+			require.Equal(t, 1, pendingFlush.Times())
+
+			var ids []int64
+			if drop {
+				ids = pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
+			} else {
+				ids = pm.FlushAndFenceSegmentUntil(200)
+			}
+			require.Equal(t, []int64{1001}, ids)
+			require.Empty(t, pm.segments)
+			require.Equal(t, policy.PolicyNameCapacity, segment.SealPolicy().Policy)
+			require.Equal(t, float64(0), testutil.ToFloat64(growing))
+			require.Equal(t, float64(1), testutil.ToFloat64(flushed))
+			for _, observer := range []prometheus.Observer{
+				metrics.WALSegmentRowsTotal.WithLabelValues(labels...),
+				metrics.WALSegmentBytes.WithLabelValues(labels...),
+			} {
+				metric := &dto.Metric{}
+				require.NoError(t, observer.(prometheus.Metric).Write(metric))
+				require.Equal(t, uint64(1), metric.GetHistogram().GetSampleCount())
+			}
+		})
+	}
 }

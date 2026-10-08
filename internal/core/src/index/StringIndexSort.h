@@ -366,9 +366,11 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
-    // Helper method for binary search
-    size_t
-    FindValueIndex(const std::string& value) const;
+    void
+    ApplyMembership(size_t n,
+                    const std::string* values,
+                    TargetBitmap& bitset,
+                    bool in) const;
 
     // Helper to find the range of unique values that start with a prefix
     std::pair<size_t, size_t>
@@ -523,9 +525,11 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
 
  private:
     friend class StringIndexSort;
-    // Binary search for a value
-    size_t
-    FindValueIndex(const std::string& value) const;
+    void
+    ApplyMembership(size_t n,
+                    const std::string* values,
+                    TargetBitmap& bitset,
+                    bool in) const;
 
     // Check if value matches pattern based on op type
     bool

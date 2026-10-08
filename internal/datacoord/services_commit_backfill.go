@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -101,7 +100,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// Broadcast call and would panic on any subsequent call. Failure of one
 	// batch does not cancel subsequent batches; per-segment statuses reflect
 	// batch-level outcomes.
-	channels := []string{streaming.WAL().ControlChannel()}
 	var lastErr error
 	for start := 0; start < len(items); start += maxItemsPerBroadcast {
 		end := start + maxItemsPerBroadcast
@@ -109,7 +107,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			end = len(items)
 		}
 		batch := items[start:end]
-		if err := s.broadcastBackfillBatch(ctx, coll, result.CollectionID, result.SchemaVersion, channels, batch); err != nil {
+		if err := s.broadcastBackfillBatch(ctx, coll, result.CollectionID, result.SchemaVersion, batch); err != nil {
 			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
 				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
@@ -156,7 +154,6 @@ func (s *Server) broadcastBackfillBatch(
 	coll *milvuspb.DescribeCollectionResponse,
 	collectionID int64,
 	expectedSchemaVersion int32,
-	channels []string,
 	items []*messagespb.BatchUpdateManifestItem,
 ) error {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
@@ -192,8 +189,8 @@ func (s *Server) broadcastBackfillBatch(
 		WithBody(&message.BatchUpdateManifestMessageBody{
 			Items: items,
 		}).
-		WithBroadcast(channels).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	)
 	return err

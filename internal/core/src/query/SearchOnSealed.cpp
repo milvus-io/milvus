@@ -60,31 +60,33 @@ SearchOnSealedIndex(const Schema& schema,
                     SearchResult& search_result) {
     const auto* schema_ptr = &schema;
     const auto* entry_ptr = &entry;
-    auto register_vector_iterator_recreator = [&] {
-        if (!search_result.allow_vector_iterator_recreation_ ||
-            !CanUseStrictGroupFilteredIterator(search_info, num_queries) ||
+    auto register_vector_search_provider = [&] {
+        if (!search_result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
             !search_result.vector_iterators_.has_value()) {
             return;
         }
-        search_result.SetVectorIteratorRecreator(
+        search_result.SetVectorSearchProvider(
             bitset,
             [schema_ptr,
              entry_ptr,
-             recreate_search_info = search_info,
+             phase1_search_info = search_info,
              query_data,
              query_offsets,
              num_queries,
              op_context](const BitsetView& combined_filter,
-                         SearchResult& recreated_result) {
-                SearchOnSealedIndex(*schema_ptr,
-                                    *entry_ptr,
-                                    recreate_search_info,
-                                    query_data,
-                                    query_offsets,
-                                    num_queries,
-                                    combined_filter,
-                                    op_context,
-                                    recreated_result);
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedIndex(
+                    *schema_ptr,
+                    *entry_ptr,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
             });
     };
 
@@ -160,7 +162,7 @@ SearchOnSealedIndex(const Schema& schema,
     }
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
-    register_vector_iterator_recreator();
+    register_vector_search_provider();
 }
 
 void
@@ -176,35 +178,37 @@ SearchOnSealedColumn(const Schema& schema,
                      milvus::OpContext* op_context,
                      SearchResult& result) {
     const auto* schema_ptr = &schema;
-    auto register_vector_iterator_recreator = [&] {
-        if (!result.allow_vector_iterator_recreation_ ||
-            !CanUseStrictGroupFilteredIterator(search_info, num_queries) ||
+    auto register_vector_search_provider = [&] {
+        if (!result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
             !result.vector_iterators_.has_value()) {
             return;
         }
-        result.SetVectorIteratorRecreator(
+        result.SetVectorSearchProvider(
             bitview,
             [schema_ptr,
              column,
-             recreate_search_info = search_info,
-             recreate_index_info = index_info,
+             phase1_search_info = search_info,
+             phase1_index_info = index_info,
              query_data,
              query_offsets,
              num_queries,
              row_count,
              op_context](const BitsetView& combined_filter,
-                         SearchResult& recreated_result) {
-                SearchOnSealedColumn(*schema_ptr,
-                                     column,
-                                     recreate_search_info,
-                                     recreate_index_info,
-                                     query_data,
-                                     query_offsets,
-                                     num_queries,
-                                     row_count,
-                                     combined_filter,
-                                     op_context,
-                                     recreated_result);
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedColumn(
+                    *schema_ptr,
+                    column,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    phase1_index_info,
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    row_count,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
             });
     };
 
@@ -286,7 +290,6 @@ SearchOnSealedColumn(const Schema& schema,
 
     const bool use_vector_iterator =
         milvus::exec::UseVectorIterator(search_info);
-    auto num_chunk = column->num_chunks();
 
     SubSearchResult final_qr(num_queries,
                              search_info.topk_,
@@ -295,6 +298,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     int64_t offset = 0;
     auto vector_chunks = column->GetAllChunks(op_context);
+    auto num_chunk = column->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
         const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
@@ -387,7 +391,7 @@ SearchOnSealedColumn(const Schema& schema,
     }
     result.unity_topK_ = query_dataset.topk;
     result.total_nq_ = query_dataset.num_queries;
-    register_vector_iterator_recreator();
+    register_vector_search_provider();
 }
 
 }  // namespace milvus::query

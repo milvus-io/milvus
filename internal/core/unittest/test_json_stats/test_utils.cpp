@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -50,11 +51,53 @@ TEST_F(UtilsTest, CreateArrowBuildersTest) {
 
     auto [builders, builders_map] = CreateArrowBuilders(column_map);
     EXPECT_EQ(builders.size(), column_map.size());
-    EXPECT_EQ(builders_map.size(), column_map.size());
+    EXPECT_EQ(builders_map.size(), column_map.size() - 1);
+    EXPECT_EQ(builders_map.count(
+                  JsonKey("shared_key", JSONType::STRING).ToColumnName()),
+              0);
 
     auto schema = CreateArrowSchema(column_map);
     EXPECT_NE(schema, nullptr);
     EXPECT_EQ(schema->num_fields(), column_map.size());
+}
+
+TEST_F(UtilsTest, SharedKeysDoNotExpandTaskLocalBuilders) {
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/typed", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/dynamic", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
+    };
+    std::set<JsonKey> column_keys;
+    for (const auto& entry : column_map) {
+        column_keys.insert(entry.first);
+    }
+    for (size_t i = 0; i < 4096; ++i) {
+        column_map.emplace(
+            JsonKey("/shared/" + std::to_string(i), JSONType::STRING),
+            JsonKeyLayoutType::SHARED);
+    }
+
+    auto [writer_builders, writer_map] = CreateArrowBuilders(column_map);
+    auto [task_builders, task_map] = CreateArrowBuildersForColumns(column_keys);
+    auto schema = CreateArrowSchema(column_map);
+
+    ASSERT_NE(schema, nullptr);
+    ASSERT_EQ(schema->num_fields(), 3);
+    ASSERT_EQ(writer_builders.size(), 3);
+    ASSERT_EQ(task_builders.size(), 3);
+    EXPECT_EQ(writer_map.size(), column_keys.size());
+    EXPECT_EQ(task_map.size(), column_keys.size());
+    EXPECT_EQ(
+        writer_map.count(JsonKey("/shared/0", JSONType::STRING).ToColumnName()),
+        0);
+    size_t column_index = 0;
+    for (const auto& key : column_keys) {
+        const auto name = key.ToColumnName();
+        EXPECT_EQ(schema->field(column_index)->name(), name);
+        EXPECT_EQ(writer_map.at(name), writer_builders[column_index]);
+        EXPECT_EQ(task_map.at(name), task_builders[column_index]);
+        ++column_index;
+    }
+    EXPECT_EQ(task_builders.back()->type()->id(), arrow::Type::BINARY);
 }
 
 TEST_F(UtilsTest, CreateParquetKVMetadataTest) {

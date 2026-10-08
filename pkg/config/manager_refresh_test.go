@@ -85,6 +85,17 @@ func assertRefreshSafe(t *testing.T, mgr *Manager) {
 	}
 }
 
+// etcdUpdateInOrder adapts EtcdSource.update to the revision-less publish signature the
+// source-agnostic tests share with FileSource, handing it strictly increasing revisions so
+// every call is published in the order the test makes it.
+func etcdUpdateInOrder(es *EtcdSource) func(map[string]string) error {
+	var revision int64
+	return func(configs map[string]string) error {
+		revision++
+		return es.update(configs, revision)
+	}
+}
+
 // The barrier runs after the source publishes its map but before Manager sees
 // even the first event. Concurrent management reads can run in this window.
 func TestSourceRefreshPublishesPolicyWithValues(t *testing.T) {
@@ -100,7 +111,7 @@ func TestSourceRefreshPublishesPolicyWithValues(t *testing.T) {
 			} else {
 				es := &EtcdSource{ctx: context.Background(), currentConfigs: make(map[string]string)}
 				es.configRefresher = newRefresher(0, nil)
-				source, update = es, es.update
+				source, update = es, etcdUpdateInOrder(es)
 			}
 			source.SetManager(mgr)
 			mgr.sources.Insert(source.GetSourceName(), source)
@@ -312,9 +323,10 @@ func TestNewSpellingCannotEndorseUnindexedSourceValue(t *testing.T) {
 					source.SetEventHandler(mgr)
 				}
 				var first Source = fs
-				publishFirst, publishOther := fs.update, es.update
+				esUpdate := etcdUpdateInOrder(es)
+				publishFirst, publishOther := fs.update, esUpdate
 				if firstSource == "etcd" {
-					first, publishFirst, publishOther = es, es.update, fs.update
+					first, publishFirst, publishOther = es, esUpdate, fs.update
 				}
 				entered, resume := make(chan struct{}), make(chan struct{})
 				var release sync.Once
@@ -421,7 +433,7 @@ func TestEstablishedSpellingSurvivesSourceAndOverlayOverrides(t *testing.T) {
 	es.SetManager(mgr)
 	mgr.sources.Insert(es.GetSourceName(), es)
 	es.SetEventHandler(mgr)
-	require.NoError(t, es.update(map[string]string{formatKey(refreshPublicKey): "from-etcd"}))
+	require.NoError(t, es.update(map[string]string{formatKey(refreshPublicKey): "from-etcd"}, 1))
 	assertPublic("from-etcd")
 	mgr.SetConfig(refreshPublicKey, "from-overlay")
 	assertPublic("from-overlay")
@@ -429,6 +441,6 @@ func TestEstablishedSpellingSurvivesSourceAndOverlayOverrides(t *testing.T) {
 	assertPublic("from-map-overlay")
 	mgr.ResetConfig(refreshPublicKey)
 	assertPublic("from-etcd")
-	require.NoError(t, es.update(map[string]string{}))
+	require.NoError(t, es.update(map[string]string{}, 2))
 	assertPublic("from-env")
 }

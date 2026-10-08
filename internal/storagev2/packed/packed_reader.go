@@ -27,6 +27,7 @@ CStatus NewPackedReaderWithProperties(char** paths,
                                       int64_t num_paths,
                                       struct ArrowSchema* schema,
                                       const int64_t buffer_size,
+                                      const bool eager_prebuffer,
                                       const LoonProperties* c_properties,
                                       const char* filesystem_path,
                                       CPackedReader* c_packed_reader,
@@ -46,6 +47,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// ReaderOption tunes how a PackedReader fetches its files.
+type ReaderOption func(*readerOptions)
+
+type readerOptions struct {
+	eagerPrebuffer bool
+}
+
+// WithEagerPrebuffer makes every read round fetch all of its byte ranges at
+// once instead of one coalesced range at a time. How far adjacent ranges are
+// coalesced is left as configured (common.arrow.reader.*), so the requests are
+// the ones every other reader issues, only together rather than one after
+// another. The raw bytes of a round stay cached until the next round either
+// way (arrow's read cache never evicts within a round), so for a given buffer
+// size this changes how many requests are in flight, not how much a round
+// holds; the buffer size is what bounds that memory.
+func WithEagerPrebuffer() ReaderOption {
+	return func(o *readerOptions) {
+		o.eagerPrebuffer = true
+	}
+}
+
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
 	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{})
 }
@@ -59,7 +81,12 @@ func NewPackedReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalReaderContext,
+	opts ...ReaderOption,
 ) (*PackedReader, error) {
+	options := &readerOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	var cProperties *C.LoonProperties
 	var cFilesystemPath *C.char
 	if extfs.Source != "" {
@@ -108,6 +135,7 @@ func NewPackedReaderWithExtfs(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
+	cEagerPrebuffer := C.bool(options.eagerPrebuffer)
 
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
@@ -124,7 +152,7 @@ func NewPackedReaderWithExtfs(
 	}
 
 	if cProperties != nil {
-		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
 	} else if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -162,9 +190,9 @@ func NewPackedReaderWithExtfs(
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
-		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

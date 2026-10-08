@@ -17,6 +17,7 @@
 package rls
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"sync"
@@ -39,16 +40,27 @@ type collectionState struct {
 	invalidationRevisionOrder []typeutil.Timestamp
 
 	// Policy snapshot and refresh state.
+	// policyCompileMu coalesces cache misses without blocking metadata updates.
+	policyCompileMu   sync.Mutex
 	policyGeneration  uint64
 	policyRefreshedAt time.Time
 	policyBackoff     *typeutil.BackoffWithInstant
-	policies          map[string]*rlsutil.RowPolicy
+	// Policy snapshots are immutable after publication, so compilation may use
+	// copied pointers without holding the collection lock.
+	policies map[string]*rlsutil.RowPolicy
+	compiled map[compiledKey]*compiledCacheEntry
 
 	// Principal tags are cached and invalidated independently per principal.
-	principalTags            map[string]*principalTagsEntry
-	principalRefreshTokens   map[string]principalRefreshToken
-	principalRefreshSequence principalRefreshToken
-	principalBackoffs        map[string]*typeutil.BackoffWithInstant
+	// Separate queues let miss churn evict misses first without making hits take a write lock.
+	principalTags               map[string]*principalTagsEntry
+	positivePrincipalCacheOrder *list.List
+	negativePrincipalCacheOrder *list.List
+	principalCacheBytes         int64
+	principalRefreshTokens      map[string]principalRefreshToken
+	principalRefreshSequence    principalRefreshToken
+	principalBackoffs           map[string]*principalBackoffEntry
+	principalBackoffOrder       *list.List
+	principalBackoffBytes       int64
 }
 
 type principalKey struct {
@@ -59,13 +71,25 @@ type principalKey struct {
 type principalTagsEntry struct {
 	refreshedAt time.Time
 	// tags is immutable after the entry is published, so cache hits can share it.
-	tags map[string]rlsutil.TagValue
+	tags         map[string]rlsutil.TagValue
+	missing      bool
+	cacheBytes   int64
+	orderElement *list.Element
+}
+
+type principalBackoffEntry struct {
+	backoff       *typeutil.BackoffWithInstant
+	lastFailureAt time.Time
+	cacheBytes    int64
+	orderElement  *list.Element
 }
 
 type principalRefreshToken uint64
 
 type manager struct {
 	mu sync.RWMutex
+
+	// Per-collection cache state.
 	// ponytail: collection states and drop tombstones are unbounded; add an LRU
 	// or byte budget if production scale makes this measurable.
 	collections map[UniqueID]*collectionState
@@ -77,15 +101,20 @@ type manager struct {
 	coord      CoordClient
 	refreshCtx context.Context
 
-	// Use the native group so canceled callers do not leave one waiter goroutine each.
-	policyRefreshes    singleflight.Group
-	principalRefreshes singleflight.Group
+	// Independent policy and principal refresh coalescing.
+	policyRefreshes       singleflight.Group
+	principalRefreshes    singleflight.Group
+	principalRefreshSlots chan struct{}
 }
 
 const (
-	principalCacheScanInterval    = 10 * time.Minute
-	metadataRefreshBackoffInitial = time.Second
-	metadataRefreshBackoffMax     = 30 * time.Second
+	principalCacheScanInterval = 10 * time.Minute
+	// ponytail: fixed process-wide safety bounds; make them configurable only
+	// if cold-miss load tests show that deployments need different values.
+	metadataRefreshTimeout          = 30 * time.Second
+	maxConcurrentPrincipalRefreshes = 64
+	metadataRefreshBackoffInitial   = time.Second
+	metadataRefreshBackoffMax       = 30 * time.Second
 	// Evicting an old revision can only cause a redundant invalidation.
 	rememberedInvalidationLimit = 64
 )
@@ -121,10 +150,17 @@ func InvalidatePrincipalTags(collectionID UniqueID, principalName string, revisi
 	defaultManager.invalidatePrincipalTags(collectionID, principalName, revision)
 }
 
+// InvalidateAll removes every cached RLS snapshot while preserving dropped
+// collection tombstones.
+func InvalidateAll() {
+	defaultManager.invalidateAll()
+}
+
 func newManager() *manager {
 	return &manager{
-		collections:        map[UniqueID]*collectionState{},
-		droppedCollections: map[UniqueID]struct{}{},
+		collections:           map[UniqueID]*collectionState{},
+		droppedCollections:    map[UniqueID]struct{}{},
+		principalRefreshSlots: make(chan struct{}, maxConcurrentPrincipalRefreshes),
 	}
 }
 
@@ -149,6 +185,10 @@ func (m *manager) getPrincipalTagsEntry(key principalKey) *principalTagsEntry {
 	state.mu.RLock()
 	defer state.mu.RUnlock()
 	return state.principalTags[key.principalName]
+}
+
+func principalTagsEntryFresh(entry *principalTagsEntry, refreshTTL time.Duration, now time.Time) bool {
+	return entry != nil && entry.refreshedAt.Add(refreshTTL).After(now)
 }
 
 func (m *manager) invalidatePolicies(collectionID UniqueID, revision typeutil.Timestamp) {
@@ -179,6 +219,7 @@ func (m *manager) invalidatePolicies(collectionID UniqueID, revision typeutil.Ti
 	state.policyRefreshedAt = time.Time{}
 	state.policyBackoff = nil
 	state.policies = nil
+	state.compiled = nil
 	state.mu.Unlock()
 	m.mu.Unlock()
 }
@@ -207,9 +248,9 @@ func (m *manager) invalidatePrincipalTags(collectionID UniqueID, principalName s
 		m.mu.Unlock()
 		return
 	}
-	delete(state.principalTags, principalName)
+	state.removePrincipalTagsLocked(principalName)
 	delete(state.principalRefreshTokens, principalName)
-	delete(state.principalBackoffs, principalName)
+	state.removePrincipalBackoffLocked(principalName)
 	state.mu.Unlock()
 	m.mu.Unlock()
 }
@@ -222,6 +263,31 @@ func (m *manager) markCollectionDropped(collectionID UniqueID) {
 	delete(m.collections, collectionID)
 	m.droppedCollections[collectionID] = struct{}{}
 	m.mu.Unlock()
+}
+
+func (m *manager) invalidateAll() {
+	if m == nil {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, state := range m.collections {
+		state.mu.Lock()
+		state.policyGeneration++
+		state.policyRefreshedAt = time.Time{}
+		state.policyBackoff = nil
+		state.policies = nil
+		state.compiled = nil
+		state.principalTags = map[string]*principalTagsEntry{}
+		state.positivePrincipalCacheOrder = list.New()
+		state.negativePrincipalCacheOrder = list.New()
+		state.principalCacheBytes = 0
+		state.principalRefreshTokens = map[string]principalRefreshToken{}
+		state.principalBackoffs = map[string]*principalBackoffEntry{}
+		state.principalBackoffOrder = list.New()
+		state.principalBackoffBytes = 0
+		state.mu.Unlock()
+	}
 }
 
 func (m *manager) runPrincipalCacheScanner(ctx context.Context, interval time.Duration) {
@@ -250,27 +316,23 @@ func (m *manager) expirePrincipalTags(now time.Time) {
 	m.mu.RUnlock()
 	for _, state := range states {
 		state.mu.Lock()
-		for principalName, entry := range state.principalTags {
-			if entry == nil || !entry.refreshedAt.Add(refreshTTL).After(now) {
-				delete(state.principalTags, principalName)
-			}
-		}
-		for principalName, backoff := range state.principalBackoffs {
-			if backoff == nil || !now.Before(backoff.NextInstant()) {
-				delete(state.principalBackoffs, principalName)
-			}
-		}
+		state.expirePrincipalTagsLocked(state.positivePrincipalCacheOrder, refreshTTL, now)
+		state.expirePrincipalTagsLocked(state.negativePrincipalCacheOrder, refreshTTL, now)
+		state.expirePrincipalBackoffsLocked(refreshTTL, now)
+		state.trimPrincipalStateLocked("")
 		state.mu.Unlock()
 	}
 }
 
 func newCollectionState() *collectionState {
 	return &collectionState{
-		invalidationRevisions:  map[typeutil.Timestamp]struct{}{},
-		policies:               map[string]*rlsutil.RowPolicy{},
-		principalTags:          map[string]*principalTagsEntry{},
-		principalRefreshTokens: map[string]principalRefreshToken{},
-		principalBackoffs:      map[string]*typeutil.BackoffWithInstant{},
+		invalidationRevisions:       map[typeutil.Timestamp]struct{}{},
+		principalTags:               map[string]*principalTagsEntry{},
+		positivePrincipalCacheOrder: list.New(),
+		negativePrincipalCacheOrder: list.New(),
+		principalRefreshTokens:      map[string]principalRefreshToken{},
+		principalBackoffs:           map[string]*principalBackoffEntry{},
+		principalBackoffOrder:       list.New(),
 	}
 }
 
@@ -336,42 +398,90 @@ func (m *manager) policyRefreshCurrent(collectionID UniqueID, state *collectionS
 }
 
 func (m *manager) startPrincipalRefresh(
+	ctx context.Context,
 	key principalKey,
-	now time.Time,
+	refreshTTL time.Duration,
 	refresh func(*collectionState, principalRefreshToken) (any, error),
 ) (*principalTagsEntry, <-chan singleflight.Result, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	state := m.collections[key.collectionID]
-	if state == nil {
-		return nil, nil, merr.WrapErrServiceUnavailableMsg("RLS collection %d was removed during principal refresh", key.collectionID)
+	ownsSlot := false
+	releaseSlot := func() {
+		if ownsSlot {
+			<-m.principalRefreshSlots
+			ownsSlot = false
+		}
 	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if entry := state.principalTags[key.principalName]; entry != nil {
-		return entry, nil, nil
+	for {
+		m.mu.RLock()
+		state := m.collections[key.collectionID]
+		if state == nil {
+			m.mu.RUnlock()
+			releaseSlot()
+			return nil, nil, merr.WrapErrServiceUnavailableMsg("RLS collection %d was removed during principal refresh", key.collectionID)
+		}
+		state.mu.Lock()
+		now := time.Now()
+		if entry := state.principalTags[key.principalName]; entry != nil {
+			if principalTagsEntryFresh(entry, refreshTTL, now) {
+				state.mu.Unlock()
+				m.mu.RUnlock()
+				releaseSlot()
+				return entry, nil, nil
+			}
+			state.removePrincipalTagsLocked(key.principalName)
+		}
+		if entry := state.principalBackoffs[key.principalName]; entry != nil {
+			if entry.backoff != nil && now.Before(entry.backoff.NextInstant()) {
+				state.mu.Unlock()
+				m.mu.RUnlock()
+				releaseSlot()
+				return nil, nil, merr.WrapErrServiceUnavailableMsg(
+					"RLS principal metadata refresh is backing off for collection %d principal %q",
+					key.collectionID, key.principalName,
+				)
+			}
+		}
+		token, refreshing := state.principalRefreshTokens[key.principalName]
+		if refreshing {
+			releaseSlot()
+			resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
+				return refresh(state, token)
+			})
+			state.mu.Unlock()
+			m.mu.RUnlock()
+			return nil, resultCh, nil
+		}
+		if ownsSlot {
+			state.principalRefreshSequence++
+			token = state.principalRefreshSequence
+			state.principalRefreshTokens[key.principalName] = token
+			resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
+				defer releaseSlot()
+				return refresh(state, token)
+			})
+			state.mu.Unlock()
+			m.mu.RUnlock()
+			return nil, resultCh, nil
+		}
+		state.mu.Unlock()
+		m.mu.RUnlock()
+
+		select {
+		case m.principalRefreshSlots <- struct{}{}:
+			ownsSlot = true
+			if err := ctx.Err(); err != nil {
+				releaseSlot()
+				return nil, nil, err
+			}
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
 	}
-	if backoff := state.principalBackoffs[key.principalName]; backoff != nil && now.Before(backoff.NextInstant()) {
-		return nil, nil, merr.WrapErrServiceUnavailableMsg(
-			"RLS principal metadata refresh is backing off for collection %d principal %q",
-			key.collectionID, key.principalName,
-		)
-	}
-	token, ok := state.principalRefreshTokens[key.principalName]
-	if !ok {
-		state.principalRefreshSequence++
-		token = state.principalRefreshSequence
-		state.principalRefreshTokens[key.principalName] = token
-	}
-	resultCh := m.principalRefreshes.DoChan(principalRefreshKey(key, token), func() (any, error) {
-		return refresh(state, token)
-	})
-	return nil, resultCh, nil
 }
 
-func (m *manager) finishPrincipalRefresh(key principalKey, state *collectionState, token principalRefreshToken, entry *principalTagsEntry, success bool) bool {
+func (m *manager) finishPrincipalRefresh(key principalKey, state *collectionState, token principalRefreshToken, entry *principalTagsEntry, success bool) (bool, error) {
 	m.mu.RLock()
 	state.mu.Lock()
+	var err error
 	currentToken, refreshing := state.principalRefreshTokens[key.principalName]
 	current := m.collections[key.collectionID] == state && refreshing && currentToken == token
 	if refreshing && currentToken == token {
@@ -379,22 +489,21 @@ func (m *manager) finishPrincipalRefresh(key principalKey, state *collectionStat
 	}
 	if current {
 		if success {
-			delete(state.principalBackoffs, key.principalName)
+			state.removePrincipalBackoffLocked(key.principalName)
 			if entry != nil {
-				state.principalTags[key.principalName] = entry
+				entry.refreshedAt = time.Now()
+				err = state.putPrincipalTagsLocked(key.principalName, entry)
+				if err != nil {
+					state.recordPrincipalRefreshFailureLocked(key.principalName)
+				}
 			}
 		} else {
-			backoff := state.principalBackoffs[key.principalName]
-			if backoff == nil {
-				backoff = typeutil.NewBackoffWithInstant(metadataRefreshBackoffConfig)
-				state.principalBackoffs[key.principalName] = backoff
-			}
-			backoff.UpdateInstantWithNextBackOff()
+			state.recordPrincipalRefreshFailureLocked(key.principalName)
 		}
 	}
 	state.mu.Unlock()
 	m.mu.RUnlock()
-	return current
+	return current, err
 }
 
 func (m *manager) principalRefreshCurrent(key principalKey, state *collectionState, token principalRefreshToken) bool {
@@ -414,6 +523,129 @@ func principalRefreshKey(key principalKey, token principalRefreshToken) string {
 	return fmt.Sprintf("%d/%s/%d", key.collectionID, key.principalName, token)
 }
 
+// putPrincipalTagsLocked publishes an entry and keeps the per-collection
+// principal cache within its count and logical-payload byte limits.
+func (state *collectionState) putPrincipalTagsLocked(principalName string, entry *principalTagsEntry) error {
+	state.removePrincipalTagsLocked(principalName)
+	if entry == nil {
+		return nil
+	}
+	cacheBytes, err := rlsutil.PrincipalTagsSize(principalName, entry.tags)
+	if err != nil {
+		return err
+	}
+	entry.cacheBytes = cacheBytes
+	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	if entry.cacheBytes <= maxBytes {
+		order := state.positivePrincipalCacheOrder
+		if entry.missing {
+			order = state.negativePrincipalCacheOrder
+		}
+		entry.orderElement = order.PushBack(principalName)
+		state.principalTags[principalName] = entry
+		state.principalCacheBytes += entry.cacheBytes
+	}
+	state.trimPrincipalStateLocked("")
+	return nil
+}
+
+func (state *collectionState) removePrincipalTagsLocked(principalName string) {
+	entry := state.principalTags[principalName]
+	if entry == nil {
+		delete(state.principalTags, principalName)
+		return
+	}
+	delete(state.principalTags, principalName)
+	state.principalCacheBytes -= entry.cacheBytes
+	if entry.orderElement != nil {
+		order := state.positivePrincipalCacheOrder
+		if entry.missing {
+			order = state.negativePrincipalCacheOrder
+		}
+		order.Remove(entry.orderElement)
+		entry.orderElement = nil
+	}
+}
+
+func (state *collectionState) trimPrincipalStateLocked(protectedBackoff string) {
+	maxEntries := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheEntries.GetAsInt()
+	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
+	for len(state.principalTags)+len(state.principalBackoffs) > maxEntries || state.principalCacheBytes+state.principalBackoffBytes > maxBytes {
+		if oldest := state.principalBackoffOrder.Front(); oldest != nil && oldest.Value.(string) != protectedBackoff {
+			state.removePrincipalBackoffLocked(oldest.Value.(string))
+			continue
+		}
+		oldest := state.negativePrincipalCacheOrder.Front()
+		if oldest == nil {
+			oldest = state.positivePrincipalCacheOrder.Front()
+		}
+		if oldest != nil {
+			state.removePrincipalTagsLocked(oldest.Value.(string))
+			continue
+		}
+		// The protected backoff itself cannot fit even after all other state was
+		// evicted, so drop it to preserve the configured hard bound.
+		if oldest := state.principalBackoffOrder.Front(); oldest != nil {
+			state.removePrincipalBackoffLocked(oldest.Value.(string))
+			continue
+		}
+		return
+	}
+}
+
+func (state *collectionState) recordPrincipalRefreshFailureLocked(principalName string) {
+	entry := state.principalBackoffs[principalName]
+	if entry == nil {
+		entry = &principalBackoffEntry{
+			backoff:    typeutil.NewBackoffWithInstant(metadataRefreshBackoffConfig),
+			cacheBytes: int64(len(principalName)),
+		}
+		entry.orderElement = state.principalBackoffOrder.PushBack(principalName)
+		state.principalBackoffs[principalName] = entry
+		state.principalBackoffBytes += entry.cacheBytes
+	} else if entry.orderElement != nil {
+		state.principalBackoffOrder.MoveToBack(entry.orderElement)
+	}
+	entry.lastFailureAt = time.Now()
+	entry.backoff.UpdateInstantWithNextBackOff()
+	state.trimPrincipalStateLocked(principalName)
+}
+
+func (state *collectionState) removePrincipalBackoffLocked(principalName string) {
+	entry := state.principalBackoffs[principalName]
+	delete(state.principalBackoffs, principalName)
+	if entry == nil {
+		return
+	}
+	state.principalBackoffBytes -= entry.cacheBytes
+	if entry.orderElement != nil {
+		state.principalBackoffOrder.Remove(entry.orderElement)
+		entry.orderElement = nil
+	}
+}
+
+func (state *collectionState) expirePrincipalTagsLocked(order *list.List, refreshTTL time.Duration, now time.Time) {
+	for oldest := order.Front(); oldest != nil; oldest = order.Front() {
+		principalName := oldest.Value.(string)
+		entry := state.principalTags[principalName]
+		if principalTagsEntryFresh(entry, refreshTTL, now) {
+			return
+		}
+		state.removePrincipalTagsLocked(principalName)
+	}
+}
+
+func (state *collectionState) expirePrincipalBackoffsLocked(refreshTTL time.Duration, now time.Time) {
+	for oldest := state.principalBackoffOrder.Front(); oldest != nil; oldest = state.principalBackoffOrder.Front() {
+		principalName := oldest.Value.(string)
+		entry := state.principalBackoffs[principalName]
+		if entry != nil && entry.lastFailureAt.Add(refreshTTL).After(now) {
+			return
+		}
+		state.removePrincipalBackoffLocked(principalName)
+	}
+}
+
 func (state *collectionState) rememberInvalidationRevision(revision typeutil.Timestamp) bool {
 	if revision == 0 {
 		return true
@@ -431,7 +663,9 @@ func (state *collectionState) rememberInvalidationRevision(revision typeutil.Tim
 }
 
 func (state *collectionState) setPreparedPolicySnapshotLocked(refreshedAt time.Time, policies map[string]*rlsutil.RowPolicy) {
+	state.policyGeneration++
 	state.policyRefreshedAt = refreshedAt
 	state.policyBackoff = nil
+	state.compiled = nil
 	state.policies = policies
 }

@@ -72,6 +72,26 @@ func Get() *ComponentParam {
 	return &params
 }
 
+// RefreshRemoteConfigsLinearizable makes the etcd config source re-read every key with a
+// linearizable read, so a value committed to etcd immediately before this call is visible to
+// this process at once instead of only on the next periodic refresh.
+//
+// The boolean reports whether a remote source was there to refresh: with no etcd config
+// source (embedded milvus, unit tests) the file source is already authoritative and carries
+// no propagation delay, so (false, nil) means "nothing to refresh", not a failure. A failed
+// read leaves the last polled snapshot in place, so a caller that cannot tolerate a stale
+// value must still validate what it subsequently reads.
+func (bt *BaseTable) RefreshRemoteConfigsLinearizable() (refreshed bool, err error) {
+	etcdSource, ok := bt.Manager().GetEtcdSource()
+	if !ok {
+		return false, nil
+	}
+	if err := etcdSource.RefreshConfigurationsLinearizable(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func GetBaseTable() *BaseTable {
 	return params.baseTable
 }

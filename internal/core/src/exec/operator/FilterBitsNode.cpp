@@ -97,20 +97,26 @@ PhyFilterBitsNode::PhyFilterBitsNode(
 
     enable_expr_cache_ = query_context_->get_enable_expr_cache();
     if (enable_expr_cache_) {
-        // Only cache the predicate result when EVERY expression in it is
-        // cacheable. A bloom_match subtree is non-cacheable (its slim ToString
-        // cache key cannot distinguish distinct filter blobs), and that
-        // propagates up, so a predicate containing bloom_match is never cached
-        // and can never reuse another query's bitmap.
-        for (const auto& e : exprs_->exprs()) {
-            if (e && !e->IsCacheable()) {
-                enable_expr_cache_ = false;
-                break;
+        const bool cache_setup_completed = RunExprCacheBestEffort([&]() {
+            // Only cache the predicate result when EVERY expression in it is
+            // cacheable. A bloom_match subtree is non-cacheable (its slim
+            // ToString cache key cannot distinguish distinct filter blobs),
+            // and that propagates up, so a predicate containing bloom_match is
+            // never cached and can never reuse another query's bitmap.
+            for (const auto& e : exprs_->exprs()) {
+                if (e && !e->IsCacheable()) {
+                    enable_expr_cache_ = false;
+                    break;
+                }
             }
+            if (enable_expr_cache_) {
+                expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
+            }
+        });
+        if (!cache_setup_completed) {
+            enable_expr_cache_ = false;
+            expr_cache_key_.clear();
         }
-    }
-    if (enable_expr_cache_) {
-        expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
     }
 }
 
@@ -151,20 +157,28 @@ PhyFilterBitsNode::GetOutput() {
                                cache_segment->type() == SegmentType::Sealed &&
                                ExprResCacheManager::IsEnabled();
     if (can_use_cache) {
-        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                     expr_cache_key_};
-        ExprResCacheManager::Value cached;
-        cached.active_count = need_process_rows_;
-        if (ExprResCacheManager::Instance().Get(key, cached) &&
-            cached.result != nullptr &&
-            cached.result->size() == need_process_rows_) {
-            num_processed_rows_ = need_process_rows_;
+        RowVectorPtr cached_output;
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                         expr_cache_key_};
+            ExprResCacheManager::Value cached;
+            cached.active_count = need_process_rows_;
+            if (!ExprResCacheManager::Instance().Get(key, cached) ||
+                cached.result == nullptr ||
+                cached.result->size() != need_process_rows_) {
+                return;
+            }
+
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
                                     : TargetBitmap(need_process_rows_, true)));
-            return std::make_shared<RowVector>(std::move(col_res));
+            cached_output = std::make_shared<RowVector>(std::move(col_res));
+            num_processed_rows_ = need_process_rows_;
+        });
+        if (cached_output != nullptr) {
+            return cached_output;
         }
     }
 
@@ -208,13 +222,15 @@ PhyFilterBitsNode::GetOutput() {
                    need_process_rows_);
 
         if (can_use_cache) {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
-            ExprResCacheManager::Value v;
-            v.result = std::make_shared<TargetBitmap>(view);
-            v.valid_result = std::make_shared<TargetBitmap>(valid_view);
-            v.active_count = need_process_rows_;
-            ExprResCacheManager::Instance().Put(key, v);
+            RunExprCacheBestEffort([&]() {
+                ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                             expr_cache_key_};
+                ExprResCacheManager::Value v;
+                v.result = std::make_shared<TargetBitmap>(view);
+                v.valid_result = std::make_shared<TargetBitmap>(valid_view);
+                v.active_count = need_process_rows_;
+                ExprResCacheManager::Instance().Put(key, v);
+            });
         }
 
         std::vector<VectorPtr> col_res;
@@ -272,13 +288,16 @@ PhyFilterBitsNode::GetOutput() {
     // search. Must clone before move since Stage 1 still owns the bitset for
     // the ColumnVector return value below.
     if (can_use_cache) {
-        ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                     expr_cache_key_};
-        ExprResCacheManager::Value v;
-        v.result = std::make_shared<TargetBitmap>(bitset.clone());
-        v.valid_result = std::make_shared<TargetBitmap>(valid_bitset.clone());
-        v.active_count = need_process_rows_;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
+                                         expr_cache_key_};
+            ExprResCacheManager::Value v;
+            v.result = std::make_shared<TargetBitmap>(bitset.clone());
+            v.valid_result =
+                std::make_shared<TargetBitmap>(valid_bitset.clone());
+            v.active_count = need_process_rows_;
+            ExprResCacheManager::Instance().Put(key, v);
+        });
     }
 
     // num_processed_rows_ = need_process_rows_;

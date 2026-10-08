@@ -146,6 +146,19 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
 }
 
 extern "C" void
+SegcoreSetLazyColumnGroupEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_lazy_column_group_enabled(value);
+}
+
+extern "C" bool
+SegcoreGetLazyColumnGroupEnabled() {
+    return milvus::segcore::SegcoreConfig::default_config()
+        .get_lazy_column_group_enabled();
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

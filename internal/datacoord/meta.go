@@ -62,7 +62,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -168,17 +167,13 @@ type channelCPs struct {
 	lock.RWMutex
 	checkpoints  map[string]*msgpb.MsgPosition
 	channelLocks *lock.KeyLock[string]
-	cond         *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
-	cp := &channelCPs{
+	return &channelCPs{
 		checkpoints:  make(map[string]*msgpb.MsgPosition),
 		channelLocks: lock.NewKeyLock[string](),
 	}
-	// use the same lock as channelCPs
-	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
-	return cp
 }
 
 type segmentMetricStateChange map[string]map[string]map[string]map[string]map[string]int
@@ -1755,15 +1750,21 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
-			if len(pos.GetStartPosition().GetMsgID()) == 0 {
-				continue
-			}
 			s := modPack.Get(pos.GetSegmentID())
 			if s == nil {
 				continue
 			}
+			// L0 segments materialized from WALSummary have no physical WAL
+			// position. Their timestamp-only StartPosition is a valid delete
+			// retention boundary used by QueryCoord/delegators, not a WAL seek
+			// position. Dropping it would allow live L0 deletes to be evicted.
+			startPosition := pos.GetStartPosition()
+			if len(startPosition.GetMsgID()) == 0 &&
+				(s.GetLevel() != datapb.SegmentLevel_L0 || startPosition.GetTimestamp() == 0) {
+				continue
+			}
 
-			s.StartPosition = pos.GetStartPosition()
+			s.StartPosition = startPosition
 		}
 		return true
 	}
@@ -2059,19 +2060,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
-				// Fail-stop. Unreachable for a normal import: its rows carry the
-				// Import message's timetick and the commit fence is a later
-				// timetick on the same WAL. Keep the error retriable so the
-				// flusher blocks on the fence instead of failing the job — a
-				// blocked pchannel surfaces as WAL lag, whereas a replica that
-				// commits what the source rejected can no longer be rolled back.
-				//
-				// Recovery from here is out of band. The job is already
-				// Committing by the time this runs -- commitImportV2AckCallback
-				// persists that state on the broadcast FastAck, independent of
-				// this fence -- and Committing cannot be failed by any writer
-				// (UnfailableJobStates). Validating earlier does not change that:
-				// the ack path flips the state regardless of what this check says.
+				// Preserve the commit fence and let the broadcast callback retry.
+				// It must not publish segment visibility or complete the job
+				// with a timestamp preceding the imported rows.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
 					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
 					ts, maxTsTo, segmentID))
@@ -2107,6 +2098,29 @@ func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOpe
 			MsgID:       nil,
 			Timestamp:   maxTs,
 		}
+		return true
+	}
+}
+
+// setSealedAtDataVersion binds the first publication in the same transaction as
+// SegmentMeta and DataView. The caller holds the DataView collection lock.
+func setSealedAtDataVersion(segmentID int64, version *viewpb.DataVersion) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		current := pack.meta.segments.GetSegment(segmentID)
+		if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if current.GetState() == commonpb.SegmentState_Flushed && current.GetSealedAtDataVersion() == nil {
+			return pack.fail(merr.WrapErrServiceInternalMsg("flushed segment %d has no publication version", segmentID))
+		}
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if segment.GetSealedAtDataVersion() != nil && !proto.Equal(segment.GetSealedAtDataVersion(), version) {
+			return pack.fail(merr.WrapErrServiceInternalMsg("conflicting sealed DataVersion for segment %d", segmentID))
+		}
+		segment.SealedAtDataVersion = proto.Clone(version).(*viewpb.DataVersion)
 		return true
 	}
 }
@@ -2161,24 +2175,12 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	return nil
 }
 
-// UpdateSegmentsInfoAndDataView applies operators to SegmentMeta and commits
-// SegmentMeta together with the supplied DataView snapshot in one atomic
-// catalog txn (flush path). The DataView entry is the visibility marker of
-// the composite write (see DataViewEntry encoding): on the over-limit
-// fallback the DataView key lands in the final guarded txn after every
-// SegmentMeta op, so a visible DataView implies its SegmentMeta is committed.
-// dataView may be nil to commit SegmentMeta alone.
-// UpdateSegmentsInfoAndDataView returns whether the composite txn actually
-// ran. The DataView snapshot is persisted even when the SegmentMeta update
-// short-circuits (updatePack == nil, e.g. a replayed flush of an
-// already-flushed segment): the flush must synchronously advance
-// streaming_version. Catalog failures are retried in-function until the
-// version is durably published (catalog.Update is an idempotent KV
-// overwrite, so an in-function retry is safe; retrying the whole
-// SaveBinlogPaths from the caller would not be idempotent). Only when both
-// sides are empty (no SegmentMeta mutation and no DataView snapshot) does it
-// return (false, nil); the caller then discards any prepared in-memory
-// snapshot instead of committing a version that does not exist in etcd.
+// UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
+// publishing either in memory. On the over-limit fallback, binlogs land first;
+// the first-publication binding and DataView commit together in the final txn.
+// dataView may be nil to commit SegmentMeta alone. A supplied DataView is saved
+// even without SegmentMeta mutations; (false, nil) means both are absent.
+// Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2216,8 +2218,7 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	}
 	// The flush publish must keep retrying: catalog.Update is an idempotent
 	// overwrite of the same actions, so an in-function retry converges to a
-	// durable streaming_version without replaying caller-side effects
-	// (retrying SaveBinlogPaths from the caller is not idempotent).
+	// durable streaming_version without replaying caller-side effects.
 	// retry.Do short-circuits InputError-typed errors unless an explicit
 	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
 	if err := retry.Do(ctx, func() error {
@@ -3443,8 +3444,6 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
 	}
-	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
-	m.channelCPs.cond.UnsafeBroadcast()
 	m.channelCPs.Unlock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
@@ -4279,22 +4278,4 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	}
 
 	return nil
-}
-
-// WatchChannelCheckpoint waits until the checkpoint of the specified channel
-// reaches or exceeds the target timestamp. Used for TruncateCollection.
-func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
-	m.channelCPs.cond.L.Lock()
-
-	for {
-		cp, ok := m.channelCPs.checkpoints[vChannel]
-		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
-			m.channelCPs.cond.L.Unlock()
-			return nil
-		}
-
-		if err := m.channelCPs.cond.Wait(ctx); err != nil {
-			return err
-		}
-	}
 }

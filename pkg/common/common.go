@@ -330,17 +330,18 @@ const (
 
 // Search, Index parameter keys
 const (
-	TopKKey                           = "topk"
-	SearchParamKey                    = "search_param"
-	SegmentNumKey                     = "segment_num"
-	WithFilterKey                     = "with_filter"
-	DataTypeKey                       = "data_type"
-	ChannelNumKey                     = "channel_num"
-	WithOptimizeKey                   = "with_optimize"
-	CollectionKey                     = "collection"
-	RecallEvalKey                     = "recall_eval"
-	StrictGroupAcceptanceThresholdKey = "strict_group_acceptance_threshold"
-	StrictGroupProbeCandidatesKey     = "strict_group_probe_candidates"
+	TopKKey                             = "topk"
+	SearchParamKey                      = "search_param"
+	SegmentNumKey                       = "segment_num"
+	WithFilterKey                       = "with_filter"
+	DataTypeKey                         = "data_type"
+	ChannelNumKey                       = "channel_num"
+	WithOptimizeKey                     = "with_optimize"
+	CollectionKey                       = "collection"
+	RecallEvalKey                       = "recall_eval"
+	StrictGroupStrategyKey              = "strict_group_strategy"
+	StrictGroupPhase1CandidateWeightKey = "strict_group_phase1_candidate_weight"
+	StrictGroupSkipRefineKey            = "strict_group_skip_refine"
 
 	GlobalRefineKey    = "global_refine"
 	SearchTopkRatioKey = "search_topk_ratio"
@@ -396,25 +397,6 @@ const (
 	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
-
-	// CollectionInsertIdempotencyEnabledKey enables idempotency keys for Insert.
-	// Delete and Upsert are already idempotent and do not use this property.
-	//
-	// SEMANTICS — read before enabling. When a client supplies no explicit
-	// idempotency key, the proxy derives one from the insert destination plus a
-	// hash of the client payload ("auto key"). Enabling this property therefore
-	// means CONTENT-ADDRESSED dedup: a byte-identical insert into the same
-	// db/collection/partition/namespace, while the first one is still inside the
-	// deduplication window, is answered with the first insert's result and its
-	// rows are NOT written again. The window is bounded by BYTES of subsequent
-	// writes, not by elapsed time (streaming.idempotency.maxBytesPerWindow), so on
-	// a quiet shard it can reach back a long way. That is the intended retry protection for clients that
-	// cannot pass keys (SDK-internal retries), but it also means workloads that
-	// legitimately insert identical content twice (e.g. duplicate log records
-	// into an autoID collection) MUST NOT enable this property, or must supply
-	// distinct explicit keys per logical request. The dedup horizon is bounded
-	// by the window TTL/entry caps, so the collapse is time-dependent by design.
-	CollectionInsertIdempotencyEnabledKey = "collection.insert.idempotency.enabled"
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -505,6 +487,7 @@ const (
 	RLSEnabledKey       = "rls.enabled"
 	RLSForceKey         = "rls.force"
 	RLSPrincipalNameKey = "rls.principal_name"
+	RLSClearAllCacheKey = "rls.clear_all_cache"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -884,29 +867,16 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
 			}
 			seen[RLSEnabledKey] = struct{}{}
-			enabled, err := IsRLSEnabled(kv)
-			if err != nil {
+			if _, err := IsRLSEnabled(kv); err != nil {
 				return err
-			}
-			// The management plane lands before the data-plane enforcement in
-			// the stacked rollout. Keep the public switch fail-closed until the
-			// enforcement slice removes this temporary gate.
-			if enabled {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
 			}
 		case RLSForceKey:
 			if _, ok := seen[RLSForceKey]; ok {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
 			}
 			seen[RLSForceKey] = struct{}{}
-			force, err := IsRLSForce(kv)
-			if err != nil {
+			if _, err := IsRLSForce(kv); err != nil {
 				return err
-			}
-			// rls.force only affects runtime enforcement. Reject it together
-			// with rls.enabled while the enforcement slice is not available.
-			if force {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
 			}
 		default:
 			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
@@ -915,6 +885,23 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateRLSForceRequiresEnabled rejects an effective collection property set
+// that enables rls.force without enabling RLS itself.
+func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
+	force, err := IsRLSForce(kvs...)
+	if err != nil || !force {
+		return err
+	}
+	enabled, err := IsRLSEnabled(kvs...)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
 	}
 	return nil
 }

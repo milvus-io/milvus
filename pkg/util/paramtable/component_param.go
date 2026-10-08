@@ -44,10 +44,17 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize = 16
+	// defaultSortReadConcurrencyCap caps dataNode.compaction.sortReadConcurrency
+	// when it is derived from the CPU count: each chunk read at once keeps one
+	// read round of raw bytes resident, which by default is the whole chunk, and
+	// 8 chunks already keep far more requests queued than arrow's IO pool serves
+	// at a time.
+	defaultSortReadConcurrencyCap = 8
 	// Load admission defaults apply only when async loading is enabled and the
 	// corresponding parameter is absent. Explicit values, including 0, win.
-	DefaultLoadTransientBudgetBytes = 2 * 1024 * 1024 * 1024
-	DefaultLoadAdmissionSlotsPerCPU = 2
+	DefaultLoadTransientBudgetBytes       = 2 * 1024 * 1024 * 1024
+	DefaultLoadAdmissionSlotsPerCPU       = 2
+	DefaultJSONStatsBuildMaxInflightBytes = 512 * 1024 * 1024
 	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
 	// default for the Storage V3 async read-window threshold.
 	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
@@ -65,12 +72,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for both the
-	// aggregate serialized size of membership-filter-bearing plans and the
-	// aggregate estimated decoded size of Roaring filters. The two totals are
-	// checked independently. It is deliberately below the default 256 MiB proxy
-	// gRPC client send limit so placeholders and the rest of the internal request
-	// retain ample headroom.
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for the
+	// aggregate serialized size of membership-filter-bearing plans and
+	// RLS-bearing HybridSearch plans, and for the aggregate estimated decoded
+	// size of Roaring filters. The serialized and decoded totals are checked
+	// independently. It is deliberately below the default 256 MiB proxy gRPC
+	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -209,6 +216,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.ProxyCfg.RLSImportEnforcementEnabled,
 	}
 }
 
@@ -2608,7 +2616,6 @@ type proxyConfig struct {
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
-	RLSMaxPrincipalsPerCollection     ParamItem `refreshable:"true"`
 	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
 	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
 	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
@@ -2618,7 +2625,10 @@ type proxyConfig struct {
 	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
 	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
 	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
 	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
+	RLSImportEnforcementEnabled       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2824,11 +2834,11 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The request-wide membership-filter budget in bytes. It independently limits both the aggregate " +
-			"serialized size of membership-filter-bearing expression plans and the aggregate estimated decoded " +
-			"size of Roaring filters in one Search, HybridSearch, Query, or complex Delete request. The proxy " +
+		Doc: "The request-wide large-filter budget in bytes. It independently limits the aggregate " +
+			"serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, " +
+			"and the aggregate estimated decoded size of Roaring filters. The proxy " +
 			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
-			"filters share both totals. Must be positive; invalid values fall back to 128 MiB.",
+			"filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -3250,17 +3260,6 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
 
-	p.RLSMaxPrincipalsPerCollection = ParamItem{
-		Key:          "proxy.rls.maxPrincipalsPerCollection",
-		Version:      "3.0.0",
-		DefaultValue: "1000",
-		PanicIfEmpty: true,
-		Doc:          "Maximum number of RLS principals allowed on one collection.",
-		Export:       true,
-		Formatter:    positiveProxyLimitFormatter("1000"),
-	}
-	p.RLSMaxPrincipalsPerCollection.Init(base.mgr)
-
 	p.RLSMaxTagsPerPrincipal = ParamItem{
 		Key:          "proxy.rls.maxTagsPerPrincipal",
 		Version:      "3.0.0",
@@ -3343,7 +3342,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum RLS principal tag value length in bytes.",
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
@@ -3354,11 +3353,33 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "1024",
 		PanicIfEmpty: true,
-		Doc:          "Maximum literal elements for RLS in and array_contains* predicates.",
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
 	p.RLSMaxArrayLiteralElements.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheEntries = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheEntries",
+		Version:      "3.0.0",
+		DefaultValue: "65536",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("65536"),
+	}
+	p.RLSMaxPrincipalCacheEntries.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheBytes = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheBytes",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		PanicIfEmpty: true,
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.RLSMaxPrincipalCacheBytes.Init(base.mgr)
 
 	p.RLSMetaRefreshInterval = ParamItem{
 		Key:          "proxy.rls.metaRefreshInterval",
@@ -3370,6 +3391,26 @@ Disabled if the value is less or equal to 0.`,
 		Formatter:    positiveProxyLimitFormatter("3600"),
 	}
 	p.RLSMetaRefreshInterval.Init(base.mgr)
+
+	// Import RLS spans Proxy, DataCoord, and DataNode. Keep it fail-closed until
+	// every live component is new enough to preserve and enforce the predicate.
+	p.RLSImportEnforcementEnabled = ParamItem{
+		Key:          "proxy.rls.importEnforcementEnabled",
+		Version:      "3.1.0-beta",
+		DefaultValue: "auto",
+		Export:       false,
+		Doc: "Whether RLS enforcement is available for bulk import. auto: enable after every live " +
+			"cluster component reaches the gate version; false: reject RLS-enforced imports; true: " +
+			"force enable and bypass the mixed-version safety gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0-beta",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.RLSImportEnforcementEnabled.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
@@ -3535,6 +3576,11 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
+	AutoscaleEnabled         ParamItem `refreshable:"true"`
+	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
+	AutoscaleMaxDiskLimit    ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -4245,6 +4291,42 @@ Set to 0 to disable the penalty period.`,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
 
+	p.AutoscalePrecheckEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.precheckEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.",
+		Export:       true,
+	}
+	p.AutoscalePrecheckEnabled.Init(base.mgr)
+
+	p.AutoscaleEnabled = ParamItem{
+		Key:          "queryCoord.autoscale.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.",
+		Export:       true,
+	}
+	p.AutoscaleEnabled.Init(base.mgr)
+
+	p.AutoscaleMaxMemoryLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxMemoryLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxMemoryLimit.Init(base.mgr)
+
+	p.AutoscaleMaxDiskLimit = ParamItem{
+		Key:          "queryCoord.autoscale.maxDiskLimit",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc:          "Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
+		Export:       true,
+	}
+	p.AutoscaleMaxDiskLimit.Init(base.mgr)
+
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
 		Version:      "2.6.8",
@@ -4268,9 +4350,10 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
-	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
-	SoPath                         ParamItem `refreshable:"false"`
+	StrictGroupStrategy              ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
+	SoPath                           ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -4319,6 +4402,7 @@ type queryNodeConfig struct {
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
 	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
+	TieredLazyColumnGroupEnabled    ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -4437,14 +4521,16 @@ type queryNodeConfig struct {
 	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
 
 	// expr cache
-	ExprResCacheEnabled               ParamItem `refreshable:"true"`
-	ExprResCacheMode                  ParamItem `refreshable:"true"`
-	ExprResCacheMinEvalDurationUs     ParamItem `refreshable:"true"`
-	ExprResCacheAdmissionThreshold    ParamItem `refreshable:"true"`
-	ExprResCacheMemMaxBytes           ParamItem `refreshable:"true"`
-	ExprResCacheMemCompressionEnabled ParamItem `refreshable:"true"`
-	ExprResCacheDiskMaxBytes          ParamItem `refreshable:"true"`
-	ExprResCacheDiskMaxFileSizeBytes  ParamItem `refreshable:"true"`
+	ExprResCacheEnabled                 ParamItem `refreshable:"true"`
+	ExprResCacheMode                    ParamItem `refreshable:"true"`
+	ExprResCacheMinEvalDurationUs       ParamItem `refreshable:"true"`
+	ExprResCacheAdmissionThreshold      ParamItem `refreshable:"true"`
+	ExprResCacheMaterializationMaxBytes ParamItem `refreshable:"true"`
+	ExprResCacheMemMaxBytes             ParamItem `refreshable:"true"`
+	ExprResCacheMemCompressionEnabled   ParamItem `refreshable:"true"`
+	ExprResCacheMemEnableGrowing        ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxBytes            ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxFileSizeBytes    ParamItem `refreshable:"true"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -4501,18 +4587,24 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
-	p.StrictGroupAcceptanceThreshold = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
-		Version: "2.6.23", DefaultValue: "0.1", Export: true,
-		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	p.StrictGroupStrategy = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupStrategy",
+		Version: "2.6.23", DefaultValue: "per_group", Export: true,
+		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
 	}
-	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
-	p.StrictGroupProbeCandidates = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
-		Version: "2.6.23", DefaultValue: "100", Export: true,
-		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	p.StrictGroupStrategy.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
+		Version: "2.6.23", DefaultValue: "0", Export: true,
+		Doc: "Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.",
 	}
-	p.StrictGroupProbeCandidates.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight.Init(base.mgr)
+	p.StrictGroupSkipRefine = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupSkipRefine",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.",
+	}
+	p.StrictGroupSkipRefine.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
@@ -4624,6 +4716,15 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
+
+	p.TieredLazyColumnGroupEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.lazyColumnGroupEnabled",
+		Version:      "3.0.3",
+		DefaultValue: "false",
+		Doc:          "When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.",
+		Export:       true,
+	}
+	p.TieredLazyColumnGroupEnabled.Init(base.mgr)
 
 	p.TieredEvictionEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
@@ -5850,7 +5951,7 @@ user-task-polling:
 		Key:          "queryNode.exprCache.mode",
 		Version:      "3.0.0",
 		DefaultValue: "disk",
-		Doc:          "cache mode: 'disk' (sealed segments only, pread/pwrite + fixed slots) or 'memory' (sealed and growing segments, malloc + Clock + compression)",
+		Doc:          "cache mode: 'disk' (sealed only) or 'memory' (sealed and optionally growing)",
 		Export:       true,
 	}
 	p.ExprResCacheMode.Init(base.mgr)
@@ -5864,6 +5965,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.ExprResCacheMinEvalDurationUs.Init(base.mgr)
+
+	p.ExprResCacheMaterializationMaxBytes = ParamItem{
+		Key:          "queryNode.exprCache.materialization.maxBytes",
+		Version:      "3.0.0",
+		DefaultValue: "268435456",
+		Doc:          "max transient heap memory for full expression-cache bitmap materializations in memory and disk modes (default 256MB)",
+		Export:       true,
+	}
+	p.ExprResCacheMaterializationMaxBytes.Init(base.mgr)
 
 	p.ExprResCacheMemMaxBytes = ParamItem{
 		Key:          "queryNode.exprCache.memory.maxBytes",
@@ -5885,11 +5995,20 @@ user-task-polling:
 	}
 	p.ExprResCacheMemCompressionEnabled.Init(base.mgr)
 
+	p.ExprResCacheMemEnableGrowing = ParamItem{
+		Key:          "queryNode.exprCache.memory.enableGrowing",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "cache growing-segment snapshots in expression cache memory mode",
+		Export:       true,
+	}
+	p.ExprResCacheMemEnableGrowing.Init(base.mgr)
+
 	p.ExprResCacheAdmissionThreshold = ParamItem{
 		Key:          "queryNode.exprCache.admissionThreshold",
 		Version:      "3.0.0",
 		DefaultValue: "2",
-		Doc:          "frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)",
+		Doc:          "per-cache-key frequency admission for memory and disk mode: cache after N+ occurrences (1=no gating)",
 		Export:       true,
 	}
 	p.ExprResCacheAdmissionThreshold.Init(base.mgr)
@@ -7683,8 +7802,8 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 
 	// ImportEnableIDRangeMsg gates the two-phase per-file ID range path: after
 	// preimport reports the row counts, the primary assigns one range per file and
-	// broadcasts them via the new ImportIDRange V2 WAL message. It is version-gated
-	// on purpose: the ImportIDRange message is a new V2 type, so broadcasting it
+	// broadcasts them via the new UpdateImport V2 WAL message. It is version-gated
+	// on purpose: the UpdateImport message is a new V2 type, so broadcasting it
 	// while a streaming node from an older build is still online crashes that node's
 	// flusher (no case for the type -> panic on WAL replay). Until the gate flips,
 	// the config resolves to "false" and import stays on the legacy local-allocator
@@ -7695,7 +7814,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
-			"the ImportIDRange WAL message. auto: switch on automatically once the whole cluster " +
+			"the UpdateImport WAL message. auto: switch on automatically once the whole cluster " +
 			"(including streaming nodes) has reached the gate version and the stability window " +
 			"elapses; false: always keep the legacy local-allocator path (escape hatch, and the safe " +
 			"value while older streaming nodes are still online); true: force enable and bypass the " +
@@ -8078,13 +8197,21 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
 
+	const defaultJSONStatsWriteBatchSize = "81920"
 	p.JSONStatsWriteBatchSize = ParamItem{
 		Key:          "dataCoord.jsonShreddingWriteBatchSize",
 		Version:      "2.6.5",
-		DefaultValue: "81920",
-		Doc:          "the batch size to write",
+		DefaultValue: defaultJSONStatsWriteBatchSize,
+		Doc:          "the batch size to write; values must be positive, otherwise the default is used",
 		FallbackKeys: []string{"dataCoord.jsonStatsWriteBatchSize"},
 		Export:       true,
+		Formatter: func(value string) string {
+			batchSize, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || batchSize <= 0 {
+				return defaultJSONStatsWriteBatchSize
+			}
+			return value
+		},
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
 }
@@ -8155,6 +8282,8 @@ type dataNodeConfig struct {
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 	MaxCompactionConcurrency ParamItem `refreshable:"true"`
+	SortReadConcurrency      ParamItem `refreshable:"true"`
+	SortReadBufferSize       ParamItem `refreshable:"true"`
 	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
@@ -8177,8 +8306,10 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel               ParamItem `refreshable:"false"`
-	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
+	BuildParallel                  ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency    ParamItem `refreshable:"true"`
+	JSONStatsBuildMaxWorkers       ParamItem `refreshable:"true"`
+	JSONStatsBuildMaxInflightBytes ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -8656,6 +8787,53 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	}
 	p.MaxCompactionConcurrency.Init(base.mgr)
 
+	p.SortReadConcurrency = ParamItem{
+		Key:     "dataNode.compaction.sortReadConcurrency",
+		Version: "3.0.2",
+		Doc: "How much of its input a sort compaction reads at the same time. The value drives two levels at once. " +
+			"Across chunks (one chunk is the set of binlog files written by one sync): that many chunks are opened, read to " +
+			"their end and closed on their own, so neither opening a chunk nor any of its reads waits for the chunks before it; " +
+			"records are still delivered in order. A chunk being read also fetches all byte ranges of its current round at once " +
+			"rather than one at a time; how far adjacent ranges are coalesced is left as configured (common.arrow.reader.*), so " +
+			"a sort issues the requests every other reader issues, only together. The requests actually in flight are capped by " +
+			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, 8 threads by default). " +
+			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. Each " +
+			"chunk being read additionally holds the raw bytes of its current round, released when the round is replaced or the " +
+			"chunk is closed, so the read phase of one sort task adds up to this value times " +
+			"dataNode.compaction.sortReadBufferSize, and never more than the raw size of its input. A DataNode runs several " +
+			"sort tasks at once, as many as its slots admit, so the figure for a node is that amount times the number of " +
+			"concurrent sort tasks. " +
+			"1 reads the chunks strictly one after another, exactly as before this option existed, and is the way to switch it off. " +
+			"Values <= 0 mean the number of CPU cores, capped at 8 so that the default does not grow with the machine. " +
+			"Only binlog-based StorageV2/V3 segments are read this way; segments read through a manifest are not.",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return strconv.Itoa(min(hardware.GetCPUNum(), defaultSortReadConcurrencyCap))
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SortReadConcurrency.Init(base.mgr)
+
+	p.SortReadBufferSize = ParamItem{
+		Key:     "dataNode.compaction.sortReadBufferSize",
+		Version: "3.0.2",
+		Doc: "Size of one read round of a chunk when a sort compaction reads with sortReadConcurrency > 1; it has no effect " +
+			"otherwise. A chunk larger than this is read in several rounds, one after another, each waiting for its slowest " +
+			"request, so the default is above the chunks a flush or an import usually writes and a chunk is normally read in " +
+			"one round. It also bounds what a chunk being read holds besides the decoded input the sort keeps anyway: one " +
+			"round of raw bytes, never more than the chunk itself, released when the chunk is closed. A sort task therefore " +
+			"adds at most sortReadConcurrency * min(this value, chunk size). Lower it to bound that memory more tightly. " +
+			"Values that are not positive mean 32m, because the packed reader reads such a value as no limit. " +
+			"Accepts a byte count or a size such as 512m.",
+		DefaultValue: "512m",
+		Export:       false,
+	}
+	p.SortReadBufferSize.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -8737,6 +8915,37 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
+
+	p.JSONStatsBuildMaxWorkers = ParamItem{
+		Key:          "dataNode.jsonStats.parallelBuild.maxWorkers",
+		Version:      "3.0.1",
+		DefaultValue: "8",
+		Doc:          "Maximum number of process-wide JSON Stats Build workers. The effective value is capped by the cgroup-aware CPU count. Values less than or equal to 0 use the safe automatic limit min(CPU, 8).",
+		Export:       true,
+	}
+	p.JSONStatsBuildMaxWorkers.Init(base.mgr)
+
+	p.JSONStatsBuildMaxInflightBytes = ParamItem{
+		Key:          "dataNode.jsonStats.parallelBuild.maxInflightBytes",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(DefaultJSONStatsBuildMaxInflightBytes),
+		Doc: `Process-wide transient memory budget in bytes for materialized JSON Stats Build chunks. ` +
+			`The budget is shared by concurrent builds. Lower values reduce peak memory at the cost of ` +
+			`parallelism. A chunk larger than the budget is allowed to run exclusively to guarantee ` +
+			`progress. Set to 0 to disable the limit.`,
+		Export: true,
+		Formatter: func(v string) string {
+			value, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || value < 0 {
+				mlog.Warn(context.TODO(), "dataNode.jsonStats.parallelBuild.maxInflightBytes must be non-negative, using default",
+					mlog.String("configured", v),
+					mlog.Int64("default", DefaultJSONStatsBuildMaxInflightBytes))
+				return strconv.Itoa(DefaultJSONStatsBuildMaxInflightBytes)
+			}
+			return v
+		},
+	}
+	p.JSONStatsBuildMaxInflightBytes.Init(base.mgr)
 
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",
@@ -8832,19 +9041,22 @@ type streamingConfig struct {
 	FlushL0MaxRowNum   ParamItem `refreshable:"true"`
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
+	// summary store retention
+	SummaryMaxBytesPerPChannel ParamItem `refreshable:"true"`
+
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
+	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyEnabled            ParamItem `refreshable:"false"`
 	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
 	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
 	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
-	IdempotencyMaxRetainedBytes   ParamItem `refreshable:"false"`
-	IdempotencyMaxRetainedChunks  ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -9272,6 +9484,18 @@ If the binary size of l0 segment is greater than this size, it will be flushed.`
 	}
 	p.FlushL0MaxSize.Init(base.mgr)
 
+	p.SummaryMaxBytesPerPChannel = ParamItem{
+		Key:     "streaming.summary.maxBytesPerPChannel",
+		Version: "3.0.0",
+		Doc: `The soft budget of the retained WALSummary chunk objects per pchannel, 4GB by default.
+The summary store keeps the transform records of every vchannel so the L0 materializer can read them back;
+chunks are released by the retention GC when the budget is exceeded, but never below the per-vchannel
+materialization frontiers.`,
+		DefaultValue: "4GB",
+		Export:       false,
+	}
+	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",
 		Version: "2.6.0",
@@ -9297,13 +9521,39 @@ but not wait for the persist interval.`,
 	p.WALRecoveryGracefulCloseTimeout = ParamItem{
 		Key:     "streaming.walRecovery.gracefulCloseTimeout",
 		Version: "2.6.0",
-		Doc: `The graceful close timeout for wal recovery, 3s by default.
-When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
-If that persist operation exceeds this timeout, the wal recovery module will close right now.`,
+		Doc: `Deprecated. RecoveryStorage no longer persists recovery metadata during close.
+This no-op setting is retained so existing configurations remain loadable.`,
 		DefaultValue: "3s",
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoveryTailLowWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.lowWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.",
+		DefaultValue: "4g",
+		Export:       true,
+	}
+	p.WALRecoveryTailLowWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailSoftWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.softWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "8g",
+		Export:       true,
+	}
+	p.WALRecoveryTailSoftWatermark.Init(base.mgr)
+
+	p.WALRecoveryTailHighWatermark = ParamItem{
+		Key:          "streaming.walRecovery.tail.highWatermark",
+		Version:      "2.7.0",
+		Doc:          "RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.",
+		DefaultValue: "16g",
+		Export:       true,
+	}
+	p.WALRecoveryTailHighWatermark.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",
@@ -9315,16 +9565,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 
-	p.IdempotencyEnabled = ParamItem{
-		Key:          "streaming.idempotency.enabled",
-		Version:      "3.0.0",
-		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
-		DefaultValue: "false",
-		FallbackKeys: []string{"idempotency.enabled"},
-		Export:       false,
-	}
-	p.IdempotencyEnabled.Init(base.mgr)
-
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",
 		Version:      "3.0.0",
@@ -9334,26 +9574,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
-
-	p.IdempotencyMaxRetainedBytes = ParamItem{
-		Key:          "streaming.idempotency.maxRetainedBytes",
-		Version:      "3.0.0",
-		Doc:          `The soft budget of the retained WAL summary chunk objects per pchannel. Once the retained set is over the budget, the oldest chunks are released whole. It bounds storage, not a duration: how far back a duplicate is still recognized after a restart follows from how fast the pchannel is written, not from elapsed time. Zero disables the release entirely.`,
-		DefaultValue: "268435456",
-		FallbackKeys: []string{"idempotency.maxRetainedBytes"},
-		Export:       false,
-	}
-	p.IdempotencyMaxRetainedBytes.Init(base.mgr)
-
-	p.IdempotencyMaxRetainedChunks = ParamItem{
-		Key:          "streaming.idempotency.maxRetainedChunks",
-		Version:      "3.0.0",
-		Doc:          `Hard cap on how many WAL summary chunk objects stay retained per pchannel. It bounds what maxRetainedBytes cannot: recovery pays one object read per chunk and every publish rewrites the whole manifest, so both scale with the chunk COUNT rather than with total size. Without it a workload writing little per checkpoint persist would retain an unbounded number of tiny chunks while the byte budget stayed far from its bound. When this cap binds, the deduplication window is smaller than maxRetainedBytes asks for. Zero disables it.`,
-		DefaultValue: "256",
-		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
-		Export:       false,
-	}
-	p.IdempotencyMaxRetainedChunks.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

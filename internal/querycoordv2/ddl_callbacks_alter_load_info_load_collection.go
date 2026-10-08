@@ -126,8 +126,16 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			mlog.Int64("collectionID", req.GetCollectionID()))
 		return nil
 	}
+	requiredByRG, err := s.checkLoadResource(ctx, alterLoadConfigReq)
+	if err != nil {
+		return err
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	if err != nil {
+		return err
+	}
+	recordLoadResourceDemand(requiredByRG)
+	return nil
 }
 
 // getLoadReplicaConfigForRequest resolves the replica configuration a load

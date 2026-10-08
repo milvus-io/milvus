@@ -273,6 +273,8 @@ KnowhereStatusToErrorCode(knowhere::Status status) {
             return ErrorCode::MemAllocateFailed;
         case knowhere::Status::disk_file_error:
             return ErrorCode::FileReadFailed;
+        case knowhere::Status::cancelled:
+            return ErrorCode::FollyCancel;
         // Server-side inner errors -> generic KnowhereError. timeout is
         // Cardinal-only (BuildAsync cancel-or-build-timeout, not a search
         // timeout) and conflates cancel with timeout, so it stays here rather
@@ -377,17 +379,18 @@ inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
+    // Length is a memory-safety requirement even when value validation is off.
+    // Check before allocating a whole number of cells and copying all bytes.
+    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
+        0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid size for sparse row data");
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
-        if (!(size % knowhere::sparse::SparseRow<
-                         SparseValueType>::element_size() ==
-              0)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "Invalid size for sparse row data");
-        }
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
             if (!(std::isfinite(element.val))) {

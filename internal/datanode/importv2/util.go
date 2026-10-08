@@ -446,7 +446,7 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 			strIDs := lo.Map(ids, func(id int64, _ int) string {
 				return strconv.FormatInt(id, 10)
 			})
-			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs, DataType: pkField.GetDataType()}
 		}
 	}
 	if needRowID {

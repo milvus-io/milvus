@@ -593,12 +593,144 @@ class SegmentExpr : public Expr {
                          : segment_->num_chunk_data(field_id);
     }
 
+    // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
+    // read the column from the frozen published state (same generation as the
+    // chunk boundaries above); otherwise fall back to the segment.
+    template <typename T>
+    PinWrapper<Span<T>>
+    GetChunkData(FieldId field_id, int64_t chunk_id) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk data",
+                       field_id.get());
+            return column->Span(op_ctx_, chunk_id)
+                .template transform<Span<T>>([](SpanBase&& span_base) {
+                    return static_cast<Span<T>>(span_base);
+                });
+        }
+        return segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    }
+
+    // Pinned sealed chunk view. Dispatches to the concrete column view
+    // (string / array / array-value / vector-array) through the frozen
+    // snapshot column; growing and non-pinned paths fall back to the segment.
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
+    GetChunkView(FieldId field_id,
+                 int64_t chunk_id,
+                 std::optional<std::pair<int64_t, int64_t>> offset_len =
+                     std::nullopt) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk view",
+                       field_id.get());
+            if constexpr (std::is_same_v<ViewType, std::string_view>) {
+                return column->StringViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+                return column->ArrayViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+                return column->ArrayValueViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
+                return column->VectorArrayViews(op_ctx_, chunk_id, offset_len);
+            } else if constexpr (std::is_same_v<ViewType, Json>) {
+                auto pw = column->StringViews(op_ctx_, chunk_id, offset_len);
+                auto& [string_views, valid_data] = pw.get();
+                std::vector<ViewType> res;
+                res.reserve(string_views.size());
+                for (const auto& str_view : string_views) {
+                    res.emplace_back(Json(str_view));
+                }
+                std::pair<std::vector<ViewType>, ValidityView> content{
+                    std::move(res), std::move(valid_data)};
+                return PinWrapper<
+                    std::pair<std::vector<ViewType>, ValidityView>>(
+                    std::move(pw), std::move(content));
+            }
+        }
+        return segment_->chunk_view<ViewType>(
+            op_ctx_, field_id, chunk_id, offset_len);
+    }
+
+    // Pinned sealed chunk views by offsets. Dispatches through the frozen
+    // snapshot column; growing and non-pinned paths fall back to the segment.
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    GetChunkViewsByOffsets(FieldId field_id,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const {
+        if (snapshot_) {
+            auto* column = snapshot_->GetColumn(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} must exist when getting chunk views by "
+                       "offsets",
+                       field_id.get());
+            if constexpr (std::is_same_v<ViewType, std::string_view>) {
+                return column->StringViewsByOffsets(op_ctx_, chunk_id, offsets);
+            } else if constexpr (std::is_same_v<ViewType, Json>) {
+                auto pw =
+                    column->StringViewsByOffsets(op_ctx_, chunk_id, offsets);
+                auto& [string_views, valid_data] = pw.get();
+                std::vector<ViewType> res;
+                res.reserve(string_views.size());
+                for (const auto& view : string_views) {
+                    res.emplace_back(view);
+                }
+                std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                    std::move(res), std::move(valid_data)};
+                return PinWrapper<
+                    std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+                    std::move(pw), std::move(content));
+            } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+                return column->ArrayViewsByOffsets(op_ctx_, chunk_id, offsets);
+            } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+                return column->ArrayValueViewsByOffsets(
+                    op_ctx_, chunk_id, offsets);
+            }
+        }
+        return segment_->chunk_views_by_offsets<ViewType>(
+            op_ctx_, field_id, chunk_id, offsets);
+    }
+
     // Global row offset of (chunk, chunk_pos) within the segment.
     int64_t
     RowOffsetInSegment(size_t chunk, int64_t chunk_pos) const {
         return segment_->is_chunked()
                    ? NumRowsUntilChunk(field_id_, chunk) + chunk_pos
                    : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
+    }
+
+    ExprExecPath
+    GetExecPath() const {
+        EnsureExecPathDetermined();
+        return exec_path_;
+    }
+
+    const segcore::SegmentInternalInterface*
+    GetSegment() const {
+        return segment_;
+    }
+
+    int64_t
+    GetActiveCount() const {
+        return active_count_;
+    }
+
+    // Opt-in contract for the composition-based RawData expression-cache
+    // adapter. An undecorated expression keeps its original execution hot path.
+    virtual bool
+    SupportsRawExprCache() const {
+        return false;
+    }
+
+    std::string
+    GetSignatureForRawExprCache() const {
+        // Null-rejecting scans may omit validity for skipped chunks. Keep
+        // their entries separate from evaluations that must preserve UNKNOWN,
+        // and namespace both modes away from other execution paths' keys.
+        return fmt::format(
+            "raw:null_rejecting={}:{}", null_rejecting_, ToString());
     }
 
     void
@@ -665,7 +797,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -689,7 +821,7 @@ class SegmentExpr : public Expr {
             return;
         }
         if (snapshot_) {
-            auto column = snapshot_->GetDataScanResources(field_id).first;
+            auto* column = snapshot_->GetColumn(field_id);
             AssertInfo(column != nullptr,
                        "field {} column must exist when validity is requested",
                        field_id.get());
@@ -917,21 +1049,24 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return false;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
-            return false;
-        }
-        ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                     this->ToString()};
-        ExprResCacheManager::Value got;
-        got.active_count = active_count_;
-        if (ExprResCacheManager::Instance().Get(key, got)) {
-            cached_index_chunk_res_ = got.result;
-            cached_index_chunk_valid_res_ = got.valid_result;
-            cached_index_chunk_id_ = 0;
-            return true;
-        }
-        return false;
+        bool cache_hit = false;
+        RunExprCacheBestEffort([&]() {
+            auto& manager = ExprResCacheManager::Instance();
+            if (!manager.CanCacheSegment(segment_->type())) {
+                return;
+            }
+            ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                         this->ToString()};
+            ExprResCacheManager::Value got;
+            got.active_count = active_count_;
+            if (manager.Get(key, got)) {
+                cached_index_chunk_res_ = got.result;
+                cached_index_chunk_valid_res_ = got.valid_result;
+                cached_index_chunk_id_ = 0;
+                cache_hit = true;
+            }
+        });
+        return cache_hit;
     }
 
     // Put the current cached_index_chunk_res_ into ExprResCache.
@@ -941,21 +1076,23 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
-            return;
-        }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
             return;
         }
-        ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                     this->ToString()};
-        ExprResCacheManager::Value v;
-        v.result = cached_index_chunk_res_;
-        v.valid_result = cached_index_chunk_valid_res_;
-        v.active_count = active_count_;
-        v.eval_duration_us = eval_duration_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            auto& manager = ExprResCacheManager::Instance();
+            if (!manager.CanCacheSegment(segment_->type())) {
+                return;
+            }
+            ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                         this->ToString()};
+            ExprResCacheManager::Value v;
+            v.result = cached_index_chunk_res_;
+            v.valid_result = cached_index_chunk_valid_res_;
+            v.active_count = active_count_;
+            v.eval_duration_us = eval_duration_us;
+            manager.Put(key, v);
+        });
     }
 
     using CacheClock = std::chrono::steady_clock;
@@ -1433,8 +1570,8 @@ class SegmentExpr : public Expr {
                     continue;
                 }
 
-                auto pw = segment_->chunk_views_by_offsets<ViewType>(
-                    op_ctx_, field_id_, run_chunk_id, batch_offsets);
+                auto pw = GetChunkViewsByOffsets<ViewType>(
+                    field_id_, run_chunk_id, batch_offsets);
                 const auto& [data_vec, valid_data] = pw.get();
                 AssertInfo(data_vec.size() == batch_offsets.size(),
                            "view row count mismatch: {} vs {}",
@@ -1486,8 +1623,7 @@ class SegmentExpr : public Expr {
                 // chunk_data<VectorArrayView> would read the wrong layout:
                 // storage holds VectorArray, and nullable rows may be compacted.
                 // Use chunk_view to build logical VectorArrayView rows.
-                auto pw = segment_->chunk_view<VectorArrayView>(
-                    op_ctx_,
+                auto pw = GetChunkView<VectorArrayView>(
                     field_id_,
                     chunk_id,
                     std::make_pair(chunk_offset, int64_t{1}));
@@ -1546,8 +1682,7 @@ class SegmentExpr : public Expr {
                     cached_skip = skip_func && skip_func(skip_view_, chunk_id);
                     if (!cached_skip ||
                         !CanUseSkipFilter(is_nullable_, null_rejecting_)) {
-                        pw.emplace(segment_->chunk_data<T>(
-                            op_ctx_, field_id_, chunk_id));
+                        pw.emplace(GetChunkData<T>(field_id_, chunk_id));
                         auto chunk = pw->get();
                         chunk_base = chunk.data();
                         chunk_validity = chunk.validity();
@@ -1603,8 +1738,7 @@ class SegmentExpr : public Expr {
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
                 if (chunk_id != cached_chunk_id) {
-                    pw.emplace(
-                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
+                    pw.emplace(GetChunkData<T>(field_id_, chunk_id));
                     auto chunk = pw->get();
                     chunk_base = chunk.data();
                     chunk_validity = chunk.validity();
@@ -1925,8 +2059,8 @@ class SegmentExpr : public Expr {
         };
 
         if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
-            auto pw = segment_->chunk_views_by_offsets<ArrayValueView>(
-                op_ctx_, field_id_, chunk_id, row_offsets);
+            auto pw = GetChunkViewsByOffsets<ArrayValueView>(
+                field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
                        "recursive ARRAY row count mismatch: {} vs {}",
@@ -1938,8 +2072,8 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else if (segment_->type() == SegmentType::Sealed) {
-            auto pw = segment_->get_views_by_offsets<ArrayView>(
-                op_ctx_, field_id_, chunk_id, row_offsets);
+            auto pw = GetChunkViewsByOffsets<ArrayView>(
+                field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
                        "ARRAY row count mismatch: {} vs {}",
@@ -1951,7 +2085,7 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else {
-            auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+            auto pw = GetChunkData<Array>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data(), chunk.validity(), [&](size_t i) {
                 return static_cast<size_t>(row_offsets[i]);
@@ -2004,11 +2138,8 @@ class SegmentExpr : public Expr {
 
         if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
             // Recursive ARRAY rows for both Growing and Sealed segments.
-            auto pw = segment_->chunk_view<ArrayValueView>(
-                op_ctx_,
-                field_id_,
-                chunk_id,
-                std::make_pair(start_offset, length));
+            auto pw = GetChunkView<ArrayValueView>(
+                field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
                        "recursive ARRAY row count mismatch: {} vs {}",
@@ -2017,8 +2148,8 @@ class SegmentExpr : public Expr {
             emit_rows(rows.data(), valid_data);
         } else if (segment_->type() == SegmentType::Sealed) {
             // Legacy ARRAY rows from a Sealed segment's chunked storage.
-            auto pw = segment_->get_batch_views<ArrayView>(
-                op_ctx_, field_id_, chunk_id, start_offset, length);
+            auto pw = GetChunkView<ArrayView>(
+                field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
                        "ARRAY row count mismatch: {} vs {}",
@@ -2027,7 +2158,7 @@ class SegmentExpr : public Expr {
             emit_rows(rows.data(), valid_data);
         } else {
             // Legacy ARRAY rows from a Growing segment's in-memory storage.
-            auto pw = segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+            auto pw = GetChunkData<Array>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
                       chunk.validity().Subview(start_offset));
@@ -2409,12 +2540,12 @@ class SegmentExpr : public Expr {
                           std::is_same_v<T, ArrayValueView>) {
                 // These non-owning views must be built from their logical
                 // storage layout instead of read through chunk_data<T>.
-                auto pw = segment_->chunk_view<T>(
-                    op_ctx_, field_id_, i, std::make_pair(data_pos, size));
+                auto pw = GetChunkView<T>(
+                    field_id_, i, std::make_pair(data_pos, size));
                 const auto& [data_vec, valid_data] = pw.get();
                 process_chunk(data_vec.data(), valid_data);
             } else {
-                auto pw = segment_->chunk_data<T>(op_ctx_, field_id_, i);
+                auto pw = GetChunkData<T>(field_id_, i);
                 auto chunk = pw.get();
                 const auto validity = chunk.validity().Subview(data_pos);
                 process_chunk(chunk.data() + data_pos, validity);
@@ -2668,8 +2799,10 @@ class SegmentExpr : public Expr {
                 int64_t batch_size = std::min(
                     {batch_size_, chunk_size - chunk_offset, remaining});
 
-                auto pw = segment_->get_batch_views<T>(
-                    op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
+                auto pw =
+                    GetChunkView<T>(field_id_,
+                                    chunk_id,
+                                    std::make_pair(chunk_offset, batch_size));
                 auto data_vec = std::move(pw.get().first);
 
                 func(data_vec.data(), batch_size, res + processed_size);
@@ -2812,7 +2945,7 @@ class SegmentExpr : public Expr {
 
             auto cached = ExprCacheHelper::GetOrCompute(
                 segment_,
-                this->ToString(),
+                [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
                     prepare_index();
@@ -2840,16 +2973,20 @@ class SegmentExpr : public Expr {
                     if (json_value_type.has_value()) {
                         const auto family =
                             static_cast<unsigned int>(json_value_type.value());
-                        const auto signature = fmt::format(
-                            "json-flat-validity:v1:field={}:path-length={}:"
-                            "path={}:family={}",
-                            field_id_.get(),
-                            json_pointer.size(),
-                            json_pointer,
-                            family);
                         if (ExprResCacheManager::IsEnabled()) {
                             auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_, signature, active_count_, [&]() {
+                                segment_,
+                                [&]() {
+                                    return fmt::format(
+                                        "json-flat-validity:v1:field={}:"
+                                        "path-length={}:path={}:family={}",
+                                        field_id_.get(),
+                                        json_pointer.size(),
+                                        json_pointer,
+                                        family);
+                                },
+                                active_count_,
+                                [&]() {
                                     return executor->ExactPathExists(
                                         json_value_type.value());
                                 });
@@ -3643,20 +3780,28 @@ class SegmentExpr : public Expr {
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
         prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            if (self->op_ctx_ != nullptr &&
-                self->op_ctx_->cancellation_token.isCancellationRequested()) {
-                return;
-            }
-            self->EnsureExecPathDetermined();
-            if (self->exec_path_ == ExprExecPath::RawData) {
-                if (self->ShouldPrefetchRawDataEagerly()) {
-                    self->PrefetchRawData();
-                    self->prefetched_ = true;
-                } else {
-                    self->raw_data_prefetch_deferred_ = true;
-                }
-            }
+            self->PrefetchOnCurrentThread();
         }));
+    }
+
+    // Execute the prefetch body without scheduling another task. This keeps
+    // composition wrappers that already run on the prefetch pool from adding
+    // a second queueing hop.
+    void
+    PrefetchOnCurrentThread() {
+        if (op_ctx_ != nullptr &&
+            op_ctx_->cancellation_token.isCancellationRequested()) {
+            return;
+        }
+        EnsureExecPathDetermined();
+        if (exec_path_ == ExprExecPath::RawData) {
+            if (ShouldPrefetchRawDataEagerly()) {
+                PrefetchRawData();
+                prefetched_ = true;
+            } else {
+                raw_data_prefetch_deferred_ = true;
+            }
+        }
     }
 
     bool

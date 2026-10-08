@@ -140,6 +140,122 @@ CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
 
 }  // namespace
 
+namespace {
+
+std::vector<std::string>
+StringMembershipRows() {
+    std::vector<std::string> rows{"",
+                                  "a",
+                                  "aa",
+                                  "ab",
+                                  std::string("a\0b", 3),
+                                  std::string("a\0c", 3),
+                                  "\x80",
+                                  "\xff",
+                                  "\xe4\xb8\xad\xe6\x96\x87",
+                                  std::string(8192, 'x'),
+                                  std::string(8192, 'x') + "a",
+                                  std::string(8192, 'x') + "b"};
+    for (size_t i = 0; i < 129; ++i) {
+        rows.push_back("prefix/" + std::to_string(i % 31));
+    }
+    std::reverse(rows.begin(), rows.end());
+    return rows;
+}
+
+void
+CheckStringMembership(StringIndexSort& index,
+                      const std::vector<std::string>& rows,
+                      const bool* valid) {
+    std::vector<std::vector<std::string>> queries{
+        {},
+        {""},
+        {"absent"},
+        {"a", "a", "aa", "missing"},
+        rows,
+        {std::string("a\0b", 3), std::string("a\0d", 3), "\x80", "\xff"},
+        {std::string(8192, 'x'), std::string(8192, 'x') + "c"},
+        std::vector<std::string>(512, "prefix/3")};
+    auto sorted = rows;
+    std::sort(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    std::reverse(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    ASSERT_EQ(index.Count(), rows.size());
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        const auto original = query;
+        const auto* values = query.empty() ? nullptr : query.data();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool hit =
+                std::find(query.begin(), query.end(), rows[row]) != query.end();
+            const bool is_valid = !valid || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        EXPECT_EQ(query, original);
+    }
+}
+
+}  // namespace
+
+TEST(StringIndexSortMembershipTest, ScanOracleAndInputImmutability) {
+    for (size_t n : {1, 63, 64, 65, 129, 141}) {
+        auto rows = StringMembershipRows();
+        rows.resize(n);
+        for (int null_mode : {0, 1, 2}) {
+            auto valid = std::make_unique<bool[]>(n);
+            for (size_t i = 0; i < n; ++i) {
+                valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+            }
+            const bool* validity = null_mode == 0 ? nullptr : valid.get();
+            StringIndexSort index;
+            index.Build(n, rows.data(), validity);
+            CheckStringMembership(index, rows, validity);
+        }
+    }
+}
+
+TEST(StringIndexSortMembershipTest, LegacyAndPackedReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_membership_reload");
+    const auto rows = StringMembershipRows();
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 0;
+        }
+        StringIndexSort built(fixture.ctx);
+        built.Build(rows.size(), rows.data(), valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/membership";
+            }
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            for (bool async : {false, true}) {
+                SCOPED_TRACE("async=" + std::to_string(async));
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                StringIndexSort loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckStringMembership(loaded, rows, valid.get());
+            }
+            StringIndexSort legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckStringMembership(legacy, rows, valid.get());
+        }
+    }
+}
+
 TEST(StringIndexSortV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     StringSortAsyncLoadFixture fixture("string_sort_async_memory");

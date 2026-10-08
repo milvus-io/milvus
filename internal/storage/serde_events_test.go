@@ -607,6 +607,7 @@ func TestDeltalogReaderExternalContext(t *testing.T) {
 			cfg *indexpb.StorageConfig,
 			pluginContext *indexcgopb.StoragePluginContext,
 			ext packed.ExternalReaderContext,
+			_ ...packed.ReaderOption,
 		) (*packed.PackedReader, error) {
 			require.NotNil(t, arrowSchema)
 			capturedPaths = append([]string(nil), paths...)

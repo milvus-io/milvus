@@ -1155,26 +1155,11 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         self.drop_collection(client, restored_collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_snapshot_growing_segment_without_flush(self):
+    def test_snapshot_includes_growing_segment_without_flush(self):
         """
-        target: test snapshot behavior with growing segment (unflushed data)
-        method: insert data without flush -> create snapshot -> restore -> verify
-        expected:
-            - Based on source code analysis, snapshot only includes segments with binlogs
-            - Growing segments without binlogs (data in buffer) should NOT be included
-            - This test verifies that unflushed data is NOT captured in snapshot
-
-        Source code reference (handler.go:725-728):
-            segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID),
-                SegmentFilterFunc(func(info *SegmentInfo) bool {
-                    segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-                    return segmentHasData && ...
-                }))
-
-        Key insight:
-            - Snapshot does NOT trigger flush
-            - Only data already persisted to binlog files will be captured
-            - Growing segment data in memory buffer will be lost if not flushed before snapshot
+        target: capture growing data without a separate client Flush
+        method: flush a baseline, insert more rows, create snapshot, then insert again
+        expected: restore includes both pre-snapshot batches and excludes later writes
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1206,7 +1191,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
             for i in range(50)
         ]
         self.insert(client, collection_name, unflushed_rows)
-        # Intentionally NOT calling flush - data stays in growing segment buffer
+        # No explicit Flush: CreateSnapshot must persist this batch itself.
         log.info("Inserted 50 rows WITHOUT flush (growing segment)")
 
         # Verify source collection can query all 150 rows (growing + flushed)
@@ -1216,9 +1201,26 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         log.info(f"Source collection total rows (flushed + growing): {source_count}")
         assert source_count == 150, f"Source should have 150 rows, got {source_count}"
 
-        # Create snapshot - this should NOT include growing segment data
+        # CreateSnapshot waits for L1/L0 persistence through its WAL boundary.
         self.create_snapshot(client, snapshot_name, collection_name)
-        log.info("Created snapshot (without triggering flush)")
+        log.info("Created snapshot including all 150 pre-snapshot rows")
+
+        # A later write must stay outside the snapshot even when it is visible
+        # in the source before restore.
+        self.insert(
+            client,
+            collection_name,
+            [
+                {
+                    default_primary_key_field_name: 150,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+            ],
+        )
+        res, _ = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["count(*)"], consistency_level="Strong"
+        )
+        assert res[0]["count(*)"] == 151
 
         # Restore snapshot to new collection
         job_id, _ = self.restore_snapshot(client, snapshot_name, collection_name, restored_collection_name)
@@ -1230,23 +1232,14 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientSnapshotBase):
         restored_count = res[0]["count(*)"]
         log.info(f"Restored collection rows: {restored_count}")
 
-        # Expectation: Only flushed data (100 rows) should be in snapshot
-        # Growing segment data (50 rows) should NOT be captured
-        # NOTE: This assertion documents the current behavior - snapshot does NOT include
-        # growing segment data. If this test fails, it means the behavior has changed.
-        assert restored_count == 100, (
-            f"Expected 100 rows (only flushed data), got {restored_count}. "
-            f"Growing segment data should NOT be included in snapshot."
+        assert restored_count == 150, (
+            f"Expected all 150 pre-snapshot rows, got {restored_count}. "
+            "CreateSnapshot must include data without a separate client Flush."
         )
-
-        # Also verify the specific IDs: only 0-99 should exist, not 100-149
-        res, _ = self.query(client, restored_collection_name, filter="id >= 100", output_fields=["count(*)"])
-        growing_data_count = res[0]["count(*)"]
-        assert growing_data_count == 0, (
-            f"Growing segment data (id >= 100) should NOT be in snapshot, found {growing_data_count}"
+        res, _ = self.query(client, restored_collection_name, filter="id >= 0", output_fields=["id"], limit=200)
+        assert {row["id"] for row in res} == set(range(150)), (
+            "Snapshot must include the previously growing rows 100-149 and exclude the later row 150"
         )
-
-        log.info("Verified: Snapshot does NOT include growing segment data")
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
