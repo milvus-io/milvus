@@ -326,7 +326,21 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		describeCollectionResp, err := rootCoord.DescribeCollection(c, &milvuspb.DescribeCollectionRequest{
+		ctx := c.Request.Context()
+		if _, admin := mhttp.AuthenticatedAdminFromContext(ctx); !admin {
+			// With the management gate disabled, this route also accepts
+			// ordinary authenticated users. Preserve their object visibility;
+			// raw HTTP headers must not choose the forwarded identity.
+			ctx = NewContextWithMetadata(ctx, c.GetString("username"), dbName)
+			if err := checkDescribeCollectionUser(ctx); err != nil {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+				return
+			}
+			ctx = describeCollectionRPCContext(ctx)
+		}
+		// A verified management administrator retains the operator view,
+		// independently of data-plane RootShouldBindRole grants.
+		describeCollectionResp, err := rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DescribeCollection,
 			},
@@ -347,7 +361,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 			})
 		}
 
-		describePartitionResp, err := rootCoord.ShowPartitions(c, &milvuspb.ShowPartitionsRequest{
+		describePartitionResp, err := rootCoord.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowPartitions,
 			},
