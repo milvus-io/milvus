@@ -1057,7 +1057,7 @@ IndexFactory::ScalarIndexFileLoadResource(
             directory.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
     }
     if (!use_async_load && type == ASCENDING_SORT &&
-        metadata.contains("version") && directory.HasEntry("valid_bitset")) {
+        directory.HasEntry("valid_bitset")) {
         staging_bytes = SaturatingAdd(
             staging_bytes, directory.At("valid_bitset").plaintext_size);
     }
@@ -1069,8 +1069,7 @@ IndexFactory::ScalarIndexFileLoadResource(
                                                        read_peak);
     request.final_memory_cost =
         SaturatingAdd(request.final_memory_cost, bitmap_resident_bytes);
-    if (type == ASCENDING_SORT && directory.HasEntry("nan_rows")) {
-        const auto nan_bytes = directory.At("nan_rows").plaintext_size;
+    if (type == ASCENDING_SORT) {
         const auto sort_rows =
             ReadRequiredIndexMeta<size_t>(metadata, "num_rows");
         if (sort_rows >
@@ -1083,24 +1082,22 @@ IndexFactory::ScalarIndexFileLoadResource(
         const bool mmap_aux = mmap_enable &&
                               directory.HasEntry("idx_to_offsets") &&
                               directory.HasEntry("valid_bitset");
-        const auto aux_bytes =
-            mmap_aux ? ValidityBitmapBytes(rows) : SortLegacyAuxBytes(rows);
-        auto resident_bytes = SaturatingAdd(aux_bytes, nan_bytes);
+        auto resident_bytes = ValidityBitmapBytes(rows);
+        if (!mmap_aux) {
+            resident_bytes =
+                SaturatingAdd(resident_bytes,
+                              SaturatingMultiply(static_cast<uint64_t>(rows),
+                                                 uint64_t{sizeof(int32_t)}));
+        }
         if (!mmap_enable) {
             resident_bytes = SaturatingAdd(
                 resident_bytes, directory.At("index_data").plaintext_size);
         }
-        // The generic estimate already includes serialized sidecars or a
-        // conservative legacy-aux allowance. Reserve the actual resident
-        // minimum rather than count nan_rows twice. Nested rows may outnumber
-        // the segment rows supplied by the caller.
+        // Use the persisted row domain: nested element slots may outnumber
+        // the segment rows supplied by the caller. Old packed files without
+        // auxiliary entries rebuild their offsets and validity on the heap.
         request.final_memory_cost =
             std::max(request.final_memory_cost, resident_bytes);
-        if (!use_async_load) {
-            // ReadEntry's byte buffer survives while ReadNaNRows copies it
-            // into the final vector. Async loading fills that vector directly.
-            staging_bytes = SaturatingAdd(staging_bytes, nan_bytes);
-        }
     }
     if (type == BITMAP_INDEX_TYPE && mmap_enable) {
         request.max_memory_cost = SaturatingAdd(

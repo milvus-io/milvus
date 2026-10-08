@@ -49,6 +49,7 @@
 
 namespace milvus::index {
 
+// Version 6 preserves source-valid NaN rows as unindexed offsets (-1).
 inline constexpr int32_t kMinScalarIndexVersionForNaNRows = 6;
 
 template <typename T>
@@ -161,7 +162,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
-        total += nan_rows_.capacity() * sizeof(int32_t);
 
         if (is_mmap_) {
             // mmap mode: add mmap size and filepath
@@ -263,14 +263,25 @@ class ScalarIndexSort : public ScalarIndex<T> {
         }
     }
 
+    void
+    UpdateUnindexedNaNFlag() {
+        if constexpr (std::is_floating_point_v<T>) {
+            // Single-valued rows have one entry per comparable valid value.
+            // Ordinary arrays use parent-row postings and cannot use this test.
+            has_unindexed_nan_ = (!is_array_field_ || is_nested_index_) &&
+                                 valid_bitset_.count() > size_;
+        }
+    }
+
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
     bool is_array_field_ = false;
     bool supports_unindexed_nan_ = true;
+    bool has_unindexed_nan_ = false;
     bool is_built_ = false;
     Config config_;
-    // idx_to_offsets: maps row_id → sorted offset.
+    // idx_to_offsets: maps row_id to sorted offset, or -1 when unindexed.
     // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
     std::vector<int32_t> idx_to_offsets_;  // memory mode owner
     const int32_t* idx_to_offsets_ptr_ =
@@ -281,9 +292,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
-    // Source-valid NaN rows are absent from the ordered entries. Persisted
-    // validity excludes them for older readers; nan_rows restores it on load.
-    std::vector<int32_t> nan_rows_;
 
     // for ram and also used for building index.
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.

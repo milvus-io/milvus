@@ -137,10 +137,10 @@ const (
 	//   (see MinScalarIndexVersionForFMINDEX).
 	//
 	// Scalar index engine version 6:
-	// - STL_SORT excludes NaN from ordered entries while preserving non-null
-	//   source rows through optional nan_rows metadata. Older readers ignore
-	//   this metadata and would treat those rows as NULL, so writers enable it
-	//   only when the negotiated scalar index engine version is at least 6.
+	// - Scalar/nested STL_SORT excludes NaN from ordered entries while retaining
+	//   source validity and using offset -1 for a valid row without a posting.
+	//   Older readers cannot interpret this sentinel and their range complement
+	//   assumes every valid row has a posting, so writers require version >= 6.
 	// - Ordinary ARRAY HYBRID supports high-cardinality sorted parent-row
 	//   postings, retaining BITMAP for low cardinality without NaN.
 	// - On-disk file format is unchanged from v3.
@@ -167,9 +167,9 @@ const (
 	MinScalarIndexVersionForFMINDEX = int32(5)
 
 	// MinScalarIndexVersionForNaNRows is the minimum scalar index engine version
-	// that preserves skipped NaN source rows in STL_SORT. Below it, builders
-	// reject valid NaN builds rather than emit metadata a reader cannot
-	// interpret.
+	// that preserves NaN source validity without a STL_SORT posting. Below it,
+	// builders reject valid NaN builds rather than emit offset sentinels an older
+	// reader cannot interpret.
 	MinScalarIndexVersionForNaNRows = int32(6)
 )
 

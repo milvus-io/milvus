@@ -14,6 +14,7 @@
 #include <utility>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -300,7 +301,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, LegacyAndPackedReloadsPreserveNaNRows) {
             CheckUnindexedNaN(built, expected_rows, expected_valid);
             const auto stats = built.UploadUnified({});
             const auto binaries = built.Serialize({});
-            ASSERT_TRUE(binaries.Contains("nan_rows"));
+            ASSERT_FALSE(binaries.Contains("nan_rows"));
+            ASSERT_TRUE(binaries.Contains("valid_bitset"));
             for (bool mmap : {false, true}) {
                 Config config;
                 config[ENABLE_MMAP] = mmap;
@@ -367,7 +369,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNRowsByEngineVersion) {
             ASSERT_NE(sorted, nullptr);
             EXPECT_EQ(sorted->Count(), rows.size());
             EXPECT_EQ(sorted->Size(), 2);
-            EXPECT_EQ(sorted->Serialize({}).Contains("nan_rows"), version >= 6);
+            EXPECT_FALSE(sorted->Serialize({}).Contains("nan_rows"));
+            EXPECT_TRUE(sorted->Serialize({}).Contains("valid_bitset"));
             if (version >= 6) {
                 CheckUnindexedNaN(*sorted, rows);
             }
@@ -394,33 +397,68 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNRowsByEngineVersion) {
             {NaNArrayFieldData<T>({{rows[0], rows[1]}, {rows[2]}}, 0x03)}));
         EXPECT_EQ(sorted->Count(), rows.size());
         EXPECT_EQ(sorted->Size(), 2);
-        EXPECT_EQ(sorted->Serialize({}).Contains("nan_rows"), version >= 6);
+        EXPECT_FALSE(sorted->Serialize({}).Contains("nan_rows"));
+        EXPECT_TRUE(sorted->Serialize({}).Contains("valid_bitset"));
         if (version >= 6) {
             CheckUnindexedNaN(*sorted, rows);
         }
     }
 }
 
-TYPED_TEST(ScalarIndexSortNaNTest, RejectsCorruptNaNRowMetadata) {
+TYPED_TEST(ScalarIndexSortNaNTest, PlaceholderOffsetsAndInvalidOffsetErrors) {
     using T = TypeParam;
-    const T rows[] = {std::numeric_limits<T>::quiet_NaN(), T(1), T(2)};
-    ScalarIndexSort<T> built;
-    built.Build(std::size(rows), rows);
-    for (const auto& bad_rows :
-         std::vector<std::vector<int32_t>>{{-1}, {3}, {1}, {0, 0}, {2, 0}}) {
-        auto binaries = built.Serialize({});
-        const auto bytes = bad_rows.size() * sizeof(int32_t);
-        std::shared_ptr<uint8_t[]> data(new uint8_t[bytes]);
-        std::memcpy(data.get(), bad_rows.data(), bytes);
-        binaries.Append("nan_rows", data, bytes);
+    const auto dtype =
+        std::is_same_v<T, float> ? proto::schema::Float : proto::schema::Double;
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_nan_offsets", dtype);
+    const std::vector<T> rows{std::numeric_limits<T>::quiet_NaN(), T(1), T(2)};
+    ScalarIndexSort<T> built(fixture.ctx);
+    built.Build(rows.size(), rows.data());
+    const auto binaries = built.Serialize({});
+    ASSERT_FALSE(binaries.Contains("nan_rows"));
+    const auto validity = binaries.GetByName("valid_bitset");
+    ASSERT_NE(validity, nullptr);
+    EXPECT_EQ(validity->data[0] & 0x07, 0x07);
+    const auto stats = built.UploadUnified({});
+    for (int32_t offset : {-1, -2, 2}) {
+        SCOPED_TRACE(offset);
+        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+        auto reader = milvus::test::OpenDirectIndexEntryReader(
+            milvus::test::ReadPackedIndexBytes(fixture.ctx,
+                                               stats->GetIndexFiles()),
+            &remote_file);
+        ASSERT_FALSE(reader->Directory().HasEntry("nan_rows"));
         Config config;
         config[ENABLE_MMAP] = false;
-        ScalarIndexSort<T> loaded;
-        try {
-            loaded.Load(binaries, config);
-            FAIL() << "corrupt NaN row metadata must fail loading";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+        ScalarIndexSort<T> loaded(fixture.ctx);
+        auto plan =
+            loaded.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
+        folly::coro::blockingWait(reader->ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        int32_t* offsets = nullptr;
+        for (auto& entry : plan.entries) {
+            if (entry.name == "idx_to_offsets") {
+                auto* target =
+                    std::get_if<storage::MemoryEntryTarget>(&entry.target);
+                ASSERT_NE(target, nullptr);
+                offsets = reinterpret_cast<int32_t*>(target->data);
+            }
+        }
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(offsets[0], -1);
+        EXPECT_EQ(offsets[1], 0);
+        EXPECT_EQ(offsets[2], 1);
+        offsets[0] = offset;
+        folly::coro::blockingWait(loaded.FinishLoadAsync(plan, config));
+        plan.Commit();
+        if (offset == -1) {
+            CheckUnindexedNaN(loaded, rows);
+        } else {
+            try {
+                loaded.Reverse_Lookup(0);
+                FAIL() << "only -1 is a valid floating placeholder offset";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+            }
         }
     }
 }
@@ -440,6 +478,7 @@ TYPED_TEST(ScalarIndexSortNaNTest,
     ScalarIndexSort<T> scalar;
     ASSERT_NO_THROW(scalar.BuildWithFieldData({scalar_data}));
     for (auto* index : {&raw, &scalar}) {
+        CheckUnindexedNaN(*index, rows, valid);
         EXPECT_EQ(index->Count(), rows.size());
         EXPECT_EQ(index->Size(), 4);
         EXPECT_FALSE(index->Reverse_Lookup(0).has_value());

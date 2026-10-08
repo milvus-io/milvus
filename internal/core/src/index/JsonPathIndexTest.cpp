@@ -285,7 +285,7 @@ TEST(JsonPathIndexTest, StringToDoubleNaNIsValidNumericProjection) {
     EXPECT_EQ(scalar->NotIn(1, &nan).count(), 8);
     EXPECT_EQ(scalar->Range(nan, OpType::GreaterEqual).count(), 0);
     auto binary = scalar->Serialize({});
-    EXPECT_TRUE(binary.Contains("nan_rows"));
+    EXPECT_FALSE(binary.Contains("nan_rows"));
 }
 
 TEST(JsonPathIndexTest, StringToDoubleAllNaNStillBuilds) {
@@ -1007,7 +1007,7 @@ TEST(JsonPathIndexTest,
             CheckValidNaNJsonProjection(*built_scalar);
             // Numeric NaNs remain valid, but have no comparable sorted entries.
             EXPECT_EQ(built_scalar->Size(), 2);
-            EXPECT_TRUE(built_scalar->Serialize({}).Contains("nan_rows"));
+            EXPECT_FALSE(built_scalar->Serialize({}).Contains("nan_rows"));
         }
         auto stats = built->UploadUnified({});
         for (bool mmap : {false, true}) {

@@ -89,39 +89,6 @@ IsScalarSortNaN(T value) {
     return false;
 }
 
-template <typename T>
-void
-RestoreNaNRows(const std::vector<int32_t>& rows, TargetBitmap& validity) {
-    int32_t previous = -1;
-    for (const auto row : rows) {
-        if (!std::is_floating_point_v<T> || row <= previous ||
-            static_cast<size_t>(row) >= validity.size() || validity[row]) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "invalid ScalarIndexSort NaN row offset {}",
-                      row);
-        }
-        validity.set(row);
-        previous = row;
-    }
-}
-
-template <typename T>
-std::vector<int32_t>
-ReadNaNRows(const uint8_t* data, size_t bytes, TargetBitmap& validity) {
-    if (bytes % sizeof(int32_t) != 0 ||
-        bytes / sizeof(int32_t) > validity.size()) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "invalid ScalarIndexSort nan_rows size {}",
-                  bytes);
-    }
-    std::vector<int32_t> rows(bytes / sizeof(int32_t));
-    if (bytes != 0) {
-        milvus::fastmem::FastMemcpy(rows.data(), data, bytes);
-    }
-    RestoreNaNRows<T>(rows, validity);
-    return rows;
-}
-
 bool
 IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
     return file_manager_context.Valid() &&
@@ -160,7 +127,6 @@ struct ScalarSortLoadContext {
     std::shared_ptr<std::vector<IndexStructure<T>>> index_data;
     std::shared_ptr<std::vector<int32_t>> offsets;
     std::shared_ptr<TargetBitmap> valid_bitset;
-    std::shared_ptr<std::vector<int32_t>> nan_rows;
     std::shared_ptr<storage::IndexFileTarget> index_data_file;
     std::shared_ptr<storage::IndexFileTarget> offsets_file;
 };
@@ -213,7 +179,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     data_.reserve(n);
     total_num_rows_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    idx_to_offsets_.resize(n);
+    idx_to_offsets_.assign(n, -1);
 
     T* p = const_cast<T*>(values);
     for (size_t i = 0; i < n; ++i, ++p) {
@@ -225,7 +191,6 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
                               "STL_SORT cannot preserve NaN source rows below "
                               "scalar index version 6");
                 }
-                nan_rows_.push_back(i);
             } else {
                 data_.emplace_back(IndexStructure(*p, i));
             }
@@ -241,6 +206,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     is_built_ = true;
 
     setup_data_pointers();
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 }
 
@@ -284,7 +250,6 @@ ScalarIndexSort<T>::BuildWithFieldData(
                                   "STL_SORT cannot preserve NaN source rows "
                                   "below scalar index version 6");
                     }
-                    nan_rows_.push_back(offset);
                 } else {
                     data_.emplace_back(IndexStructure(*value, offset));
                 }
@@ -293,7 +258,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         }
     }
     std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows_);
+    idx_to_offsets_.assign(total_num_rows_, -1);
     for (size_t i = 0; i < data_.size(); ++i) {
         if (data_[i].idx_ < 0 || data_[i].idx_ >= total_num_rows_) {
             continue;
@@ -305,6 +270,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
     is_built_ = true;
 
     setup_data_pointers();
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 }
 
@@ -319,7 +285,6 @@ ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
         ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build zero rows!");
     }
     data_.clear();
-    nan_rows_.clear();
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     int64_t row = 0;
     for (const auto& data : datas) {
@@ -359,6 +324,7 @@ ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
     idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
     setup_data_pointers();
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 }
 
@@ -398,8 +364,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             for (int64_t j = 0; j < length; j++) {
                 auto value = array->get_data_unchecked<T>(j);
                 if (IsScalarSortNaN(value)) {
-                    // An ignored NaN payload must not enter ordered entries or
-                    // be restored as a source-valid NaN by the sidecar.
+                    // An ignored NaN payload must not become a valid NaN hole.
                     if (!array->is_element_valid(j)) {
                         valid_bitset_.reset(offset++);
                         continue;
@@ -409,7 +374,6 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
                                   "STL_SORT cannot preserve NaN source rows "
                                   "below scalar index version 6");
                     }
-                    nan_rows_.push_back(offset);
                 } else {
                     data_.emplace_back(IndexStructure(value, offset));
                 }
@@ -418,7 +382,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
         }
     }
     std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows_);
+    idx_to_offsets_.assign(total_num_rows_, -1);
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
@@ -427,6 +391,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     is_built_ = true;
 
     setup_data_pointers();
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 }
 
@@ -458,22 +423,11 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     res_set.Append("index_length", index_length, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
     res_set.Append("is_nested_index", is_nested_data, sizeof(bool));
-    if (!nan_rows_.empty()) {
-        const auto bytes = nan_rows_.size() * sizeof(int32_t);
-        std::shared_ptr<uint8_t[]> nan_rows(new uint8_t[bytes]);
-        milvus::fastmem::FastMemcpy(nan_rows.get(), nan_rows_.data(), bytes);
-        res_set.Append("nan_rows", nan_rows, bytes);
-    }
-
-    if (is_array_field_ || is_nested_index_) {
-        auto indexed_validity = valid_bitset_.clone();
-        for (const auto row : nan_rows_) {
-            indexed_validity.reset(row);
-        }
-        const auto bytes = indexed_validity.size_in_bytes();
+    if (is_array_field_ || is_nested_index_ || has_unindexed_nan_) {
+        const auto bytes = valid_bitset_.size_in_bytes();
         std::shared_ptr<uint8_t[]> validity(new uint8_t[bytes]);
         milvus::fastmem::FastMemcpy(
-            validity.get(), indexed_validity.data(), bytes);
+            validity.get(), valid_bitset_.data(), bytes);
         res_set.Append("valid_bitset", validity, bytes);
     }
 
@@ -612,7 +566,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         total_num_rows_ = index_size;
     }
 
-    idx_to_offsets_.resize(total_num_rows_);
+    idx_to_offsets_.assign(total_num_rows_, -1);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     for (size_t i = 0; i < Size(); ++i) {
@@ -630,13 +584,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         milvus::fastmem::FastMemcpy(
             valid_bitset_.data(), validity->data.get(), validity->size);
     }
-    nan_rows_.clear();
-    if (index_binary.Contains("nan_rows")) {
-        const auto rows = index_binary.GetByName("nan_rows");
-        nan_rows_ = ReadNaNRows<T>(rows->data.get(), rows->size, valid_bitset_);
-    }
 
     is_built_ = true;
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 
     LOG_INFO("load ScalarIndexSort done, field_id: {}, is_mmap:{}",
@@ -765,12 +715,10 @@ ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && !has_unindexed_nan_ &&
+        hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
-        for (const auto row : nan_rows_) {
-            bitset.reset(row);
-        }
         // Set elements before lb to false
         for (auto it = begin(); it < lb; ++it) {
             bitset[it->idx_] = false;
@@ -831,12 +779,10 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && !has_unindexed_nan_ &&
+        hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
-        for (const auto row : nan_rows_) {
-            bitset.reset(row);
-        }
         // Set elements before lb to false
         for (auto it = begin(); it < lb; ++it) {
             bitset[it->idx_] = false;
@@ -868,12 +814,18 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
+    auto offset = idx_to_offsets_ptr_[idx];
     if constexpr (std::is_floating_point_v<T>) {
-        if (std::binary_search(nan_rows_.begin(), nan_rows_.end(), idx)) {
+        if (offset == -1) {
             return std::numeric_limits<T>::quiet_NaN();
         }
     }
-    auto offset = idx_to_offsets_ptr_[idx];
+    if (offset < 0 || static_cast<size_t>(offset) >= size_) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid ScalarIndexSort offset {} for row {}",
+                  offset,
+                  idx);
+    }
     return operator[](offset).a_;
 }
 
@@ -935,23 +887,9 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("idx_to_offsets",
                        idx_to_offsets_.data(),
                        idx_to_offsets_.size() * sizeof(int32_t));
-    if (nan_rows_.empty()) {
-        writer->WriteEntry(
-            "valid_bitset",
-            reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
-            valid_bitset_.size_in_bytes());
-    } else {
-        auto indexed_validity = valid_bitset_.clone();
-        for (const auto row : nan_rows_) {
-            indexed_validity.reset(row);
-        }
-        writer->WriteEntry(
-            "valid_bitset",
-            reinterpret_cast<const uint8_t*>(indexed_validity.data()),
-            indexed_validity.size_in_bytes());
-        writer->WriteEntry(
-            "nan_rows", nan_rows_.data(), nan_rows_.size() * sizeof(int32_t));
-    }
+    writer->WriteEntry("valid_bitset",
+                       reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
+                       valid_bitset_.size_in_bytes());
 }
 
 template <typename T>
@@ -1020,23 +958,6 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
     // Keep the check for compatibility with older packed files.
     context->has_persisted_aux = directory.HasEntry("idx_to_offsets") &&
                                  directory.HasEntry("valid_bitset");
-    if (directory.HasEntry("nan_rows")) {
-        const auto bytes = directory.At("nan_rows").plaintext_size;
-        if (bytes % sizeof(int32_t) != 0 ||
-            bytes / sizeof(int32_t) > context->total_num_rows) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "invalid ScalarIndexSort nan_rows size {}",
-                      bytes);
-        }
-        context->nan_rows =
-            std::make_shared<std::vector<int32_t>>(bytes / sizeof(int32_t));
-        plan.entries.push_back(storage::EntryLoadPlan{
-            "nan_rows",
-            storage::MemoryEntryTarget{
-                context->nan_rows,
-                reinterpret_cast<uint8_t*>(context->nan_rows->data()),
-                bytes}});
-    }
     if (!context->has_persisted_aux) {
         return plan;
     }
@@ -1080,7 +1001,7 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
                 context->offsets_file, 0, context->offsets_bytes}});
     } else {
         context->offsets =
-            std::make_shared<std::vector<int32_t>>(context->total_num_rows);
+            std::make_shared<std::vector<int32_t>>(context->total_num_rows, -1);
         plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::MemoryEntryTarget{
@@ -1179,7 +1100,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         }
     } else {
         new_valid_bitset = TargetBitmap(context->total_num_rows, false);
-        new_offsets.resize(context->total_num_rows);
+        new_offsets.assign(context->total_num_rows, -1);
         auto* index_data =
             context->is_mmap
                 ? reinterpret_cast<const IndexStructure<T>*>(new_mmap_data)
@@ -1195,12 +1116,6 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
             new_offsets[item.idx_] = i;
             new_valid_bitset.set(item.idx_);
         }
-    }
-
-    std::vector<int32_t> new_nan_rows;
-    if (context->nan_rows != nullptr) {
-        new_nan_rows = std::move(*context->nan_rows);
-        RestoreNaNRows<T>(new_nan_rows, new_valid_bitset);
     }
 
     total_num_rows_ = context->total_num_rows;
@@ -1222,7 +1137,6 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     }
 
     valid_bitset_ = std::move(new_valid_bitset);
-    nan_rows_ = std::move(new_nan_rows);
     if (context->has_persisted_aux && is_mmap_) {
         if (!(context->offsets_file->file_size <=
               static_cast<size_t>(std::numeric_limits<int64_t>::max()))) {
@@ -1244,6 +1158,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
 
     setup_data_pointers();
     is_built_ = true;
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
     LOG_INFO(
         "FinishLoadAsync ScalarIndexSort done, field_id: {}, "
@@ -1415,7 +1330,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                reader.Directory().HasEntry("valid_bitset")) {
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
-        idx_to_offsets_.resize(total_num_rows_);
+        idx_to_offsets_.assign(total_num_rows_, -1);
         size_t wo = 0;
         reader.ReadEntryStream(
             "idx_to_offsets", [&](const uint8_t* d, size_t len) {
@@ -1435,7 +1350,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         load_valid_bitset();
     } else {
         // Backward compat: recompute from index_data
-        idx_to_offsets_.resize(total_num_rows_);
+        idx_to_offsets_.assign(total_num_rows_, -1);
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
         for (size_t i = 0; i < Size(); ++i) {
             const auto& item = operator[](i);
@@ -1446,14 +1361,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_size_ = idx_to_offsets_.size();
     }
 
-    nan_rows_.clear();
-    if (reader.Directory().HasEntry("nan_rows")) {
-        const auto rows = reader.ReadEntry("nan_rows");
-        nan_rows_ =
-            ReadNaNRows<T>(rows.data.data(), rows.data.size(), valid_bitset_);
-    }
-
     is_built_ = true;
+    UpdateUnindexedNaNFlag();
     ComputeByteSize();
 
     LOG_INFO("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
