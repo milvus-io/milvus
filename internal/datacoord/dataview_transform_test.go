@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -87,4 +88,71 @@ func TestCheckpointRecomputeKeepsPublishedSortInputs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, projection, 1)
 	require.Equal(t, int64(1), projection[0].SegmentID, "published Flush input stays queryable until its replacement retires it")
+}
+
+func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
+	ctx := context.Background()
+	metadata := &meta{ctx: ctx, collections: typeutil.NewConcurrentMap[int64, *collectionInfo](), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	metadata.collections.Insert(100, &collectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}})
+	metadata.channelCPs.checkpoints["v1"] = &msgpb.MsgPosition{Timestamp: 300}
+	metadata.channelCPs.checkpoints["v2"] = &msgpb.MsgPosition{Timestamp: 400}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Committing,
+		TransformCommitTimeticks: map[string]uint64{"v1": 100},
+	}}
+	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
+	_, err := transformFrontierBounds(ctx, metadata, imports, 100)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady, "one shard's ack cannot establish another shard's coverage")
+	job.TransformCommitTimeticks["v2"] = 200
+	bounds, err := transformFrontierBounds(ctx, metadata, imports, 100)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 100, "v2": 200}, bounds)
+
+	// Commit publication transfers the pin to Segment metadata before the
+	// completed job is excluded. The first shard must never jump to K=300.
+	metadata.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+		TransformStartAfterTimetick: 100,
+	}))
+	job.State = internalpb.ImportJobState_Completed
+	bounds, err = transformFrontierBounds(ctx, metadata, imports, 100)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 100, "v2": 400}, bounds)
+}
+
+func TestTransformBoundsRejectUnknownDataButAllowEmptyAllocation(t *testing.T) {
+	ctx := context.Background()
+	metadata := &meta{ctx: ctx, collections: typeutil.NewConcurrentMap[int64, *collectionInfo](), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	metadata.collections.Insert(100, &collectionInfo{ID: 100, VChannelNames: []string{"v1"}})
+	metadata.channelCPs.checkpoints["v1"] = &msgpb.MsgPosition{Timestamp: 300}
+	segment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Growing}
+	metadata.segments.SetSegment(10, NewSegmentInfo(segment))
+	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(300), bounds["v1"])
+	segment.NumOfRows = 1
+	_, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	segment.StartPosition = &msgpb.MsgPosition{Timestamp: 400}
+	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(300), bounds["v1"], "new data beyond captured K cannot pull the frontier past K")
+}
+
+func TestSegmentTransformCursorKeepsFirstInsertAndImportCommit(t *testing.T) {
+	ordinary := NewSegmentInfo(&datapb.SegmentInfo{ID: 1})
+	imported := NewSegmentInfo(&datapb.SegmentInfo{ID: 2, IsImporting: true})
+	pack := &updateSegmentPack{segments: map[int64]*SegmentInfo{1: ordinary, 2: imported}}
+	for _, tick := range []uint64{20, 30} {
+		require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{
+			{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: tick}},
+			{SegmentID: 2, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: tick}},
+		})(pack))
+		require.Equal(t, uint64(20), ordinary.GetTransformStartAfterTimetick())
+		require.Zero(t, imported.GetTransformStartAfterTimetick(), "imported row timestamps cannot establish commit visibility")
+	}
+	require.True(t, UpdateCommitTimestamp(2, 100)(pack))
+	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick())
+	require.True(t, UpdateCommitTimestamp(2, 0)(pack))
+	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick(), "removing the MVCC override cannot erase base coverage")
 }

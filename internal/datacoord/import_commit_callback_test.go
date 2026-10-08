@@ -81,6 +81,7 @@ func TestImportCommitCallbackPublishesPerChannelVisibility(t *testing.T) {
 		segment := callbacks.meta.GetSegment(ctx, id)
 		require.False(t, segment.GetIsImporting())
 		require.Equal(t, tick, segment.GetCommitTimestamp())
+		require.Equal(t, tick, segment.GetTransformStartAfterTimetick())
 	}
 	// Completion is durable and no per-vchannel RPC/counter is needed.
 	restored, err := NewImportMeta(ctx, catalog, nil, nil)

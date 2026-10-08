@@ -158,11 +158,11 @@ monotonically; removing a constraint cannot lower a minimum. Atomic parent-to-
 output replacement preserves this argument only when compaction inheritance
 uses valid input versions.
 
-These are the proof obligations of the proposed producer. The current
-`PersistGrowingSegment` bridge and checkpoint updater are marked for removal
-when the legacy path is retired. They must not be removed until an equivalent
-registration-completeness protocol is installed. A dedicated SN safe-watermark
-RPC is a possible replacement, not a prerequisite for this design.
+These are the producer's proof obligations. Retiring legacy Growing binlog
+publication or checkpoint reporting must preserve the first-pack registration
+barrier until an equivalent registration-completeness protocol is installed.
+A dedicated SN safe-watermark RPC is a possible replacement, not a prerequisite
+for this design.
 
 ## 4. Consistent publication and other data sources
 
@@ -254,9 +254,12 @@ A conservative initial implementation can pin history from B for the live
 VChannel, installed before GC during creation/recovery. This trades storage
 space for avoiding an incomplete distributed View-retention protocol. Advancing
 storage GC later requires the minimum across the latest reloadable View and
-all still-protected older Views. Collection drop may release the protection
-only after the relevant serving/lifecycle obligations end. No pin can recreate
-history already deleted; existing collections require a readable-history check.
+all still-protected older Views. Collection drop releases the protection only
+after its tombstone is durable, all local Segments have been cleaned, and no
+QueryView references remain. Release the pin before waiting for Summary
+retirement, then remove the VChannel metadata after retirement completes.
+No pin can recreate history already deleted; existing collections require a
+readable-history check.
 
 Each QN buffer retains the minimum F of all locally held Views and any pending
 Segment registrations. It must not trim based only on local assigned Segments.
