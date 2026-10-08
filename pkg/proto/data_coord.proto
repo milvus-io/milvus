@@ -491,6 +491,11 @@ message SegmentInfo {
   // First growing-to-sealed DataView publication. Written with the flush snapshot
   // and retained across compaction/drop so a retried commit returns the same version.
   view.DataVersion sealed_at_data_version = 41;
+
+  // mem_size is the RAM consumed by the segment (in bytes) as reported by the
+  // QueryNode. It provides visibility into per-segment memory usage (e.g. index
+  // RAM consumption). Populated from the QueryNode data distribution report.
+  int64 mem_size = 42;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
