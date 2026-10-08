@@ -225,6 +225,21 @@ type PhysicalSegmentLoader interface {
 	Update(ctx context.Context, segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error
 }
 
+// SegmentLoadPlan is immutable for one attempt, including admission retries.
+// Its collection is kept alive by the manager's pending-attempt references.
+type SegmentLoadPlan struct {
+	Collection                  CollectionRuntime
+	LoadInfo                    *querypb.SegmentLoadInfo
+	TransformStartAfterTimeTick uint64 // Zero is an explicit replay floor.
+}
+
+// PlannedPhysicalSegmentLoader initializes both replay and applied progress
+// from the view-derived plan. The legacy Load entry point remains available
+// for callers that do not have QueryView requirements.
+type PlannedPhysicalSegmentLoader interface {
+	LoadWithPlan(ctx context.Context, plan SegmentLoadPlan) (TransformSegment, error)
+}
+
 type SegmentResourceEstimator interface {
 	Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error)
 }

@@ -57,15 +57,22 @@ func (t *SegmentLoadTask) load(ctx context.Context) (TransformSegment, error) {
 	if reservation != nil {
 		defer reservation.Release()
 	}
+	if loader, ok := t.loader.(PlannedPhysicalSegmentLoader); ok {
+		return loader.LoadWithPlan(ctx, SegmentLoadPlan{
+			Collection: t.Collection, LoadInfo: loadInfo,
+			TransformStartAfterTimeTick: t.TransformStartAfterTimeTick,
+		})
+	}
 	segment, err := t.loader.Load(ctx, loadInfo, t.Collection)
 	if err != nil {
 		return nil, err
 	}
-	if t.TransformStartAfterTimeTick > 0 {
-		segment = &transformStartSegment{
-			TransformSegment: segment,
-			startAfter:       t.TransformStartAfterTimeTick,
-		}
+	// Legacy implementations may already return the requested baseline. Never
+	// repair a mismatch with a getter-only decorator: that splits replay and
+	// applied progress and can silently skip required history.
+	if segment != nil && (segment.TransformStartAfterTimeTick() != t.TransformStartAfterTimeTick || segment.AppliedTransformTimeTick() != t.TransformStartAfterTimeTick) {
+		_ = segment.Release(ctx)
+		return nil, merr.WrapErrServiceInternalMsg("segment loader did not initialize planned transform frontier, segmentID=%d", t.SegmentID)
 	}
 	return segment, nil
 }
@@ -197,24 +204,4 @@ func updateCollectionIndexMeta(ctx context.Context, collection CollectionRuntime
 		return nil
 	}
 	return updater.UpdateIndexMeta(ctx, indexes)
-}
-
-type transformStartSegment struct {
-	TransformSegment
-	startAfter uint64
-}
-
-func (s *transformStartSegment) UnwrapTransformSegment() TransformSegment {
-	return s.TransformSegment
-}
-
-func (s *transformStartSegment) TransformStartAfterTimeTick() uint64 {
-	return s.startAfter
-}
-
-func (s *transformStartSegment) ReadView() SegmentReadView {
-	if readable, ok := s.TransformSegment.(ReadableSealedSegment); ok {
-		return readable.ReadView()
-	}
-	return SegmentReadView{}
 }

@@ -18,6 +18,14 @@ import (
 )
 
 func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection qnview.CollectionRuntime) (qnview.TransformSegment, error) {
+	return l.LoadWithPlan(ctx, qnview.SegmentLoadPlan{
+		Collection: collection, LoadInfo: info,
+		TransformStartAfterTimeTick: qvSegmentTransformStartAfter(info),
+	})
+}
+
+func (l *queryViewPhysicalSegmentLoader) LoadWithPlan(ctx context.Context, plan qnview.SegmentLoadPlan) (qnview.TransformSegment, error) {
+	info, collection := plan.LoadInfo, plan.Collection
 	if info == nil {
 		return nil, merr.WrapErrServiceInternalMsg("query view segment load info is nil")
 	}
@@ -45,7 +53,7 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 		return nil, err
 	}
 	releaseOnFailure = false
-	return newQueryViewTransformSegment(loaded, qvSegmentVChannel(info), qvSegmentTransformStartAfter(info)), nil
+	return newQueryViewTransformSegment(loaded, qvSegmentVChannel(info), plan.TransformStartAfterTimeTick), nil
 }
 
 func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnview.TransformSegment, collection qnview.CollectionRuntime, snapshot qnview.SegmentLoadInfoSnapshot, action qnview.SegmentUpdateAction) error {

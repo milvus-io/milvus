@@ -82,7 +82,7 @@ type transformViewRef struct {
 	dropping               bool
 	physicalReady          map[int64]bool
 	cancel                 context.CancelFunc
-	transformGuard         TransformLogGuard
+	transformGuard         *retainedTransformGuard
 	collectionGuard        CollectionRuntimeGuard
 	segments               map[int64]int64
 	onUnrecoverable        func()
@@ -93,6 +93,8 @@ type transformViewRef struct {
 }
 
 type transformSegmentState struct {
+	replayGuard   *retainedTransformGuard
+	replayStart   uint64
 	state         transformSegmentLoadState
 	generation    uint64
 	poison        *viewpb.PoisonedSegment
@@ -232,7 +234,7 @@ func (m *QueryViewSegmentReadinessManager) recordPendingAcquire(req AcquireSegme
 	}
 	ref := &transformViewRef{
 		cancel:          cancel,
-		transformGuard:  guard,
+		transformGuard:  newRetainedTransformGuard(guard),
 		segments:        segmentPartitions,
 		physicalReady:   make(map[int64]bool),
 		states:          make(map[int64]*transformSegmentState),
@@ -275,6 +277,7 @@ func (m *QueryViewSegmentReadinessManager) detachViewIfCurrent(key qviews.QueryV
 
 func (m *QueryViewSegmentReadinessManager) activateAcquire(req AcquireSegments, ref *transformViewRef, collectionGuard CollectionRuntimeGuard) ([]int64, bool, bool) {
 	physicalRefSegments := make([]int64, 0)
+	var supersededGuards []*retainedTransformGuard
 
 	m.mu.Lock()
 	if m.views[req.Key] != ref {
@@ -320,9 +323,19 @@ func (m *QueryViewSegmentReadinessManager) activateAcquire(req AcquireSegments, 
 		if state.state == transformSegmentWaiting {
 			state.state = transformSegmentLoading
 		}
+		if state.reg == nil && (state.replayGuard == nil || req.Meta.GetTransformStartAfterTimetick() < state.replayStart) {
+			if state.replayGuard != nil {
+				supersededGuards = append(supersededGuards, state.replayGuard)
+			}
+			state.replayGuard = ref.transformGuard.retain()
+			state.replayStart = req.Meta.GetTransformStartAfterTimetick()
+		}
 		state.waiters[req.Key] = waiter
 	}
 	m.mu.Unlock()
+	for _, guard := range supersededGuards {
+		guard.Release()
+	}
 
 	return physicalRefSegments, len(ref.segments) == 0, true
 }
@@ -437,12 +450,18 @@ func (m *QueryViewSegmentReadinessManager) registerAndCatchup(task segmentCatchu
 
 func (m *QueryViewSegmentReadinessManager) storeRegistration(task segmentCatchupTask, reg TransformRegistration) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	state := m.segments[task.segment.ID()]
 	if state != task.state || len(state.refs) == 0 {
+		m.mu.Unlock()
 		return false
 	}
 	state.reg = reg
+	guard := state.replayGuard
+	state.replayGuard = nil
+	m.mu.Unlock()
+	if guard != nil {
+		guard.Release()
+	}
 	return true
 }
 
@@ -479,6 +498,8 @@ func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, expected
 		return
 	}
 	reg := state.reg
+	guard := state.replayGuard
+	state.replayGuard = nil
 	cancel := state.catchupCancel
 	// Hold a cleanup reference until transform unregistration completes, even
 	// if the last query handle is released concurrently. Existing handles keep
@@ -492,6 +513,9 @@ func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, expected
 	delete(m.segments, segmentID)
 	m.mu.Unlock()
 
+	if guard != nil {
+		guard.Release()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -608,10 +632,11 @@ type transformViewGuards struct {
 }
 
 type transformViewDetach struct {
-	guards   transformViewGuards
-	cancels  []context.CancelFunc
-	regs     []TransformRegistration
-	segments []TransformSegment
+	guards       transformViewGuards
+	replayGuards []*retainedTransformGuard
+	cancels      []context.CancelFunc
+	regs         []TransformRegistration
+	segments     []TransformSegment
 }
 
 func (d transformViewDetach) releaseTransform() {
@@ -627,6 +652,9 @@ func (d transformViewDetach) releaseCollection() {
 }
 
 func (d transformViewDetach) unregister() {
+	for _, guard := range d.replayGuards {
+		guard.Release()
+	}
 	for _, cancel := range d.cancels {
 		if cancel != nil {
 			cancel()
@@ -667,6 +695,10 @@ func (m *QueryViewSegmentReadinessManager) detachViewLocked(key qviews.QueryView
 		delete(state.refs, key)
 		delete(state.waiters, key)
 		if len(state.refs) == 0 {
+			if state.replayGuard != nil {
+				detached.replayGuards = append(detached.replayGuards, state.replayGuard)
+				state.replayGuard = nil
+			}
 			if state.catchupCancel != nil {
 				detached.cancels = append(detached.cancels, state.catchupCancel)
 				state.catchupCancel = nil
