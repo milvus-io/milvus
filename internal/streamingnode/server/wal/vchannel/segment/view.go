@@ -388,8 +388,9 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		s.pendingFlushChunkLocked(targetTimeTick).persisted = result
 		s.mu.Unlock()
 	}
-	// TODO: Remove after enabling queryview. Publish exactly this stable pack
-	// before exposing its recovery snapshot or releasing the Insert handles.
+	// Publish exactly this stable pack before exposing its recovery snapshot
+	// or releasing the Insert handles. QueryView's checkpoint-bounded Transform
+	// frontier requires the first StartPosition registration in this ordering.
 	appendPersistedStorage(pack.Meta, result.PersistedStorage)
 	var start *msgpb.MsgPosition
 	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {

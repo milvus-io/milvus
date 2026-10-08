@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -676,9 +677,16 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 			cleanup.PhysicalTimeTick,
 			m.vchannelView.PersistedMaterializedTimeTick(),
 		)
+		dropReady := dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced
+		if dropReady && m.summaryManager != nil {
+			// A durable collection tombstone forbids new query references. All
+			// existing references and Segment recovery state are gone, so release
+			// the collection-origin pin before waiting for Summary retirement.
+			m.summaryManager.SetQueryRetention(m.vchannel, math.MaxUint64)
+		}
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
-		} else if dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced &&
+		} else if dropReady &&
 			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
 			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
 			snapshots = append(snapshots,

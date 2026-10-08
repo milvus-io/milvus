@@ -3153,8 +3153,8 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 // recovery rebuild and bootstrap. A segment is loadable iff it is flushed
 // (Flushing or Flushed - growing/sealed segments stay on the streaming side,
 // matching handler.go's GetQueryVChanPositions classification), healthy (not
-// Dropped/NotExist), not invisible, not importing, and not an L0 delta
-// segment, and has a data footprint (a non-empty binlog set or a StorageV3
+// Dropped/NotExist), visible or already published by Flush, not importing, and
+// not an L0 delta segment, and has a data footprint (a non-empty binlog set or a StorageV3
 // manifest path). The Manifest version is parsed from the segment's manifest
 // path (0 when absent). The SegmentMeta snapshot is taken under segMu.RLock;
 // manifest path parsing runs outside the lock (pure string ops on the

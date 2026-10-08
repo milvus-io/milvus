@@ -1,6 +1,7 @@
 package vchannel
 
 import (
+	"math"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -9,8 +10,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -77,4 +81,39 @@ func TestQueryRetentionBeforeCreateCollection(t *testing.T) {
 		IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	module.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(raw))
 	require.Equal(t, []uint64{0, 100}, retained)
+}
+
+func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.T) {
+	var retained uint64
+	patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, _ string, start uint64) {
+		retained = start
+	}).Build()
+	defer patch.UnPatch()
+	module, err := NewModule(ModuleConfig{
+		PChannel: "p1", VChannel: "v1", SummaryManager: &walsummary.Manager{},
+		VChannelMeta: &streamingpb.VChannelMeta{
+			Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
+			CreateCollectionTimeTick: 1, CheckpointTimeTick: 10, TransformMaterializedTimeTick: 10,
+		},
+	})
+	require.NoError(t, err)
+	queryReferenced := true
+	references := mockey.Mock((*queryresource.Manager).OldestDataVersion).To(func(*queryresource.Manager) (qviews.DataVersion, bool) {
+		return qviews.DataVersion{}, queryReferenced
+	}).Build()
+	defer references.UnPatch()
+	summaryRetired := false
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool {
+		require.Equal(t, uint64(math.MaxUint64), retained, "release the pin before waiting for Summary GC")
+		return summaryRetired
+	}}
+	require.Empty(t, module.ConsumeCleanupSnapshots(cleanup))
+	require.Equal(t, uint64(1), retained, "existing QueryViews still own the history")
+	queryReferenced = false
+	require.Empty(t, module.ConsumeCleanupSnapshots(cleanup), "retain the tombstone until Summary GC finishes")
+	require.Equal(t, uint64(math.MaxUint64), retained)
+	summaryRetired = true
+	snapshots := module.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
 }
