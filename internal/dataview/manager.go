@@ -53,6 +53,12 @@ type Manager interface {
 	// for the flush atomic txn (see implementation comment for the
 	// commit/abort contract).
 	PrepareFlush(ctx context.Context, event FlushDataViewEvent) (view *viewpb.DataViewOfCollection, commit func(), abort func(), err error)
+	// PublishChange builds the post-batch-publish snapshot under the Collection
+	// lock for the batch atomic publish txn (see publish_change.go for the
+	// commit/abort contract). Symmetric with PrepareFlush; advances only
+	// compact_version and removes the superseded parents alongside the new
+	// members.
+	PublishChange(ctx context.Context, event ChangeGroupDataViewEvent) (view *viewpb.DataViewOfCollection, commit func(), abort func(), err error)
 	// Recompute asynchronously requests a reconciliation of the Collection
 	// snapshot against the latest SegmentMeta projection (injected at
 	// construction). It is a non-blocking, deduplicated request: a Collection
