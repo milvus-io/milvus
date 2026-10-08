@@ -469,6 +469,7 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 		}
 		delete(b.pending, reg.segment.ID())
 		b.live[reg.segment.ID()] = reg
+		b.trimLocked()
 		return nil, true, nil, nil
 	}
 	return batch, false, nil, nil
@@ -542,6 +543,7 @@ func (b *vchannelBuffer) removeRegistration(reg *registration) {
 	if b.live[reg.segment.ID()] == reg {
 		delete(b.live, reg.segment.ID())
 	}
+	b.trimLocked()
 }
 
 func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
@@ -574,6 +576,8 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 }
 
 func (b *vchannelBuffer) trimLocked() {
+	// View guards retain history for future loads; pending registrations also
+	// retain their replay range until catch-up completes or they are removed.
 	minStart := uint64(0)
 	first := true
 	for startFrom := range b.guards {
@@ -597,6 +601,7 @@ func (b *vchannelBuffer) trimLocked() {
 			kept = append(kept, entry)
 		}
 	}
+	clear(b.entries[len(kept):])
 	b.entries = kept
 	b.retentionStart = minStart
 }

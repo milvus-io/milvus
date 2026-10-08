@@ -301,6 +301,16 @@ transform manager still waits for the physical manager to confirm this view's
 DataVersion and LoadInfo. Only then can it report Ready without re-registering
 the segment.
 
+The TransformLogBuffer retains entries strictly after the minimum
+`TransformStartAfterTimeTick` of its live view guards and pending segment
+registrations. Releasing a view guard, completing catch-up, or removing a
+registration immediately re-evaluates this boundary. A caught-up segment no
+longer pins its original replay range: it receives subsequent entries through
+live delivery. Trimming clears discarded entry pointers in the backing array
+so they do not retain Transform payloads. A view whose frontier never advances
+continues to retain its required history; the buffer does not evict that range
+based on a separate size limit.
+
 If registration or catch-up fails:
 
 1. cancel catch-up;
