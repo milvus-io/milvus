@@ -426,7 +426,7 @@ func TestQueryTaskRLSEnforcement(t *testing.T) {
 			},
 		})
 		task := newTask(t, "alice")
-		task.Request().Expr = ""
+		task.request.Expr = ""
 		err := task.PreExecute(ctx)
 		require.ErrorContains(t, err, "empty expression should be used with limit")
 	})
