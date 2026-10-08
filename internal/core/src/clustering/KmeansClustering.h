@@ -36,6 +36,11 @@
 
 namespace milvus::clustering {
 
+std::map<int64_t, int64_t>
+AllocateSegmentSampleRows(const std::vector<int64_t>& segment_ids,
+                          const std::map<int64_t, int64_t>& segment_num_rows,
+                          int64_t target_sample_rows);
+
 // after clustering result uploaded, return result meta for golang usage
 struct ClusteringResultMeta {
     std::string centroid_path;   // centroid result path
@@ -116,36 +121,35 @@ class KmeansClustering {
         const milvus::proto::clustering::AnalyzeInfo& config,
         const milvus::proto::clustering::ClusteringCentroidsStats&
             centroid_stats,
-        const std::vector<
-            milvus::proto::clustering::ClusteringCentroidIdMappingStats>&
-            id_mapping_stats,
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& insert_files,
         const std::map<int64_t, int64_t>& num_rows,
         const std::map<int64_t, std::string>& manifest_paths,
         const Config& base_config,
+        const knowhere::Json& cluster_config,
         const int64_t dim,
-        const int64_t trained_segments_num,
+        const T* full_training_data,
         const int64_t num_clusters);
 
     template <typename T>
     void
     FetchDataFiles(uint8_t* buf,
-                   const int64_t expected_train_size,
-                   const int64_t expected_remote_file_size,
+                   const int64_t expected_rows,
+                   const int64_t row_offset,
                    const std::vector<std::string>& files,
                    const int64_t dim,
                    int64_t& offset);
 
-    // StorageV3 sibling of FetchDataFiles: reads a whole segment through its
-    // manifest instead of a list of insert log files.
+    // StorageV3 sibling of FetchDataFiles: reads a row range through the
+    // segment manifest instead of a list of insert log files.
     template <typename T>
     void
     FetchSegmentViaManifest(uint8_t* buf,
-                            const int64_t expected_train_size,
-                            const int64_t expected_remote_file_size,
+                            const int64_t expected_rows,
+                            const int64_t row_offset,
                             const std::string& manifest_path,
                             const Config& base_config,
+                            const int64_t dim,
                             int64_t& offset);
 
     // given all possible segments, sample data to buffer
@@ -169,13 +173,13 @@ class KmeansClustering {
                   const int64_t num_clusters,
                   const int64_t dim);
 
-    // transform flattened id mapping result to several PB files by each segment for future usage of golang side
-    std::vector<milvus::proto::clustering::ClusteringCentroidIdMappingStats>
-    CentroidIdMappingToPB(const uint32_t* centroid_id_mapping,
-                          const std::vector<int64_t>& segment_ids,
-                          const int64_t trained_segments_num,
-                          const std::map<int64_t, int64_t>& num_row_map,
-                          const int64_t num_clusters);
+    // Transform one segment's assignment result into the persisted protobuf.
+    // Assignment implementations must return both ids and distances.
+    milvus::proto::clustering::ClusteringCentroidIdMappingStats
+    CentroidIdMappingWithDistanceToPB(const int64_t* centroid_id_mapping,
+                                      const float* distances,
+                                      const int64_t num_rows,
+                                      const int64_t num_clusters);
 
     template <typename T>
     bool

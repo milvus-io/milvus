@@ -22,6 +22,7 @@ import (
 	sio "io"
 	"math"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/internal/util/clustercompaction"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -100,6 +103,7 @@ type clusteringCompactionTask struct {
 	// vector
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
+	layoutPlan             *clustercompaction.LayoutPlan
 	// bm25
 	bm25FieldIds []int64
 
@@ -412,12 +416,8 @@ func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
 	return result, resultIndex
 }
 
-func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, bufferNum int, centroids []*schemapb.VectorField) error {
-	centroidsOffset := make([]int, len(centroids))
-	for i := 0; i < len(centroids); i++ {
-		centroidsOffset[i] = i
-	}
-	centroidGroups, groupIndex := splitCentroids(centroidsOffset, bufferNum)
+func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, centroidGroups [][]int, centroids []*schemapb.VectorField) error {
+	groupIndex := make(map[int]int, len(centroids))
 	for id, group := range centroidGroups {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -443,6 +443,9 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
+		for _, centroidID := range group {
+			groupIndex[centroidID] = id
+		}
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
 		centroidGroupOffset := groupIndex[int(idMapping[offset])]
@@ -457,7 +460,91 @@ func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context
 	if bufferNumByMemory < bufferNum {
 		bufferNum = bufferNumByMemory
 	}
-	return t.generatedVectorPlan(ctx, bufferNum, centroids.GetCentroids())
+	centroidOffsets := make([]int, len(centroids.GetCentroids()))
+	for index := range centroidOffsets {
+		centroidOffsets[index] = index
+	}
+	centroidGroups, _ := splitCentroids(centroidOffsets, bufferNum)
+	return t.generatedVectorPlan(ctx, centroidGroups, centroids.GetCentroids())
+}
+
+func (t *clusteringCompactionTask) collectCentroidCounts(ctx context.Context, centroidCount int64) ([]int64, error) {
+	counts := make([]int64, centroidCount)
+	for _, segmentID := range t.plan.GetAnalyzeSegmentIds() {
+		mappingPath, ok := t.segmentIDOffsetMapping[segmentID]
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("missing clustering assignment artifact for segment %d", segmentID)
+		}
+		blobs, err := t.binlogIO.Download(ctx, []string{mappingPath})
+		if err != nil {
+			return nil, err
+		}
+		if len(blobs) != 1 {
+			return nil, merr.WrapErrServiceInternalMsg("expected one clustering assignment artifact for segment %d, got %d", segmentID, len(blobs))
+		}
+		stats := &clusteringpb.ClusteringCentroidIdMappingStats{}
+		if err := proto.Unmarshal(blobs[0], stats); err != nil {
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to decode clustering assignment artifact for segment %d", segmentID)
+		}
+		if err := clustercompaction.ValidateCentroidMappingStats(stats, int64(len(stats.GetCentroidIdMapping())), centroidCount); err != nil {
+			return nil, err
+		}
+		for centroidID, count := range stats.GetNumInCentroid() {
+			if counts[centroidID] > math.MaxInt64-count {
+				return nil, merr.WrapErrServiceInternalMsg("clustering centroid %d aggregate row count overflows int64", centroidID)
+			}
+			counts[centroidID] += count
+		}
+	}
+	return counts, nil
+}
+
+func getCompactionPlanParams(configured map[string]string, maxSegmentRows int64) map[string]string {
+	params := make(map[string]string, len(configured)+1)
+	for key, value := range configured {
+		params[key] = value
+	}
+	if _, ok := params["compaction_max_rows"]; !ok {
+		params["compaction_max_rows"] = strconv.FormatInt(maxSegmentRows, 10)
+	}
+	return params
+}
+
+func (t *clusteringCompactionTask) buildVectorLayoutPlan(
+	ctx context.Context,
+	centroids *clusteringpb.ClusteringCentroidsStats,
+) error {
+	centroidCounts, err := t.collectCentroidCounts(ctx, int64(len(centroids.GetCentroids())))
+	if err != nil {
+		return err
+	}
+	params := getCompactionPlanParams(
+		t.compactionParams.ClusteringCompactionPlanParams,
+		t.plan.GetMaxSegmentRows(),
+	)
+	layoutPlan, err := analyzecgowrapper.BuildCompactionPlan(
+		centroids,
+		t.clusteringKeyField.GetDataType(),
+		centroidCounts,
+		paramtable.Get().KnowhereConfig.ClusterType.GetValue(),
+		params,
+	)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(layoutPlan.CentroidCounts, centroidCounts) {
+		return merr.WrapErrServiceInternalMsg("clustering compaction planner changed centroid counts")
+	}
+
+	centroidGroups := make([][]int, len(layoutPlan.CentroidGroups))
+	for groupOffset, group := range layoutPlan.CentroidGroups {
+		centroidGroups[groupOffset] = make([]int, len(group.Centroids))
+		for centroidOffset, centroidID := range group.Centroids {
+			centroidGroups[groupOffset][centroidOffset] = int(centroidID)
+		}
+	}
+	t.layoutPlan = layoutPlan
+	return t.generatedVectorPlan(ctx, centroidGroups, centroids.GetCentroids())
 }
 
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
@@ -485,7 +572,10 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 		mlog.Int("centroidNum", len(centroids.GetCentroids())),
 		mlog.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
 
-	return t.switchPolicyForVectorPlan(ctx, centroids)
+	if len(t.compactionParams.ClusteringCompactionPlanParams) == 0 {
+		return t.switchPolicyForVectorPlan(ctx, centroids)
+	}
+	return t.buildVectorLayoutPlan(ctx, centroids)
 }
 
 // mapping read and split input segments into buffers

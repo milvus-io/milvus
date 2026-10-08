@@ -63,9 +63,7 @@ func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemap
 		if field.IsPartitionKey {
 			partitionKeyField = field
 		}
-		// todo support other vector type
-		// if typeutil.IsVectorType(field.GetDataType()) {
-		if field.DataType == schemapb.DataType_FloatVector {
+		if typeutil.IsDenseFloatVectorType(field.GetDataType()) {
 			vectorFields = append(vectorFields, field)
 		}
 	}
