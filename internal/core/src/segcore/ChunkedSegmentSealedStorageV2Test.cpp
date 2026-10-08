@@ -3479,7 +3479,7 @@ TEST(SkipIndexPr51441, StorageV2SkipQueryResultsCorrect) {
     StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_query_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_query_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 4 * 1024 * 1024);
 
