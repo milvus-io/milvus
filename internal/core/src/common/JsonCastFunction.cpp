@@ -31,8 +31,6 @@ template <>
 std::optional<double>
 JsonCastFunction::cast<double, std::string>(const std::string& t) const {
     try {
-        // A successfully parsed NaN is a valid numeric projection. Indexes
-        // preserve its validity separately from comparable sorted entries.
         return std::stod(t);
     } catch (const std::exception&) {
         return std::nullopt;

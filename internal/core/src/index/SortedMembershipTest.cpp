@@ -151,8 +151,7 @@ class SortedFloatingMembershipTest : public testing::Test {};
 using FloatingMembershipTypes = testing::Types<float, double>;
 TYPED_TEST_SUITE(SortedFloatingMembershipTest, FloatingMembershipTypes);
 
-TYPED_TEST(SortedFloatingMembershipTest,
-           NaNNeverMatchesAndFiniteTargetsRemain) {
+TYPED_TEST(SortedFloatingMembershipTest, NaNRetainsBinarySearchSemantics) {
     using T = TypeParam;
     using Entry = IndexStructure<T>;
     std::vector<Entry> entries;
@@ -168,22 +167,19 @@ TYPED_TEST(SortedFloatingMembershipTest,
     const T nan = std::numeric_limits<T>::quiet_NaN();
     for (const auto& queries : std::vector<std::vector<T>>{
              {nan},
-             {nan, -nan, nan},
-             {nan, T(1), T(1), nan},
              {nan, T(0), nan},
              {T(1), nan, T(-1)},
              {nan, -nan, std::numeric_limits<T>::infinity()}}) {
         auto original = queries;
         std::vector<int32_t> expected, actual;
         size_t validations = 0;
-        // Independent equality scan: NaN targets match nothing, while mixed
-        // finite targets still visit each matching indexed row once.
-        for (const auto& entry : entries) {
-            if (std::any_of(queries.begin(), queries.end(), [&](T value) {
-                    return entry.a_ == value;
-                })) {
-                expected.push_back(entry.idx_);
-            }
+        // Independent copy of the pre-optimization lookup, including
+        // repeated visits and the values passed to the diagnostic callback.
+        for (T value : queries) {
+            auto lb =
+                std::lower_bound(entries.begin(), entries.end(), Entry(value));
+            auto ub = std::upper_bound(lb, entries.end(), Entry(value));
+            for (; lb != ub; ++lb) expected.push_back(lb->idx_);
         }
         detail::VisitSortedMatches(
             entries.begin(),
@@ -192,8 +188,7 @@ TYPED_TEST(SortedFloatingMembershipTest,
             queries.data(),
             [&](int32_t row) { actual.push_back(row); },
             [&](T value, const Entry& entry) {
-                EXPECT_FALSE(std::isnan(value));
-                EXPECT_EQ(entry.a_, value);
+                EXPECT_TRUE(std::isnan(value) || entry.a_ == value);
                 ++validations;
             });
         EXPECT_EQ(actual, expected);

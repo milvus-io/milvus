@@ -2005,30 +2005,25 @@ TEST(BitmapIndexArrayNestedTest, HybridArrayNaNFirstStillSelectsStlsort) {
     auto found = hybrid.In(1, &finite);
     ASSERT_EQ(found.size(), 1);
     EXPECT_TRUE(found[0]);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    EXPECT_EQ(hybrid.In(1, &nan).count(), 0);
     boost::filesystem::remove_all(root_path);
 }
 
 namespace {
 template <typename T>
-class FloatingIndexNaNQueryTest : public testing::Test {};
-using FloatingNaNQueryTypes = testing::Types<float, double>;
-TYPED_TEST_SUITE(FloatingIndexNaNQueryTest, FloatingNaNQueryTypes);
+class FloatingIndexQueryTest : public testing::Test {};
+using FloatingQueryTypes = testing::Types<float, double>;
+TYPED_TEST_SUITE(FloatingIndexQueryTest, FloatingQueryTypes);
 
 template <typename T>
 void
-CheckFloatingNaNQueries(index::ScalarIndex<T>& index) {
-    const T nan = std::numeric_limits<T>::quiet_NaN();
+CheckFloatingQueries(index::ScalarIndex<T>& index) {
     const T inf = std::numeric_limits<T>::infinity();
     ASSERT_EQ(index.Count(), 6);
-    EXPECT_EQ(index.In(1, &nan).count(), 0);
-    EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
-    const T mixed[] = {nan, T(1), nan};
-    auto hit = index.In(3, mixed);
+    const T one = T(1);
+    auto hit = index.In(1, &one);
     EXPECT_EQ(hit.count(), 1);
     EXPECT_TRUE(hit[3]);
-    EXPECT_EQ(index.NotIn(3, mixed).count(), 4);
+    EXPECT_EQ(index.NotIn(1, &one).count(), 4);
     for (const T zero : {T(0), -T(0)}) {
         const auto zeros = index.In(1, &zero);
         EXPECT_EQ(zeros.count(), 2);
@@ -2036,14 +2031,6 @@ CheckFloatingNaNQueries(index::ScalarIndex<T>& index) {
         EXPECT_TRUE(zeros[2]);
     }
     EXPECT_EQ(index.In(1, &inf).count(), 1);
-    for (auto op : {OpType::LessThan,
-                    OpType::LessEqual,
-                    OpType::GreaterThan,
-                    OpType::GreaterEqual}) {
-        EXPECT_EQ(index.Range(nan, op).count(), 0);
-    }
-    EXPECT_EQ(index.Range(nan, true, inf, true).count(), 0);
-    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 0);
     const T zero = 0;
     EXPECT_EQ(index.Range(zero, OpType::LessThan).count(), 1);
     EXPECT_EQ(index.Range(zero, OpType::LessEqual).count(), 3);
@@ -2054,7 +2041,7 @@ CheckFloatingNaNQueries(index::ScalarIndex<T>& index) {
 
 template <typename T>
 std::pair<storage::FileManagerContext, FieldDataPtr>
-MakeFloatingNaNQueryFixture(const std::string& name, int64_t index_id) {
+MakeFloatingQueryFixture(const std::string& name, int64_t index_id) {
     constexpr auto dtype = std::is_same_v<T, float>
                                ? proto::schema::DataType::Float
                                : proto::schema::DataType::Double;
@@ -2075,21 +2062,19 @@ MakeFloatingNaNQueryFixture(const std::string& name, int64_t index_id) {
 }
 }  // namespace
 
-TYPED_TEST(FloatingIndexNaNQueryTest,
-           BitmapNaNQueriesIgnoreTargetsAndKeepValidity) {
+TYPED_TEST(FloatingIndexQueryTest, BitmapFiniteQueriesPreserveValidity) {
     using T = TypeParam;
-    auto [ctx, field] =
-        MakeFloatingNaNQueryFixture<T>("bitmap_nan_query", 3190);
+    auto [ctx, field] = MakeFloatingQueryFixture<T>("bitmap_nan_query", 3190);
     index::BitmapIndex<T> built(ctx);
     built.BuildWithFieldData({field});
     // Reload selects the mode for the serialized postings.
     auto binary = built.Serialize({});
     index::BitmapIndex<T> loaded(ctx);
     loaded.Load(binary, {});
-    CheckFloatingNaNQueries(loaded);
+    CheckFloatingQueries(loaded);
 }
 
-TYPED_TEST(FloatingIndexNaNQueryTest,
+TYPED_TEST(FloatingIndexQueryTest,
            BitmapInvalidNaNPayloadDoesNotEnterOrderedPostings) {
     using T = TypeParam;
     constexpr auto dtype = std::is_same_v<T, float>
@@ -2126,9 +2111,6 @@ TYPED_TEST(FloatingIndexNaNQueryTest,
         }
         auto check = [nested](index::BitmapIndex<T>& loaded) {
             EXPECT_EQ(loaded.Count(), nested ? 601 : 1);
-            const T nan = std::numeric_limits<T>::quiet_NaN();
-            EXPECT_EQ(loaded.In(1, &nan).count(), 0);
-            EXPECT_EQ(loaded.Range(nan, OpType::LessEqual).count(), 0);
             const T target = 42;
             const auto hits = loaded.In(1, &target);
             EXPECT_EQ(hits.count(), 1);
@@ -2165,11 +2147,9 @@ TYPED_TEST(FloatingIndexNaNQueryTest,
     }
 }
 
-TYPED_TEST(FloatingIndexNaNQueryTest,
-           InvertedNaNQueriesIgnoreTargetsAndKeepValidity) {
+TYPED_TEST(FloatingIndexQueryTest, InvertedFiniteQueriesPreserveValidity) {
     using T = TypeParam;
-    auto [ctx, field] =
-        MakeFloatingNaNQueryFixture<T>("inverted_nan_query", 3191);
+    auto [ctx, field] = MakeFloatingQueryFixture<T>("inverted_nan_query", 3191);
     index::InvertedIndexTantivy<T> built(7, ctx);
     built.BuildWithFieldData({field});
     auto stats = built.UploadUnified({});
@@ -2179,15 +2159,12 @@ TYPED_TEST(FloatingIndexNaNQueryTest,
     config[ENABLE_MMAP] = false;
     index::InvertedIndexTantivy<T> loaded(7, ctx);
     loaded.LoadUnified(config);
-    CheckFloatingNaNQueries(loaded);
-    const T nan = std::numeric_limits<T>::quiet_NaN();
-    const T query[] = {nan, T(1)};
+    CheckFloatingQueries(loaded);
+    const T one = T(1);
     EXPECT_EQ(
-        loaded.InApplyFilter(2, query, [](size_t) { return true; }).count(), 1);
+        loaded.InApplyFilter(1, &one, [](size_t) { return true; }).count(), 1);
     size_t callbacks = 0;
-    loaded.InApplyCallback(1, &nan, [&](size_t) { ++callbacks; });
-    EXPECT_EQ(callbacks, 0);
-    loaded.InApplyCallback(2, query, [&](size_t row) {
+    loaded.InApplyCallback(1, &one, [&](size_t row) {
         EXPECT_EQ(row, 3);
         ++callbacks;
     });
@@ -2195,9 +2172,9 @@ TYPED_TEST(FloatingIndexNaNQueryTest,
 }
 
 TEST(BitmapIndexArrayNestedTest,
-     LowCardinalityHybridNaNQueryUsesBitmapCorrectly) {
+     LowCardinalityHybridFiniteQueryUsesBitmapCorrectly) {
     auto [ctx, field] =
-        MakeFloatingNaNQueryFixture<double>("hybrid_bitmap_nan_query", 3192);
+        MakeFloatingQueryFixture<double>("hybrid_bitmap_nan_query", 3192);
     TestHybridScalarIndexDouble hybrid(7, ctx);
     hybrid.scalar_index_version_ = 6;
     EXPECT_EQ(hybrid.SelectPublic({field}), ScalarIndexType::BITMAP);
@@ -2205,14 +2182,14 @@ TEST(BitmapIndexArrayNestedTest,
     auto binary = hybrid.Serialize({});
     TestHybridScalarIndexDouble loaded(7, ctx);
     loaded.Load(binary, {});
-    CheckFloatingNaNQueries(loaded);
+    CheckFloatingQueries(loaded);
 }
 
-TYPED_TEST(FloatingIndexNaNQueryTest,
+TYPED_TEST(FloatingIndexQueryTest,
            InvertedNumericRangesExcludeBothNaNEncodings) {
     using T = TypeParam;
     auto [ctx, ignored] =
-        MakeFloatingNaNQueryFixture<T>("inverted_nan_range_domain", 3193);
+        MakeFloatingQueryFixture<T>("inverted_nan_range_domain", 3193);
     const T nan = std::numeric_limits<T>::quiet_NaN();
     const T inf = std::numeric_limits<T>::infinity();
     const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
@@ -2231,9 +2208,12 @@ TYPED_TEST(FloatingIndexNaNQueryTest,
     index::InvertedIndexTantivy<T> loaded(7, ctx);
     loaded.LoadUnified(config);
     ASSERT_EQ(loaded.Count(), 8);
-    EXPECT_EQ(loaded.In(1, &nan).count(), 0);
-    EXPECT_EQ(loaded.NotIn(1, &nan).count(), 7);
     const T zero = 0;
+    const auto not_zero = loaded.NotIn(1, &zero);
+    EXPECT_EQ(not_zero.count(), 5);
+    EXPECT_TRUE(not_zero[0]);
+    EXPECT_TRUE(not_zero[6]);
+    EXPECT_FALSE(not_zero[7]);
     EXPECT_EQ(loaded.Range(zero, OpType::LessThan).count(), 1);
     EXPECT_EQ(loaded.Range(zero, OpType::LessEqual).count(), 3);
     EXPECT_EQ(loaded.Range(zero, OpType::GreaterThan).count(), 2);

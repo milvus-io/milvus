@@ -138,11 +138,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::Range",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        if constexpr (std::is_floating_point_v<T>) {
-            if (std::isnan(value)) {
-                return bitset;
-            }
-        }
         switch (op) {
             case OpType::LessThan: {
                 this->wrapper_->json_range_query(json_path_,
@@ -207,12 +202,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RangeWithBounds",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        if constexpr (std::is_floating_point_v<T>) {
-            if (std::isnan(lower_bound_value) ||
-                std::isnan(upper_bound_value)) {
-                return bitset;
-            }
-        }
         this->wrapper_->json_range_query(
             json_path_,
             LowerQueryBound(lower_bound_value, lb_inclusive),
@@ -295,9 +284,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             std::vector<T> terms;
             terms.reserve(n);
             for (size_t i = 0; i < n; ++i) {
-                if (std::isnan(values[i])) {
-                    continue;
-                }
                 terms.push_back(values[i]);
                 if (values[i] == T(0)) {
                     terms.push_back(-values[i]);

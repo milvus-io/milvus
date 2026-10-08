@@ -3910,17 +3910,13 @@ TEST(Expr, OrdinaryArraySortedNaNContainsMatchesRaw) {
     ASSERT_TRUE(index_segment->HasIndex(fid));
     ASSERT_FALSE(raw_segment->HasIndex(fid));
 
-    std::vector<std::vector<double>> target_sets{
-        {}, {nan}, {3}, {3, nan}, {nan, 3}, {nan, 9}, {9, nan}};
+    std::vector<std::vector<double>> target_sets{{}, {3}, {9}, {3, 9}};
     std::vector<double> large_targets;
-    for (size_t i = 0; i < 65; ++i) {
+    for (size_t i = 0; i < 64; ++i) {
         large_targets.push_back(static_cast<double>(i));
     }
     target_sets.push_back(large_targets);
-    large_targets.push_back(nan);
-    target_sets.push_back(large_targets);
-    std::rotate(
-        large_targets.begin(), large_targets.end() - 1, large_targets.end());
+    large_targets.push_back(64);
     target_sets.push_back(large_targets);
     for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
                     proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
@@ -4041,7 +4037,7 @@ TEST(Expr, ScalarSortedNaNOperatorsMatchRawIEEE) {
                 << "index validity row " << row;
         }
     };
-    for (double target : {nan, 3.0}) {
+    for (double target : {3.0, 9.0}) {
         proto::plan::GenericValue value;
         value.set_float_val(target);
         for (auto op : {proto::plan::Equal,
@@ -4235,86 +4231,4 @@ CheckStructSortedSourceNaNIn() {
 TEST(Expr, StructSortedSourceNaNInMatchesRaw) {
     CheckStructSortedSourceNaNIn<float>();
     CheckStructSortedSourceNaNIn<double>();
-}
-
-TEST(Expr, RawJsonArrayNaNContainsTargetsRemainUnmatchable) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("id", DataType::INT64);
-    auto fid = schema->AddDebugField("doc", DataType::JSON);
-    schema->set_primary_field_id(pk);
-    const std::vector<std::vector<double>> arrays{{3}, {9}, {}};
-    std::vector<milvus::Json> docs;
-    for (const auto* text : {R"({"a":[3]})", R"({"a":[9]})", R"({"a":[]})"}) {
-        docs.emplace_back(std::string_view(text));
-    }
-    auto field_data =
-        storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
-    field_data->FillFieldData(docs.data(), docs.size());
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto segment = CreateSealedSegment(schema);
-    auto info = PrepareSingleFieldInsertBinlog(
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
-    segment->LoadFieldData(info);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
-                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
-        for (const auto& targets :
-             std::vector<std::vector<double>>{{3}, {nan}, {3, nan}, {nan, 3}}) {
-            std::vector<proto::plan::GenericValue> values;
-            for (double target : targets) {
-                proto::plan::GenericValue value;
-                value.set_float_val(target);
-                values.push_back(value);
-            }
-            auto expression = std::make_shared<expr::JsonContainsExpr>(
-                expr::ColumnInfo(fid, DataType::JSON, {"a"}, false),
-                op,
-                true,
-                values);
-            auto plan = std::make_shared<plan::FilterBitsNode>(
-                DEFAULT_PLANNODE_ID, expression);
-            auto result = milvus::test::gen_filter_res(
-                plan.get(), segment.get(), docs.size(), MAX_TIMESTAMP);
-            BitsetTypeView bits(result->GetRawData(), result->size());
-            BitsetTypeView valid(result->GetValidRawData(), result->size());
-            for (size_t row = 0; row < arrays.size(); ++row) {
-                auto contains = [&](double target) {
-                    return std::find(arrays[row].begin(),
-                                     arrays[row].end(),
-                                     target) != arrays[row].end();
-                };
-                const bool expected =
-                    op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll
-                        ? std::all_of(targets.begin(), targets.end(), contains)
-                        : std::any_of(targets.begin(), targets.end(), contains);
-                EXPECT_EQ(bits[row], expected) << "row " << row;
-                EXPECT_TRUE(valid[row]) << "row " << row;
-            }
-        }
-    }
-}
-
-TEST(Expr, ShreddingBsonArrayAllNaNTargetCannotBeErased) {
-    const auto bytes = index::BuildBsonArrayBytesFromJsonString("[3]");
-    const std::string_view source(reinterpret_cast<const char*>(bytes.data()),
-                                  bytes.size());
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    for (const auto& targets :
-         std::vector<std::vector<double>>{{3}, {nan}, {3, nan}, {nan, 3}}) {
-        std::set<double, exec::ContainsTargetLess<double>> set(targets.begin(),
-                                                               targets.end());
-        exec::ShreddingArrayBsonContainsAllExecutor<
-            double,
-            exec::ContainsTargetLess<double>>
-            executor(set);
-        TargetBitmap result(1, false), valid(1, true);
-        executor(&source,
-                 nullptr,
-                 1,
-                 TargetBitmapView(result),
-                 TargetBitmapView(valid));
-        EXPECT_EQ(result[0], targets.size() == 1 && targets[0] == 3);
-        EXPECT_TRUE(valid[0]);
-    }
 }

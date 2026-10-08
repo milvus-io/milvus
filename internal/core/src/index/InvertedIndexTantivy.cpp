@@ -16,7 +16,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -70,7 +69,7 @@ namespace milvus::index {
 namespace {
 
 // Keep all term-query surfaces (IN, NOT IN, callbacks and filtered IN) on
-// IEEE equality semantics. NaN cannot match any numeric value.
+// IEEE equality semantics.
 template <typename T>
 void
 QueryTerms(const std::shared_ptr<TantivyIndexWrapper>& wrapper,
@@ -81,31 +80,19 @@ QueryTerms(const std::shared_ptr<TantivyIndexWrapper>& wrapper,
         return;
     }
     if constexpr (std::is_floating_point_v<T>) {
-        if (std::any_of(values, values + n, [](T value) {
-                return std::isnan(value) || value == T(0);
-            })) {
+        if (std::any_of(
+                values, values + n, [](T value) { return value == T(0); })) {
             std::vector<T> comparable;
-            comparable.reserve(n);
-            bool has_zero = false;
+            comparable.reserve(n + 1);
             for (size_t i = 0; i < n; ++i) {
-                if (std::isnan(values[i])) {
-                    continue;
-                }
-                if (values[i] == T(0)) {
-                    has_zero = true;
-                } else {
+                if (values[i] != T(0)) {
                     comparable.push_back(values[i]);
                 }
             }
-            if (has_zero) {
-                // Tantivy stores the two IEEE zero encodings as distinct terms.
-                comparable.push_back(T(0));
-                comparable.push_back(-T(0));
-            }
-            if (!comparable.empty()) {
-                wrapper->terms_query(
-                    comparable.data(), comparable.size(), result);
-            }
+            // Tantivy stores the two IEEE zero encodings as distinct terms.
+            comparable.push_back(T(0));
+            comparable.push_back(-T(0));
+            wrapper->terms_query(comparable.data(), comparable.size(), result);
             return;
         }
     }
@@ -617,11 +604,6 @@ const TargetBitmap
 InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
     tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    if constexpr (std::is_floating_point_v<T>) {
-        if (std::isnan(value)) {
-            return bitset;
-        }
-    }
 
     const T* bound = &value;
     T normalized_bound{};
@@ -683,11 +665,6 @@ InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
     tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    if constexpr (std::is_floating_point_v<T>) {
-        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
-            return bitset;
-        }
-    }
     const T* lower = &lower_bound_value;
     const T* upper = &upper_bound_value;
     T normalized_lower{}, normalized_upper{};

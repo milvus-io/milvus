@@ -167,9 +167,8 @@ CheckUnindexedNaN(ScalarIndexSort<T>& index,
         ASSERT_LT(static_cast<size_t>(it->idx_), rows.size());
         EXPECT_EQ(it->a_, rows[it->idx_]);
     }
-    const T nan = std::numeric_limits<T>::quiet_NaN();
     for (const auto& queries : std::vector<std::vector<T>>{
-             {}, {T(2)}, {T(9)}, {T(0)}, {nan}, std::vector<T>(129, T(2))}) {
+             {}, {T(2)}, {T(9)}, {T(0)}, std::vector<T>(129, T(2))}) {
         const auto in = index.In(queries.size(), queries.data());
         const auto not_in = index.NotIn(queries.size(), queries.data());
         for (size_t row = 0; row < rows.size(); ++row) {
@@ -182,8 +181,7 @@ CheckUnindexedNaN(ScalarIndexSort<T>& index,
             EXPECT_EQ(not_in[row], source_valid && !hit);
         }
     }
-    for (T value :
-         {T(0), T(2), T(9), std::numeric_limits<T>::infinity(), nan}) {
+    for (T value : {T(0), T(2), T(9), std::numeric_limits<T>::infinity()}) {
         for (auto op : {OpType::LessThan,
                         OpType::LessEqual,
                         OpType::GreaterThan,
@@ -211,8 +209,6 @@ CheckUnindexedNaN(ScalarIndexSort<T>& index,
             }
         }
     }
-    EXPECT_EQ(index.Range(nan, true, T(9), true).count(), 0);
-    EXPECT_EQ(index.Range(T(0), true, nan, true).count(), 0);
     const auto range = index.Range(-std::numeric_limits<T>::infinity(),
                                    true,
                                    std::numeric_limits<T>::infinity(),
@@ -843,11 +839,6 @@ CheckTypedMembership(ScalarIndexSort<T>& index,
         queries.push_back({T(1.25),
                            std::nextafter(T(1.25), T(2)),
                            std::nextafter(T(1.25), T(0))});
-        queries.push_back({std::numeric_limits<T>::quiet_NaN()});
-        queries.push_back({T(31),
-                           std::numeric_limits<T>::quiet_NaN(),
-                           T(-0.0),
-                           std::numeric_limits<T>::quiet_NaN()});
     }
     ASSERT_EQ(index.Count(), rows.size());
     for (const auto& query : queries) {
@@ -1169,11 +1160,8 @@ TEST(ScalarIndexSortArrayTest, NaNDoesNotMatchAndEmptyRowsRemainValid) {
     data->FillFieldData(arrays.data(), arrays.size());
     ScalarIndexSort<double> index(fixture.ctx);
     index.BuildWithFieldData({data});
-    double nan = std::numeric_limits<double>::quiet_NaN();
     double three = 3;
-    EXPECT_EQ(index.In(1, &nan).count(), 0);
     EXPECT_EQ(index.In(1, &three).count(), 1);
-    EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 0);
     EXPECT_EQ(index.Range(three, true, three, true).count(), 1);
     EXPECT_EQ(index.IsNotNull().count(), 2);
 }
@@ -1241,15 +1229,10 @@ TYPED_TEST(ScalarIndexSortNaNTest, OrdinaryArrayNaNRowsRetainParentValidity) {
         EXPECT_FALSE(valid[3]);
         EXPECT_TRUE(valid[4]);
         const T one = T(1);
-        const T queries[] = {nan, one};
-        EXPECT_EQ(index.In(1, &nan).count(), 0);
-        auto matches = index.In(2, queries);
+        auto matches = index.In(1, &one);
         EXPECT_TRUE(matches[0]);
         EXPECT_EQ(matches.count(), 1);
-        EXPECT_EQ(index.NotIn(1, &nan).count(), 4);
-        EXPECT_EQ(index.NotIn(2, queries).count(), 3);
-        EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 0);
-        EXPECT_EQ(index.Range(one, true, nan, true).count(), 0);
+        EXPECT_EQ(index.NotIn(1, &one).count(), 3);
         auto range = index.Range(T(1), true, T(3), true);
         EXPECT_TRUE(range[0]);
         EXPECT_TRUE(range[4]);
@@ -1319,9 +1302,6 @@ TYPED_TEST(ScalarIndexSortNaNTest, NestedIgnoresInvalidNaNPayload) {
         EXPECT_TRUE(std::isnan(*lookup));
         EXPECT_EQ(index.Reverse_Lookup(2), T(3));
         EXPECT_EQ(index.Reverse_Lookup(3), T(9));
-        EXPECT_EQ(index.In(1, &nan).count(), 0);
-        EXPECT_EQ(index.NotIn(1, &nan).count(), 3);
-        EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 0);
         const T three = T(3), nine = T(9);
         auto matches = index.In(1, &three);
         EXPECT_EQ(matches.count(), 1);

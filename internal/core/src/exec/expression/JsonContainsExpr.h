@@ -20,7 +20,6 @@
 
 #include <fmt/core.h>
 
-#include <cmath>
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -35,23 +34,6 @@
 
 namespace milvus {
 namespace exec {
-
-// Query targets require an ordered container without collapsing NaN into a
-// finite target. Keeping an unmatchable NaN target makes contains-all false.
-// This comparator is never used to store indexed scalar values.
-template <typename T>
-struct ContainsTargetLess {
-    bool
-    operator()(const T& lhs, const T& rhs) const {
-        if constexpr (std::is_floating_point_v<T>) {
-            const bool lhs_nan = std::isnan(lhs), rhs_nan = std::isnan(rhs);
-            if (lhs_nan || rhs_nan) {
-                return !lhs_nan && rhs_nan;
-            }
-        }
-        return lhs < rhs;
-    }
-};
 
 class ShreddingArrayBsonContainsArrayExecutor {
  public:
@@ -206,11 +188,11 @@ class ShreddingArrayBsonContainsAnyExecutor {
     std::shared_ptr<MultiElement> arg_set_;
 };
 
-template <typename GetType, typename Compare = std::less<GetType>>
+template <typename GetType>
 class ShreddingArrayBsonContainsAllExecutor {
  public:
     explicit ShreddingArrayBsonContainsAllExecutor(
-        const std::set<GetType, Compare>& elements)
+        const std::set<GetType>& elements)
         : elements_(elements) {
     }
 
@@ -232,7 +214,7 @@ class ShreddingArrayBsonContainsAllExecutor {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            std::set<GetType, Compare> tmp_elements(elements_);
+            std::set<GetType> tmp_elements(elements_);
             for (const auto& element : array_view.value()) {
                 auto value = [&]() -> std::optional<GetType> {
                     if constexpr (std::is_same_v<GetType, int64_t> ||
@@ -246,12 +228,10 @@ class ShreddingArrayBsonContainsAllExecutor {
                 if (!value.has_value()) {
                     continue;
                 }
-                if constexpr (std::is_floating_point_v<GetType>) {
-                    if (std::isnan(value.value())) {
-                        continue;
-                    }
+                auto it = tmp_elements.lower_bound(value.value());
+                if (it != tmp_elements.end() && *it == value.value()) {
+                    tmp_elements.erase(it);
                 }
-                tmp_elements.erase(value.value());
                 if (tmp_elements.empty()) {
                     break;
                 }
@@ -261,7 +241,7 @@ class ShreddingArrayBsonContainsAllExecutor {
     }
 
  private:
-    std::set<GetType, Compare> elements_;
+    std::set<GetType> elements_;
 };
 
 class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {
@@ -547,20 +527,6 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             return;
         }
         SegmentExpr::DetermineExecPath();
-        if (exec_path_ == ExprExecPath::ScalarIndex &&
-            expr_->column_.data_type_ == DataType::JSON &&
-            std::any_of(expr_->vals_.begin(),
-                        expr_->vals_.end(),
-                        [](const auto& value) {
-                            return value.has_float_val() &&
-                                   std::isnan(value.float_val());
-                        })) {
-            // Evaluate NaN targets against the source array container. This
-            // keeps NaN comparisons and negation consistent across JSON backends
-            // without introducing a new container-validity index format.
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
         if (exec_path_ != ExprExecPath::ScalarIndex ||
             expr_->column_.data_type_ != DataType::JSON ||
             value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {

@@ -894,11 +894,6 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     if (is_mmap_) {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if constexpr (std::is_floating_point_v<T>) {
-                if (std::isnan(val)) {
-                    continue;
-                }
-            }
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -911,11 +906,6 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if constexpr (std::is_floating_point_v<T>) {
-                if (std::isnan(val)) {
-                    continue;
-                }
-            }
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -926,11 +916,6 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     } else {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if constexpr (std::is_floating_point_v<T>) {
-                if (std::isnan(val)) {
-                    continue;
-                }
-            }
             auto it = bitsets_.find(val);
             if (it != bitsets_.end()) {
                 res |= it->second;
@@ -952,11 +937,6 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (is_mmap_) {
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if constexpr (std::is_floating_point_v<T>) {
-                if (std::isnan(val)) {
-                    continue;
-                }
-            }
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -969,11 +949,6 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if constexpr (std::is_floating_point_v<T>) {
-                if (std::isnan(val)) {
-                    continue;
-                }
-            }
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -985,11 +960,6 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     }
     for (size_t i = 0; i < n; ++i) {
         const auto& val = values[i];
-        if constexpr (std::is_floating_point_v<T>) {
-            if (std::isnan(val)) {
-                continue;
-            }
-        }
         auto it = bitsets_.find(val);
         if (it != bitsets_.end()) {
             res -= it->second;
@@ -1083,12 +1053,6 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::Range(const T& value, OpType op) {
-    AssertInfo(is_built_, "index has not been built");
-    if constexpr (std::is_floating_point_v<T>) {
-        if (std::isnan(value)) {
-            return TargetBitmap(total_num_rows_);
-        }
-    }
     if (is_mmap_) {
         return std::move(RangeForMmap(value, op));
     }
@@ -1291,12 +1255,6 @@ BitmapIndex<T>::Range(const T& lower_value,
                       bool lb_inclusive,
                       const T& upper_value,
                       bool ub_inclusive) {
-    AssertInfo(is_built_, "index has not been built");
-    if constexpr (std::is_floating_point_v<T>) {
-        if (std::isnan(lower_value) || std::isnan(upper_value)) {
-            return TargetBitmap(total_num_rows_);
-        }
-    }
     if (is_mmap_) {
         return RangeForMmap(
             lower_value, lb_inclusive, upper_value, ub_inclusive);

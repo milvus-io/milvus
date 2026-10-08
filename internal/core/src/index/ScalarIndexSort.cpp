@@ -685,9 +685,6 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
-    if (IsScalarSortNaN(value)) {
-        return TargetBitmap(Count());
-    }
     auto lb = begin();
     auto ub = end();
     if (ShouldSkip(value, value, op)) {
@@ -745,10 +742,6 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
                           const T& upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
-    if (IsScalarSortNaN(lower_bound_value) ||
-        IsScalarSortNaN(upper_bound_value)) {
-        return TargetBitmap(Count());
-    }
     if (lower_bound_value > upper_bound_value ||
         (lower_bound_value == upper_bound_value &&
          !(lb_inclusive && ub_inclusive))) {
