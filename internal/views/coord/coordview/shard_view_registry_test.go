@@ -481,3 +481,30 @@ func shardStatsForNodes(segmentNodes map[int64][]int64) *ShardStats {
 	}
 	return stats
 }
+
+func TestRegistry_SnapshotForCollection(t *testing.T) {
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: shardA.VChannel}
+	other := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_200v0"}
+	statsA, statsB := &ShardStats{}, &ShardStats{}
+	reg := &ShardViewRegistry{
+		version:          1,
+		stats:            map[qviews.ShardID]*ShardStats{shardA: statsA, other: {}},
+		collectionShards: map[int64]map[qviews.ShardID]struct{}{100: {shardA: {}}, 200: {other: {}}},
+	}
+	first := reg.SnapshotForCollection(100)
+	require.Equal(t, uint64(1), first.Version())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardA: statsA}, first.StatsMap())
+	require.Empty(t, reg.SnapshotForCollection(300).StatsMap())
+	reg.mu.Lock()
+	reg.stats[shardB] = statsB
+	reg.collectionShards[100][shardB] = struct{}{}
+	delete(reg.stats, shardA)
+	delete(reg.collectionShards[100], shardA)
+	reg.version++
+	reg.mu.Unlock()
+	next := reg.SnapshotForCollection(100)
+	require.Equal(t, uint64(2), next.Version())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardB: statsB}, next.StatsMap())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardA: statsA}, first.StatsMap(), "previous snapshot remains immutable")
+}

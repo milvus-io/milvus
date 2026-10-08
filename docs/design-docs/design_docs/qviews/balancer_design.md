@@ -315,6 +315,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Snapshot() *ShardViewSnapshot
 func (r *ShardViewRegistry) SnapshotForShards(shardIDs []qviews.ShardID) *ShardViewSnapshot
+func (r *ShardViewRegistry) SnapshotForCollection(collectionID int64) *ShardViewSnapshot
 func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardID
 func (r *ShardViewRegistry) NodeShards(nodeID int64) []qviews.ShardID
 func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID
@@ -325,7 +326,8 @@ Maintains live per-shard stats via callbacks from each `ShardViewManager`.
 `collectionShards` supports collection-scoped reconciliation, while
 `nodeShards` tracks the shards currently referencing each node. `Snapshot()`
 publishes the resident full snapshot lazily; `SnapshotForShards()` copies only
-the requested `ShardID -> *ShardStats` entries.
+the requested `ShardID -> *ShardStats` entries. `SnapshotForCollection()` captures
+the collection shard index and its stats together under one read lock.
 
 Shard managers remain resident until release is requested and every QueryView
 has completed durable removal. The registry then removes that exact manager
@@ -389,6 +391,26 @@ version changed, it reports zero progress for the current configuration (or no
 configuration after release). Store versions increase across release/reload, so
 old Up views cannot satisfy the new load. A successful check describes a point
 in time during the call; subsequent configuration changes require a new poll.
+
+**Query segment inspection**: `GetQuerySegmentInfo` / `GetLoadSegmentInfo`
+report the latest serving sealed-segment membership per vchannel from the
+Registry's Up views, restricted to replicas in the current LoadConfig. Choose
+by `DataVersion`; `QueryVersion` is local to one shard-on-replica and must not be
+compared across replicas. Merge node/replica IDs only from Up placements with
+that selected DataVersion. Preparing and retained Down placements are excluded,
+so a compaction's parent and child memberships are never combined. An empty
+latest Up view replaces the older membership too.
+
+The collection's resident shard set and stats are captured under one Registry
+lock. Rows and index metadata come from the existing local DataCoord
+`GetQueryViewSegmentLoadInfos` method; this API does not query QueryNodes.
+`MemSize` retains its existing zero/default semantics. After reading metadata,
+recheck the LoadConfig version and scoped immutable shard stats. Retry a changed
+snapshot at most three times, then return a retriable service-unavailable error.
+An absent config returns no collection segments, including immediately after
+release. This describes serving views, so an old-config Up view may still be
+reported while the new load config is Loading; it does not imply readiness for
+the new configuration.
 
 **Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
 

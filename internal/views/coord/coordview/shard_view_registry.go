@@ -210,6 +210,19 @@ func (r *ShardViewRegistry) SnapshotForShards(shardIDs []qviews.ShardID) *ShardV
 	}
 }
 
+// SnapshotForCollection reads the resident shard set and its immutable stats
+// under the same lock, including shards added while the collection is loading.
+func (r *ShardViewRegistry) SnapshotForCollection(collectionID int64) *ShardViewSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	stats := make(map[qviews.ShardID]*ShardStats, len(r.collectionShards[collectionID]))
+	for shardID := range r.collectionShards[collectionID] {
+		stats[shardID] = r.stats[shardID]
+	}
+	return &ShardViewSnapshot{version: r.version, stats: stats}
+}
+
 // CollectionShards returns the resident shards belonging to collectionID.
 func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardID {
 	r.mu.RLock()
