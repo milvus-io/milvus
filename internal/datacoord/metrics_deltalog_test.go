@@ -19,7 +19,9 @@ package datacoord
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -114,4 +116,63 @@ func TestReportDeltalogMetrics(t *testing.T) {
 	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogSize))
 	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataCoordSegmentDeletedRowsRatio))
 	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataCoordL0DeltalogFileNum))
+}
+
+func TestReportDeltalogMetricsPrunesStaleLevel(t *testing.T) {
+	// round 1: collection 100 has L1 and L2, collection 200 has L1 only
+	agg100 := &deltalogAggregate{dbName: "db1"}
+	agg100.observe(makeDeltaMetricSegment(datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 1000, 180, 1, 1024))
+	agg100.observe(makeDeltaMetricSegment(datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, 1000, 182, 1, 1024))
+	agg200 := &deltalogAggregate{dbName: "db1"}
+	agg200.observe(makeDeltaMetricSegment(datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, 1000, 50, 1, 1024))
+	reportDeltalogMetrics(map[string]*deltalogAggregate{"100": agg100, "200": agg200})
+	assert.Equal(t, 3*len(deltalogQuantiles), testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogFileCount))
+
+	// round 2: clustering compaction consumed every L1 segment of collection
+	// 100; the collection survives with L2 only. Its L1 series must go, its L2
+	// series and collection 200 must stay.
+	agg100 = &deltalogAggregate{dbName: "db1"}
+	agg100.observe(makeDeltaMetricSegment(datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, 1000, 183, 1, 1024))
+	reportDeltalogMetrics(map[string]*deltalogAggregate{"100": agg100, "200": agg200})
+	for _, vec := range []*prometheus.GaugeVec{
+		metrics.DataCoordSegmentDeltalogFileCount,
+		metrics.DataCoordSegmentDeltalogSize,
+		metrics.DataCoordSegmentDeletedRowsRatio,
+	} {
+		assert.Equal(t, 2*len(deltalogQuantiles), testutil.CollectAndCount(vec))
+		assert.False(t, hasDeltalogSeries(vec, "100", "L1"))
+		assert.True(t, hasDeltalogSeries(vec, "100", "L2"))
+		assert.True(t, hasDeltalogSeries(vec, "200", "L1"))
+	}
+	assert.Equal(t, 183.0, testutil.ToFloat64(metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues("db1", "100", "L2", "1.0")))
+	assert.Equal(t, 50.0, testutil.ToFloat64(metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues("db1", "200", "L1", "1.0")))
+	assert.Equal(t, 2, testutil.CollectAndCount(metrics.DataCoordL0DeltalogFileNum))
+
+	// round 3: both collections gone
+	reportDeltalogMetrics(map[string]*deltalogAggregate{})
+	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogFileCount))
+	assert.Equal(t, 0, testutil.CollectAndCount(metrics.DataCoordL0DeltalogFileNum))
+}
+
+// hasDeltalogSeries reports whether vec currently holds any series of the
+// given collection and segment level (a curried vec still collects the whole
+// vec, so the label pairs are inspected directly).
+func hasDeltalogSeries(vec *prometheus.GaugeVec, collectionID, level string) bool {
+	ch := make(chan prometheus.Metric, 64)
+	vec.Collect(ch)
+	close(ch)
+	for m := range ch {
+		var d dto.Metric
+		if err := m.Write(&d); err != nil {
+			continue
+		}
+		labels := make(map[string]string, len(d.GetLabel()))
+		for _, lp := range d.GetLabel() {
+			labels[lp.GetName()] = lp.GetValue()
+		}
+		if labels["collection_id"] == collectionID && labels["segment_level"] == level {
+			return true
+		}
+	}
+	return false
 }

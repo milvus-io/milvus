@@ -633,3 +633,17 @@ func CleanupDataCoordDeltalogMetrics(collectionID string) {
 		collectionIDLabelName: collectionID,
 	})
 }
+
+// CleanupDataCoordDeltalogLevelMetrics removes the per-level quantile series of
+// one (collection, segment level) pair; called when a metrics refresh round
+// observes the collection but no flushed segment of that level any more, so the
+// series do not freeze at their last published values.
+func CleanupDataCoordDeltalogLevelMetrics(collectionID, segmentLevel string) {
+	labels := prometheus.Labels{
+		collectionIDLabelName: collectionID,
+		segmentLevelLabelName: segmentLevel,
+	}
+	DataCoordSegmentDeltalogFileCount.DeletePartialMatch(labels)
+	DataCoordSegmentDeltalogSize.DeletePartialMatch(labels)
+	DataCoordSegmentDeletedRowsRatio.DeletePartialMatch(labels)
+}

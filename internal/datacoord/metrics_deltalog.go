@@ -136,17 +136,20 @@ func quantilesInPlace(values []float64, qs []float64) []float64 {
 
 var (
 	deltalogPublishMu sync.Mutex
-	// collections whose deltalog series are currently published; lets a
-	// refresh round prune collections that disappeared since the last one
-	publishedDeltalogCollections = make(map[string]struct{})
+	// (collection, segment level) pairs whose per-level quantile series are
+	// currently published; lets a refresh round prune a level that stopped
+	// contributing while its collection survived (e.g. clustering compaction
+	// consumed every L1 segment), as well as collections that disappeared
+	publishedDeltalogLevels = make(map[string]map[string]struct{})
 )
 
 // reportDeltalogMetrics publishes the per-collection deltalog gauges, then
-// prunes series of collections absent from this round (dropped collections are
-// also eagerly cleaned in CleanupDataCoordWithCollectionID on DropCollection).
-// Publish-then-prune instead of Reset-then-Set so a concurrent scrape never
-// observes an empty window; the mutex serializes concurrent GetQuotaInfo
-// callers.
+// prunes the series absent from this round: a whole collection (also eagerly
+// cleaned in CleanupDataCoordWithCollectionID on DropCollection), or one
+// segment level of a surviving collection, whose 12 quantile series would
+// otherwise freeze at their last published values. Publish-then-prune instead
+// of Reset-then-Set so a concurrent scrape never observes an empty window; the
+// mutex serializes concurrent GetQuotaInfo callers.
 func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
 	deltalogPublishMu.Lock()
 	defer deltalogPublishMu.Unlock()
@@ -156,10 +159,13 @@ func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
 		qs[i] = p.q
 	}
 
+	published := make(map[string]map[string]struct{}, len(aggregates))
 	for collectionID, agg := range aggregates {
 		metrics.DataCoordL0DeltalogFileNum.WithLabelValues(agg.dbName, collectionID).Set(float64(agg.l0FileCount))
+		levels := make(map[string]struct{}, len(agg.byLevel))
 		for level, d := range agg.byLevel {
 			levelStr := level.String()
+			levels[levelStr] = struct{}{}
 			fcQ := quantilesInPlace(d.fileCounts, qs)
 			szQ := quantilesInPlace(d.sizes, qs)
 			drQ := quantilesInPlace(d.deletedRatios, qs)
@@ -169,14 +175,19 @@ func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
 				metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(drQ[i])
 			}
 		}
+		published[collectionID] = levels
 	}
-	for collectionID := range publishedDeltalogCollections {
-		if _, ok := aggregates[collectionID]; !ok {
+	for collectionID, levels := range publishedDeltalogLevels {
+		current, ok := published[collectionID]
+		if !ok {
 			metrics.CleanupDataCoordDeltalogMetrics(collectionID)
-			delete(publishedDeltalogCollections, collectionID)
+			continue
+		}
+		for levelStr := range levels {
+			if _, ok := current[levelStr]; !ok {
+				metrics.CleanupDataCoordDeltalogLevelMetrics(collectionID, levelStr)
+			}
 		}
 	}
-	for collectionID := range aggregates {
-		publishedDeltalogCollections[collectionID] = struct{}{}
-	}
+	publishedDeltalogLevels = published
 }
