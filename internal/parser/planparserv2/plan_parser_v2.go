@@ -180,6 +180,9 @@ func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visit
 	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
+		if err == errNaNQuery {
+			return nil, err
+		}
 		return nil, merr.WrapErrQueryPlan(err, "cannot parse expression: %s", exprStr)
 	}
 
@@ -201,6 +204,9 @@ func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visit
 		}
 	}
 
+	if err := validateQueryValues(predicate.expr); err != nil {
+		return nil, err
+	}
 	return predicate.expr, nil
 }
 

@@ -28,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -4108,6 +4109,132 @@ TEST(Expr, ScalarSortedNaNOperatorsMatchRawIEEE) {
             column, proto::plan::NullExpr_NullOp_IsNotNull),
         [](double, bool valid) { return valid; },
         true);
+}
+
+namespace {
+
+template <typename T>
+void
+CheckStructSortedSourceNaNIn() {
+    const DataType type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugArrayField("objects[score]", type, false);
+    schema->set_primary_field_id(pk);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<std::vector<T>> rows{
+        {nan, T(3)}, {}, {T(7), nan, T(3)}, {T(0), T(9), T(3)}, {nan}};
+    std::vector<Array> arrays;
+    std::vector<T> elements;
+    for (const auto& row : rows) {
+        ScalarFieldProto values;
+        if constexpr (std::is_same_v<T, float>) {
+            auto* data = values.mutable_float_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        } else {
+            auto* data = values.mutable_double_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        }
+        arrays.emplace_back(values);
+        elements.insert(elements.end(), row.begin(), row.end());
+    }
+    auto field_data = storage::CreateFieldData(DataType::ARRAY, type, false);
+    field_data->FillFieldData(arrays.data(), rows.size());
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_segment = CreateSealedSegment(schema);
+    auto index_segment = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
+    raw_segment->LoadFieldData(field_info);
+    index_segment->LoadFieldData(field_info);
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("objects[score]");
+    field_schema.set_fieldid(fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(static_cast<proto::schema::DataType>(type));
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4012, 4012};
+    auto sorted = std::make_unique<index::ScalarIndexSort<T>>(ctx, true);
+    sorted->BuildWithFieldData({field_data});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = DataType::ARRAY;
+    info.element_type = type;
+    info.num_rows = rows.size();
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index = CreateTestCacheIndex(
+        "struct_sorted_nan_in_" + std::to_string(sizeof(T)), std::move(sorted));
+    index_segment->LoadIndex(info);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+    ASSERT_NE(raw_segment->GetArrayOffsets(fid), nullptr);
+    EXPECT_EQ(raw_segment->GetArrayOffsets(fid)->GetTotalElementCount(),
+              elements.size());
+    expr::ColumnInfo column(fid, DataType::ARRAY, type);
+    column.element_level_ = true;
+    std::vector<std::vector<T>> target_sets{{}, {T(3)}, {T(0), T(3), T(7)}};
+    std::vector<T> large_targets;
+    for (int i = 0; i < 129; ++i) {
+        large_targets.push_back(T(i));
+    }
+    target_sets.push_back(std::move(large_targets));
+    for (const auto& targets : target_sets) {
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto value : targets) {
+            proto::plan::GenericValue literal;
+            literal.set_float_val(value);
+            values.push_back(std::move(literal));
+        }
+        auto terms = std::make_shared<expr::TermFilterExpr>(column, values);
+        for (const bool negated : {false, true}) {
+            SCOPED_TRACE("type " + std::to_string(static_cast<int>(type)) +
+                         " targets " + std::to_string(targets.size()) +
+                         " negated " + std::to_string(negated));
+            expr::TypedExprPtr expression = terms;
+            if (negated) {
+                expression = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, terms);
+            }
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto raw = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), rows.size(), MAX_TIMESTAMP);
+            auto indexed = milvus::test::gen_filter_res(
+                plan.get(), index_segment.get(), rows.size(), MAX_TIMESTAMP);
+            ASSERT_EQ(raw->size(), elements.size());
+            ASSERT_EQ(indexed->size(), elements.size());
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+            BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                       indexed->size());
+            for (size_t i = 0; i < elements.size(); ++i) {
+                const bool hit =
+                    std::find(targets.begin(), targets.end(), elements[i]) !=
+                    targets.end();
+                const bool expected = negated ? !hit : hit;
+                EXPECT_EQ(raw_bits[i], expected) << "raw element " << i;
+                EXPECT_EQ(index_bits[i], expected) << "index element " << i;
+                EXPECT_TRUE(raw_valid[i]) << "raw element " << i;
+                EXPECT_TRUE(index_valid[i]) << "index element " << i;
+            }
+        }
+    }
+}
+
+}  // namespace
+
+TEST(Expr, StructSortedSourceNaNInMatchesRaw) {
+    CheckStructSortedSourceNaNIn<float>();
+    CheckStructSortedSourceNaNIn<double>();
 }
 
 TEST(Expr, RawJsonArrayNaNContainsTargetsRemainUnmatchable) {

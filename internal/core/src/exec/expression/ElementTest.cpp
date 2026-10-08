@@ -16,7 +16,9 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -97,6 +99,52 @@ TEST(SimdBatchElementTest, Double) {
         EXPECT_TRUE(sb.In(MakeVT(v)));
     }
     EXPECT_FALSE(sb.In(MakeVT(1.6)));
+}
+
+template <typename T>
+void
+VerifySourceNaNIn() {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<std::vector<T>> targets{{}, {T(3)}, {T(0), T(3), T(7)}};
+    std::vector<T> data(41);
+    const std::vector<T> pattern{nan, T(3), T(9), T(0), T(7)};
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = pattern[i % pattern.size()];
+    }
+    for (const auto& values : targets) {
+        SimdBatchElement<T> elem(values);
+        EXPECT_FALSE(elem.In(MakeVT(nan)));
+        for (const auto value : data) {
+            EXPECT_EQ(
+                elem.In(MakeVT(value)),
+                std::find(values.begin(), values.end(), value) != values.end());
+        }
+        // Exercise scalar tails and unaligned heads as well as SIMD bulk.
+        for (const int offset : {0, 1, 7}) {
+            milvus::TargetBitmap bitmap(data.size() + offset + 1, false);
+            milvus::TargetBitmapView full(bitmap);
+            full[offset + data.size()] = true;
+            elem.FilterChunk(data.data(), data.size(), full + offset);
+            for (size_t i = 0; i < data.size(); ++i) {
+                EXPECT_EQ(full[offset + i],
+                          std::find(values.begin(), values.end(), data[i]) !=
+                              values.end())
+                    << "offset " << offset << " slot " << i;
+            }
+            EXPECT_TRUE(full[offset + data.size()]);
+            for (int i = 0; i < offset; ++i) {
+                EXPECT_FALSE(full[i]);
+            }
+        }
+    }
+}
+
+TEST(SimdBatchElementTest, FloatSourceNaN) {
+    VerifySourceNaNIn<float>();
+}
+
+TEST(SimdBatchElementTest, DoubleSourceNaN) {
+    VerifySourceNaNIn<double>();
 }
 
 TEST(SimdBatchElementTest, Empty) {

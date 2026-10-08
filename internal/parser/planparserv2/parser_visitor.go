@@ -361,13 +361,13 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 			if err != nil {
 				return err
 			}
-			return n
+			return validateFoldedConstant(n)
 		case parser.PlanParserSUB:
 			n, err := Subtract(leftValue, rightValue)
 			if err != nil {
 				return err
 			}
-			return n
+			return validateFoldedConstant(n)
 		default:
 			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
@@ -444,19 +444,19 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 			if err != nil {
 				return err
 			}
-			return n
+			return validateFoldedConstant(n)
 		case parser.PlanParserDIV:
 			n, err := Divide(leftValue, rightValue)
 			if err != nil {
 				return err
 			}
-			return n
+			return validateFoldedConstant(n)
 		case parser.PlanParserMOD:
 			n, err := Modulo(leftValue, rightValue)
 			if err != nil {
 				return err
 			}
-			return n
+			return validateFoldedConstant(n)
 		default:
 			return merr.WrapErrParameterInvalidMsg("unexpected op: %s", ctx.GetOp().GetText())
 		}
@@ -2134,7 +2134,7 @@ func (v *ParserVisitor) VisitPower(ctx *parser.PowerContext) interface{} {
 
 	leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 	if leftValue != nil && rightValue != nil {
-		return Power(leftValue, rightValue)
+		return validateFoldedConstant(Power(leftValue, rightValue))
 	}
 
 	return merr.WrapErrParameterInvalidMsg("power can only apply on constants: %s", ctx.GetText())
