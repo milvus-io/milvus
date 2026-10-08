@@ -475,12 +475,21 @@ func (s *mixCoordImpl) Stop() error {
 		mlog.Error(s.ctx, "Failed to stop rootCoord", mlog.Err(err))
 	}
 
+	// Created only on activation, so a standby that never became active has none.
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Stop()
+	}
+
+	// Cancel before stopping the session: on a standby, cancelling the session
+	// makes ProcessActiveStandBy return context.Canceled, and the goroutine
+	// started in Register only treats that as a shutdown once s.ctx is done.
+	// The session context derives from s.ctx, and the lease is revoked with a
+	// background context, so the session still shuts down cleanly.
+	s.cancel()
+
 	// All coordinators have stopped. Now stop the session.
 	s.session.SetMixCoordMode(false)
 	s.session.Stop()
-
-	s.fileResourceObserver.Stop()
-	s.cancel()
 	return nil
 }
 
