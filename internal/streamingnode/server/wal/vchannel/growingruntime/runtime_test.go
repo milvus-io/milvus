@@ -234,6 +234,28 @@ func TestDrainDeleteReplayUsesSharedTransformLogStream(t *testing.T) {
 	}
 }
 
+func TestDrainDeleteReplayAcceptsSummaryLowerBound(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	manager := walsummary.NewManager(walsummary.ManagerConfig{PChannel: "p1"})
+	manager.InitLastAcked(10)
+	manager.ObserveMessage(ctx, newTestTransformDeleteMessage(t, "v1", 20))
+	stream := walsummary.NewStream(manager)
+	defer stream.Close()
+	for _, end := range []uint64{5, 20} {
+		entries, err := drainDeleteReplay(ctx, walview.VChannelWALView{
+			VChannel: "v1", BaseTransformTimeTick: end, TransformLogStream: stream,
+		})
+		require.NoError(t, err)
+		if end <= 10 {
+			require.Empty(t, entries)
+		} else {
+			require.Len(t, entries, 1)
+			require.Equal(t, uint64(20), entries[0].GetTimeTick())
+		}
+	}
+}
+
 func TestRecoveryBarrierAdvancesBothRuntimeFrontiers(t *testing.T) {
 	runtime := newRuntime()
 
