@@ -30,10 +30,14 @@ func TestProtoContract_ReleaseFieldKindsPinned(t *testing.T) {
 		{&schemapb.VectorField{}, "1=int64,2=message,3=bytes,4=bytes,5=bytes,6=message,7=bytes,8=message"},
 		{&schemapb.IDs{}, "1=message,2=message"},
 		{&schemapb.SparseFloatArray{}, "1=bytes,2=int64"},
-		{&schemapb.FloatArray{}, "1=float"}, {&schemapb.LongArray{}, "1=int64"},
-		{&schemapb.IntArray{}, "1=int32"}, {&schemapb.BoolArray{}, "1=bool"},
-		{&schemapb.DoubleArray{}, "1=double"}, {&schemapb.BytesArray{}, "1=bytes"},
-		{&schemapb.JSONArray{}, "1=bytes"}, {&schemapb.StringArray{}, "1=string"},
+		{&schemapb.FloatArray{}, "1=float"},
+		{&schemapb.LongArray{}, "1=int64"},
+		{&schemapb.IntArray{}, "1=int32"},
+		{&schemapb.BoolArray{}, "1=bool"},
+		{&schemapb.DoubleArray{}, "1=double"},
+		{&schemapb.BytesArray{}, "1=bytes"},
+		{&schemapb.JSONArray{}, "1=bytes"},
+		{&schemapb.StringArray{}, "1=string"},
 	}
 	for _, c := range cases {
 		fields := c.message.ProtoReflect().Descriptor().Fields()
