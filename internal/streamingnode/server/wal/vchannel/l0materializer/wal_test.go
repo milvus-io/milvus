@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -39,6 +40,34 @@ func walDelete(tt uint64) message.ImmutableMessage {
 
 func walFlush(tt uint64) message.ImmutableMessage {
 	return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
+}
+
+// retiringAlterCollection builds the shard split routing commit whose
+// post-image names `vchannels`. It retires "v1" exactly when that list omits
+// it; every other AlterCollection is not a boundary at all.
+func retiringAlterCollection(vchannels []string) message.MutableMessage {
+	return message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: 1,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{VirtualChannelNames: vchannels},
+		}).MustBuildMutable()
+}
+
+// TestWALMaterializerAlterCollectionIsABoundaryOnlyWhenItRetires: the same
+// message type commits routing on every shard of a collection, and only the
+// vchannel its post-image omits is dropped by it. A commit that keeps the
+// vchannel must not end its batch.
+func TestWALMaterializerAlterCollectionIsABoundaryOnlyWhenItRetires(t *testing.T) {
+	m, _, _ := testWALMaterializer(t, 0, 1<<20)
+	keeps := retiringAlterCollection([]string{"v1", "v2"}).
+		WithTimeTick(120).WithLastConfirmed(rmq.NewRmqID(119)).IntoImmutableMessage(rmq.NewRmqID(120))
+	require.False(t, m.isL0Boundary(keeps))
+	retires := retiringAlterCollection([]string{"v2"}).
+		WithTimeTick(130).WithLastConfirmed(rmq.NewRmqID(129)).IntoImmutableMessage(rmq.NewRmqID(130))
+	require.True(t, m.isL0Boundary(retires))
 }
 
 func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
@@ -63,6 +92,18 @@ func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
 		},
 		"CreateSnapshot": func() message.MutableMessage {
 			return message.NewCreateSnapshotMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CreateSnapshotMessageHeader{}).WithBody(&message.CreateSnapshotMessageBody{}).MustBuildMutable()
+		},
+		// A shard split's fence: the source takes no delete after it, so its
+		// last deletes must be materialized at T_switch rather than whenever
+		// the stale-flush timer next comes round.
+		"SplitShard": func() message.MutableMessage {
+			return message.NewSplitShardMessageBuilderV2().WithVChannel("v1").WithHeader(&message.SplitShardMessageHeader{CollectionId: 1, SplitTaskId: 7, SourceVchannel: "v1"}).WithBody(&message.SplitShardMessageBody{}).MustBuildMutable()
+		},
+		// The routing commit that delists a fenced source is that vchannel's
+		// drop, and its tombstone cannot be published before the frontier
+		// passes the drop tick.
+		"RetiringAlterCollection": func() message.MutableMessage {
+			return retiringAlterCollection([]string{"v2"})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

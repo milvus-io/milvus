@@ -2,12 +2,14 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -41,6 +43,9 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
 		return merr.Wrap(err, "failed to check field schema")
+	}
+	if err := refuseTextFieldDuringShardSplit(coll, fieldSchema); err != nil {
+		return err
 	}
 	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
 		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
@@ -118,4 +123,42 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		return err
 	}
 	return nil
+}
+
+// refuseTextFieldDuringShardSplit is asked by every path that can add a
+// field: AddCollectionField and AlterCollectionSchema's add action. (A struct
+// sub-field is an Array or ArrayOfVector, never TEXT, and AlterCollectionField
+// never changes a field's type.)
+//
+// It refuses to add a TEXT field while a shard
+// split of the collection is in flight: any shard of it is Splitting or
+// Creating. A split moves the source's data by rewriting it, and the rewrite
+// does not carry TEXT fields (LOB references), so a TEXT field added mid-split
+// would make every remaining rewrite plan fail while the split, past its fence,
+// can no longer abort.
+//
+// The request is valid; the collection is in a transient state that ends when
+// the split adopts its targets. So the error is System and retriable
+// (ServiceUnavailable), not an input error.
+func refuseTextFieldDuringShardSplit(coll *model.Collection, field *schemapb.FieldSchema) error {
+	if field.GetDataType() != schemapb.DataType_Text || !collectionHasShardSplitInFlight(coll) {
+		return nil
+	}
+	return merr.WrapErrServiceUnavailable(fmt.Sprintf(
+		"collection %d has a shard split in flight, a TEXT field %s can be added once it finishes",
+		coll.CollectionID, field.GetName()))
+}
+
+// collectionHasShardSplitInFlight reports whether any shard of the collection
+// is Splitting or Creating.
+func collectionHasShardSplitInFlight(coll *model.Collection) bool {
+	for _, shard := range coll.ShardInfos {
+		if shard == nil {
+			continue
+		}
+		if shard.State == schemapb.ShardState_ShardSplitting || shard.State == schemapb.ShardState_ShardCreating {
+			return true
+		}
+	}
+	return false
 }

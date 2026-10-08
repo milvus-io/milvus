@@ -57,6 +57,17 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
 				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
+					// This runs outside the vchannel lock, so a shard split fence
+					// can land between iterations. The fence tears the source's
+					// registration down, and the lookup then fails exactly as it
+					// does for a vchannel this pchannel never held. Ask the same
+					// question the shard interceptor's admission asks, by name:
+					// a fenced vchannel is SHARD_FENCED -- the write belongs to a
+					// shard that exists and the route is one routing commit
+					// behind -- not a terminal error.
+					if fenceErr := r.shardManager.CheckIfVChannelCanBeWritten(h.CollectionId, msg.VChannel()); errors.Is(fenceErr, shards.ErrVChannelFenced) {
+						return status.NewShardFenced(msg.VChannel(), 0, 0)
+					}
 					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
 				}
 				return err

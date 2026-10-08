@@ -82,6 +82,22 @@ type Dispatcher struct {
 	includeSkipWhenSplit bool
 }
 
+// SeekablePosition reports whether a dispatcher built from this position will
+// SEEK the underlying stream, rather than only subscribing to it.
+//
+// It matters to callers, not just here: a stream whose Seek is skipped is left
+// half-built, and the delegator's streaming adaptor — whose Seek is what opens
+// the WAL scanner — panics the process the first time the dispatcher reads from
+// it. A caller that can wait for a better position (a freshly created vchannel
+// whose checkpoint has not been reported yet, say) should wait rather than hand
+// one over. Exported so those callers test the same condition this does, since
+// the two drifting apart is exactly what produces that panic.
+func SeekablePosition(position *Pos) bool {
+	// Only the earliest msgID of WoodPecker may legitimately be empty bytes.
+	return position != nil &&
+		(len(position.GetMsgID()) != 0 || position.GetWALName() == commonpb.WALName_WoodPecker)
+}
+
 func NewDispatcher(
 	ctx context.Context,
 	factory msgstream.Factory,
@@ -111,7 +127,7 @@ func NewDispatcher(
 		return nil, err
 	}
 	// Note: Only the earliest msgId of WP can be empty bytes
-	if position != nil && (len(position.MsgID) != 0 || position.WALName == commonpb.WALName_WoodPecker) {
+	if SeekablePosition(position) {
 		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
 		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)
