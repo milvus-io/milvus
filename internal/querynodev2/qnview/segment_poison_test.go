@@ -18,7 +18,7 @@ func TestPoisonBoundaryPinsInstanceAndReports(t *testing.T) {
 	reports := make(chan *viewpb.PoisonedSegment, 2)
 	state := &transformSegmentState{state: transformSegmentLoaded, generation: 7, segment: &fakeTransformSegment{id: 1000, partitionID: 10}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
 	healthy := &transformSegmentState{state: transformSegmentLoaded, generation: 8, segment: &fakeTransformSegment{id: 2000, partitionID: 20}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
-	m := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state, 2000: healthy}, views: map[qviews.QueryViewKey]*transformViewRef{key: {onPoisoned: func(p *viewpb.PoisonedSegment) { reports <- p }}}}
+	m := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state, 2000: healthy}, views: map[qviews.QueryViewKey]*transformViewRef{key: {physicalReady: map[int64]bool{1000: true, 2000: true}, onPoisoned: func(p *viewpb.PoisonedSegment) { reports <- p }}}}
 	s := &observedTransformSegment{TransformSegment: state.segment, manager: m, state: state}
 	s.OnTransformFailed(100, merr.WrapErrServiceUnavailableMsg("delete failed"))
 	select {

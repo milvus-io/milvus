@@ -16,6 +16,7 @@ type SealedSegmentHandle interface {
 }
 
 type sealedSegmentHandle struct {
+	view      *transformViewRef
 	manager   *QueryViewSegmentReadinessManager
 	segmentID int64
 	segment   TransformSegment
@@ -41,6 +42,7 @@ func (h *sealedSegmentHandle) Release() {
 	manager := h.manager
 	h.manager = nil
 	manager.releaseSealedSegmentHandle(h.segmentID, h.state)
+	manager.releaseViewQueryRef(h.view)
 }
 
 func (m *QueryViewSegmentReadinessManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error) {
@@ -54,12 +56,13 @@ func (m *QueryViewSegmentReadinessManager) AcquireSealedSegmentHandles(ctx conte
 	handles := make([]SealedSegmentHandle, 0, len(segmentPartitions))
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.views[key] == nil {
+	ref := m.views[key]
+	if ref == nil || ref.dropping {
 		return nil, viewerror.NewViewNotFound("query view %s is not found", key.String())
 	}
 	for segmentID := range segmentPartitions {
 		state := m.segments[segmentID]
-		if state == nil || state.state != transformSegmentLoaded || state.segment == nil {
+		if ref.unrecoverable || !ref.physicalReady[segmentID] || state == nil || state.state != transformSegmentLoaded || state.segment == nil {
 			for _, handle := range handles {
 				segmentID := handle.ID()
 				rollback := m.segments[segmentID]
@@ -72,11 +75,13 @@ func (m *QueryViewSegmentReadinessManager) AcquireSealedSegmentHandles(ctx conte
 		state.queryRefs++
 		handles = append(handles, &sealedSegmentHandle{
 			manager:   m,
+			view:      ref,
 			segmentID: segmentID,
 			segment:   state.segment,
 			state:     state,
 		})
 	}
+	ref.queryRefs += len(handles)
 	return handles, nil
 }
 
@@ -94,4 +99,18 @@ func (m *QueryViewSegmentReadinessManager) releaseSealedSegmentHandle(segmentID 
 	}
 	m.mu.Unlock()
 	m.releaseDetachedSegment(segment)
+}
+
+func (m *QueryViewSegmentReadinessManager) releaseViewQueryRef(ref *transformViewRef) {
+	var releases []ReleaseSegments
+	m.mu.Lock()
+	ref.queryRefs--
+	if ref.queryRefs == 0 && ref.dropping {
+		releases = ref.pendingReleases
+		ref.pendingReleases = nil
+	}
+	m.mu.Unlock()
+	for _, req := range releases {
+		m.release(req)
+	}
 }

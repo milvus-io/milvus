@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,6 +46,21 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
+	if loadInfo.CollectionID != meta.GetCollectionId() || loadInfo.Version != qnview.QueryViewLoadInfoVersionFromProto(meta.GetLoadInfoVersion()) {
+		return nil, false, merr.WrapErrServiceInternalMsg("query view load-info snapshot does not match requested collection/version")
+	}
+	loadInfo = qnview.CloneQueryViewLoadInfo(loadInfo)
+	// Resolve the legacy empty-list convention before merging view demands.
+	if len(loadInfo.LoadFields) == 0 {
+		for _, field := range collection.GetSchema().GetFields() {
+			loadInfo.LoadFields = append(loadInfo.LoadFields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldID()})
+		}
+		for _, group := range collection.GetSchema().GetStructArrayFields() {
+			for _, field := range group.GetFields() {
+				loadInfo.LoadFields = append(loadInfo.LoadFields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldID()})
+			}
+		}
+	}
 	if err := m.collections.PutOrRef(
 		meta.GetCollectionId(),
 		collection.GetSchema(),
@@ -66,6 +82,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		ccollection = localCollection.GetCCollection()
 	}
 	return &queryViewCollectionRuntimeGuard{
+		loadInfo:      loadInfo,
 		collections:   m.collections,
 		collection:    localCollection,
 		collectionID:  meta.GetCollectionId(),
@@ -92,6 +109,7 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 }
 
 type queryViewCollectionRuntimeGuard struct {
+	loadInfo      qnview.QueryViewLoadInfo
 	collections   qvCollectionManager
 	collection    *segments.Collection
 	collectionID  int64
@@ -155,4 +173,8 @@ func qvViewPartitionIDs(view *viewpb.QueryViewOfQueryNode) []int64 {
 		partitions = append(partitions, partition.GetPartitionId())
 	}
 	return partitions
+}
+
+func (g *queryViewCollectionRuntimeGuard) LoadInfo() qnview.QueryViewLoadInfo {
+	return qnview.CloneQueryViewLoadInfo(g.loadInfo)
 }

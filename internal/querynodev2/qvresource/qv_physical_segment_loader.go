@@ -18,10 +18,10 @@ import (
 
 func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection qnview.CollectionRuntime) (qnview.TransformSegment, error) {
 	if info == nil {
-		return nil, fmt.Errorf("query view segment load info is nil")
+		return nil, merr.WrapErrServiceInternalMsg("query view segment load info is nil")
 	}
 	if collection == nil {
-		return nil, fmt.Errorf("query view collection runtime is nil")
+		return nil, merr.WrapErrServiceInternalMsg("query view collection runtime is nil")
 	}
 
 	loaded, err := l.loader.NewSegment(ctx, collection, info)
@@ -49,15 +49,15 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 
 func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnview.TransformSegment, collection qnview.CollectionRuntime, snapshot qnview.SegmentLoadInfoSnapshot, action qnview.SegmentUpdateAction) error {
 	if segment == nil {
-		return fmt.Errorf("query view transform segment is nil")
+		return merr.WrapErrServiceInternalMsg("query view transform segment is nil")
 	}
 	if snapshot.LoadInfo == nil {
-		return fmt.Errorf("query view segment load info is nil")
+		return merr.WrapErrServiceInternalMsg("query view segment load info is nil")
 	}
 	segment = qnview.UnwrapTransformSegment(segment)
 	transform, ok := segment.(*queryViewTransformSegment)
 	if !ok {
-		return fmt.Errorf("unexpected query view transform segment type %T", segment)
+		return merr.WrapErrServiceInternalMsg("unexpected query view transform segment type %T", segment)
 	}
 	if action.Has(qnview.SegmentUpdateReopen) {
 		if err := l.loader.ReopenSegment(ctx, transform.segment, snapshot.LoadInfo); err != nil {
@@ -99,7 +99,7 @@ type realQVSegmentLoader struct {
 
 func (l realQVSegmentLoader) NewSegment(ctx context.Context, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) (qvLoadedSegment, error) {
 	if collection == nil {
-		return nil, fmt.Errorf("query view collection runtime is nil")
+		return nil, merr.WrapErrServiceInternalMsg("query view collection runtime is nil")
 	}
 	localCollection := collection.PinnedCollection()
 	if localCollection == nil {
@@ -193,7 +193,7 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 		return err
 	}
 	if len(bfs) != 1 {
-		return fmt.Errorf("query view physical loader expected one bloom filter set, got %d", len(bfs))
+		return merr.WrapErrServiceInternalMsg("query view physical loader expected one bloom filter set, got %d", len(bfs))
 	}
 	local.segment.SetPKCandidate(bfs[0])
 	return nil

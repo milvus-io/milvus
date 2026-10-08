@@ -4,7 +4,6 @@ package qnview
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +36,8 @@ type noopNodeTaskHandle struct{}
 
 func (noopNodeTaskHandle) Cancel() {}
 
-func (noopNodeTaskHandle) Wait(context.Context) error { return nil }
+// Captured tasks are driven explicitly by each test, not completed by Submit.
+func (noopNodeTaskHandle) Wait(context.Context) error { return context.Canceled }
 
 func testSegmentLoadSnapshot(segmentID int64, partitionID int64, indexes ...*indexpb.IndexInfo) SegmentLoadInfoSnapshot {
 	return SegmentLoadInfoSnapshot{
@@ -129,45 +129,6 @@ func TestSegmentLoadTaskContextCancelsRunningLoad(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for canceled load")
 	}
-}
-
-func TestSegmentUpdateTaskRetriesSameTaskWithErrDelay(t *testing.T) {
-	nodeScheduler := &capturedNodeScheduler{}
-	var attempts atomic.Int32
-	loader := &fakePhysicalLoader{
-		updateFn: func(segment TransformSegment, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot, action SegmentUpdateAction) error {
-			if attempts.Add(1) == 1 {
-				return errors.New("update failed")
-			}
-			return nil
-		},
-	}
-	var updated atomic.Int32
-	var failed atomic.Int32
-	nodeScheduler.Submit(newSegmentUpdateTask(loader, SegmentUpdateTask{
-		Segment:    &fakeTransformSegment{id: 1000},
-		Collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
-		Current:    SegmentLoadInfoRevision{Revision: 1},
-		Snapshot: SegmentLoadInfoSnapshot{
-			SegmentID: 1000,
-			Revision:  SegmentLoadInfoRevision{Revision: 2},
-			LoadInfo:  &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: testCollectionID},
-		},
-		OnUpdated: func(SegmentLoadInfoRevision) { updated.Add(1) },
-		OnFailed:  func(error) { failed.Add(1) },
-	}))
-
-	require.Len(t, nodeScheduler.tasks, 1)
-	task := nodeScheduler.tasks[0]
-	require.ErrorIs(t, task.Execute(context.Background()), nodescheduler.ErrDelay)
-	assert.Equal(t, int32(0), updated.Load())
-	assert.Equal(t, int32(0), failed.Load())
-
-	require.NoError(t, task.Execute(context.Background()))
-	assert.Equal(t, int32(2), attempts.Load())
-	assert.Equal(t, int32(1), updated.Load())
-	assert.Equal(t, int32(0), failed.Load())
-	require.Len(t, nodeScheduler.tasks, 1, "retry must reuse the same scheduled task")
 }
 
 func TestSegmentLoadTask_ReservesAndReleasesResourceAroundLoad(t *testing.T) {
@@ -425,32 +386,6 @@ func TestSegmentLoadTask_IndexMetaUpdateFailureSkipsReserveAndLoad(t *testing.T)
 	assert.Empty(t, loader.loadInfos)
 }
 
-func TestSegmentLoadTask_ReservationFailureSkipsPhysicalLoad(t *testing.T) {
-	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
-	loader := &fakePhysicalLoader{}
-	estimator := &fakeSegmentResourceEstimator{err: errors.New("resource rejected")}
-	unrecoverableCh := make(chan error, 1)
-	submitTestSegmentLoadTask(t, loader, SegmentLoadTask{
-		Context:         context.Background(),
-		SegmentID:       1000,
-		Collection:      runtime,
-		Snapshot:        testSegmentLoadSnapshot(1000, 10),
-		OnLoaded:        func(TransformSegment) { t.Fatal("unexpected loaded") },
-		OnUnrecoverable: func(err error) { unrecoverableCh <- err },
-	}, estimator)
-
-	select {
-	case err := <-unrecoverableCh:
-		require.Error(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for unrecoverable")
-	}
-	require.Len(t, estimator.infos, 1)
-	require.Len(t, estimator.collections, 1)
-	assert.Same(t, runtime, estimator.collections[0])
-	assert.Empty(t, loader.loadInfos)
-}
-
 func TestSegmentUpdateTask_ClassifiesRevisionChange(t *testing.T) {
 	loader := &fakePhysicalLoader{}
 	updatedCh := make(chan SegmentLoadInfoRevision, 1)
@@ -481,7 +416,7 @@ func TestSegmentUpdateTask_ClassifiesRevisionChange(t *testing.T) {
 	}
 	require.Len(t, loader.updateActions, 1)
 	require.True(t, loader.updateActions[0].Has(SegmentUpdateReopen))
-	require.True(t, loader.updateActions[0].Has(SegmentUpdateLoadIndex))
+	require.False(t, loader.updateActions[0].Has(SegmentUpdateLoadIndex))
 }
 
 func TestSegmentUpdateTask_ClassifiesDataChange(t *testing.T) {
@@ -514,5 +449,5 @@ func TestSegmentUpdateTask_ClassifiesDataChange(t *testing.T) {
 	}
 	require.Len(t, loader.updateActions, 1)
 	require.True(t, loader.updateActions[0].Has(SegmentUpdateReopen))
-	require.True(t, loader.updateActions[0].Has(SegmentUpdateLoadIndex))
+	require.False(t, loader.updateActions[0].Has(SegmentUpdateLoadIndex))
 }

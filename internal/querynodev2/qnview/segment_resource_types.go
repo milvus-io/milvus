@@ -58,6 +58,11 @@ type CollectionRuntime interface {
 	PinnedCollection() *segments.Collection
 }
 
+// QueryViewLoadInfoProvider exposes the immutable configuration pinned by a view.
+type QueryViewLoadInfoProvider interface {
+	LoadInfo() QueryViewLoadInfo
+}
+
 type CollectionIndexMetaUpdater interface {
 	UpdateIndexMeta(ctx context.Context, indexes []*indexpb.IndexInfo) error
 }
@@ -118,7 +123,9 @@ type AcquirePhysicalSegments struct {
 	Meta       *viewpb.QueryViewMeta
 	View       *viewpb.QueryViewOfQueryNode
 	Collection CollectionRuntime
+	LoadInfo   *QueryViewLoadInfo
 
+	OnAvailable            func([]TransformSegment)
 	OnLoaded               func(loaded []TransformSegment)
 	OnSegmentUnrecoverable func(segmentID int64, err error)
 	OnUnrecoverable        func()
@@ -139,11 +146,12 @@ func QueryViewLoadInfoVersionFromProto(version uint64) QueryViewLoadInfoVersion 
 }
 
 type QueryViewLoadInfo struct {
-	CollectionID int64
-	Version      QueryViewLoadInfoVersion
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	fieldVersions map[int64]QueryViewLoadInfoVersion
+	CollectionID  int64
+	Version       QueryViewLoadInfoVersion
+	PartitionIDs  []int64
+	LoadFields    []*messagespb.LoadFieldConfig
+	IndexInfos    []*indexpb.IndexInfo
 }
 
 type SegmentLoadInfoRevision struct {
@@ -154,7 +162,12 @@ func (r SegmentLoadInfoRevision) Empty() bool {
 	return r.Revision == 0
 }
 
+// DataVersion certifies the minimum compatible data view covered by this complete
+// snapshot. Revision is only a content equality token, never a version order.
 type SegmentLoadInfoSnapshot struct {
+	// Captured local demand used to produce this physical load attempt.
+	resources    *QueryViewLoadInfo
+	DataVersion  qviews.DataVersion
 	CollectionID int64
 	SegmentID    int64
 	Revision     SegmentLoadInfoRevision
@@ -163,6 +176,13 @@ type SegmentLoadInfoSnapshot struct {
 }
 
 type SegmentLoadInfoSubscriptionOption struct {
+	// Union of the active views; conflicting field configurations use the
+	// newest load-info version. The stream must provide all requested indexes.
+	LoadInfo QueryViewLoadInfo
+	// Return a complete snapshot covering at least this version, even when its
+	// content revision has not changed. Higher versions must remain compatible
+	// with the live views referencing this segment.
+	DataVersion  qviews.DataVersion
 	CollectionID int64
 	SegmentID    int64
 	Revision     SegmentLoadInfoRevision
@@ -231,7 +251,8 @@ type SegmentLoadTask struct {
 }
 
 type SegmentUpdateTask struct {
-	loader PhysicalSegmentLoader
+	loader    PhysicalSegmentLoader
+	estimator SegmentResourceEstimator
 
 	Context    context.Context
 	Segment    TransformSegment
@@ -239,6 +260,7 @@ type SegmentUpdateTask struct {
 	Snapshot   SegmentLoadInfoSnapshot
 	Current    SegmentLoadInfoRevision
 
-	OnUpdated func(SegmentLoadInfoRevision)
-	OnFailed  func(error)
+	OnUpdated  func(SegmentLoadInfoRevision)
+	OnFailed   func(error)
+	OnFinished func()
 }

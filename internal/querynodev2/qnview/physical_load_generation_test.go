@@ -44,7 +44,7 @@ func TestPhysicalLoadCallbackKeepsReplacementGeneration(t *testing.T) {
 				return newSegment, nil
 			}).Build())
 			patchLifetime(t, mockey.Mock((*fakeSegmentLoadInfoStream).Subscribe).To(func(_ *fakeSegmentLoadInfoStream, opt SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
-				_ = opt.Handler.Handle(SegmentLoadInfoSnapshot{CollectionID: testCollectionID, SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000}})
+				_ = opt.Handler.Handle(SegmentLoadInfoSnapshot{DataVersion: opt.DataVersion, CollectionID: testCollectionID, SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000}})
 				return &lifetimeSubscription{}
 			}).Build())
 			patchLifetime(t, mockey.Mock((*lifetimeSubscription).Close).To(func(*lifetimeSubscription) { closes.Add(1) }).Build())

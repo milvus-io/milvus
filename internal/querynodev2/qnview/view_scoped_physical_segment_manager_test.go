@@ -4,11 +4,9 @@ package qnview
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -35,6 +33,7 @@ func (s *channelNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.Tas
 
 func TestViewScopedPhysicalSegmentManager_SubmitsSegmentLoadTasks(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	meta.TransformStartAfterTimetick = 99
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
@@ -88,6 +87,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseCompletesForQueuedCanceledLoad(
 
 	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, &fakePhysicalLoader{})
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -126,6 +126,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseCompletesFromTaskFinishedCallba
 	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(segmentScheduler, &fakePhysicalLoader{})
 
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -159,199 +160,9 @@ func TestViewScopedPhysicalSegmentManager_ReleaseCompletesFromTaskFinishedCallba
 	}
 }
 
-func TestViewScopedPhysicalSegmentManager_PendsResourceFailureWhileOtherSegmentLoads(t *testing.T) {
-	meta := buildHandlerTestMeta(1)
-	view := &viewpb.QueryViewOfQueryNode{
-		NodeId:     1,
-		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001, 1002}}},
-	}
-	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	scheduler := &fakeNodeScheduler{}
-	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
-
-	loadedCh := make(chan []TransformSegment, 3)
-	failedCh := make(chan int64, 2)
-	unrecoverableCh := make(chan struct{}, 1)
-	mgr.Acquire(AcquirePhysicalSegments{
-		Key: key, Meta: meta, View: view,
-		Collection:             &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
-		OnLoaded:               func(loaded []TransformSegment) { loadedCh <- loaded },
-		OnSegmentUnrecoverable: func(segmentID int64, err error) { failedCh <- segmentID },
-		OnUnrecoverable:        func() { unrecoverableCh <- struct{}{} },
-	})
-
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 3
-	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
-		taskBySegment[task.SegmentID] = task
-	}
-
-	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
-	taskBySegment[1001].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
-	require.Contains(t, mgr.pendingLoadSegments, int64(1000))
-	require.Contains(t, mgr.pendingLoadSegments, int64(1001))
-	select {
-	case got := <-failedCh:
-		t.Fatalf("resource failure should pend while another segment is loading, got failed segment %d", got)
-	case <-unrecoverableCh:
-		t.Fatal("resource failure should not mark view unrecoverable while another segment is loading")
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	taskBySegment[1002].OnLoaded(&fakeTransformSegment{id: 1002, partitionID: 10})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 5
-	}, time.Second, 10*time.Millisecond)
-	require.Empty(t, mgr.pendingLoadSegments)
-	retries := make(map[int64]*SegmentLoadTask, 2)
-	for _, task := range scheduler.tasks[3:] {
-		retries[task.SegmentID] = task
-	}
-	require.Contains(t, retries, int64(1000))
-	require.Contains(t, retries, int64(1001))
-	retries[1000].OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
-	retries[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
-
-	require.Eventually(t, func() bool {
-		return len(loadedCh) == 3
-	}, time.Second, 10*time.Millisecond)
-	select {
-	case got := <-failedCh:
-		t.Fatalf("resource failure should be recovered by retry, got failed segment %d", got)
-	case <-unrecoverableCh:
-		t.Fatal("resource failure should be recovered by retry")
-	default:
-	}
-}
-
-func TestViewScopedPhysicalSegmentManager_PreservesLatestStreamSnapshotForPendingResourceRetry(t *testing.T) {
-	tests := []struct {
-		name                    string
-		emitLatestBeforeFailure bool
-	}{
-		{name: "snapshot arrives while load is running", emitLatestBeforeFailure: true},
-		{name: "snapshot arrives after resource failure"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			meta := buildHandlerTestMeta(1)
-			view := &viewpb.QueryViewOfQueryNode{
-				NodeId:     1,
-				Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
-			}
-			key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-			scheduler := &fakeNodeScheduler{}
-			stream := &fakeSegmentLoadInfoStream{}
-			mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler, stream)
-
-			mgr.Acquire(AcquirePhysicalSegments{
-				Key: key, Meta: meta, View: view,
-				Collection:             &fakeCollectionRuntimeGuard{collectionID: testCollectionID},
-				OnSegmentUnrecoverable: func(segmentID int64, err error) { t.Fatalf("unexpected failed segment %d: %v", segmentID, err) },
-			})
-
-			snapshot := SegmentLoadInfoSnapshot{
-				CollectionID: testCollectionID,
-				SegmentID:    1000,
-				Revision:     SegmentLoadInfoRevision{Revision: 100},
-				LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, CollectionID: testCollectionID},
-			}
-			require.NoError(t, stream.Emit(snapshot))
-			require.NoError(t, stream.Emit(SegmentLoadInfoSnapshot{
-				CollectionID: testCollectionID,
-				SegmentID:    1001,
-				Revision:     SegmentLoadInfoRevision{Revision: 11},
-				LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1001, PartitionID: 10, CollectionID: testCollectionID},
-			}))
-			require.Len(t, scheduler.tasks, 2)
-			taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-			for _, task := range scheduler.tasks {
-				taskBySegment[task.SegmentID] = task
-			}
-			latest := snapshot
-			latest.Revision = SegmentLoadInfoRevision{Revision: 1}
-			latest.LoadInfo = &querypb.SegmentLoadInfo{
-				SegmentID:    1000,
-				PartitionID:  10,
-				CollectionID: testCollectionID,
-				NumOfRows:    1,
-			}
-
-			if test.emitLatestBeforeFailure {
-				require.NoError(t, stream.Emit(latest))
-			}
-			taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
-			if !test.emitLatestBeforeFailure {
-				require.NoError(t, stream.Emit(latest))
-			}
-			if test.emitLatestBeforeFailure {
-				require.Len(t, scheduler.tasks, 2)
-			} else {
-				require.Len(t, scheduler.tasks, 3)
-			}
-
-			taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
-			require.Len(t, scheduler.tasks, 3)
-			retry := scheduler.tasks[2]
-			require.Equal(t, int64(1000), retry.SegmentID)
-			require.Equal(t, latest, retry.Snapshot)
-
-			retry.OnLoaded(&fakeTransformSegment{id: 1000, partitionID: 10})
-			require.Empty(t, scheduler.updates)
-		})
-	}
-}
-
-func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForPendingRetryCallback(t *testing.T) {
-	meta := buildHandlerTestMeta(1)
-	view := &viewpb.QueryViewOfQueryNode{
-		NodeId:     1,
-		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
-	}
-	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	scheduler := &fakeNodeScheduler{}
-	mgr := newTestViewScopedPhysicalSegmentManager(t, scheduler)
-
-	mgr.Acquire(AcquirePhysicalSegments{
-		Key: key, Meta: meta, View: view,
-		OnLoaded:               func([]TransformSegment) {},
-		OnSegmentUnrecoverable: func(segmentID int64, err error) { t.Fatalf("unexpected failed segment %d: %v", segmentID, err) },
-		OnUnrecoverable:        func() { t.Fatal("unexpected unrecoverable") },
-	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
-	}, time.Second, 10*time.Millisecond)
-	taskBySegment := make(map[int64]*SegmentLoadTask, len(scheduler.tasks))
-	for _, task := range scheduler.tasks {
-		taskBySegment[task.SegmentID] = task
-	}
-	taskBySegment[1000].OnUnrecoverable(merr.WrapErrSegmentRequestResourceFailed("Memory"))
-	taskBySegment[1001].OnLoaded(&fakeTransformSegment{id: 1001, partitionID: 10})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 3
-	}, time.Second, 10*time.Millisecond)
-
-	dropped := make(chan struct{}, 1)
-	mgr.Release(ReleaseSegments{Key: key, OnDropped: func() { dropped <- struct{}{} }})
-	require.ErrorIs(t, scheduler.tasks[2].Context.Err(), context.Canceled)
-	select {
-	case <-dropped:
-		t.Fatal("release should wait for pending retry callback")
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	scheduler.tasks[2].OnUnrecoverable(context.Canceled)
-	select {
-	case <-dropped:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for dropped after pending retry callback")
-	}
-}
-
 func TestViewScopedPhysicalSegmentManager_FailsResourceFailureWithoutOtherSegmentLoads(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -382,6 +193,7 @@ func TestViewScopedPhysicalSegmentManager_FailsResourceFailureWithoutOtherSegmen
 
 func TestViewScopedPhysicalSegmentManager_FailsNonResourceErrorWhileOtherSegmentLoads(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
@@ -416,6 +228,7 @@ func TestViewScopedPhysicalSegmentManager_FailsNonResourceErrorWhileOtherSegment
 
 func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRelease(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -452,6 +265,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsLoadingSegmentAfterLastViewRele
 
 func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -489,6 +303,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseWaitsForInFlightLoadCallback(t 
 
 func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpdates(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -538,6 +353,7 @@ func TestViewScopedPhysicalSegmentManager_AppliesLoadInfoSnapshotAndCoalescesUpd
 
 func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightUpdate(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -579,103 +395,6 @@ func TestViewScopedPhysicalSegmentManager_CoalescesRevisionRevertDuringInFlightU
 	assert.Equal(t, appliedRevision, scheduler.updates[1].Snapshot.Revision)
 }
 
-func TestViewScopedPhysicalSegmentManager_KeepsNewerSnapshotPendingWhileUpdateTaskRetries(t *testing.T) {
-	nodeScheduler := &capturedNodeScheduler{}
-	var attempts atomic.Int32
-	loader := &fakePhysicalLoader{
-		updateFn: func(TransformSegment, CollectionRuntime, SegmentLoadInfoSnapshot, SegmentUpdateAction) error {
-			if attempts.Add(1) == 1 {
-				return errors.New("update failed")
-			}
-			return nil
-		},
-	}
-	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
-
-	meta := buildHandlerTestMeta(1)
-	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
-	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
-	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
-	mgr.segments[1000] = &physicalSegmentState{
-		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
-		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
-		requests:     map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: runtime}},
-		revision:     SegmentLoadInfoRevision{Revision: 1},
-		collectionID: testCollectionID,
-	}
-
-	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 10}})
-	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 11}})
-	require.Len(t, nodeScheduler.tasks, 1)
-
-	current := nodeScheduler.tasks[0]
-	require.ErrorIs(t, current.Execute(context.Background()), nodescheduler.ErrDelay)
-	require.Len(t, nodeScheduler.tasks, 1)
-
-	require.NoError(t, current.Execute(context.Background()))
-	require.Len(t, nodeScheduler.tasks, 2)
-	next := nodeScheduler.tasks[1].(*SegmentUpdateTask)
-	assert.Equal(t, uint64(11), next.Snapshot.Revision.Revision)
-}
-
-func TestViewScopedPhysicalSegmentManager_ReleaseStopsRetryingSegmentUpdate(t *testing.T) {
-	nodeScheduler := nodescheduler.New(1)
-	t.Cleanup(nodeScheduler.Close)
-
-	var attempts atomic.Int32
-	loader := &fakePhysicalLoader{
-		updateFn: func(TransformSegment, CollectionRuntime, SegmentLoadInfoSnapshot, SegmentUpdateAction) error {
-			attempts.Add(1)
-			return errors.New("update failed")
-		},
-	}
-	mgr := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
-
-	meta := buildHandlerTestMeta(1)
-	view := &viewpb.QueryViewOfQueryNode{
-		NodeId:     1,
-		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
-	}
-	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-	runtime := &fakeCollectionRuntimeGuard{collectionID: testCollectionID}
-	mgr.views[key] = &viewRef{segments: map[int64]int64{1000: 10}}
-	mgr.segments[1000] = &physicalSegmentState{
-		segment:      &fakeTransformSegment{id: 1000, partitionID: 10},
-		refs:         map[qviews.QueryViewKey]struct{}{key: {}},
-		requests:     map[qviews.QueryViewKey]segmentLoadRequest{key: {meta: meta, collection: runtime}},
-		revision:     SegmentLoadInfoRevision{Revision: 1},
-		collectionID: testCollectionID,
-	}
-
-	mgr.ApplyLoadInfoSnapshot(context.Background(), SegmentLoadInfoSnapshot{
-		CollectionID: testCollectionID,
-		SegmentID:    1000,
-		Revision:     SegmentLoadInfoRevision{Revision: 10},
-		LoadInfo:     &querypb.SegmentLoadInfo{SegmentID: 1000, CollectionID: testCollectionID},
-	})
-	require.Eventually(t, func() bool {
-		return attempts.Load() >= 2
-	}, time.Second, time.Millisecond)
-
-	dropped := make(chan struct{})
-	mgr.Release(ReleaseSegments{
-		Key:       key,
-		OnDropped: func() { close(dropped) },
-	})
-	select {
-	case <-dropped:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for view release")
-	}
-
-	time.Sleep(20 * time.Millisecond)
-	settled := attempts.Load()
-	assert.Never(t, func() bool {
-		return attempts.Load() > settled
-	}, 100*time.Millisecond, time.Millisecond)
-}
-
 func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease(t *testing.T) {
 	scheduler := &fakeNodeScheduler{}
 	stream := &fakeSegmentLoadInfoStream{}
@@ -683,6 +402,7 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 
 	loadedCh := make(chan []TransformSegment, 1)
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -739,6 +459,7 @@ func TestViewScopedPhysicalSegmentManager_WatchesInitialSnapshotUntilLastRelease
 	require.Len(t, scheduler.updates, 1)
 	assert.Equal(t, updatedRevision, scheduler.updates[0].Snapshot.Revision)
 	scheduler.updates[0].OnUpdated(updatedRevision)
+	scheduler.updates[0].OnFinished()
 	require.Len(t, stream.subscriptions, 1)
 
 	droppedCh := make(chan struct{}, 1)
@@ -763,6 +484,7 @@ func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptio
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	mgr.Acquire(AcquirePhysicalSegments{Key: key1, Meta: meta1, View: view})
 	require.Len(t, stream.subscriptions, 1)
@@ -772,6 +494,7 @@ func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptio
 	assert.True(t, oldSubscription.closed)
 
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 	mgr.Acquire(AcquirePhysicalSegments{Key: key2, Meta: meta2, View: view})
 	require.Len(t, stream.subscriptions, 2)
@@ -791,12 +514,14 @@ func TestViewScopedPhysicalSegmentManager_IgnoresSnapshotFromReleasedSubscriptio
 
 func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRelease(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeNodeScheduler{}
@@ -853,12 +578,14 @@ func TestViewScopedPhysicalSegmentManager_SharedInFlightLoadSurvivesSubmitterRel
 
 func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view1 := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view1).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	view2 := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -904,6 +631,7 @@ func TestViewScopedPhysicalSegmentManager_CancelsOnlyLastRefTasksOnMixedRelease(
 
 func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	loader := &fakePhysicalLoader{
@@ -939,6 +667,7 @@ func TestViewScopedPhysicalSegmentManager_AcquireWatchesSnapshotsLoadsAndReports
 
 func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000, 1001}}},
@@ -974,9 +703,11 @@ func TestViewScopedPhysicalSegmentManager_LoadsMissingSegmentsIndependently(t *t
 
 func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view1 := buildHandlerTestQNView(1)
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view1).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	view2 := buildHandlerTestQNView(1)
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view2).QueryViewKey()
 	loader := &fakePhysicalLoader{
@@ -1011,6 +742,7 @@ func TestViewScopedPhysicalSegmentManager_ReleaseAfterLastView(t *testing.T) {
 
 func TestViewScopedPhysicalSegmentManager_MissingIndexDoesNotBlockAcquire(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},

@@ -116,14 +116,15 @@ func (p *fakeQVLoadMetadataProvider) DescribeCollection(context.Context, int64) 
 	return p.collection, p.err
 }
 
-func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(context.Context, int64, qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
+func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(_ context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
 	fields := make([]*messagespb.LoadFieldConfig, 0, len(p.loadFields))
 	for _, fieldID := range p.loadFields {
 		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
 	}
 	return qnview.QueryViewLoadInfo{
-		PartitionIDs: append([]int64(nil), p.partitionIDs...),
-		LoadFields:   fields,
+		CollectionID: collectionID,
+		Version:      version, PartitionIDs: append([]int64(nil), p.partitionIDs...),
+		LoadFields: fields,
 	}, p.err
 }
 

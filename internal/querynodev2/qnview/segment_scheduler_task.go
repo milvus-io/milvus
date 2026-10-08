@@ -3,7 +3,10 @@ package qnview
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -16,10 +19,12 @@ func newSegmentLoadTask(loader PhysicalSegmentLoader, estimator SegmentResourceE
 	return &task
 }
 
-func (t *SegmentLoadTask) Execute(schedulerCtx context.Context) error {
-	if t.OnFinished != nil {
-		defer t.OnFinished()
-	}
+func (t *SegmentLoadTask) Execute(schedulerCtx context.Context) (err error) {
+	defer func() {
+		if !errors.Is(err, nodescheduler.ErrDelay) && t.OnFinished != nil {
+			t.OnFinished()
+		}
+	}()
 	ctx, cancel := mergeTaskContext(schedulerCtx, t.Context)
 	defer cancel()
 	if ctx.Err() != nil {
@@ -27,6 +32,9 @@ func (t *SegmentLoadTask) Execute(schedulerCtx context.Context) error {
 	}
 	segment, err := t.load(ctx)
 	if err != nil {
+		if errors.Is(err, nodescheduler.ErrDelay) {
+			return err
+		}
 		if t.OnUnrecoverable != nil {
 			t.OnUnrecoverable(err)
 		}
@@ -43,10 +51,7 @@ func (t *SegmentLoadTask) load(ctx context.Context) (TransformSegment, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := updateCollectionIndexMeta(ctx, t.Collection, indexes); err != nil {
-		return nil, err
-	}
-	reservation, err := t.reserve(ctx, loadInfo)
+	reservation, err := prepareSegmentResources(ctx, t.Collection, loadInfo, indexes, t.estimator)
 	if err != nil {
 		return nil, err
 	}
@@ -73,19 +78,43 @@ func (t *SegmentLoadTask) loadInfo() (*querypb.SegmentLoadInfo, []*indexpb.Index
 	return nil, nil, merr.WrapErrServiceInternalMsg("query view segment load requires watch snapshot, segmentID=%d", t.SegmentID)
 }
 
-func (t *SegmentLoadTask) reserve(ctx context.Context, info *querypb.SegmentLoadInfo) (ResourceReservation, error) {
-	if t.estimator == nil {
+// Load and Reopen share admission. Only this preparation stage may delay the
+// task; once native work starts, an error terminates the attempt.
+func prepareSegmentResources(ctx context.Context, collection CollectionRuntime, info *querypb.SegmentLoadInfo, indexes []*indexpb.IndexInfo, estimator SegmentResourceEstimator) (ResourceReservation, error) {
+	if info == nil {
+		return nil, merr.WrapErrServiceInternalMsg("query view segment load requires watch snapshot")
+	}
+	if err := updateCollectionIndexMeta(ctx, collection, indexes); err != nil {
+		return nil, err
+	}
+	if estimator == nil {
 		return nil, nil
 	}
-	return t.estimator.Reserve(ctx, info, t.Collection)
+	reservation, err := estimator.Reserve(ctx, info, collection)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		mlog.Debug(ctx, "segment resource admission delayed", mlog.FieldSegmentID(info.GetSegmentID()), mlog.Err(err))
+		return nil, nodescheduler.ErrDelay
+	}
+	return reservation, nil
 }
 
-func newSegmentUpdateTask(loader PhysicalSegmentLoader, task SegmentUpdateTask) *SegmentUpdateTask {
+func newSegmentUpdateTask(loader PhysicalSegmentLoader, task SegmentUpdateTask, estimators ...SegmentResourceEstimator) *SegmentUpdateTask {
 	task.loader = loader
+	if len(estimators) > 0 {
+		task.estimator = estimators[0]
+	}
 	return &task
 }
 
-func (t *SegmentUpdateTask) Execute(schedulerCtx context.Context) error {
+func (t *SegmentUpdateTask) Execute(schedulerCtx context.Context) (err error) {
+	defer func() {
+		if !errors.Is(err, nodescheduler.ErrDelay) && t.OnFinished != nil {
+			t.OnFinished()
+		}
+	}()
 	ctx, cancel := mergeTaskContext(schedulerCtx, t.Context)
 	defer cancel()
 	if ctx.Err() != nil {
@@ -93,11 +122,11 @@ func (t *SegmentUpdateTask) Execute(schedulerCtx context.Context) error {
 		return nil
 	}
 	if err := t.update(ctx); err != nil {
-		if ctx.Err() != nil {
-			t.fail(ctx.Err())
-			return nil
+		if errors.Is(err, nodescheduler.ErrDelay) {
+			return err
 		}
-		return nodescheduler.ErrDelay
+		t.fail(err)
+		return err
 	}
 	return nil
 }
@@ -110,8 +139,12 @@ func (t *SegmentUpdateTask) update(ctx context.Context) error {
 		}
 		return nil
 	}
-	if err := updateCollectionIndexMeta(ctx, t.Collection, t.Snapshot.IndexInfos); err != nil {
+	reservation, err := prepareSegmentResources(ctx, t.Collection, t.Snapshot.LoadInfo, t.Snapshot.IndexInfos, t.estimator)
+	if err != nil {
 		return err
+	}
+	if reservation != nil {
+		defer reservation.Release()
 	}
 	if err := t.loader.Update(ctx, t.Segment, t.Collection, t.Snapshot, action); err != nil {
 		return err
@@ -144,7 +177,7 @@ func classifySegmentUpdate(current, next SegmentLoadInfoRevision) SegmentUpdateA
 	if next.Empty() || current == next {
 		return SegmentUpdateNone
 	}
-	return SegmentUpdateReopen | SegmentUpdateLoadIndex
+	return SegmentUpdateReopen
 }
 
 type schedulerTaskFunc func(context.Context) error
