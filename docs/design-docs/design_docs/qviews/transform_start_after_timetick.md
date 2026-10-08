@@ -171,8 +171,9 @@ RPC is a possible replacement, not a prerequisite for this design.
 2. Under collection publication synchronization, construct a consistent new
    membership and unpublished set, with coverage for the selected base versions.
 3. Calculate F and check that it does not regress.
-4. Persist the complete immutable DataView and any membership transfer that
-   must be atomic, then expose the new version.
+4. Persist DataView membership and version-bound Segment coverage, together
+   with any membership transfer that must be atomic. Keep the calculated F only
+   in the runtime snapshot exposed to consumers; do not serialize it.
 
 Do not pair a newer checkpoint with an older Segment list. The synchronization
 must include state/coverage changes relevant to S and G; a DataView lock alone
@@ -213,12 +214,21 @@ do not assume their cursors satisfy the ordinary Insert registration rule.
 
 ## 5. Recovery, retention, and shared buffers
 
-Persist F in each immutable DataView and C with each referenced data revision.
-Restore an old View's F directly; never recompute it from current SegmentMeta.
-Recover channel checkpoints, publication state, and pending task constraints
-before permitting frontier advancement. The next new View may then use the
-normal calculation. A zero legacy field is unknown, not a request to consume
-from a fabricated current timestamp.
+DataView F is dynamically calculated and is **not persisted**. Persist C with
+each referenced Segment data revision, so recovery can calculate the minimum
+for the exact revisions selected by a View. Recover channel checkpoints,
+publication state, and pending task constraints before generating runtime F.
+A shard frontier serialized by an older writer is not authoritative.
+
+Reconstruct runtime snapshots before exposing them to QueryView builders. For
+retained historical versions, use their own version-bound coverage and cap the
+result by the next retained version's reconstructed F; do not substitute the
+latest Segment revision's C. This preserves version ordering even for an old
+empty View followed by a View containing Segments. Once a runtime snapshot is
+handed to a consumer, keep it immutable. Existing QueryViews keep their own
+adopted cursor until their references are released. Missing recovery inputs
+must block readiness rather than fabricate a current timestamp. A zero legacy
+field means unknown coverage.
 
 The cursor proof and history availability are separate requirements:
 
@@ -266,7 +276,8 @@ pack registration; checkpoint/projection races; concurrent compaction;
 Import callback delay and restart; empty shards; metadata publication failures;
 SN/DataCoord/QN restart; old/new View coexistence; Segment moves; and reload
 while Summary GC runs after SN local Segments have been released. Assert both
-nondecreasing persisted F and exact Delete/Upsert query results.
+nondecreasing dynamically generated F, absence of F from persisted DataViews,
+and exact Delete/Upsert query results.
 
 ## Key packages and current evidence
 
