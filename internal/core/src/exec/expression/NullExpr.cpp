@@ -205,15 +205,11 @@ PhyNullExpr::ExecVectorNull(OffsetVector* input) {
     const auto batch_size =
         std::min(batch_size_, active_count_ - current_data_global_pos_);
     TargetBitmap valid_res(batch_size, true);
-    std::vector<int64_t> offsets(batch_size);
-    for (int64_t i = 0; i < batch_size; ++i) {
-        offsets[i] = current_data_global_pos_ + i;
-    }
-    segment_->ApplyFieldValidDataByOffsets(op_ctx_,
-                                           field_id_,
-                                           offsets.data(),
-                                           offsets.size(),
-                                           TargetBitmapView(valid_res));
+    segment_->ApplyFieldValidDataByRange(op_ctx_,
+                                         field_id_,
+                                         current_data_global_pos_,
+                                         batch_size,
+                                         TargetBitmapView(valid_res));
     current_data_global_pos_ += batch_size;
     return BuildNullResult(std::move(valid_res));
 }
