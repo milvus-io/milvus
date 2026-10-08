@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
@@ -21,6 +22,9 @@ type EventStreamOptions struct {
 	Assignment *types.PChannelInfoAssigned
 }
 
+// Bound both a flow-controlled closing send and the server's close response.
+const eventStreamCloseTimeout = 5 * time.Second
+
 func CreateEventStream(
 	ctx context.Context,
 	opts *EventStreamOptions,
@@ -30,8 +34,10 @@ func CreateEventStream(
 	ctx = contextutil.WithCreateTransformStream(ctx, &streamingpb.CreateTransformStreamRequest{
 		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
 	})
+	ctx, cancel := context.WithCancel(ctx)
 	streamClient, err := handlerClient.SubscribeTransform(ctx, grpc.MaxCallRecvMsgSize(math.MaxInt32))
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	mlog.Debug(ctx, "handler transform log event stream created",
@@ -41,6 +47,7 @@ func CreateEventStream(
 	)
 	stream := &EventStream{
 		ctx:           ctx,
+		cancel:        cancel,
 		pchannel:      pchannel,
 		stream:        streamClient,
 		subscriptions: make(map[int64]*eventSubscription),
@@ -52,6 +59,7 @@ func CreateEventStream(
 
 type EventStream struct {
 	ctx      context.Context
+	cancel   context.CancelFunc
 	pchannel string
 	stream   streamingpb.StreamingNodeHandlerService_SubscribeTransformClient
 
@@ -124,15 +132,33 @@ func (s *EventStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscri
 func (s *EventStream) Close() error {
 	s.markClosing()
 	s.closeOnce.Do(func() {
-		_ = s.send(&streamingpb.TransformRequest{
-			Request: &streamingpb.TransformRequest_CloseStream{
-				CloseStream: &streamingpb.CloseTransformStreamRequest{},
-			},
+		timer := time.AfterFunc(eventStreamCloseTimeout, func() {
+			s.finish(context.DeadlineExceeded)
 		})
-		_ = s.stream.CloseSend()
+		defer timer.Stop()
+		s.closeSend()
+		<-s.done
 	})
 	<-s.done
 	return s.Error()
+}
+
+// closeSend is called only by closeOnce. It shares sendMu with every Send;
+// finish cancels the RPC instead of concurrently calling CloseSend.
+func (s *EventStream) closeSend() {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	_ = s.stream.Send(&streamingpb.TransformRequest{
+		Request: &streamingpb.TransformRequest_CloseStream{
+			CloseStream: &streamingpb.CloseTransformStreamRequest{},
+		},
+	})
+	_ = s.stream.CloseSend()
 }
 
 func (s *EventStream) newSubscription(opt wal.TransformLogSubscriptionOption) *eventSubscription {
@@ -202,6 +228,8 @@ func (s *EventStream) sendCloseSubscription(subscriptionID int64) error {
 }
 
 func (s *EventStream) send(req *streamingpb.TransformRequest) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	select {
 	case <-s.done:
 		if err := s.Error(); err != nil {
@@ -210,8 +238,12 @@ func (s *EventStream) send(req *streamingpb.TransformRequest) error {
 		return io.EOF
 	default:
 	}
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
+	s.mu.Lock()
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		return io.EOF
+	}
 	return s.stream.Send(req)
 }
 
@@ -366,6 +398,9 @@ func (s *EventStream) finish(err error) {
 		s.subscriptions = make(map[int64]*eventSubscription)
 		close(s.done)
 		s.mu.Unlock()
+		// Do not wait for sendMu: Send may be blocked on gRPC flow control.
+		// Cancel only this RPC, leaving the resumable stream's context intact.
+		s.cancel()
 		mlog.Debug(s.ctx, "handler transform log event stream finished",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.Err(err),
@@ -373,6 +408,5 @@ func (s *EventStream) finish(err error) {
 		for _, sub := range subscriptions {
 			sub.finish(err)
 		}
-		_ = s.stream.CloseSend()
 	})
 }
