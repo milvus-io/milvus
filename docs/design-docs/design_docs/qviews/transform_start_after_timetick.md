@@ -6,13 +6,14 @@
 - Design Review: 2026-07-29
 - Design Update: 2026-10-03
 
-Status: design agreed; producer, persistence, and retention integration remain
-unimplemented. The current branch carries `transform_start_after_timetick` on
-`DataViewOfShard` and `QueryViewMeta`, but does not produce a meaningful value.
-The rules below define the intended implementation, not existing guarantees of
-the DataView manager.
+Status: the checkpoint-bounded producer, runtime-only DataView frontier,
+version-bound Segment cursors, Import registration, and conservative history
+retention are implemented. L0 compaction retains the prior Segment cursor until
+it can supply a continuous-prefix coverage certificate; a manifest update alone
+does not justify advancement. Legacy or external data without recoverable
+coverage must remain not-ready instead of fabricating a replay start.
 
-DataCoord will calculate the shard frontier from the existing reported channel
+DataCoord calculates the shard frontier from the existing reported channel
 checkpoint, published Segment coverage, and unpublished Segment constraints.
 This replaces the earlier mandatory shard-wide rotation/Flush barrier proposal.
 Partitions may Flush independently, and no new SN-to-DataCoord watermark RPC is
@@ -199,15 +200,22 @@ CommitImport callback. Pending imports must remain represented in G until
 publication, including the interval after WAL commit but before its TimeTick
 has reached DataCoord's callback.
 
-One concrete implementation is to persist the current shard F as a task's
-conservative constraint **before** issuing CommitImport. Retain it across
-retries and recovery. After obtaining each VChannel's commit TimeTick, persist
-that value as the imported Segments' C and publish the members before removing
-the task constraint. These transitions must participate in the same collection
-publication synchronization.
+The implementation registers each business VChannel's CommitImport TimeTick in
+ImportJob metadata from the broadcaster's synchronous AckOnce callback. SN
+retains ownership of the CommitImport WAL message until that callback succeeds,
+so K cannot pass the commit before its constraint is durable. The asynchronous
+joined callback then persists Segment C and visibility before completing the
+job. The projection reads job constraints before Segment metadata, and includes
+all healthy Segments even when their DataView publication is pending. Thus a
+completed job's constraint is already represented by its Segments.
+
+Missing task fences block frontier generation conservatively. This also keeps
+legacy pending jobs without registration evidence from authorizing progress.
+These task-level commit timestamps are recovery inputs; they are not a persisted
+copy of DataView F.
 
 This ordering must cover replicated imports and recovered tasks as well as
-local broadcasts. An already-issued commit cannot retrospectively be protected
+local broadcasts. An already-acknowledged commit cannot retrospectively be protected
 by pinning today's F. Legacy tasks without a proof need reconciliation before
 advancement. Equivalent obligations apply to copy/external publication paths;
 do not assume their cursors satisfy the ordinary Insert registration rule.

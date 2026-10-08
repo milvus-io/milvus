@@ -75,7 +75,8 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 				},
 			},
 		},
-		CheckpointTimeTick: msg.TimeTick(),
+		CheckpointTimeTick:       msg.TimeTick(),
+		CreateCollectionTimeTick: msg.TimeTick(),
 	}
 }
 

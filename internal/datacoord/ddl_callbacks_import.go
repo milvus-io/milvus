@@ -403,6 +403,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 func (c *DDLCallbacks) registerImportCallbacks() {
 	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
 	registry.RegisterCommitImportV2AckCallback(c.commitImportV2AckCallback)
+	registry.RegisterCommitImportV2AckOnceCallback(c.commitImportV2AckOnceCallback)
 	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
 	registry.RegisterUpdateImportV2AckCallback(c.updateImportAckCallback)
 }
@@ -672,4 +673,32 @@ func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result messa
 	mlog.Info(ctx, "UpdateImport applied to import job",
 		mlog.FieldJobID(jobID), mlog.Int("fileCount", len(ranges)), mlog.Int64("totalReservedIDs", totalReserved))
 	return nil
+}
+
+// commitImportV2AckOnceCallback bridges checkpoint completeness to the async
+// import callback. The SN owns this WAL message until Ack returns, so K cannot
+// pass its timestamp until the constraint below is durable. This also covers
+// replicated commits arriving before local import tasks finish.
+func (c *DDLCallbacks) commitImportV2AckOnceCallback(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
+	msg := result.Message
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
+	jobID := msg.Header().GetJobId()
+	job := c.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.WrapErrServiceNotReadyMsg("import job %d is not registered", jobID)
+	}
+	return c.importMeta.UpdateJob(ctx, jobID, func(job ImportJob) {
+		stored := job.(*importJob)
+		if stored.TransformCommitTimeticks == nil {
+			stored.TransformCommitTimeticks = make(map[string]uint64)
+		}
+		// A retried broadcast may use a later fence. Retain the earliest until
+		// publication so the previous successful append remains protected.
+		old := stored.TransformCommitTimeticks[msg.VChannel()]
+		if old == 0 || msg.TimeTick() < old {
+			stored.TransformCommitTimeticks[msg.VChannel()] = msg.TimeTick()
+		}
+	})
 }

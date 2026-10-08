@@ -34,12 +34,12 @@ For this workflow, local QueryNode `Ready` means:
 After local `Ready`, QueryNode keeps the view-scoped resources until the same
 view is applied as `Dropped`.
 
-The planned [Transform start producer](../transform_start_after_timetick.md)
+The [Transform start producer](../transform_start_after_timetick.md)
 distinguishes the shard cursor F, which pins the entire View's shared buffer,
 from each Segment's cursor C, which belongs to its selected base version.
 Loading and moving Segments uses that shared TransformLog history; QueryView
-does not use L0 loading/forwarding as a historical fallback. The producer and
-version-bound Segment cursor propagation remain to be implemented.
+does not use L0 loading/forwarding as a historical fallback. QueryView partitions carry the version-bound Segment cursors used by physical
+loads, while the shard cursor pins the shared buffer.
 
 ## 3. Component Responsibilities
 

@@ -1784,7 +1784,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1833,6 +1834,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Flushed: true,
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		// Model the first-pack registration and checkpoint that precede Flush.
+		segment.TransformStartAfterTimetick = 10
+		svr.meta.channelCPs.checkpoints["vchan1"] = &msgpb.MsgPosition{ChannelName: "vchan1", Timestamp: 10, MsgID: []byte{1}}
+
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -2628,7 +2633,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
-		svr := newTestServer(t, WithMeta(meta))
+		svr := newTestServer(t, WithMeta(t, meta))
 		defer closeTestServer(t, svr)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -2761,9 +2766,15 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 var globalTestTikv = tikv.SetupLocalTxn()
 
-func WithMeta(meta *meta) Option {
+func WithMeta(t *testing.T, meta *meta) Option {
+	t.Helper()
 	return func(svr *Server) {
 		svr.meta = meta
+		// Production recovers imports with SegmentMeta before exposing DataViews.
+		// Inject the same complete metadata set when bypassing initMeta here.
+		var err error
+		svr.importMeta, err = NewImportMeta(svr.ctx, meta.catalog, svr.allocator, meta)
+		require.NoError(t, err)
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))

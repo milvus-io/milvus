@@ -844,11 +844,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			flushView, commitView, abortView, err := s.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
 				CollectionID: segment.GetCollectionID(),
 				Segments: []dataview.LoadableSegment{{
-					SegmentID:       segment.GetID(),
-					VChannel:        segment.GetInsertChannel(),
-					PartitionID:     segment.GetPartitionID(),
-					ManifestVersion: manifestVersion,
-					RowNum:          rowNum,
+					SegmentID:                   segment.GetID(),
+					VChannel:                    segment.GetInsertChannel(),
+					PartitionID:                 segment.GetPartitionID(),
+					ManifestVersion:             manifestVersion,
+					TransformStartAfterTimetick: segmentTransformStart(segment),
+					RowNum:                      rowNum,
 				}},
 			})
 			if err != nil {

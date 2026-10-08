@@ -180,7 +180,7 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 				toLoad = append(toLoad, segmentLoadSubmission{
 					segmentID: segmentID,
 					ctx:       loadCtx,
-					request:   newSegmentLoadRequest(req),
+					request:   newSegmentLoadRequest(req, segmentID),
 					done:      chainLoadDone(loadDone, loadCancel),
 				})
 			} else {
@@ -202,12 +202,12 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 			toLoad = append(toLoad, segmentLoadSubmission{
 				segmentID: segmentID,
 				ctx:       loadCtx,
-				request:   newSegmentLoadRequest(req),
+				request:   newSegmentLoadRequest(req, segmentID),
 				done:      chainLoadDone(loadDone, loadCancel),
 			})
 		}
 		state.refs[req.Key] = struct{}{}
-		state.requests[req.Key] = newSegmentLoadRequest(req)
+		state.requests[req.Key] = newSegmentLoadRequest(req, segmentID)
 	}
 	m.mu.Unlock()
 	m.subscribeSegments(toSubscribe)
@@ -623,11 +623,21 @@ func (m *ViewScopedPhysicalSegmentManager) removeView(req ReleaseSegments) ([]Se
 	return toClose, nil
 }
 
-func newSegmentLoadRequest(req AcquirePhysicalSegments) segmentLoadRequest {
+func newSegmentLoadRequest(req AcquirePhysicalSegments, segmentID int64) segmentLoadRequest {
+	start := req.Meta.GetTransformStartAfterTimetick()
+	for _, partition := range req.View.GetPartitions() {
+		for idx, id := range partition.GetSegmentIds() {
+			if id == segmentID && idx < len(partition.GetSegmentTransformStartAfterTimeticks()) {
+				if cursor := partition.GetSegmentTransformStartAfterTimeticks()[idx]; cursor != 0 {
+					start = cursor
+				}
+			}
+		}
+	}
 	return segmentLoadRequest{
 		meta:                        req.Meta,
 		collection:                  req.Collection,
-		transformStartAfterTimeTick: req.Meta.GetTransformStartAfterTimetick(),
+		transformStartAfterTimeTick: start,
 	}
 }
 
