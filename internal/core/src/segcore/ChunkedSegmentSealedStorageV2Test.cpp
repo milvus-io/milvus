@@ -3705,7 +3705,8 @@ TEST(SkipIndexPr51441, StorageV2OneSidedVarcharFooterStatsFailOpen) {
     ParquetStatsSkipIndexGuard skip_index_guard(true);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = TestLocalPath + "skip_pr51441_one_sided_varchar_v2";
+    const std::string root =
+        TestLocalPath + "skip_pr51441_one_sided_varchar_v2";
     const int64_t N = WriteOneSidedVarcharStatsV2Parquet(schema, pk_fid, root);
 
     // Exercise the real Arrow writer/reader boundary.  Arrow's default 4 KiB
@@ -3824,7 +3825,8 @@ TEST(SkipIndexPr51441, OutOfRangeBinaryRangePrefetchMatchesScan) {
                                         /*payload_fid=*/nullptr,
                                         /*nullable_val=*/false,
                                         DataType::INT32);
-    const std::string root = TestLocalPath + "skip_pr51441_out_of_range_range_v2";
+    const std::string root =
+        TestLocalPath + "skip_pr51441_out_of_range_range_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 

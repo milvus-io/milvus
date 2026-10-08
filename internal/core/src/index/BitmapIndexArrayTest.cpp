@@ -301,10 +301,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        auto root_path =
-            TestLocalPath +
-            boost::filesystem::unique_path("array_bitmap-%%%%-%%%%-%%%%-%%%%")
-                .string();
+        auto root_path = TestLocalPath + boost::filesystem::unique_path(
+                                             "array_bitmap-%%%%-%%%%-%%%%-%%%%")
+                                             .string();
         ASSERT_TRUE(boost::filesystem::create_directory(root_path));
         root_path_ = root_path;
 
