@@ -217,7 +217,7 @@ Rules that apply across groups:
   | `dim` (per vector field, max over the collection) | `<=128`, `129-512`, `513-1024`, `1025-2048`, `>2048` |
   | `max_length` (max over every field whose type params carry `max_length`, struct sub-fields and Array elements included) | `<=256`, `257-4096`, `4097-65535`, `>65535` |
   | `max_capacity` (max over Array fields) | `<=64`, `65-1024`, `>1024` |
-  | `replica_number` (from `collection.replica.number`, default 1) | `1`, `2`, `3+` |
+  | `replica_number` (from `collection.replica.number`, else the database's `database.replica.number`; a collection with neither inherits the cluster default and is not bucketed) | `1`, `2`, `3+` |
   | `loaded_replica_number` (the effective replica count of a loaded collection) | `1`, `2`, `3+` |
 
 ### HTTP endpoint
@@ -290,7 +290,7 @@ call.
 
 | Data | Source |
 |---|---|
-| Collection schema, properties, partitions, aliases, databases | rootcoord `MetaTable.FeatureUsageSnapshot` — databases, available collections and the alias total, taken under one read lock in one pass over each index. Listing collections per database would walk the whole collection map once per database |
+| Collection schema, properties, partitions, aliases, databases | rootcoord `MetaTable.FeatureUsageSnapshot` — databases, available collections and the alias total, taken under one read lock in one pass over each index. Listing collections per database would walk the whole collection map once per database. The same snapshot yields a `CollectionContext` (field count and BM25 presence per available collection) that the `loaded` and `segment` groups resolve their collection IDs against, so one report describes one set of collections |
 | Index type, metric type, index params, `IsAutoIndex` | datacoord `indexMeta` — `model.Index{TypeParams, IndexParams, UserIndexParams, IsAutoIndex}` |
 | Segment traits | datacoord `meta` — `SegmentInfo{storage_version, is_sorted, is_sorted_by_namespace, textStatsLogs, jsonKeyStats, bm25statslogs}` |
 | Build version, deploy mode | process-level values already used by `GetMetrics(system_info)` |
@@ -307,11 +307,13 @@ added; the last two rest on lists kept in code.
 3. **Counts against a fixed list.**
    - `properties`, `database_properties`, `field_params`, `index_params`: count the keys that occur, name
      them if they are on the official-key allowlist, fold the rest into `_custom`.
-   - `providers`: the provider of an embedding function, and of a rerank function whose `reranker` is
-     `model`, named if it is one of the providers the code knows (13 embedding providers, 8 rerank
-     providers, listed in `internal/featureusage/static.go`), else folded into `_other` (`rerank:_other`
-     for rerank). The provider is a free string in the function params, so an unknown value must not
-     reach the report; a new provider appears as `_other` until it is added to the list.
+   - `providers`: the provider of an embedding function, named if it is one of the 13 providers the code
+     knows (listed in `internal/featureusage/static.go`), else folded into `_other`. The provider is a
+     free string in the function params, so an unknown value must not reach the report; a new provider
+     appears as `_other` until it is added to the list. The parameter key is matched case-insensitively,
+     as the runtime matches it. Rerank functions cannot be declared in a collection (schema validation
+     rejects `FunctionType_Rerank`), so a model reranker's provider is a request counter instead
+     (`rerank_provider=*`, see "Hybrid search, rerank, highlight").
 4. **Hand-written predicates.** `declared`, `objects`, `distribution`: one function per entry,
    enumerated in the catalog and deliberately short.
 
@@ -320,8 +322,19 @@ schema booleans would miss the second:
 
 - `enable_dynamic_field`: `CollectionSchema.enable_dynamic_field` **or** the collection property
   `dynamicfield.enabled` (set by `AlterCollection` after creation). The predicate takes the union.
-- `enable_namespace`: `CollectionSchema.enable_namespace` **or** the namespace property
-  (`namespace.enabled` on 2.6, `namespace.sharding.enabled` on master). Union.
+- `enable_namespace`: `CollectionSchema.enable_namespace` alone. The `namespace.sharding.enabled`
+  property is a sub-option that only acts on a collection that has namespaces, and the server writes it
+  as `false` on every new collection, so it is neither the predicate nor, at `false`, a reported
+  property.
+
+Properties the server writes without the user asking are not reported as the user's: `max_field_id`
+(bookkeeping), `timezone` and `cipher.ezID` (copied from the database onto every new collection; the
+database's own value is what `database_properties` reports), `namespace.sharding.enabled=false` (the
+default written on every new collection; `=true` is reported), and `partitionkey.isolation` on a
+collection with namespaces (set by the server when the namespace field is added). The two fields the
+server adds to a collection, the namespace field and the virtual primary key of an external collection,
+are likewise excluded from `field_types` and the field predicates; their existence is what
+`enable_namespace` and `external_collection` report.
 
 Reflection over `FieldSchema` / `CollectionSchema` booleans is **not** used. It would emit
 `is_primary_key` (always one per collection), `is_dynamic` (the internal `$meta` field, redundant with
@@ -452,20 +465,22 @@ introduced:
 
 | Feature class | Hook |
 |---|---|
-| `search_params` keys (`group_by_field` / `group_by_fields`, `iterator`, `search_iter_v2`, `radius` inside the `params` object, `group_size`, `strict_group_size`, `rank_group_scorer`, `hints`, `analyzer_name`, `ignore_growing`, `order_by_fields`) | marked into the search task's set at the `parseSearchInfo` call site in `tryGeneratePlan`, once per sub-request, plus one scan of the request-level `search_params` in `PreExecute`. `parseSearchInfo` itself stays a pure parser: it does not know whether its caller is a user request. The query-side keys are marked at the `parseQueryParams` call site in `queryTask.PreExecute`, for the same reason |
-| Legacy `rank_params.strategy`, `norm_score` | `searchTask.PreExecute`, at the `selectHybridRerankMeta` call site, on the branch that neither `function_chains` nor `function_score` took |
+| `search_params` keys (`group_by_field` / `group_by_fields`, `iterator`, `search_iter_v2`, `radius` inside the `params` object, `group_size`, `strict_group_size`, `rank_group_scorer`, `hints`, `analyzer_name`, `ignore_growing`, `order_by_fields`) | marked into the search task's set at the `parseSearchInfo` call site in `tryGeneratePlan`, once per sub-request, plus one scan of the request-level `search_params` in `PreExecute`. `parseSearchInfo` itself stays a pure parser: it does not know whether its caller is a user request. The key scan knows which list it is reading: on a hybrid search the grouping keys and `order_by_fields` are read from the request-level `rank_params` and the per-ANN keys (`hints`, `analyzer_name`, `ignore_growing`) from each sub-request, and a key a client puts where the server does not read it is not counted. `hints=iterative_filter` is also taken from the parse, which honors the hint inside the `params` object too. The query-side keys are marked at the `parseQueryParams` call site in `queryTask.PreExecute`, for the same reason |
+| Legacy `rank_params.strategy`, `norm_score` | `searchTask.PreExecute`, at the `selectHybridRerankMeta` call site, on the branch that neither `function_chains` nor `function_score` took. An empty `strategy` value (REST v2 sends the key with no ranker) is no ranker, not an unrecognized one |
+| `function_chains` (`reranker=*`, `rerank_provider=*`) | the start of `searchTask.PreExecute`, from the request's chains, and each hybrid sub-request's own L0/L1 chains in `initAdvancedSearchRequest`: a merge operator's `strategy` and the rerank function a map or filter operator evaluates count as the same reranker they would under `function_score` |
 | Request fields (`namespace`, `highlighter.type`, `function_score`, `not_return_all_meta`, `use_default_consistency` + `consistency_level`, `travel_timestamp`, and the output fields behind `output_fields=dynamic` / `output_fields=vector`) | the start of `searchTask.PreExecute` and the end of `queryTask.PreExecute`, reading the proto fields and the output fields `translateOutputFields` resolved |
 | `primary_key_search` | `Proxy.search`, before it calls `handleIfSearchByPK`. It cannot be read in the task: that function resolves the ids into vectors and overwrites `search_input` with the placeholder group, and it returns before a task exists both when the resolution fails and when every id resolves to a null vector |
 | `auth_method=api_key` / `auth_method=password` | both entry points that authenticate, each after the credential verifies: the gRPC interceptor (`AuthenticationInterceptorWithMetaCache`) and the RESTful middleware (`authenticate` in `internal/distributed/proxy/service.go`, also reached from `metricsPortAuthMiddleware` when the console API on the metrics port authenticates that way), which is a separate code path with the opposite decision order |
-| Expression features (`text_match`, `json_contains`, `st_*`, `is null`, `like`, ...) and `filter_templating` (the `expr_template_values` map) / `expr_use_json_stats` | **after** the plan is built, by one walk over the plan's predicate tree at the three plan-creation sites (`tryGeneratePlan` for search, `QueryTask.createPlanArgs` for query, `DeleteRunner.Init` in `internal/proxy/dml` for delete, on the user's filter before the row-level-security predicate is merged into it) — see below |
+| Expression features (`text_match`, `json_contains`, `st_*`, `is null`, `like`, ...) and `filter_templating` (the `expr_template_values` map) / `expr_use_json_stats` | by one walk over each expression the parser produces, through the `ParserVisitorArgs.OnParsedExpr` hook the three plan-creation sites install (`tryGeneratePlan` for search, `QueryTask.createPlanArgs` for query, `DeleteRunner.Init` in `internal/proxy/dml` for delete). The hook sees the parser's output after template values are filled in and **before the rewriter**, and it sees every expression of the parse: the user's filter and each boost scorer's filter. The row-level-security predicate is merged afterwards and is never seen — see below |
 | Search shape (`ef`, `nprobe`, `limit`, `nq`, `retrieval=*`, `hybrid_search_reqs`, `hybrid_search=*`) | `ef` / `nprobe` / `limit` in `tryGeneratePlan` after `parseSearchInfo`, once per ANN subrequest; `nq` and the retrieval kind where the placeholder type is known (`initSearchRequest`, and each subrequest in `initAdvancedSearchRequest`); the hybrid shape once, after the subrequest loop. The per-subrequest counters go into the task's `Tally`, the rest into its set |
 | Query aggregation, `order_by`, `search_aggregation` | `QueryTask.createPlanArgs` after `translateOutputFields` resolves the aggregates; the query params scan in `queryTask.PreExecute`; the start of `searchTask.PreExecute` |
-| Upsert and delete modes | `UpsertTask.PreExecute` right after `partial_update` is normalized (`recordUpsertFeatures`); `DeleteRunner.Run` where it decides between a primary-key delete and a query-then-delete (`recordDeleteMode`); both in `internal/proxy/dml/feature_usage_hooks.go` |
-| Execution features | the Proxy sets `PlanOption.collect_feature_bits` where it builds the plan of a counted search or query, and counts the OR of the results' `feature_bits` in `SearchTask.PostExecute` / `QueryTask.PostExecute`; see "Execution features" |
-| Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where it persists a compaction task (`enqueueCompaction` in `compaction_inspector.go`). The import hook counts the job's **distinct** file types once each, not once per file: one job carrying a thousand Parquet files is one use of Parquet |
-| QueryNode execution decisions | `two_stage_search` where the delegator takes the two-stage branch (`delegator.search`), `segment_prune` where pruning removed at least one segment (`PruneSegments`), `run_analyzer` at the QueryNode `RunAnalyzer` RPC |
-| QueryNode configuration (`config` group) | read at report time from the paramtable, not counted: `QueryNode.GetFeatureUsage` renders each boolean `queryNode.*` item as `key=true` / `key=false` |
-| Loaded state (`loaded` group) | read at report time from QueryCoord's `CollectionManager` and `ReplicaManager`, not counted |
+| Upsert and delete modes | `UpsertTask.PreExecute` right after `partial_update` is normalized (`recordUpsertFeatures`); `DeleteRunner.Run` (`recordDeleteMode`), on the shape of the user's own expression as classified in `Init` before any row-level-security predicate is merged into it, since that merge turns every delete into a filter delete on the server side; both in `internal/proxy/dml/feature_usage_hooks.go` |
+| Execution features | the Proxy sets `PlanOption.collect_feature_bits` where it builds the plan of a counted search or query, and counts the OR of the results' `feature_bits` in `SearchTask.PostExecute` / `QueryTask.PostExecute`, on the search side after the result pipeline has run, so the storage cost of its requery is part of the cold-read decision; see "Execution features" |
+| Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where its queue accepts a compaction task (`enqueueCompaction` in `compaction_inspector.go`, after `submitTask`: a full queue makes the trigger plan the same compaction again on its next tick). The import hook counts the job's **distinct** file types once each, not once per file: one job carrying a thousand Parquet files is one use of Parquet |
+| Delegator decisions (`two_stage_search`, `segment_prune`) | execution feature bits the delegator ORs into the results it returns (`delegator.search` after both stages of a two-stage search ran, `PruneSegments` when it removed at least one sealed segment), counted by the Proxy like the segcore bits: once per user request, never on a retry, a recall evaluation or an internal query |
+| `run_analyzer` | `Proxy.RunAnalyzer`, once per client request, whichever QueryNode ends up serving it (a QueryNode-side count repeats on a replica retry) |
+| QueryNode configuration (`config` group) | read at report time, not counted: `QueryNode.GetFeatureUsage` renders each boolean `queryNode.*` item as `key=true` / `key=false`. A non-refreshable item (`refreshable:"false"` in the paramtable) is reported with the value captured at node init, which is the value the node runs with; a refreshable one with its live value |
+| Loaded state (`loaded` group) | read at report time from QueryCoord's `CollectionManager` and `ReplicaManager`, not counted; collection IDs are resolved against the RootCoord snapshot's `CollectionContext` |
 
 #### Expression counters and the parser cache
 
@@ -473,13 +488,21 @@ introduced:
 TTL, `internal/parser/planparserv2/plan_parser_v2.go:30`). A counter placed inside the ANTLR visitor
 would fire only on cache misses and undercount every repeated expression by orders of magnitude.
 
-Counters therefore hang off the **output** of `ParseExpr`: one walk over the `planpb.Expr` tree per
-request, setting a bitmask of expression features encountered, then one atomic add per set bit. The walk
-is linear in expression size and does not allocate. This is the only counted class whose cost is more
-than one branch; it is bounded by the size of the expression the request already had to parse.
+Counters therefore hang off the **output** of the parse: one walk over the `planpb.Expr` tree per
+expression, setting a bitmask of expression features encountered, then one atomic add per set bit. The
+walk is linear in expression size and does not allocate. This is the only counted class whose cost is
+more than one branch; it is bounded by the size of the expression the request already had to parse.
 
-The walk is invoked from all four paths that parse an expression: `Search`, `Query`, `Delete`, and each
-sub-request of `HybridSearch`.
+The walk runs **before the rewriter** (`rewriter.RewriteExpr`), through a hook on the parser's
+`ParserVisitorArgs`. The rewriter changes operators: a one-value `IN` becomes `==`, an `OR` of equalities
+becomes `IN`, `arr == []` becomes an `array_length` check, a contradiction folds to `AlwaysFalse`. A
+count taken from the final plan would describe the rewriter's choices rather than the user's. Lowering
+the parser itself performs is not undone: a `LIKE` with no wildcard is parsed as an equality, an
+anchored regular expression as a prefix or postfix match (counted as `like`), and `IS [NOT] NULL` on a
+JSON path as `exists`; those count as the plan represents them.
+
+The hook is invoked from all four paths that parse an expression: `Search` (including each boost
+scorer's `filter`), `Query`, `Delete`, and each sub-request of `HybridSearch`.
 
 #### Counting rules that decide whether a counter carries signal
 
@@ -490,10 +513,13 @@ fires on "field present" for such a field measures request volume, not feature u
 |---|---|
 | Count `ignore_growing` on its **effective value** (`== true`), never on key presence; `round_decimal` and `offset` are not counted | pymilvus sends `ignore_growing` and `round_decimal` in every `search_params` |
 | Do **not** count `guarantee_timestamp` | pymilvus sets it on every search and query (`ts_utils.construct_guarantee_ts`: the cached write timestamp, `1`, or `0` for Strong); `SearchIterator` pins it as well. There is no request-side signal for "the user chose a timestamp" |
-| `request_consistency_level` counts `use_default_consistency == false` and records the level as the entry name (`consistency_level=Strong`, ...) | It is the only field that distinguishes a per-request override. Clients that predate `use_default_consistency` leave it `false`; the catalog notes this bias |
+| `request_consistency_level` counts `use_default_consistency == false` and records the level as the entry name (`consistency_level=Strong`, ...), except level 0 (`Strong`) together with a non-zero `guarantee_timestamp` | It is the only field that distinguishes a per-request override. Level 0 with a timestamp is the pre-2.3 protocol (REST v1, old SDKs): the timestamp was the request and no level was chosen, and the server runs the timestamp (`task_search.go`, "Compatibility logic"). pymilvus sends an explicit `Strong` with timestamp 0, which counts |
 | Do **not** count `reduce_stop_for_best` separately | pymilvus sets it only inside `QueryIterator`; the Proxy parses it only on the query path. It is the query iterator, which `query_iterator` already counts |
-| `rank_params.strategy` is counted per **recognized** value (`strategy=rrf`, `strategy=weighted`, else `strategy=_other`); `function_score` is counted per **recognized** function type (`reranker=rrf`, `weighted`, `decay`, `model`, `boost`, else `reranker=_other`) | The two are distinct client paths (`RRFRanker`/`WeightedRanker` versus a `Function` object). Neither is deprecated. Counting "rrf" or "weights" on their own would double-count across the two paths. Both values are user strings at the counting point, hence the `_other` fold (see "The key space is closed at compile time") |
-| `filter_templating` counts only when the `expr_template_values` map contains a key other than `expr_use_json_stats` | The JSON-stats hint travels in the same map |
+| `rank_params.strategy` is counted per **recognized** value (`strategy=rrf`, `strategy=weighted`, else `strategy=_other`); `function_score` and `function_chains` are counted per **recognized** function type (`reranker=rrf`, `weighted`, `decay`, `model`, `boost`, else `reranker=_other`) | The legacy path and the function paths are distinct client APIs (`RRFRanker`/`WeightedRanker` versus a `Function` object or a chain). Neither is deprecated. Counting "rrf" or "weights" on their own would double-count across the paths. All values are user strings at the counting point, hence the `_other` fold (see "The key space is closed at compile time"). A chain's merge `strategy` `max`/`sum`/`avg` has no `function_score` equivalent and folds to `reranker=_other`; a chain that names no reranker at all (helper functions only, or sort/limit) counts once as `reranker=_other` so that no chain goes uncounted |
+| `range_search` counts `radius` only outside a search iterator | the v1 search iterator sends `radius`/`range_filter` of its own on every page after the first |
+| `search_params` keys count only where the server reads them | the Go SDK puts `group_size` on each hybrid sub-request and REST puts `hints` in `rank_params`; neither has an effect there |
+| The search-shape units (`ef`, `nprobe`, `limit`, `nq`, `retrieval=*`, hybrid shape) are flushed only for a request `PreExecute` accepted | they are recorded at different steps of the parse, so a rejected request would leave them disagreeing with each other; the request-level features still count on a rejected request |
+| `filter_templating` counts only when the `expr_template_values` map contains a key other than `expr_use_json_stats`; `expr_use_json_stats` counts only when its value is `true` | The JSON-stats hint travels in the same map, and the parser reads its value, not its presence |
 | `travel_timestamp` counts `> 0`, and is named `deprecated_travel_timestamp` | The Proxy no longer reads it for semantics; the counter measures how many clients still send a removed field, which is what the decision to drop the proto field needs |
 | `highlighter` counts per `HighlightType` (`highlighter=Lexical`, `highlighter=Semantic`) | The two have different dependencies and adoption meaning |
 | `primary_key_search` counts a non-empty `search_input.ids`, **not** the `search_by_primary_keys` bool | The proto marks that field "use search_input instead", nothing in the server sets it, and `ConvertHybridSearchToSearch` hard-codes it false. `handleIfSearchByPK` decides on the ids. A counter reading the flag stays at zero for every real search-by-primary-key request, which reads as "nobody uses it" |
@@ -503,6 +529,37 @@ fires on "field present" for such a field measures request volume, not feature u
 `recall_eval` is not counted; it is an internal evaluation switch, not a user feature. `sub_reqs` is
 not counted; the Proxy fills it itself when folding a `HybridSearch`, and the number of hybrid searches
 is already `milvus_proxy_req_count{function_name="HybridSearch"}`.
+
+#### Known limitations of the counting points
+
+Found by an audit of every counter's realization paths after the second review round; each is either
+not fixable at the counting point without a parser or metadata change, or is a definition the design
+accepts. They are listed so the consumer does not read them as signal.
+
+- **Parser-side lowering is counted as the plan represents it.** A `LIKE` with no wildcard counts as
+  `comparison_operators=equality`, an anchored regular expression as `like`, and `IS [NOT] NULL` on a
+  JSON path as `exists`. The rewriter's changes are not counted (the walk runs before it).
+- **A request the Proxy rejects counts its request-level features but not what the rejected step would
+  have parsed.** `grouping_search`, `range_search`, the iterator protocols and `strategy=*` need the
+  parse that marks them; `primary_key_search` counts before the ids resolve. The shape units are flushed
+  only for an accepted request.
+- **Search iterators count every page.** The v2 iterator's probe search and each page are counted
+  searches with the page size as `limit`; the overall limit of the iteration is never seen.
+- **`search_by_primary_keys` with every id unresolved** counts `primary_key_search` and nothing else.
+- **The Go SDK's per-sub-request `FunctionScore` on a hybrid search** is dropped by
+  `ConvertHybridSearchToSearch` before it could take effect, and is not counted either.
+- **A row-level-security predicate counts as an execution-feature filter** (see "Execution features").
+- **A delete's retrieval reports no execution features** (its plan never asks for them).
+- **`load_fields` after an added field** reads a collection loaded in full as a partial load from the
+  moment a field is added until it is loaded again, because the persisted list is explicit (see "Loaded
+  state").
+- **An older node in a rolling upgrade** that lacks the RPC is reported as `reachable=false` with the
+  `Unimplemented` error text; the consumer cannot tell it from a node that is down without reading the
+  text. An embedded QueryNode inside a StreamingNode is reported as a plain QueryNode.
+- **The metrics-port console** authenticates through the same middleware when admin authentication is
+  off, so its polling counts as `auth_method=password`.
+- **`compaction=partition_key_sort` and `compaction=clustering_partition_key_sort`** are catalog rows no
+  code path produces (see "The acceptance gate").
 
 ### Sanitization
 
@@ -551,9 +608,9 @@ are checked in, so the numbers below can be re-measured rather than trusted.
 | Execution features, when collected | per expression per segment, one relaxed atomic load, plus one `fetch_or` the first time a bit is set in the request; one C call per QueryNode task to read the set; one `uint64` per result |
 | Request hot path, expressions | one walk of the parsed `planpb.Expr`: 4.0 ns at one term, 740 ns at a hundred, 0 allocations |
 | Request hot path, legacy `norm_score` | 20 ns and no allocation when the key is absent, which is every request that does not ask for normalization; about 450 ns and 795 B when it is present and the `params` object is unmarshalled. This is the only hook that allocates |
-| Resident memory per search task | 166 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
+| Resident memory per search task | 175 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
 | Counter update itself | one `atomic.Add`, plus one forward-only compare-and-swap of the timestamp at most once per second per counter |
-| Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`): 166 × 16 = 2,656 bytes in this build, constant for the life of the process |
+| Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`): 175 × 16 = 2,800 bytes in this build, constant for the life of the process |
 | `GetFeatureUsage` on a node | copy of a fixed-size counter array |
 | Static statistics | one pass over collections + one over indexes; milliseconds at thousands of collections |
 | Segment traits | one pass over segment meta; tens of milliseconds at tens of thousands of segments |
@@ -686,7 +743,7 @@ mechanism handles both.
 | `auto_id` | `declared` | predicate | primary key is auto-generated |
 | `multi_vector_field` (named) | `declared` | predicate | more than one vector field |
 | `struct_array` | `declared` | predicate | `CollectionSchema.struct_array_fields` non-empty |
-| `num_partitions`, `shards_num`, `dim`, `max_length`, `max_capacity`, `replica_number` | `distribution` | predicate | buckets fixed above |
+| `num_partitions`, `shards_num`, `dim`, `max_length`, `max_capacity`, `replica_number` | `distribution` | predicate | buckets fixed above; `num_partitions` counts available partitions only, as RootCoord's own partition count does (a dropped partition stays in the model until the tombstone sweeper removes it) |
 
 ### Index and search configuration (`index_types`, `metric_types`, `index_params`, `field_params`)
 
@@ -695,7 +752,8 @@ mechanism handles both.
 | every `index_type` that occurs | `index_types` | open value | vector (`HNSW`, `IVF_*`, `DISKANN`, `SCANN`, `SPARSE_*`, `GPU_*`, RaBitQ, MinHash LSH, ...) and scalar (`INVERTED`, `BITMAP`, `HYBRID`, `NGRAM`, `RTREE`, `TRIE`, `STL_SORT`) in one namespace, `AUTOINDEX` included |
 | every `metric_type` that occurs | `metric_types` | open value | 2.6 has 14 values incl. the `MAX_SIM_*` family; master adds `MAX_SIM_L2` |
 | every official key in `UserIndexParams` | `index_params` | fixed list | includes `refine`, `refine_type`, `sq_type`, `nbits`, `drop_ratio_build`, `inverted_index_algo`, `hybrid_low_cardinality_index_type`, `bitmap_cardinality_limit`, `json_cast_type`, `json_path`, `json_cast_function`, `mmap.enabled`, `index.nonEncoding`, `indexoffsetcache.enabled`, and the scalar index parameters `min_gram` / `max_gram` (NGRAM) and `fm_sa_sample_rate` / `fm_block_bytes` (FMINDEX). Keys that only exist as Knowhere parameters are still counted: they are keys, not values. A key the allowlist does not have is reported as `_custom`; the local verification run found the NGRAM parameters missing that way, and `TestScalarIndexParamsAreOfficialFeatureKeys` in `internal/util/indexparamcheck` now keeps the scalar index parameters defined there on the list. **Note:** with `AUTOINDEX`, `refine` / `sq_type` are chosen server-side and do not appear in user params |
-| `autoindex` | `declared` | predicate | `model.Index.IsAutoIndex` |
+| `autoindex` | `declared` | predicate | `model.Index.IsAutoIndex`, which the Proxy sets for scalar fields, **or** `AUTOINDEX` as the user index type, which is how a vector field built with AUTOINDEX (or with no `index_type`) is stored while the resolved type goes to `IndexParams` |
+| `external_collection` | `declared` | predicate | `model.Collection.ExternalSource` is set; the source is stored outside the properties and is never named |
 | every official key in field `type_params` | `field_params` | fixed list | `enable_analyzer`, `analyzer_params`, `multi_analyzer_params`, `enable_match`, `mmap.enabled`, `field.skipLoad`, `dim`, `max_length`, `max_capacity` |
 
 Removed from the earlier draft after verification: `materialized_view_search_info` (no such key; the
@@ -708,7 +766,7 @@ user-facing switch is the `partitionkey.isolation` property), `EMB_LIST_META` (s
 |---|---|---|---|
 | every `FunctionType` | `functions` | enum walk | `BM25`, `TextEmbedding`, `Rerank`, `MinHash`, `MolFingerprint` on master |
 | every embedding provider that occurs | `providers` | fixed list, else `_other` | 13: `openai`, `azure_openai`, `bedrock`, `dashscope`, `vertexai`, `voyageai`, `cohere`, `siliconflow`, `tei`, `zilliz`, `gemini`, `huggingface`, `yc` (12 on 2.6, without `yc`) |
-| every rerank provider that occurs | `providers` | fixed list, else `rerank:_other` | `ali`, `cohere`, `huggingface`, `siliconflow`, `tei`, `vllm`, `voyageai`, `zilliz`; prefixed `rerank:` to keep the namespace separate; only a rerank function whose `reranker` is `model` has a provider |
+| rerank providers | — | — | not a schema trait: a collection cannot declare a rerank function, so the provider of a model reranker is the request counter `rerank_provider=*` |
 
 Model names are user strings and are never emitted.
 
@@ -728,8 +786,11 @@ All official keys are counted against the allowlist; the table lists the ones re
 
 | Entry | Note |
 |---|---|
-| `storage_version=<V1\|V2\|V3>` | collections with at least one segment on that storage format version; the direct measure of columnar-storage migration. The legacy format is stored as `0` (`storage.StorageV1`) and reported as `V1` |
-| `is_sorted` *(undocumented)*, `is_sorted_by_namespace` *(undocumented)* (named after `SegmentInfo.is_sorted`, `is_sorted_by_namespace` — `is_partition_key_sorted` on 2.6), `text_match_index`, `json_shredding`, `full_text_search` (read from `textStatsLogs`, `jsonKeyStats`, `bm25statslogs`) | collections with at least one live segment (not dropped, not invisible) carrying the trait |
+| `storage_version=<V1\|V2\|V3>` | collections with at least one segment on that storage format version; the direct measure of columnar-storage migration. The legacy format is stored as `0` (`storage.StorageV1`) and reported as `V1`. L0 (delete) segments are created without a storage version and contribute nothing here |
+| `is_sorted` *(undocumented)*, `is_sorted_by_namespace` *(undocumented)* (named after `SegmentInfo.is_sorted`, `is_sorted_by_namespace` — `is_partition_key_sorted` on 2.6), `text_match_index`, `json_shredding`, `full_text_search` (read from `textStatsLogs`, `jsonKeyStats`, `bm25statslogs`) | collections with at least one live segment (not dropped, not invisible) carrying the trait. `full_text_search` also counts a collection that declares a BM25 function and has a live segment: storage V3 keeps the BM25 statistics in the manifest rather than on the segment |
+
+Segments of a collection that RootCoord no longer lists as available (dropped, not yet released by the
+flusher) are skipped, so this group never counts a collection the collection groups do not.
 
 These differ in kind from the rest: they report what was **materialized**, not what the user declared.
 They require a pass over segment metadata, which is why they were planned as a separate phase.
@@ -754,8 +815,8 @@ metadata MixCoord already walks. It contributes four entries, all computed on de
 
 | Entry | Group | Note |
 |---|---|---|
-| `collections` | `loaded` | how many collections are loaded |
-| `load_fields` | `loaded` | collections whose load request named fewer fields than the schema has. Load metadata written before `load_fields` existed is upgraded to the full list on recovery, so an empty list counts as "everything" |
+| `collections` | `loaded` | how many collections are loaded (`LoadStatus_Loaded`; a collection still loading, or one whose load failed to recover, is not) |
+| `load_fields` | `loaded` | collections whose persisted load-field list is shorter than the schema's field count, the count taken from the RootCoord snapshot (QueryCoord's own schema copy is empty after a restart). QueryCoord stores an explicit list for every loaded collection: the Proxy expands a request that names no fields into the full list of that moment (`GetLoadFieldIDs`), so a collection loaded in full and then given a new field reads as a partial load until it is loaded again, which is also what it is: the new field is not loaded. The verification run shows this on `fu_writes`. An empty list, which only metadata from before load-field lists carries, is a full load |
 | `resource_groups` | `loaded` | collections with at least one replica outside `__default_resource_group`. Counted once per collection, not per replica. Resource group names are operator strings and are never emitted |
 | `loaded_replica_number` | `distribution` | the effective replica count per loaded collection, in the `replica_number` buckets. It differs from the declared `collection.replica.number` property, which is what the `distribution` entry of the same name reports |
 
@@ -781,19 +842,27 @@ Only booleans are reported. A non-boolean configuration value can be an operator
 a size expression), which would break the rule that every emitted string is drawn from a code-defined
 set; a boolean has exactly two values, and the key is a constant in the paramtable.
 
-### QueryNode execution path (`request`)
+The value reported is the one the node runs with. Thirteen of the twenty are `refreshable:"false"`:
+the node reads them once at start and a later change in etcd or the YAML has no effect until a
+restart, while the paramtable serves the changed value. For those the node captures the value at init
+(`captureStartConfig`, which reads the refreshable tag from the config struct so the list of items
+never has to say which are which) and reports the captured value; the refreshable ones are read live.
 
-Three counters record decisions taken inside the node that neither the request nor the metadata shows.
+### Delegator decisions and `run_analyzer` (`request`)
 
-A QueryNode counter is per **QueryNode request**, which is not the user's request: a delegator fans one
-user search out to one request per shard, and to a separate request per segment group, since a search
-task carries a single `DataScope`. Compare these counters against each other, not against the Proxy's.
+Three counters record decisions taken inside the QueryNode that neither the request nor the metadata
+shows. Two of them are delegator decisions and travel as execution feature bits (next section): the
+delegator ORs `two_stage_search` into the results of a search that ran both of its stages, and
+`segment_prune` into the results of a search or query where pruning removed at least one sealed segment
+(stale partition statistics that name only segments no longer in the sealed list do not count). The
+Proxy counts them like every other execution feature, once per user request, so a replica retry, the
+un-optimized retry, a recall evaluation or an internal query never counts. A first design counted them
+on the QueryNode, once per QueryNode request, where every one of those re-runs counted and the number
+was per shard rather than per request.
 
-| Entry | Signal |
-|---|---|
-| `two_stage_search` *(undocumented)* | the delegator took the two-stage search branch |
-| `segment_prune` | segment pruning removed at least one sealed segment from a search or query (stale partition statistics that name only segments no longer in the sealed list do not count) |
-| `run_analyzer` | the `RunAnalyzer` RPC, the one user-facing feature only a QueryNode serves |
+`run_analyzer`, the one user-facing feature only a QueryNode serves, is counted by the Proxy's
+`RunAnalyzer` handler, once per client request. A QueryNode-side count repeated whenever the load
+balancer retried the request on another replica.
 
 A `brute_force_search` counter was implemented and removed during review. It fired when a search reached
 a segment with no Go-side index metadata on the search field, but that does not establish that the
@@ -825,11 +894,12 @@ drift. A plan without the option records nothing, and every recording site is th
 | `filter_exec_path=scalar_index` / `pk_index` / `text_match_index` / `json_shredding` / `brute_force` | `SegmentExpr::EnsureExecPathDetermined`, the one place every expression settles its path | the path a filter expression took on a segment |
 | `filter_exec_path=ngram_index` | the NGRAM phase-one calls, single LIKE and batched LIKE | the NGRAM index served a LIKE; it is chosen outside the path above |
 | `scalar_index_type=BITMAP` / `STL_SORT` / `Trie` / `INVERTED` / `HYBRID` / `RTREE` / `NGRAM` / `FMINDEX` *(undocumented)* / `json_flat` | the pinned index object behind a `scalar_index` path | which kind of scalar index served it, from the index object, never from user input |
-| `filter_index_declined` | the same place | the field has a scalar index but the expression ran on raw data: the operator or literal is one the index does not serve, or a cost guard declined it |
-| `expr_cache_hit` | the expression result cache and the whole-filter cache | a filter result was served from the cache |
+| `filter_index_declined` | the same place | the field has a scalar index the expression could have used but it ran on raw data: the operator or literal is one the index does not serve, or a cost guard declined it. On a JSON field only an index covering the expression's path counts as one it could have used |
+| `expr_cache_hit` | the expression result cache (`TryCacheGet`, `ExprCacheHelper`, and `RawExprCacheAdapter`, which serves a hit without evaluating the wrapped expression and records through its recorder), and the whole-filter cache | a filter result was served from the cache |
 | `interim_index_search` | growing-segment search and the sealed binlog-index branch | the interim index served a vector search |
 | `strict_group_size_effective` | the strict grouping search | its second phase ran: a filtered search per group the first pass left short of `group_size` returned rows |
-| `tiered_storage_cold_read` | the QueryNode in Go, and the Proxy | the request read bytes from remote storage. The QueryNode sets the bit from the storage cost before it is split across merged requests, since the split rounds small counts to zero; the Proxy also counts it when the summed `scanned_remote_bytes` of the results is positive. Needs `queryNode.segcore.tieredStorage.storageUsageTrackingEnabled` |
+| `tiered_storage_cold_read` | the QueryNode in Go, and the Proxy | the request read bytes from remote storage. The QueryNode sets the bit from the storage cost before it is split across merged requests, since the split rounds small counts to zero, on the filter stage of a two-stage search as well; the Proxy also counts it when the summed `scanned_remote_bytes` of the results, including its requery's, is positive. Needs `queryNode.segcore.tieredStorage.storageUsageTrackingEnabled` |
+| `two_stage_search` *(undocumented)*, `segment_prune` | the delegator, in Go | see "Delegator decisions" above |
 
 Semantics the consumer relies on:
 
@@ -838,11 +908,20 @@ Semantics the consumer relies on:
   evaluation. That changes how often, never whether a feature is in use.
 - **Merged requests share a set.** A QueryNode merges searches with identical plans into one execution;
   each gets the union.
-- **Internal filters are not features.** The TTL filter segcore adds on its own records nothing, nor does
-  the raw-data refine pass of a fused GIS filter. Raw data is not counted as a declined index where it is
-  the designed path (membership filters, timestamptz arithmetic, IS NULL over a JSON path index).
+- **Internal filters are not features.** The TTL filter segcore adds on its own and the namespace
+  predicate the plan parser merges in record nothing, nor does the raw-data refine pass of a fused GIS
+  filter. Raw data is not counted as a declined index where it is the designed path (membership
+  filters, timestamptz arithmetic, IS NULL over a JSON path index, `ST_IsValid`, which has no index
+  form). A field-to-field comparison and a function call expression are not `SegmentExpr`s and report
+  no path.
+- **A two-stage search's filter stage counts.** The stage runs the filter and keeps only the valid
+  counts; its feature bits (the index it used, a cold read) are carried into the final results, and on
+  a fallback to a single-stage search into those results, since the second stage may serve the same
+  filter from the cache. That second stage is a genuine `expr_cache_hit`: on a two-stage search over
+  sealed segments the whole-filter cache the first stage filled is what the second reads.
 - **Only searches and queries report.** The retrieval behind a delete or an upsert, and the Proxy's own
-  requery, do not.
+  requery, do not (the requery's storage cost is part of the search's cold-read decision, since it is
+  the same user request).
 - **A row-level-security predicate counts as a filter.** RLS merges the policy predicate into the plan
   before it is sent, and the execution features are collected per plan, so the paths it takes are
   reported like the user's own filter. On a collection with RLS a query with no filter can therefore
@@ -872,9 +951,9 @@ for which of them were also exercised end to end.
 | `search_iterator=v1` | search request with `iterator` set to `true` / `True` **and** `search_iter_v2` not set | yes — old search iterator protocol. pymilvus's v2 search iterator sends both keys, so without the exclusion every v2 page would also count as the old protocol |
 | `search_iterator=v2` | `search_iter_v2` parses as true (it requires `iterator` as well; without it the request is rejected before counting) | yes — new protocol; keep separate to watch migration |
 | `query_iterator` | query request with `iterator=true` | yes — the query iterator; previously counted under the same name as the old search iterator |
-| `range_search` | `radius` present in the `params` object of the search params (a `range_filter` without `radius` is rejected before counting) | yes |
+| `range_search` | `radius` present in the `params` object of the search params (a `range_filter` without `radius` is rejected before counting), outside a search iterator | yes |
 | `ignore_growing` | `== true` | yes |
-| `hints=iterative_filter`, `hints=_other` | `hints` key present; `iterative_filter` is the documented value, any other value is a user string and folds to `hints=_other` | yes |
+| `hints=iterative_filter`, `hints=_other` | `hints` key present, or `iterative_filter` inside the `params` object; `iterative_filter` is the documented value, any other value is a user string and folds to `hints=_other` | yes |
 | `analyzer_name` | key present | yes |
 | `primary_key_search` | `search_input` carries a non-empty `ids` | yes — not the deprecated `search_by_primary_keys` bool, which nothing sets |
 | `namespace` *(undocumented)* | field set | yes |
@@ -923,7 +1002,8 @@ for which of them were also exercised end to end.
 |---|---|---|
 | `strategy=rrf`, `strategy=weighted`, `strategy=_other` | recognized `strategy` value in the legacy rank params (`RRFRanker` / `WeightedRanker`); anything else folds to `_other`; absent key counts nothing | yes |
 | `norm_score` | `norm_score` true inside the `params` object of `rank_params`, or on a rerank function's params | yes — a top-level `rank_params` key is dropped before it reaches the reranker |
-| `reranker=rrf` / `weighted` / `decay` / `model` / `boost` / `_other` | recognized function name in `function_score`; anything else folds to `_other` | yes |
+| `reranker=rrf` / `weighted` / `decay` / `model` / `boost` / `_other` | recognized function name in `function_score`, or in `function_chains`: a merge operator's `strategy` (`rrf`, `weighted`; `max`/`sum`/`avg` fold to `_other`) and the rerank function a map or filter operator evaluates (`decay`, `rerank_model`, `boost_score`); anything else folds to `_other`, and a chain naming no reranker counts once as `_other` | yes |
+| `rerank_provider=ali` / `cohere` / `huggingface` / `siliconflow` / `tei` / `vllm` / `voyageai` / `zilliz` / `_other` | the `provider` of a `model` reranker, in `function_score` or a `rerank_model` chain function; the fixed list is the one `rerank.NewModelFunction` accepts, anything else folds to `_other` | yes — rerank functions exist only on requests, so this is the counter form of the `providers` group |
 | `highlighter=Lexical`, `highlighter=Semantic` *(undocumented)* | `SearchRequest.highlighter.type` | yes — **decision:** Semantic maturity; if not GA, the consumer should label it |
 | `fragment_size` / `num_of_fragments` | key present in highlighter params | yes |
 | `hybrid_search_reqs` | subrequest count, buckets `<=2`, `3`, `4-5`, `6-10`, `>10` | yes — once per hybrid search |
@@ -951,7 +1031,7 @@ the two together with `index_types`.
 | `upsert_mode=override` / `upsert_mode=merge` | `partial_update`, read after the Proxy normalizes it: a non-`REPLACE` field operator promotes the request to a merge | yes |
 | `field_ops=REPLACE` / `ARRAY_APPEND` / `ARRAY_REMOVE` / `PATH_REPLACE` / `_other` | each partial-update operator the request carries, once per request; `_other` is the fold slot for an operator this build does not know, which is rejected before counting and so stays at zero | yes — what reaches the server depends on the client: pymilvus 3.1 drops an explicit `REPLACE` before sending (it is the default on the wire) and has no `PATH_REPLACE` in its proto, so from pymilvus only `ARRAY_APPEND` and `ARRAY_REMOVE` move |
 | `upsert_fields` | fields the upsert carries, buckets `1`, `2-4`, `5-16`, `>16` | yes |
-| `delete_mode=ids` / `delete_mode=filter` | whether the delete expression is only a primary-key match, which is how the SDKs send `delete(ids=...)` and which deletes without a query, or a filter the Proxy queries first | yes |
+| `delete_mode=ids` / `delete_mode=filter` | whether the user's delete expression is only a primary-key match, which is how the SDKs send `delete(ids=...)` and which deletes without a query, or a filter the Proxy queries first; classified before any row-level-security predicate is merged in, which would make every delete a filter delete | yes |
 
 `output_fields=vector` and the two `auth_method` entries were added after the first review round, at the
 request of the Cloud side, which wanted "does this client read raw vectors" and "API key or username and
@@ -1038,16 +1118,16 @@ compare only those. Each side is still an exact delta.
 | `TestUnknownRankStrategyFoldsToOther` | an unknown `strategy` value increments `_other` and creates no new slot: the key space stays closed |
 | `TestStaticGroupsAndSanitization` | the declared, properties and distribution groups on a freshly created collection, and that a sentinel used as the collection name, a field name, a property key and a property value appears nowhere in the serialized report |
 | `TestLoadedGroup` | a collection loaded with a subset of its fields is counted as a partial load |
-| `TestQueryNodeGroups` | every config entry is `key=true`/`key=false` with value 1 per node, a filtered pure-ANN search moves `two_stage_search`, and `RunAnalyzer` moves its counter |
+| `TestQueryNodeGroups` | every config entry is `key=true`/`key=false` with value 1 per node, a filtered pure-ANN search moves `two_stage_search` (as an execution feature at the Proxy), and `RunAnalyzer` moves its Proxy counter |
 | `TestUnreachableNodeIsReported` | a QueryNode killed without deregistering is still listed, with `reachable=false` and an error |
 | `TestImportFileTypesAreCounted` | one import job each for the JSON, JSONLine and CSV formats moves that format's DataCoord counter |
 | `TestProvidersAndCustomResourceGroup` | a text-embedding function reports its provider while its endpoint never appears, and a collection loaded into a named resource group is counted without the group's name leaving the node |
 | `TestGeoAndTimeExpressions` | the nine geospatial predicates and the timestamp-with-timezone comparison, on a collection with a Geometry and a Timestamptz field |
 | `TestStructArrayExpressions` | `element_filter` and `struct_array_match` on a struct array field, and `retrieval=embedding_list` / `retrieval=element_level` searches on its vector sub-field |
 | `TestMoreSearchCounters` | the remaining consistency levels, the null predicates, the regex operator and the JSON-stats hint |
-| `TestRerankCounters` | both rerank client paths: the legacy `strategy` values with `norm_score` inside the `params` object, plus a negative control that a top-level `norm_score` key counts nothing, and a `FunctionScore` naming `rrf`, `weighted`, `model` and `boost` (`decay` is in `TestSearchCounters`); also `highlighter=Semantic` |
+| `TestRerankCounters` | all three rerank client paths: the legacy `strategy` values with `norm_score` inside the `params` object, plus a negative control that a top-level `norm_score` key counts nothing; a `FunctionScore` naming `rrf`, `weighted`, `model` and `boost` (`decay` is in `TestSearchCounters`), and a `model` reranker per provider on the list plus one off it; `function_chains` with a merge of each strategy on a hybrid search, a `decay` chain and a helper-only chain on a plain search; also `highlighter=Semantic` |
 | `TestCompactionTypesAreCounted` | sort, level-zero delete and schema-version-bump compactions, each triggered by the user action that produces it |
-| `TestClusteringCompactionAndSegmentPrune` | clustering compaction, and the QueryNode `segment_prune` counter it makes reachable |
+| `TestClusteringCompactionAndSegmentPrune` | clustering compaction, and the `segment_prune` execution feature it makes reachable |
 | `TestBinaryImportFileTypesAreCounted` | the Parquet and NumPy import formats |
 | `TestBinlogImportIsCounted` | a milvus-backup style restore of one flushed segment counts as `import_file_type=binlog` and moves no other import counter |
 | `TestSearchParameterDistributions` | every bucket of `ef`, `nprobe`, `limit` and `nq`, asserted on the per-subrequest counters only; a three-subrequest hybrid search adding three to its buckets and one to `hybrid_search_reqs`; the remaining `hybrid_search_reqs` buckets |
@@ -1151,39 +1231,42 @@ node.
 
 ## Local Verification
 
-Run on 2026-09-24 against a standalone instance built from the implementation branch
-(`feat/feature-usage-report` at `3c06abe35a`, plus the allowlist fix described below; woodpecker WAL,
-dependencies on the shared etcd / MinIO / Pulsar containers), driven by pymilvus 3.1.0rc8. Every counter
-was reset by a restart before the workload, so the report below is one run. Besides
-`common.security.featureUsageEnabled=true`, the instance turned on the configuration-gated paths the report
-has counters for: `queryNode.enableSegmentPrune`, `autoIndex.twoStageSearch.enabled` (with `minTopk=1`,
-`minNumSegments=1`), `queryNode.segcore.interimIndex.enableIndex`, `queryNode.exprCache.enabled` (with
-`minEvalDurationUs=0`, `admissionThreshold=1`) and
-`queryNode.segcore.tieredStorage.storageUsageTrackingEnabled`; and `dataCoord.segment.maxSize=4` with
-`dataCoord.compaction.clustering.preferSegmentSizeRatio=0.5` so clustering compaction emits more than one
-segment on a test-sized dataset.
+Run on 2026-10-08 against a standalone instance built from the implementation branch
+(`feat/feature-usage-report`; the tree was built on `a3d413006e`, which `build_version` carries, and squashed
+into `6bf18418b7` after the run with no change to the code the binary was built from; woodpecker WAL,
+dependencies on the shared etcd / MinIO / Pulsar containers), driven by pymilvus 3.1.0rc8. Every counter was reset by a restart before the workload, so
+the report below is one run. Besides `common.security.featureUsageEnabled=true`, the instance turned on the
+configuration-gated paths the report has counters for: `queryNode.enableSegmentPrune`,
+`autoIndex.twoStageSearch.enabled` (with `minTopk=1`, `minNumSegments=1`),
+`queryNode.segcore.interimIndex.enableIndex`, `queryNode.exprCache.enabled` (with `minEvalDurationUs=0`,
+`admissionThreshold=1`) and `queryNode.segcore.tieredStorage.storageUsageTrackingEnabled`; and
+`dataCoord.segment.maxSize=4` with `dataCoord.compaction.clustering.preferSegmentSizeRatio=0.5` so clustering
+compaction emits more than one segment on a test-sized dataset.
 
 **Workload.** Eleven collections and one database, then 130 request steps through the public pymilvus API
-(searches, queries, upserts, deletes and one `run_analyzer`, including five searches on growing data; an iterator step sends
-more than one request), 3 compaction and schema steps and 5 import jobs. A request the server rejects still moves its request
-counters, because they are taken when the Proxy parses it; five steps were rejected that way and are
-marked below.
+(searches, queries, upserts, deletes and one `run_analyzer`, including five searches on growing data; an
+iterator step sends more than one request), 3 compaction and schema steps and 5 import jobs. Six steps
+failed on the server and are marked below. A rejected request still moves its flag counters, which are taken
+when the Proxy parses it; its shape buckets (`ef`, `nprobe`, `limit`, `nq`, `retrieval=*`, hybrid shape)
+move only when `PreExecute` accepted it (see "Counting rules"), which one of the six did not pass.
 
 - `fu_main`, 2,000 rows (above the 1,024-row threshold below which a segment is never indexed): one field
   per scalar index kind (`STL_SORT`, `INVERTED`, `AUTOINDEX` on an Int64, which builds `HYBRID`, `BITMAP`,
   `Trie`, `NGRAM` with `min_gram`/`max_gram`, `FMINDEX`, `RTREE`, a flat `INVERTED` JSON index and a
   `DOUBLE` JSON path index), an analyzer- and match-enabled VarChar, JSON, an Int32 array, a nullable VarChar,
   Timestamptz, an unindexed Int64, a group-by Int64, an 8-dim `IVF_FLAT`/`L2` vector, a dynamic field;
-  properties `mmap.enabled=true`, `collection.ttl.seconds`, `timezone` and a custom key; one alias.
+  properties `mmap.enabled=true`, `collection.ttl.seconds`, `collection.replica.number`, `timezone` and a
+  custom key; one alias.
 - `fu_hybrid`: dense (`HNSW`/`COSINE`), sparse (`SPARSE_INVERTED_INDEX`/`IP`) and a `BM25` function output,
   consistency `Strong`.
 - `fu_struct`: a struct array with an Int32 and a vector sub-field (`HNSW`/`MAX_SIM_L2`).
 - `fu_partkey`: VarChar partition key, 16 partitions, loaded with `load_fields` a strict subset.
 - `fu_clustering`: Int64 clustering key, 100,000 rows in 20 flushes, then a clustering compaction.
 - `fu_cold` (`warmup.scalarField=disable`), `fu_writes` (client-set primary key, an array, JSON and fourteen
-  Int64 columns), `fu_growing` (20,000 rows searched while still growing), `fu_strict` (one rare group next
-  to the query vector), `fu_text_embedding` (a `TEI` text-embedding function; a local stand-in served the
-  endpoint), `fu_import`; database `fu_db` with two properties.
+  Int64 columns; a field is added to it at the end, while it is loaded), `fu_growing` (20,000 rows searched
+  while still growing), `fu_strict` (one rare group next to the query vector), `fu_text_embedding` (a `TEI`
+  text-embedding function; a local stand-in served the endpoint), `fu_import`; database `fu_db` with two
+  properties.
 - Requests: every search and query option in the catalog that pymilvus can send; each expression kind; each
   bucket of `ef`, `nprobe`, `limit`, `nq`; each retrieval kind; hybrid searches over every family
   combination and subrequest-count bucket; each query aggregation; upserts in both modes with array
@@ -1191,33 +1274,34 @@ marked below.
   a repeated JSON-statistics filter for the cache; five searches on growing data; a strict grouping search;
   a filter on the cold collection; a clustering-key-filtered search; `run_analyzer`; a mix and a
   level-zero compaction; an added field; one import job per file format.
-- Rejected after counting: an undocumented hint (segcore rejects it), a `SemanticHighlighter` (no model
-  endpoint configured), an element-level search on an index built for embedding lists, and an unknown
-  legacy strategy and an unknown reranker.
+- Failed after counting: an undocumented hint (segcore rejects it), a `SemanticHighlighter` (no model
+  endpoint configured; this is the one `PreExecute` rejection), an element-level search on an index built
+  for embedding lists, an unknown legacy strategy and an unknown reranker, and the `ARRAY_REMOVE` upsert,
+  which follows the `ARRAY_APPEND` upsert on the same key and loses the partial-update conflict check
+  (`STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE`); its `field_ops` counter had already moved.
 
 **Gate and auth**, on the management port: no credentials `401`; wrong root password `401`; root `200`.
 Restarted without `common.security.featureUsageEnabled`, the same request returns `404`: the route does not
 exist.
 
-**Report.** `build_version=feat-feature-usage-report-20260925-3c06abe35a`, `deploy_mode=STANDALONE`, three
+**Report.** `build_version=feat-feature-usage-report-20261008-a3d413006e`, `deploy_mode=STANDALONE`, three
 nodes, all `reachable=true`. Non-zero entries:
 
 | node | group | entries |
 |---|---|---|
 | mixcoord | `field_types` | `Int64=11`, `FloatVector=11`, `VarChar=4`, `Array=3`, `JSON=2`, `SparseFloatVector=1`, `ArrayOfVector=1`, `Geometry=1`, `Timestamptz=1` (19 other types present at 0; the dynamic `$meta` field is not counted as `JSON`, a struct's sub-fields count as arrays) |
 | mixcoord | `functions` / `providers` | `BM25=1`, `TextEmbedding=1` / `tei=1` |
-| mixcoord | `declared` | `auto_id=7`, `consistency_level=Bounded=10`, `consistency_level=Strong=1`, `enable_dynamic_field=1`, `is_clustering_key=1`, `is_partition_key=1`, `multi_vector_field=2`, `nullable=2`, `struct_array=1`, `autoindex=1` |
+| mixcoord | `declared` | `auto_id=7`, `consistency_level=Bounded=10`, `consistency_level=Strong=1`, `enable_dynamic_field=1`, `is_clustering_key=1`, `is_partition_key=1`, `multi_vector_field=2`, `nullable=2`, `struct_array=1`, `autoindex=1` (`external_collection=0`) |
 | mixcoord | `index_types` / `metric_types` | `IVF_FLAT=5`, `FLAT=3`, `HNSW=2`, `SPARSE_INVERTED_INDEX=1`, `STL_SORT=1`, `INVERTED=1`, `HYBRID=1`, `BITMAP=1`, `Trie=1`, `NGRAM=1`, `FMINDEX=1`, `RTREE=1` / `L2=7`, `IP=2`, `COSINE=1`, `BM25=1`, `MAX_SIM_L2=1` |
 | mixcoord | `index_params` / `field_params` | `nlist=5`, `M=2`, `efConstruction=2`, `json_cast_type=1`, `json_path=1`, `min_gram=1`, `max_gram=1` / `dim=11`, `max_length=4`, `max_capacity=3`, `enable_analyzer=true=2`, `enable_match=true=1` |
-| mixcoord | `properties` / `database_properties` | `timezone=11`, `namespace.sharding.enabled=false=11`, `mmap.enabled=true=1`, `collection.ttl.seconds=1`, `collection.replica.number=1`, `warmup.scalarField=1`, `_custom=1` / `database.max.collections=1`, `database.force.deny.writing=false=1` |
+| mixcoord | `properties` / `database_properties` | `mmap.enabled=true=1`, `collection.ttl.seconds=1`, `collection.replica.number=1`, `warmup.scalarField=1`, `_custom=1` (the server-written `timezone`, `namespace.sharding.enabled` and `cipher.ezID` are not reported) / `database.max.collections=1`, `database.force.deny.writing=false=1` |
 | mixcoord | `objects` | `databases=1`, `aliases=1` |
-| mixcoord | `distribution` | `dim\|<=128=11`, `shards_num\|1=11`, `replica_number\|1=11`, `num_partitions\|1=10`, `num_partitions\|2-16=1`, `max_length\|<=256=4`, `max_capacity\|<=64=3`, `loaded_replica_number\|1=9` |
+| mixcoord | `distribution` | `dim\|<=128=11`, `shards_num\|1=11`, `replica_number\|1=1` (only `fu_main` declares `collection.replica.number`; the other ten have no declared replica number and are not bucketed), `num_partitions\|1=10`, `num_partitions\|2-16=1`, `max_length\|<=256=4`, `max_capacity\|<=64=3`, `loaded_replica_number\|1=9` |
 | mixcoord | `segment` | `storage_version=V2=10`, `is_sorted=10`, `json_shredding=2`, `text_match_index=1`, `full_text_search=1` |
-| mixcoord | `loaded` | `collections=9`, `load_fields=1` (`resource_groups=0`: one resource group on a standalone instance) |
-| mixcoord | `request` | `import_file_type=JSON=1`, `JSONLine=1`, `NumPy=1`, `Parquet=1`, `CSV=1`; `compaction=sort=41`, `mix=9`, `l0=1`, `clustering=1` |
-| proxy | `request` | 141 of 149 counters non-zero; the 8 at zero are listed below |
-| querynode | `config` | all 20 switches, each at exactly one of `key=true` / `key=false`; the ones the run turned on read back as `true` |
-| querynode | `request` | `two_stage_search=2`, `segment_prune=1`, `run_analyzer=1` |
+| mixcoord | `loaded` | `collections=9`, `load_fields=2` (`fu_partkey`, and `fu_writes` since its added field; `resource_groups=0`: one resource group on a standalone instance) |
+| mixcoord | `request` | `import_file_type=JSON=1`, `JSONLine=1`, `NumPy=1`, `Parquet=1`, `CSV=1`; `compaction=sort=41`, `mix=10`, `l0=3`, `clustering=1` |
+| proxy | `request` | 145 of 161 counters non-zero; the 16 at zero are listed below |
+| querynode | `config` | all 20 switches, each at exactly one of `key=true` / `key=false`; the ones the run turned on read back as `true`. The QueryNode has no `request` entries: its execution decisions reach the report through the Proxy |
 
 The Proxy counters that moved, by class (full values in the report file kept with the run):
 
@@ -1228,46 +1312,62 @@ The Proxy counters that moved, by class (full values in the report file kept wit
   `group_by_fields=1`, `order_by=1`, `order_by_fields=1`, `search_aggregation=1`, `consistency_level=` each
   of `Strong=6`, `Session`, `Bounded`, `Eventually`, `Customized` once;
 - ranking and highlighting: `strategy=rrf=11`, `strategy=weighted=1`, `strategy=_other=1`, `reranker=` each
-  of `rrf`, `weighted`, `decay`, `model`, `boost`, `_other` once, `norm_score=2`, `highlighter=Lexical=1`,
-  `highlighter=Semantic=1`, `fragment_size=1`, `num_of_fragments=1`;
-- expressions: every expression counter, from `comparison_operators=relational=19` and
-  `comparison_operators=equality=14` down to one each for the nine `st_*` operators (`st_intersects=2`);
+  of `rrf`, `weighted`, `decay`, `model`, `boost`, `_other` once, `rerank_provider=tei=1`, `norm_score=2`,
+  `highlighter=Lexical=1`, `highlighter=Semantic=1`, `fragment_size=1`, `num_of_fragments=1`;
+- expressions: every expression counter, from `comparison_operators=relational=20` and
+  `comparison_operators=equality=13` down to one each for the nine `st_*` operators (`st_intersects=2`);
+  `in_operator=3`, `json_path=7`, `like=4`, `filter_templating=2`, `expr_use_json_stats=1`;
 - search shape: every bucket of `ef`, `nprobe`, `limit` (including `>16384`, through the old search
   iterator, which clamps the limit instead of rejecting it), `nq`, `retrieval=*`, `hybrid_search_reqs` and
-  `hybrid_search=*`, e.g. `ef|omitted=94`, `nprobe|<=8=38`, `limit|<=10=95`, `retrieval=dense_vector=82`;
+  `hybrid_search=*`, e.g. `ef|omitted=93`, `nprobe|<=8=38`, `limit|<=10=94`, `nq|1=93`,
+  `retrieval=dense_vector=82`;
 - aggregation and writes: `query_aggregation=count=17` and one each of `sum`, `min`, `max`, `avg`;
   `upsert_mode=override=1`, `upsert_mode=merge=5`, `field_ops=ARRAY_APPEND=1`, `field_ops=ARRAY_REMOVE=1`,
   every `upsert_fields` bucket, `delete_mode=ids=2`, `delete_mode=filter=1`;
 - execution features: `filter_exec_path=brute_force=20`, `scalar_index=16`, `pk_index=10`,
   `json_shredding=6`, `text_match_index=2`, `ngram_index=1`; `scalar_index_type=RTREE=9` and one each of
-  the other eight kinds; `filter_index_declined=2`, `expr_cache_hit=3`, `interim_index_search=5`,
-  `strict_group_size_effective=1`, `tiered_storage_cold_read=1`.
+  the other eight kinds; `filter_index_declined=1`, `expr_cache_hit=4`, `interim_index_search=5`,
+  `strict_group_size_effective=2`, `tiered_storage_cold_read=1`, `two_stage_search=2`, `segment_prune=1`;
+  and `run_analyzer=1`.
 
-The counts reconcile with the workload. For example `strategy=rrf=11` is the seven family combinations,
-the three subrequest-count buckets and the grouped hybrid search, all with `RRFRanker`;
-`scalar_index_type=RTREE=9` is the R-Tree case plus the eight geospatial predicates the index serves
-(`st_isvalid` is the ninth and does not use it); `query_aggregation=count=17` is every `count(*)` the workload sent;
-`interim_index_search=5` is the five searches on growing data; `consistency_level=Strong=6` is the one
-explicit Strong search plus the five growing-data searches.
+The counts reconcile with the workload. `strategy=rrf=11` is the seven family combinations, the three
+subrequest-count buckets and the grouped hybrid search, all with `RRFRanker`; `scalar_index_type=RTREE=9` is
+the R-Tree case plus the eight geospatial predicates the index serves (`st_isvalid` is the ninth and does not
+use it, and no longer reports a declined index either: `filter_index_declined=1` is the `like "%row 1%"`
+filter whose inverted index cannot serve an infix pattern); `query_aggregation=count=17` is every `count(*)`
+the workload sent; `interim_index_search=5` is the five searches on growing data; `consistency_level=Strong=6`
+is the one explicit Strong search plus the five growing-data searches; `in_operator=3` and
+`comparison_operators=equality=13` count the delete by a single id as the `pk in [8]` the SDK sends, not as
+the `pk == 8` the rewriter turns it into, because expressions are observed before rewriting;
+`comparison_operators=relational=20` includes the `ts + INTERVAL 'P1D' > ISO '...'` comparison;
+`expr_use_json_stats=1` is the one filter that turns the statistics on (the filter that turns them off is
+not counted); `expr_cache_hit=4` is the second run of the JSON-statistics filter and the three
+re-evaluations of `pk >= 0`, which the workload sends three times and the query iterator a fourth;
+`strict_group_size_effective=2` is both strict grouping searches; `two_stage_search=2` and `segment_prune=1`
+are the delegator decisions the clustering-key filter and the two selective filters on `fu_main` took.
 
 **Zero, and why.** On the Proxy: `namespace`, `not_return_all_meta` and `deprecated_travel_timestamp` have
-no pymilvus 3.1 API; `field_ops=REPLACE` is dropped by pymilvus before sending and `field_ops=PATH_REPLACE`
-is not in its proto; `auth_method=*` need `common.security.authorizationEnabled`; `field_ops=_other` is
-structurally zero. On MixCoord: `compaction=bump_schema_version` needs
-`dataCoord.compaction.bumpSchemaVersion.enabled` and storage V3 (`common.storage.useLoonFFI`), which this run left
-off because V3 changes every collection's storage; the other three are structurally zero. The integration
-suite drives every one of these that can be driven.
+no pymilvus 3.1 API; the eight `rerank_provider=*` values other than `tei`, because the workload has only a
+TEI stand-in (a request naming another provider counts at parse time even when the server then rejects it,
+which is how the integration suite drives all nine); `field_ops=REPLACE` is dropped by pymilvus before
+sending and `field_ops=PATH_REPLACE` is not in its proto; `auth_method=*` need
+`common.security.authorizationEnabled`; `field_ops=_other` is structurally zero. On MixCoord:
+`compaction=bump_schema_version` needs `dataCoord.compaction.bumpSchemaVersion.enabled` and storage V3
+(`common.storage.useLoonFFI`), which this run left off because V3 changes every collection's storage;
+`import_file_type=binlog` needs the binlog files of an existing segment as its source, which the workload
+does not stage; the other three are structurally zero. The integration suite drives every one of these that
+can be driven.
 
 **Report shape.** An excerpt of the report the endpoint returned, decoded and reformatted:
 
 ```json
 {
-  "collected_at": 1790298786,
-  "build_version": "feat-feature-usage-report-20260925-3c06abe35a",
+  "collected_at": 1791499284,
+  "build_version": "feat-feature-usage-report-20261008-a3d413006e",
   "deploy_mode": "STANDALONE",
   "nodes": [
     {
-      "role": "mixcoord", "node_id": 6, "node_start_time": 1790298357, "reachable": true,
+      "role": "mixcoord", "node_id": 10, "node_start_time": 1791498248, "reachable": true,
       "entries": [
         { "group": "field_types", "name": "FloatVector", "value": 11 },
         { "group": "properties", "name": "mmap.enabled=true", "value": 1 },
@@ -1277,27 +1377,28 @@ suite drives every one of these that can be driven.
       ]
     },
     {
-      "role": "proxy", "node_id": 6, "node_start_time": 1790298357, "reachable": true,
+      "role": "proxy", "node_id": 10, "node_start_time": 1791498248, "reachable": true,
       "entries": [
-        { "group": "request", "name": "grouping_search", "value": 4, "last_used_at": 1790298694 },
-        { "group": "request", "name": "limit", "value": 95, "bucket": "<=10", "last_used_at": 1790298694 },
-        { "group": "request", "name": "limit", "value": 1, "bucket": "11-100", "last_used_at": 1790298685 },
-        { "group": "request", "name": "filter_exec_path=scalar_index", "value": 16, "last_used_at": 1790298694 },
+        { "group": "request", "name": "grouping_search", "value": 4, "last_used_at": 1791499061 },
+        { "group": "request", "name": "limit", "value": 94, "bucket": "<=10", "last_used_at": 1791499061 },
+        { "group": "request", "name": "limit", "value": 1, "bucket": "11-100", "last_used_at": 1791499051 },
+        { "group": "request", "name": "filter_exec_path=scalar_index", "value": 16, "last_used_at": 1791499061 },
+        { "group": "request", "name": "two_stage_search", "value": 2, "last_used_at": 1791499061 },
         { "group": "request", "name": "namespace" }
       ]
     },
     {
-      "role": "querynode", "node_id": 6, "node_start_time": 1790298357, "reachable": true,
+      "role": "querynode", "node_id": 10, "node_start_time": 1791498248, "reachable": true,
       "entries": [
         { "group": "config", "name": "queryNode.enableDisk=false", "value": 1 },
-        { "group": "request", "name": "two_stage_search", "value": 2, "last_used_at": 1790298694 }
+        { "group": "config", "name": "queryNode.enableSegmentPrune=true", "value": 1 }
       ]
     }
   ]
 }
 ```
 
-The excerpt is decoded: the raw text escapes `<` and `>` in bucket labels (`"\u003c=10"`). Zero-valued
+The excerpt is decoded: the raw text escapes `<` and `>` in bucket labels (`"<=10"`). Zero-valued
 fields are omitted (see "Consumer contract"): an entry with only `group` and `name`, like `namespace`
 above, has `value` 0 and `last_used_at` 0, and an unreachable node would carry `role`, `node_id` and
 `error` with no `reachable` key. A standalone instance runs every role in one process, so all three nodes
@@ -1307,25 +1408,31 @@ share one `node_id`; each role still reports only its own entries.
 function names, the custom property key or its value, the partition key values, the inserted text, the
 text-embedding endpoint, or the unknown strategy, reranker and hint strings the rejected requests carried.
 
-**Found by this run.** The first run of the workload reported the `NGRAM` index's `min_gram` / `max_gram`
-as `_custom`: the official-key allowlist lacked the scalar index parameters that have no constant in
-`pkg/common`. They are now on it, with `fm_sa_sample_rate` / `fm_block_bytes` for `FMINDEX`, and a test in
-`internal/util/indexparamcheck` keeps the two in step. The run also confirmed two behaviors a reader of the
-report needs: a segment under 1,024 rows is never indexed, so filters on it report `brute_force` even with
-an index declared; and JSON statistics take precedence over a JSON index on the same field unless the
-request turns them off.
+**Found by the runs.** The first run of the workload (2026-09-24) reported the `NGRAM` index's `min_gram` /
+`max_gram` as `_custom`: the official-key allowlist lacked the scalar index parameters that have no constant
+in `pkg/common`. They are now on it, with `fm_sa_sample_rate` / `fm_block_bytes` for `FMINDEX`, and a test in
+`internal/util/indexparamcheck` keeps the two in step. This run found two more things a reader of the report
+needs. DataCoord skips a manual clustering compaction while any compaction task of the collection is still
+executing (`collectionIsClusteringCompacting` looks at the collection's latest trigger of any type and hands
+its id back), and the flush before the trigger had just started an automatic sort compaction, so the first
+attempt reported `compaction=clustering=0` and `segment_prune=0`; the workload now lets the automatic
+compactions finish before it triggers. And `load_fields=2` is one more than the one collection loaded with a
+field list, because QueryCoord stores an explicit field list for every load and `fu_writes` gained a field
+after it was loaded (see "Loaded state"). The runs also confirmed two behaviors: a segment under 1,024 rows
+is never indexed, so filters on it report `brute_force` even with an index declared; and JSON statistics take
+precedence over a JSON index on the same field unless the request turns them off.
 
 **The integration suite run.** The manual run above and `tests/integration/featureusage` verify different
 things and both are kept. The manual run is the only place the HTTP endpoint, its gate and its Basic Auth
 are exercised against a real Proxy management port, with a real SDK's request shapes; the suite reads the
 report over `MixCoord.GetFeatureUsage` and is the one that proves every catalog row is reachable, with
-requests built directly where no SDK sends a shape. Its latest full run on the same branch:
+requests built directly where no SDK sends a shape. Its latest full run on the same tree:
 
 | | |
 |---|---|
 | Test methods | 25, all passing |
-| Wall clock | 271 s for the package, one cluster |
-| Counters exercised | every entry in the surface file except the six listed under "The acceptance gate"; `auth_method=password` is driven in the sibling authentication suite, which also passes |
+| Wall clock | 207 s for the package, one cluster |
+| Counters exercised | every entry in the surface file except the six listed under "The acceptance gate"; `auth_method=password` is driven in the sibling authentication suite, which also passes (15 s) |
 | Groups present | all 16 |
 
 Two entries in the report need state that outlives the test that created it, so those tests deliberately
@@ -1333,11 +1440,12 @@ leave it behind: the collection carrying a text-embedding function, because `pro
 entries disappear when no collection has a function, and a database carrying a property, for
 `database_properties`. Everything else is cleaned up.
 
-**Observations for the consumer.** `timezone` and `namespace.sharding.enabled=false` are written by the
-server on every collection and show `N/N`; they are official keys and are reported as designed, but they do
-not indicate a user choice. `max_field_id` is server-managed and excluded. The compaction counts are
-inflated by the small `dataCoord.segment.maxSize` this run used. Configuration-gated counters read zero on
-a default instance (`segment_prune`, `two_stage_search`, `interim_index_search`, `expr_cache_hit`,
+**Observations for the consumer.** `timezone`, `cipher.ezID` and `namespace.sharding.enabled=false` are
+written by the server on every collection and are excluded from `properties`, as `max_field_id` is; the
+database-level values are what `database_properties` reports. The compaction counts are inflated by the
+small `dataCoord.segment.maxSize` this run used, and `compaction=l0=3` is the one explicit level-zero
+compaction plus two automatic ones the delete steps triggered. Configuration-gated counters read zero on a
+default instance (`segment_prune`, `two_stage_search`, `interim_index_search`, `expr_cache_hit`,
 `tiered_storage_cold_read`): a zero there means "not enabled", not "not used". For three of them the
 `config` group tells the two apart (`queryNode.enableSegmentPrune`,
 `queryNode.segcore.interimIndex.enableIndex`, `queryNode.exprCache.enabled`); the gates of the other two,
@@ -1390,10 +1498,12 @@ The deprecation question for a boolean switch is "who turned it off", which "key
 SDKs send several keys unconditionally. A presence-based counter for those measures request volume.
 The rule is stated per counter in the catalog so that the implementer does not have to rediscover it.
 
-### D7. Expression counters run on the parsed tree, after the cache
+### D7. Expression counters run on the parsed tree, after the cache and before the rewriter
 
-The parser cache makes visitor-side counting wrong by construction. One walk over `planpb.Expr` per
-request is the cheapest correct placement and covers all four expression-bearing request types.
+The parser cache makes visitor-side counting wrong by construction, and the rewriter makes a walk over
+the final plan describe its own choices (a one-value `IN` becomes `==`). One walk over the `planpb.Expr`
+the parser hands to the rewriter, per expression, is the cheapest correct placement and covers all four
+expression-bearing request types and the boost scorer filters with them.
 
 ### D8. No feature registry in code
 
@@ -1523,17 +1633,17 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 | Index-side static entries | `internal/datacoord/feature_usage.go` — `Server.FeatureUsageEntries`; `index_meta.go` — `indexMeta.ListAllIndexes` |
 | MixCoord merge and Proxy fan-out | `internal/coordinator/feature_usage.go` — `GetFeatureUsage`, `collectProxyFeatureUsage` |
 | Proxy RPC and HTTP handler | `internal/proxy/impl.go` — `GetFeatureUsage`; `internal/proxy/management.go` — `FeatureUsage` (route registered only when enabled); `internal/http/router.go` — `RouteFeatureUsage` |
-| Proxy counter hooks | search and query: `internal/proxy/dql/feature_usage_hooks.go`, called from `SearchTask.PreExecute` / `tryGeneratePlan` / `initSearchRequest` / `initAdvancedSearchRequest` / `PostExecute` and `QueryTask.PreExecute` / `createPlanArgs` / `PostExecute`; upsert and delete: `internal/proxy/dml/feature_usage_hooks.go` (`recordUpsertFeatures`, `recordDeleteMode`), called from `internal/proxy/dml/task_upsert.go` and `task_delete.go`, whose expression walk calls `dql.RecordPlanExprFeatures`; primary-key search and authentication in `internal/proxy/impl.go`, `internal/proxy/authentication_interceptor.go` and `internal/distributed/proxy/service.go` |
-| Expression walk | `internal/featureusage/exprwalk.go` — `CollectExprFeatures`; the request-level wrappers `collectPlanExprFeatures` / `recordPlanExprFeatures` in `internal/proxy/dql/feature_usage_hooks.go` |
+| Proxy counter hooks | search and query: `internal/proxy/dql/feature_usage_hooks.go`, called from `SearchTask.PreExecute` / `tryGeneratePlan` / `initSearchRequest` / `initAdvancedSearchRequest` / `PostExecute` and `QueryTask.PreExecute` / `createPlanArgs` / `PostExecute`; upsert and delete: `internal/proxy/dml/feature_usage_hooks.go` (`recordUpsertFeatures`, `recordDeleteMode`), called from `internal/proxy/dml/task_upsert.go` and `task_delete.go`, whose parse installs `dql.ExprFeatureObserver` and flushes with `dql.RecordExprTemplateFeatures`; primary-key search, `run_analyzer` and authentication in `internal/proxy/impl.go`, `internal/proxy/authentication_interceptor.go` and `internal/distributed/proxy/service.go` |
+| Expression walk | `internal/featureusage/exprwalk.go` — `CollectExprFeatures`; the parser hook `ParserVisitorArgs.OnParsedExpr` (`internal/parser/planparserv2/parser_visitor.go`, called in `parseExprInner` before `rewriter.RewriteExpr`) and its installer `exprFeatureObserver` / the template hook `collectExprTemplateFeatures` in `internal/proxy/dql/feature_usage_hooks.go` |
 | Per-subrequest counters | `internal/featureusage/tally.go` — `Tally`; bucket helpers in `internal/featureusage/counters.go` |
 | Execution features | segcore: `internal/core/src/common/FeatureBits.h` (`FeatureBit`, `FeatureRecorder`), `query/PlanNode.h` / `PlanProto.cpp` (the plan option), `exec/expression/Expr.h` (`RecordExecPath`, `RecordScalarIndexType`), `Expr.cpp` (binding in `CompileExpression` and the GIS split), `UnaryExpr.cpp` (NGRAM), `ExprCacheHelper.h` / `Expr.h` / `FilterBitsNode.cpp` (cache hits), `SearchOnGrowing.cpp` / `ChunkedSegmentSealedImpl.cpp` / `VectorSearchNode.cpp` (interim index), `StrictGroupFilteredSearch.cpp` / `SearchGroupByNode.cpp` (strict grouping), `segcore/plan_c.*` (`GetSearchPlanFeatureBits`, `GetRetrievePlanFeatureBits`); Go: `internal/util/segcore/plan.go` (`FeatureBits`), `internal/querynodev2/tasks/search_task.go`, `search_task_go_reduce.go` (`attributeStorageCost`), `query_task.go`, `internal/querynodev2/segments/result.go` (`orFeatureBits`, `ColdReadFeatureBit`), `segments/query_pipeline.go`, `pkg/util/fastpb/query_insert.go`; bit layout `internal/featureusage/execbits.go` |
-| Segment traits | `internal/featureusage/segment.go` — `ComputeSegmentEntries`; `internal/datacoord/feature_usage.go` — `FeatureUsageEntries` |
+| Segment traits | `internal/featureusage/segment.go` — `ComputeSegmentEntries`; `internal/datacoord/feature_usage.go` — `FeatureUsageEntries`; the `CollectionContext` it resolves against: `internal/featureusage/static.go` (`CollectionInput.Context`), `internal/rootcoord/root_coord.go` (`FeatureUsageStatic`), wired in `internal/coordinator/feature_usage.go` |
 | Import and compaction counters | `internal/datacoord/feature_usage.go` — `recordImportFileTypes`, `recordCompactionType`; hooks in `internal/datacoord/services.go` (`ImportV2`) and `internal/datacoord/compaction_inspector.go` (`enqueueCompaction`) |
-| QueryNode RPC, `config` group and execution counters | `pkg/proto/query_coord.proto` (`QueryNode.GetFeatureUsage`); `internal/querynodev2/services.go` — `GetFeatureUsage`, `queryNodeConfigEntries`; hooks in `delegator.go`, `segment_pruner.go` and `RunAnalyzer` |
+| QueryNode RPC, `config` group and delegator bits | `pkg/proto/query_coord.proto` (`QueryNode.GetFeatureUsage`); `internal/querynodev2/services.go` — `GetFeatureUsage`, `queryNodeConfigEntries`, `captureStartConfig` (called from `QueryNode.Init`); the delegator bits in `internal/querynodev2/delegator/delegator.go` (`execBit`, `orFeatureBits`), `delegator_twostage.go` (stage-one bits) and `segment_pruner.go` (`PruneSegments` returns whether it pruned) |
 | QueryNode fan-out and the `loaded` group | `internal/querycoordv2/feature_usage.go` — `CollectQueryNodeFeatureUsage`, `FeatureUsageEntries`; `internal/querycoordv2/session/cluster.go` — `Cluster.GetFeatureUsage`; `internal/featureusage/loaded.go` — `ComputeLoadedEntries`, `BoolConfigEntry` |
 | Config | `pkg/util/paramtable/component_param.go` — `common.security.featureUsageEnabled`, `common.featureUsage.countersEnabled`; `configs/milvus.yaml` regenerated |
 | Report surface guard | `internal/featureusage/surface_test.go` + `internal/featureusage/testdata/report_surface.golden` — `TestReportSurfaceIsStable`, regenerated with `-update-surface` |
-| Hot-path benchmarks | `internal/proxy/dql/feature_usage_bench_test.go` — `BenchmarkFeatureUsageSearchFlush`, `…SearchUnits`, `…LegacyNormScore`, `…ParseSearchInfo`, `…ExprWalk`; C++ unit tests for the recorder in `internal/core/unittest/test_determine_use_index.cpp` |
+| Hot-path benchmarks | `internal/proxy/dql/feature_usage_bench_test.go` — `BenchmarkFeatureUsageSearchFlush`, `…SearchUnits`, `…LegacyNormScore`, `…ParseSearchInfo`, `…ExprWalk`; C++ unit tests for the recorder in `internal/core/unittest/test_determine_use_index.cpp` and for the cache adapter's hit in `internal/core/src/exec/expression/RawExprCacheExtendedTest.cpp` |
 | Integration suite | `tests/integration/featureusage/` — `helper_test.go` (suite, report accessors, the exact-delta assertion), `counters_test.go` and `extra_counters_test.go` (one request per Proxy counter), `expressions_test.go` (geospatial, timestamptz, struct array), `compaction_test.go` (compaction types, clustering, segment pruning), `groups_test.go` (static, loaded, config, provider, resource group, reachability, and the JSON, JSONLine and CSV imports), `import_files_test.go` (Parquet, NumPy), `shape_counters_test.go` (search parameter distributions, retrieval kinds, aggregation and ordering, delete and upsert modes), `exec_features_test.go` (execution features), `coverage_test.go` (the acceptance gate). `tests/integration/featureusageauth/auth_method_test.go` is the sibling suite for the two `auth_method` counters |
 | Other tests | as in Test Plan |
 
