@@ -50,7 +50,7 @@ func TestFastPBBeforeInitialization(t *testing.T) {
 		require.Nil(t, paramtable.GetIfInitialized(), "codec initialized configuration")
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBBeforeInitialization$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBBeforeInitialization$") // #nosec G204 G702 -- Re-exec this test binary with a fixed filter.
 	cmd.Env = append(os.Environ(), "MILVUS_TEST_FASTPB_PREINIT=1")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", output)
