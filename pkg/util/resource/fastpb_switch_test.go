@@ -32,7 +32,7 @@ import (
 
 func TestFastPBStartupDoesNotInitializeConfig(t *testing.T) {
 	if os.Getenv("MILVUS_FASTPB_STARTUP_TEST") != "child" {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBStartupDoesNotInitializeConfig$") // #nosec G204 -- Re-exec this test binary with a fixed filter.
+		cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBStartupDoesNotInitializeConfig$") // #nosec G204,G702 -- Re-exec this test binary with a fixed filter.
 		cmd.Env = append(os.Environ(), "MILVUS_FASTPB_STARTUP_TEST=child")
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, string(output))
