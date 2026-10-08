@@ -143,6 +143,11 @@ CreateSegment registration also precedes completion of its retained handle.
 A Segment's first data position is the first effective Insert, not its creation
 TimeTick. Later packs preserve the original StartPosition.
 
+StorageV3 allocates a version-zero Manifest path before any data is committed.
+That placeholder and row-count reports are not first-pack registration evidence.
+A Growing or Sealed Segment without StartPosition, binlogs, or a committed
+Manifest remains protected by K until registration supplies its cursor.
+
 For an Insert at t whose initial data registration has not completed, K cannot
 pass t. Thus DataCoord does not need to see the latest complete Growing list:
 

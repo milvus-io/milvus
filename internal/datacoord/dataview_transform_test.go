@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -125,12 +127,22 @@ func TestTransformBoundsRejectUnknownDataButAllowEmptyAllocation(t *testing.T) {
 	metadata := &meta{ctx: ctx, collections: typeutil.NewConcurrentMap[int64, *collectionInfo](), segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
 	metadata.collections.Insert(100, &collectionInfo{ID: 100, VChannelNames: []string{"v1"}})
 	metadata.channelCPs.checkpoints["v1"] = &msgpb.MsgPosition{Timestamp: 300}
-	segment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Growing}
+	segment := &datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segment-10", packed.ManifestEarliest),
+	}
 	metadata.segments.SetSegment(10, NewSegmentInfo(segment))
 	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(300), bounds["v1"])
 	segment.NumOfRows = 1
+	for _, state := range []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed} {
+		segment.State = state
+		bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
+		require.NoError(t, err)
+		require.Equal(t, uint64(300), bounds["v1"], "unregistered first packs remain protected by K even after row-count reports or sealing")
+	}
+	segment.ManifestPath = packed.MarshalManifestPath("segment-10", 1)
 	_, err = transformFrontierBounds(ctx, metadata, nil, 100)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	segment.StartPosition = &msgpb.MsgPosition{Timestamp: 400}
