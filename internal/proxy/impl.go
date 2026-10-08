@@ -3708,6 +3708,7 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 		return nil, merr.WrapErrParameterInvalidMsg("search by IDs is not supported for hybrid search")
 	}
 
+	// Pin collection identity before validating request-sized ID input.
 	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
 		request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
@@ -3848,6 +3849,9 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+	// Search by primary keys uses an internal Query to fetch the input vectors.
+	// Apply the top-level Search policy pinned by the preflight, then prevent
+	// queryTask from applying a Query policy to the same internal retrieval.
 	if preflight.rlsPredicate != nil {
 		if err := rls.AttachPredicateToRequeryPlan(plan, preflight.rlsPredicate); err != nil {
 			return nil, nil, err

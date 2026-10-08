@@ -124,8 +124,8 @@ type searchTask struct {
 	rlsPreset            bool
 }
 
-// ResolvedRLSSnapshot is the request-local RLS decision reused by later
-// attempts of the same Search or HybridSearch RPC.
+// ResolvedRLSSnapshot is the request-local RLS decision that later attempts
+// of the same Search or HybridSearch RPC must reuse.
 type ResolvedRLSSnapshot struct {
 	CollectionID   int64
 	DBName         string
@@ -133,13 +133,15 @@ type ResolvedRLSSnapshot struct {
 	Predicate      *planpb.Expr
 }
 
-// SetResolvedRLSPredicate reuses a predicate resolved by an earlier attempt.
+// SetResolvedRLSPredicate reuses a predicate resolved by a preparatory read.
 func (t *searchTask) SetResolvedRLSPredicate(predicate *planpb.Expr) {
 	t.rlsPredicate = predicate
 	t.rlsResolved = true
 	t.rlsPreset = true
 }
 
+// ResolvedRLSSnapshot returns the predicate and canonical collection identity
+// after this task has resolved RLS. The predicate is immutable after resolution.
 func (t *searchTask) ResolvedRLSSnapshot() *ResolvedRLSSnapshot {
 	if !t.rlsResolved {
 		return nil
@@ -233,7 +235,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.partitionKeyMode = t.schema.hasPartitionKeyField
+	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}

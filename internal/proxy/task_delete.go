@@ -302,34 +302,43 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = dr.req.GetDbName()
 	}
-	collName = colInfo.schema.GetName()
-	dr.req.DbName = canonicalDBName
-	dr.req.CollectionName = collName
-	rlsEnabled, err := resolveRLSEnforcement(ctx, colInfo.rlsEnabled, colInfo.rlsForce, dr.req.GetSkipRls(),
-		canonicalDBName, collName, "delete")
-	if err != nil {
-		return err
+	rlsEnabled := colInfo.rlsEnabled
+	if rlsEnabled && dr.req.GetSkipRls() {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
+			canonicalDBName, colInfo.schema.GetName(), "delete")
+		if err != nil {
+			return err
+		}
 	}
 	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
 	if err != nil {
 		return err
 	}
+
 	dr.schema = colInfo.schema
 	colTimezone := getColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
-	start := time.Now()
-	userPlan, err := planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
-	if err != nil {
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
+		start := time.Now()
+		plan, err := planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, expr, dr.req.GetExprTemplateValues(), visitorArgs)
+		if err != nil {
+			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+			return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+		}
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+		return plan, nil
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
+	userPlan, err := parseDeletePlan(dr.req.GetExpr())
+	if err != nil {
+		return err
+	}
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
+
 	if enforceRLS {
 		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.schemaHelper)
 		if err != nil {

@@ -1667,16 +1667,17 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionName = colInfo.schema.GetName()
+	it.rlsEnabled = colInfo.rlsEnabled
 	canonicalDBName := colInfo.dbName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
 	}
-	it.req.DbName = canonicalDBName
-	it.req.CollectionName = it.collectionName
-	it.rlsEnabled, err = resolveRLSEnforcement(ctx, colInfo.rlsEnabled, colInfo.rlsForce, it.req.GetSkipRls(),
-		canonicalDBName, it.collectionName, "upsert")
-	if err != nil {
-		return err
+	if it.rlsEnabled && it.req.GetSkipRls() {
+		it.rlsEnabled, err = resolveRLSEnforcement(ctx, it.rlsEnabled, colInfo.rlsForce, true,
+			canonicalDBName, colInfo.schema.GetName(), "upsert")
+		if err != nil {
+			return err
+		}
 	}
 	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
 		return err
@@ -1778,9 +1779,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if it.req.NumRows <= 0 {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
 	}
+	it.rlsUsingPredicate = nil
+	it.rlsCheckPredicate = nil
 	if it.rlsEnabled {
 		it.rlsUsingPredicate, it.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
-			ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.schemaHelper)
+			ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.schemaHelper,
+		)
 		if err != nil {
 			return err
 		}
