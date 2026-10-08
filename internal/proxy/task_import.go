@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -118,6 +119,9 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
 		return merr.WrapErrImportSysFailed("collection schema is unavailable")
+	}
+	if err := refuseImportIntoSplitCollection(colInfo); err != nil {
+		return err
 	}
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
@@ -323,4 +327,31 @@ func GetImportFiles(internals []*internalpb.ImportFile) []*msgpb.ImportFile {
 
 func (it *importTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// refuseImportIntoSplitCollection refuses an import into a collection a shard
+// split has touched -- one with a routing modulus, or with a shard a split has
+// fenced. The import path places rows by the collection's vchannel count, which
+// after a split no longer matches the residues its shards own, so the rows
+// would land on shards that do not own them. Import into a split collection is
+// not designed yet (design doc §11); until it is, the request is refused as an
+// unsupported operation rather than misplaced. It is a System error: the split
+// is Milvus's doing, not the request's.
+func refuseImportIntoSplitCollection(info *collectionInfo) error {
+	if info == nil {
+		return nil
+	}
+	splitting := false
+	for _, shard := range info.ShardInfos {
+		if shard.GetState() == schemapb.ShardState_ShardSplitting {
+			splitting = true
+			break
+		}
+	}
+	if info.RoutingModulus == 0 && !splitting {
+		return nil
+	}
+	return merr.WrapErrOperationNotSupportedMsg(
+		"import into collection %d is not supported after a shard split (routing modulus %d); insert the rows instead",
+		info.CollID, info.RoutingModulus)
 }
