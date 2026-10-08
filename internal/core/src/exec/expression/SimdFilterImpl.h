@@ -25,8 +25,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include "common/FastMem.h"
 #include <cstring>
+#include <type_traits>
 #include <vector>
 #include <xsimd/xsimd.hpp>
 #include "common/SimdUtil.h"
@@ -159,8 +161,12 @@ filterChunkImpl(
 
     // ── Scalar tail ─────────────────────────────────────────────────────
     for (; i < size; ++i) {
-        auto it = std::lower_bound(vals, vals + num_vals, data[i]);
-        if (it != vals + num_vals && *it == data[i]) {
+        if constexpr (std::is_floating_point_v<T>) {
+            if (std::isnan(data[i])) {
+                continue;
+            }
+        }
+        if (std::binary_search(vals, vals + num_vals, data[i])) {
             bitmap[i / 8] |= static_cast<uint8_t>(1 << (i % 8));
         }
     }

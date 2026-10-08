@@ -34,7 +34,7 @@ Scalar and nested sorted indexes represent an unindexed valid NaN using their ex
 
 Positive range queries use finite postings when the scalar/nested index contains unindexed NaNs. A runtime-only flag, derived from source validity and posting count, keeps the existing complement optimization for indexes without such slots. NOT IN continues to subtract matching postings from source validity.
 
-Raw numeric IN lookup uses lower_bound followed by equality, including per-element, unaligned-head and scalar-tail paths. Contains ANY and ALL cannot satisfy a finite target using source NaN. Scan and index evaluation must agree for supported finite query values. This change does not redefine finite NULL-member payload handling.
+Raw numeric IN lookup skips source NaN before binary search, including per-element, unaligned-head and scalar-tail paths. Contains ANY and ALL cannot satisfy a finite target using source NaN. Scan and index evaluation must agree for supported finite query values. This change does not redefine finite NULL-member payload handling.
 
 The parser rejects numeric NaN query values, including template scalars, nested query arrays and constant calculations that produce NaN. Validation occurs before template coercion and before logical folding can discard an invalid value. Strings such as "NaN" remain ordinary string query values. No NaN query functionality is introduced. JSON stats shared and shredded execution is compared with raw execution using supported finite queries; flat-index behavior is outside this validation scope. No container or NULL-member metadata is added and historical indexes are not repaired.
 

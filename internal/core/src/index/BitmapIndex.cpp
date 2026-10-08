@@ -129,6 +129,7 @@ BitmapIndex<T>::BitmapIndex(
     bool is_nested_index)
     : ScalarIndex<T>(BITMAP_INDEX_TYPE),
       is_built_(false),
+      build_mode_(BitmapIndexBuildMode::ROARING),
       schema_(file_manager_context.fieldDataMeta.field_schema),
       is_mmap_(false),
       is_nested_index_(is_nested_index) {

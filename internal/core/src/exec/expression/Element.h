@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -408,8 +409,12 @@ class SimdBatchElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         T v = std::get<T>(value);
-        auto it = std::lower_bound(vals_.begin(), vals_.end(), v);
-        return it != vals_.end() && *it == v;
+        if constexpr (std::is_floating_point_v<T>) {
+            if (std::isnan(v)) {
+                return false;
+            }
+        }
+        return std::binary_search(vals_.begin(), vals_.end(), v);
     }
 
     // Batch SIMD filter — delegates to runtime-dispatched simdFilterChunk().
@@ -427,8 +432,12 @@ class SimdBatchElement : public MultiElement {
         if (bit_offset != 0) {
             int head = std::min(size, 8 - bit_offset);
             for (int i = 0; i < head; ++i) {
-                auto it = std::lower_bound(vals_.begin(), vals_.end(), data[i]);
-                if (it != vals_.end() && *it == data[i]) {
+                if constexpr (std::is_floating_point_v<T>) {
+                    if (std::isnan(data[i])) {
+                        continue;
+                    }
+                }
+                if (std::binary_search(vals_.begin(), vals_.end(), data[i])) {
                     res[i] = true;
                 }
             }

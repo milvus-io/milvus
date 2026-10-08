@@ -20,6 +20,7 @@
 
 #include <fmt/core.h>
 
+#include <cmath>
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -228,10 +229,12 @@ class ShreddingArrayBsonContainsAllExecutor {
                 if (!value.has_value()) {
                     continue;
                 }
-                auto it = tmp_elements.lower_bound(value.value());
-                if (it != tmp_elements.end() && *it == value.value()) {
-                    tmp_elements.erase(it);
+                if constexpr (std::is_floating_point_v<GetType>) {
+                    if (std::isnan(value.value())) {
+                        continue;
+                    }
                 }
+                tmp_elements.erase(value.value());
                 if (tmp_elements.empty()) {
                     break;
                 }
