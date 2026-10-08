@@ -34,6 +34,7 @@
 #include "exec/expression/Utils.h"
 #include "exec/operator/Utils.h"
 #include "monitor/Monitor.h"
+#include "query/Utils.h"
 #include "opentelemetry/trace/span.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"
@@ -186,6 +187,10 @@ PhyVectorSearchNode::GetOutput() {
 
     // Single search + metrics path
     milvus::SearchResult search_result;
+    if (query::CanUseStrictGroupSearch(search_info_, num_queries) &&
+        !search_view.empty()) {
+        search_result.vector_search_filter_owner_ = GetColumnVector(input_);
+    }
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,

@@ -120,6 +120,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
     if (UseVectorIterator(search_info)) {
         try {
             auto search_conf = index.PrepareSearchParams(search_info);
+            query::ApplyStrictGroupSkipRefine(search_info, nq, search_conf);
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
                 iterators_val = index.VectorIterators(
                     dataset, search_conf, bitset, op_context);
@@ -140,12 +141,13 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     "inside, terminate {} operation:{}",
                     operator_type,
                     knowhere::Status2String(iterators_val.error()));
-                ThrowInfo(
-                    ErrorCode::Unsupported,
-                    fmt::format(
-                        "Returned knowhere iterator has non-ready iterators "
-                        "inside, terminate {} operation",
-                        operator_type));
+                ThrowInfo(ErrorCode::Unsupported,
+                          fmt::format(
+                              "Failed to {}, current index:{} doesn't support "
+                              "the requested iterator operation: {}",
+                              operator_type,
+                              index.GetIndexType(),
+                              knowhere::Status2String(iterators_val.error())));
             }
             search_result.total_nq_ = nq;
             search_result.unity_topK_ = search_info.topk_;
