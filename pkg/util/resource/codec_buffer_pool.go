@@ -61,6 +61,7 @@ func (p *codecBufferPool) Get(length int) *[]byte {
 	b := make([]byte, length, capacity)
 	return &b
 }
+
 func (p *codecBufferPool) Put(b *[]byte) {
 	capacity := cap(*b)
 	if capacity == 0 {
