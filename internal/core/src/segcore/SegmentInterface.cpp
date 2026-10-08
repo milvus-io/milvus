@@ -503,16 +503,28 @@ SegmentInternalInterface::FillTargetEntry(
     milvus::OpContext* op_ctx) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
+    // Capture the request-scoped read snapshot once per FillTargetEntry so
+    // the per-field reads (take + bulk_subscript) don't re-capture the
+    // published state. Growing segments return a null snapshot and fall back
+    // to the virtual bulk_subscript with identical semantics.
+    auto chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this);
+    auto snapshot = CaptureReadSnapshot();
+    auto pinned =
+        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                : std::shared_ptr<
+                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
+
     // Fast path: use take() API for eligible output fields.
     // Use dynamic_cast to avoid adding new virtual methods (vtable layout
     // change causes SIGSEGV in cgo boundary).
-    if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+    if (chunked) {
         if (chunked->TryTakeForRetrieve(plan,
                                         results,
                                         offsets,
                                         size,
                                         ignore_non_pk,
                                         fill_ids,
+                                        pinned,
                                         op_ctx)) {
             return;
         }
@@ -564,17 +576,33 @@ SegmentInternalInterface::FillTargetEntry(
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col = bulk_subscript(
-                &local_ctx, field_id, offsets, size, target_dynamic_fields);
+            auto col = pinned ? chunked->bulk_subscript_from_state(
+                                    pinned,
+                                    &local_ctx,
+                                    field_id,
+                                    offsets,
+                                    size,
+                                    target_dynamic_fields)
+                              : bulk_subscript(&local_ctx,
+                                               field_id,
+                                               offsets,
+                                               size,
+                                               target_dynamic_fields);
             fields_data->AddAllocated(col.release());
             continue;
         }
         std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_->operator[](field_id);
-        if (!is_field_exist(field_id)) {
+        bool field_exists =
+            pinned ? pinned->schema->get_fields().find(field_id) !=
+                         pinned->schema->get_fields().end()
+                   : is_field_exist(field_id);
+        if (!field_exists) {
             col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            col = bulk_subscript(&local_ctx, field_id, offsets, size);
+            col = pinned ? chunked->bulk_subscript_from_state(
+                               pinned, &local_ctx, field_id, offsets, size)
+                         : bulk_subscript(&local_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {

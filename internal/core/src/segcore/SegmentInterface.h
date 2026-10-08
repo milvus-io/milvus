@@ -131,6 +131,17 @@ class SegmentReadSnapshot {
     GetColumn(FieldId field_id) const {
         return GetDataScanResources(field_id).first.get();
     }
+
+    // Type-erased accessor to the immutable published state behind the
+    // snapshot. Returns nullptr for growing segments and non-sealed / test
+    // snapshots. Only the segment implementation that created the snapshot may
+    // reinterpret the returned pointer (via the alias shared_ptr constructor);
+    // the abstract facade stays minimal so common/ never depends on the
+    // segment's concrete state type.
+    virtual const void*
+    GetState() const {
+        return nullptr;
+    }
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API

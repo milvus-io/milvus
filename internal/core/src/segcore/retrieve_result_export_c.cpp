@@ -264,6 +264,23 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 milvus::OpContext op_ctx(cancel_token);
                 auto read_lease =
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
+                // Capture the request-scoped read snapshot once per segment so
+                // the per-field bulk_subscript calls below reuse it instead of
+                // re-capturing the published state. Growing segments return a
+                // null snapshot and fall back to the virtual bulk_subscript.
+                auto chunked = dynamic_cast<
+                    const milvus::segcore::ChunkedSegmentSealedImpl*>(
+                    materialized.segment);
+                auto pinned =
+                    chunked
+                        ? milvus::segcore::ChunkedSegmentSealedImpl::
+                              ToPublishedState(
+                                  materialized.segment
+                                      ->CaptureReadSnapshot())
+                        : std::shared_ptr<
+                              const milvus::segcore::
+                                  ChunkedSegmentSealedImpl::
+                                      PublishedSegmentState>();
                 for (auto field_id : plan->field_ids_) {
                     milvus::futures::throwIfCancelled(cancel_token);
                     if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
@@ -291,21 +308,42 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     }
                     auto& field_meta = plan->schema_->operator[](field_id);
                     std::unique_ptr<DataArray> data;
+                    bool field_exists =
+                        pinned
+                            ? pinned->schema->get_fields().find(field_id) !=
+                                  pinned->schema->get_fields().end()
+                            : materialized.segment->is_field_exist(field_id);
                     if (dynamic_field_id.has_value() &&
                         dynamic_field_id.value() == field_id &&
                         !plan->target_dynamic_fields_.empty()) {
-                        data = materialized.segment->bulk_subscript(
-                            &op_ctx,
-                            field_id,
-                            materialized.segment_offsets.data(),
-                            materialized.segment_offsets.size(),
-                            plan->target_dynamic_fields_);
-                    } else if (!materialized.segment->is_field_exist(
-                                   field_id)) {
+                        if (pinned) {
+                            data = chunked->bulk_subscript_from_state(
+                                pinned,
+                                &op_ctx,
+                                field_id,
+                                materialized.segment_offsets.data(),
+                                materialized.segment_offsets.size(),
+                                plan->target_dynamic_fields_);
+                        } else {
+                            data = materialized.segment->bulk_subscript(
+                                &op_ctx,
+                                field_id,
+                                materialized.segment_offsets.data(),
+                                materialized.segment_offsets.size(),
+                                plan->target_dynamic_fields_);
+                        }
+                    } else if (!field_exists) {
                         data = materialized.segment
                                    ->bulk_subscript_not_exist_field(
                                        field_meta,
                                        materialized.segment_offsets.size());
+                    } else if (pinned) {
+                        data = chunked->bulk_subscript_from_state(
+                            pinned,
+                            &op_ctx,
+                            field_id,
+                            materialized.segment_offsets.data(),
+                            materialized.segment_offsets.size());
                     } else {
                         data = materialized.segment->bulk_subscript(
                             &op_ctx,

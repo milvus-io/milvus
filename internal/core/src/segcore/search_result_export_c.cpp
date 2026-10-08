@@ -45,6 +45,7 @@
 #include "prometheus/histogram.h"
 #include "pb/cgo_msg.pb.h"
 #include "query/PlanImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
@@ -628,14 +629,34 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
         milvus::OpContext op_ctx(cancel_token);
+        auto chunked = dynamic_cast<
+            const milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+        auto pinned =
+            chunked
+                ? milvus::segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+                      search_result->read_snapshot_)
+                : std::shared_ptr<
+                      const milvus::segcore::ChunkedSegmentSealedImpl::
+                          PublishedSegmentState>();
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
             auto& field_meta = plan->schema_->operator[](field_id);
             std::unique_ptr<milvus::DataArray> field_data;
-            if (!segment->is_field_exist(field_id)) {
+            bool field_exists =
+                pinned ? pinned->schema->get_fields().find(field_id) !=
+                             pinned->schema->get_fields().end()
+                       : segment->is_field_exist(field_id);
+            if (!field_exists) {
                 field_data =
                     segment->bulk_subscript_not_exist_field(field_meta, size);
+            } else if (pinned) {
+                field_data = chunked->bulk_subscript_from_state(
+                    pinned,
+                    &op_ctx,
+                    field_id,
+                    search_result->seg_offsets_.data(),
+                    size);
             } else {
                 field_data =
                     segment->bulk_subscript(&op_ctx,
@@ -1306,6 +1327,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 OrderedSegmentFields& materialized) {
                 SearchResult temp_result;
                 temp_result.segment_ = materialized.search_result->segment_;
+                temp_result.read_snapshot_ =
+                    materialized.search_result->read_snapshot_;
                 temp_result.seg_offsets_ = materialized.segment_offsets;
                 temp_result.distances_.resize(
                     materialized.segment_offsets.size(), 0.0f);
@@ -1441,13 +1464,35 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
                 milvus::OpContext op_ctx(cancel_token);
+                auto chunked = dynamic_cast<
+                    const milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
+                auto pinned =
+                    chunked
+                        ? milvus::segcore::ChunkedSegmentSealedImpl::
+                              ToPublishedState(
+                                  materialized.search_result->read_snapshot_)
+                        : std::shared_ptr<
+                              const milvus::segcore::ChunkedSegmentSealedImpl::
+                                  PublishedSegmentState>();
                 for (auto field_id : requested_field_ids) {
                     milvus::futures::throwIfCancelled(cancel_token);
                     auto& field_meta = plan->schema_->operator[](field_id);
                     std::unique_ptr<milvus::DataArray> data;
-                    if (!segment->is_field_exist(field_id)) {
+                    bool field_exists =
+                        pinned
+                            ? pinned->schema->get_fields().find(field_id) !=
+                                  pinned->schema->get_fields().end()
+                            : segment->is_field_exist(field_id);
+                    if (!field_exists) {
                         data = segment->bulk_subscript_not_exist_field(
                             field_meta, materialized.segment_offsets.size());
+                    } else if (pinned) {
+                        data = chunked->bulk_subscript_from_state(
+                            pinned,
+                            &op_ctx,
+                            field_id,
+                            materialized.segment_offsets.data(),
+                            materialized.segment_offsets.size());
                     } else {
                         data = segment->bulk_subscript(
                             &op_ctx,

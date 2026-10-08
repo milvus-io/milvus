@@ -1331,6 +1331,14 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return Column(field_id);
     }
 
+    // Type-erased published state for result-fill reuse. The segment that
+    // created this snapshot reinterprets the pointer via the alias shared_ptr
+    // constructor; nothing outside ChunkedSegmentSealedImpl dereferences it.
+    const void*
+    GetState() const override {
+        return state_.get();
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {
@@ -1349,6 +1357,31 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
 std::shared_ptr<const SegmentReadSnapshot>
 ChunkedSegmentSealedImpl::CaptureReadSnapshot() const {
     return std::make_shared<SealedReadSnapshot>(CapturePublishedState());
+}
+
+std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
+ChunkedSegmentSealedImpl::ToPublishedState(
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot) {
+    if (!snapshot) {
+        return nullptr;
+    }
+    // The type-erased pointer is only valid if the snapshot is really a
+    // SealedReadSnapshot (created by this class via CaptureReadSnapshot).
+    // Guards every call site — including the export paths that bypass
+    // FillTargetEntry's cross-segment assertion.
+    AssertInfo(dynamic_cast<const SealedReadSnapshot*>(snapshot.get()) !=
+                   nullptr,
+               "read_snapshot_ is not a sealed segment read snapshot");
+    const void* state = snapshot->GetState();
+    if (state == nullptr) {
+        return nullptr;
+    }
+    // Alias constructor: shares the snapshot's control block (no ref-count
+    // churn) and reinterprets the type-erased pointer. The snapshot owns the
+    // concrete state through SealedReadSnapshot::state_, so the alias keeps it
+    // alive as long as the request result lives.
+    return std::shared_ptr<const PublishedSegmentState>(
+        snapshot, static_cast<const PublishedSegmentState*>(state));
 }
 
 std::shared_ptr<const ChunkedSegmentSealedImpl::RuntimeResourceState>
@@ -6731,7 +6764,17 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                          FieldId field_id,
                                          const int64_t* seg_offsets,
                                          int64_t count) const {
-    auto snapshot = CapturePublishedState();
+    return bulk_subscript_from_state(
+        CapturePublishedState(), op_ctx, field_id, seg_offsets, count);
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::bulk_subscript_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count) const {
     auto& field_meta = snapshot->schema->operator[](field_id);
     // if count == 0, return empty data array
     if (count == 0) {
@@ -6825,13 +6868,28 @@ ChunkedSegmentSealedImpl::bulk_subscript(
     const int64_t* seg_offsets,
     int64_t count,
     const std::vector<std::string>& dynamic_field_names) const {
-    auto snapshot = CapturePublishedState();
+    return bulk_subscript_from_state(CapturePublishedState(),
+                                     op_ctx,
+                                     field_id,
+                                     seg_offsets,
+                                     count,
+                                     dynamic_field_names);
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::bulk_subscript_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>& dynamic_field_names) const {
     Assert(!dynamic_field_names.empty());
     if (count == 0) {
         return fill_with_empty(field_id, 0);
     }
 
-    auto column = get_column(field_id);
+    auto column = get_column(snapshot->runtime, field_id);
     AssertInfo(column != nullptr,
                "json field {} must exist when bulk_subscript",
                field_id.get());
@@ -9420,7 +9478,20 @@ void
 ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+    // Reuse the request-pinned snapshot captured once at search start; fall
+    // back to a fresh capture for non-pinned / test paths.
+    if (results.read_snapshot_ != nullptr) {
+        // The snapshot is only safe to reinterpret here if it was captured by
+        // this very segment (alias re-binding in ToPublishedState is a
+        // type-erased static_cast). Cross-segment reuse would be silent UB.
+        // segment_ is null in test helpers, which never attach a snapshot.
+        AssertInfo(results.segment_ == nullptr || results.segment_ == this,
+                   "read_snapshot_ was captured by a different segment");
+    }
+    auto snapshot = ToPublishedState(results.read_snapshot_);
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.seg_offsets_.size() == size,
@@ -9431,7 +9502,7 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     // Try take() for eligible output fields. Fields not filled by take still
     // go through bulk_subscript below.
     bool used_take = TryTakeForSearch(
-        plan, results.seg_offsets_.data(), size, results, op_ctx);
+        plan, results.seg_offsets_.data(), size, results, snapshot, op_ctx);
 
     std::unique_ptr<DataArray> field_data;
     // Per-call OpContext keeps storage_usage scoped to this segment;
@@ -9454,16 +9525,21 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&local_ctx,
-                                        field_id,
-                                        results.seg_offsets_.data(),
-                                        size,
-                                        target_dynamic_fields);
-        } else if (!is_field_exist(field_id)) {
+            field_data = bulk_subscript_from_state(snapshot,
+                                                   &local_ctx,
+                                                   field_id,
+                                                   results.seg_offsets_.data(),
+                                                   size,
+                                                   target_dynamic_fields);
+        } else if (snapshot->schema->get_fields().find(field_id) ==
+                   snapshot->schema->get_fields().end()) {
             field_data = bulk_subscript_not_exist_field(field_meta, size);
         } else {
-            field_data = bulk_subscript(
-                &local_ctx, field_id, results.seg_offsets_.data(), size);
+            field_data = bulk_subscript_from_state(snapshot,
+                                                   &local_ctx,
+                                                   field_id,
+                                                   results.seg_offsets_.data(),
+                                                   size);
         }
         results.output_fields_data_[field_id] = std::move(field_data);
     }
@@ -9980,8 +10056,12 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids,
+    std::shared_ptr<const PublishedSegmentState> snapshot,
     milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+    // Fallback for callers without a pinned snapshot (direct tests).
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     auto schema_snapshot = snapshot->schema;
     if (size == 0 || !snapshot->use_take_for_output ||
         !plan->take_for_output_allowed_) {
@@ -10267,12 +10347,17 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 }
 
 bool
-ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
-                                           const int64_t* seg_offsets,
-                                           int64_t size,
-                                           SearchResult& results,
-                                           milvus::OpContext* op_ctx) const {
-    auto snapshot = CapturePublishedState();
+ChunkedSegmentSealedImpl::TryTakeForSearch(
+    const query::Plan* plan,
+    const int64_t* seg_offsets,
+    int64_t size,
+    SearchResult& results,
+    std::shared_ptr<const PublishedSegmentState> snapshot,
+    milvus::OpContext* op_ctx) const {
+    // Fallback for callers without a pinned snapshot (direct tests).
+    if (!snapshot) {
+        snapshot = CapturePublishedState();
+    }
     auto schema_snapshot = snapshot->schema;
     if (size == 0 || !snapshot->use_take_for_output ||
         !plan->take_for_output_allowed_) {
