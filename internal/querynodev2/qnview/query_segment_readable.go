@@ -1,10 +1,16 @@
 package qnview
 
-import "github.com/milvus-io/milvus/internal/querynodev2/segments"
+import (
+	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+)
 
-// ReadableSealedSegment exposes the querynode execution objects behind a
-// QueryView-owned sealed segment handle.
-type ReadableSealedSegment interface {
-	QuerySegment() segments.Segment
-	Collection() *segments.Collection
+// SegmentReadView borrows native resources pinned by a query handle.
+// LoadInfo is an immutable applied snapshot, never the pending preparation target.
+type SegmentReadView struct {
+	Collection   *segcore.CCollection
+	Segment      segcore.CSegment
+	LoadInfo     *querypb.SegmentLoadInfo
+	DatabaseName string
 }
+type ReadableSealedSegment interface{ ReadView() SegmentReadView }

@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -300,7 +300,7 @@ func TestSegmentLoadTask_UsesTaskTransformStartTick(t *testing.T) {
 }
 
 func TestSegmentLoadTask_PreservesReadableSegment(t *testing.T) {
-	collection := &segments.Collection{}
+	collection := &segcore.CCollection{}
 	loader := &fakePhysicalLoader{
 		loadFn: func(info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
 			return &fakeReadableTransformSegment{
@@ -329,7 +329,7 @@ func TestSegmentLoadTask_PreservesReadableSegment(t *testing.T) {
 	}
 	readable, ok := loaded.(ReadableSealedSegment)
 	require.True(t, ok)
-	assert.Same(t, collection, readable.Collection())
+	assert.Same(t, collection, readable.ReadView().Collection)
 }
 
 func TestSegmentLoadTask_UpdatesCollectionIndexMetaBeforeLoad(t *testing.T) {

@@ -6,22 +6,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *testing.T) {
-	collection := &fakeQVCollectionManager{}
-	segments := &fakeQVSegmentManager{}
 	loader := &fakeQVLoader{segment: &fakeQVSegment{id: 10, partitionID: 100}}
-	physical := newQueryViewPhysicalSegmentLoader(collection, segments, loader)
+	physical := newQueryViewPhysicalSegmentLoader(loader)
 
 	loaded, err := physical.Load(
 		context.Background(),
@@ -30,9 +26,6 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 	)
 	require.NoError(t, err)
 
-	assert.Zero(t, collection.putCollectionID)
-	assert.Zero(t, collection.unrefCount)
-	assert.Zero(t, collection.refCount)
 	assert.Equal(t, int64(1), loader.collectionID)
 	assert.True(t, loader.newCalled)
 	assert.True(t, loader.loadCalled)
@@ -46,8 +39,8 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 
 func TestQueryViewPhysicalSegmentLoaderUpdateDoesNotUseContentHashAsOrderedLoadVersion(t *testing.T) {
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(&fakeQVCollectionManager{}, &fakeQVSegmentManager{}, loader)
-	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, &fakeQVSegmentManager{}, "v1", 50)
+	physical := newQueryViewPhysicalSegmentLoader(loader)
+	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, "v1", 50)
 
 	err := physical.Update(
 		context.Background(),
@@ -58,18 +51,18 @@ func TestQueryViewPhysicalSegmentLoaderUpdateDoesNotUseContentHashAsOrderedLoadV
 			Revision:  qnview.SegmentLoadInfoRevision{Revision: ^uint64(0)},
 			LoadInfo:  &querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10},
 		},
-		qnview.SegmentUpdateLoadIndex,
+		qnview.SegmentUpdateReopen,
 	)
 	require.NoError(t, err)
-	assert.True(t, loader.loadIndexCalled)
+	assert.True(t, loader.reopenCalled)
 	assert.Zero(t, loader.version,
 		"SegmentLoadInfoRevision is a non-monotonic equality token and must not enter an ordered loader version slot")
 }
 
 func TestQueryViewPhysicalSegmentLoaderUpdateUnwrapsTransformSegment(t *testing.T) {
 	loader := &fakeQVLoader{}
-	physical := newQueryViewPhysicalSegmentLoader(&fakeQVCollectionManager{}, &fakeQVSegmentManager{}, loader)
-	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, &fakeQVSegmentManager{}, "v1", 50)
+	physical := newQueryViewPhysicalSegmentLoader(loader)
+	segment := newQueryViewTransformSegment(&fakeQVSegment{id: 10, partitionID: 100}, "v1", 50)
 	wrapper := &testTransformSegmentWrapper{TransformSegment: &testTransformSegmentWrapper{TransformSegment: segment}}
 
 	err := physical.Update(
@@ -81,11 +74,10 @@ func TestQueryViewPhysicalSegmentLoaderUpdateUnwrapsTransformSegment(t *testing.
 			Revision:  qnview.SegmentLoadInfoRevision{Revision: 2},
 			LoadInfo:  &querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10},
 		},
-		qnview.SegmentUpdateReopen|qnview.SegmentUpdateLoadIndex,
+		qnview.SegmentUpdateReopen,
 	)
 	require.NoError(t, err)
 	assert.True(t, loader.reopenCalled)
-	assert.True(t, loader.loadIndexCalled)
 }
 
 type testTransformSegmentWrapper struct {
@@ -94,33 +86,4 @@ type testTransformSegmentWrapper struct {
 
 func (s *testTransformSegmentWrapper) UnwrapTransformSegment() qnview.TransformSegment {
 	return s.TransformSegment
-}
-
-func TestRealQVSegmentLoader_NewSegmentUsesPinnedCollection(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Name: "coll"}
-	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
-	collections := &fakeQVCollectionManager{collection: localCollection}
-	runtime := &queryViewCollectionRuntimeGuard{
-		collections:  collections,
-		collection:   localCollection,
-		collectionID: 1,
-		schema:       schema,
-	}
-
-	var usedCollection *segments.Collection
-	patch := mockey.Mock(segments.NewSegment).
-		To(func(_ context.Context, collection *segments.Collection, _ segments.SegmentManager, _ segments.SegmentType, _ int64, _ *querypb.SegmentLoadInfo) (segments.Segment, error) {
-			usedCollection = collection
-			return nil, assert.AnError
-		}).
-		Build()
-	t.Cleanup(func() {
-		patch.UnPatch()
-	})
-
-	loader := realQVSegmentLoader{collections: collections}
-	_, err := loader.NewSegment(context.Background(), runtime, &querypb.SegmentLoadInfo{CollectionID: 1})
-	require.ErrorIs(t, err, assert.AnError)
-	assert.Same(t, localCollection, usedCollection)
-	assert.Zero(t, collections.getCount)
 }

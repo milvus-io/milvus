@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -16,7 +16,6 @@ import (
 
 type queryViewTransformSegment struct {
 	segment     qvLoadedSegment
-	releaser    qvSegmentManager
 	vchannel    string
 	startAfter  uint64
 	mu          sync.Mutex
@@ -26,10 +25,9 @@ type queryViewTransformSegment struct {
 	releaseErr  error
 }
 
-func newQueryViewTransformSegment(segment qvLoadedSegment, releaser qvSegmentManager, vchannel string, startAfter uint64) *queryViewTransformSegment {
+func newQueryViewTransformSegment(segment qvLoadedSegment, vchannel string, startAfter uint64) *queryViewTransformSegment {
 	return &queryViewTransformSegment{
 		segment:    segment,
-		releaser:   releaser,
 		vchannel:   vchannel,
 		startAfter: startAfter,
 		applied:    startAfter,
@@ -49,20 +47,11 @@ func (s *queryViewTransformSegment) PartitionID() int64 {
 	return s.segment.Partition()
 }
 
-func (s *queryViewTransformSegment) QuerySegment() segments.Segment {
-	readable, ok := s.segment.(qvReadableSegment)
-	if !ok {
-		return nil
+func (s *queryViewTransformSegment) ReadView() qnview.SegmentReadView {
+	if readable, ok := s.segment.(qnview.ReadableSealedSegment); ok {
+		return readable.ReadView()
 	}
-	return readable.QuerySegment()
-}
-
-func (s *queryViewTransformSegment) Collection() *segments.Collection {
-	readable, ok := s.segment.(qvReadableSegment)
-	if !ok {
-		return nil
-	}
-	return readable.Collection()
+	return qnview.SegmentReadView{}
 }
 
 func (s *queryViewTransformSegment) TransformStartAfterTimeTick() uint64 {

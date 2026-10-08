@@ -17,19 +17,17 @@ import (
 )
 
 func TestQueryViewTransformSegment_ReleaseReleasesPhysicalSegment(t *testing.T) {
-	segments := &fakeQVSegmentManager{}
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, segments, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	err := wrapped.Release(context.Background())
 	require.NoError(t, err)
 	assert.True(t, segment.released)
-	assert.Empty(t, segments.removed)
 }
 
 func TestQueryViewTransformSegment_ReleaseIsIdempotent(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	require.NoError(t, wrapped.Release(context.Background()))
 	require.NoError(t, wrapped.Release(context.Background()))
@@ -38,7 +36,7 @@ func TestQueryViewTransformSegment_ReleaseIsIdempotent(t *testing.T) {
 
 func TestQueryViewTransformSegment_AppliesDeleteForMatchingPartition(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	err := wrapped.ApplyTransform(context.Background(), &streamingpb.TransformLogEntry{
 		TimeTick: 99,
@@ -65,7 +63,7 @@ func TestQueryViewTransformSegment_AppliesDeleteForMatchingPartition(t *testing.
 
 func TestQueryViewTransformSegment_AppliesAllPartitionsDelete(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	err := wrapped.ApplyTransform(context.Background(), &streamingpb.TransformLogEntry{
 		TimeTick: 99,
@@ -88,7 +86,7 @@ func TestQueryViewTransformSegment_AppliesAllPartitionsDelete(t *testing.T) {
 
 func TestQueryViewTransformSegment_FiltersDeleteByPKCandidate(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100, candidateOK: true, hits: []bool{false, true, false}}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	err := wrapped.ApplyTransform(context.Background(), &streamingpb.TransformLogEntry{
 		TimeTick: 99,
@@ -112,7 +110,7 @@ func TestQueryViewTransformSegment_FiltersDeleteByPKCandidate(t *testing.T) {
 
 func TestQueryViewTransformSegment_WaitTransformAppliedReturnsAfterApply(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	done := make(chan error, 1)
 	go func() {
@@ -132,7 +130,7 @@ func TestQueryViewTransformSegment_WaitTransformAppliedReturnsAfterApply(t *test
 
 func TestQueryViewTransformSegment_StartsAppliedAtTransformStart(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	require.Equal(t, uint64(50), wrapped.AppliedTransformTimeTick())
 	require.NoError(t, wrapped.WaitTransformApplied(context.Background(), 50))
@@ -144,7 +142,7 @@ func TestQueryViewTransformSegment_StartsAppliedAtTransformStart(t *testing.T) {
 
 func TestQueryViewTransformSegment_WaitTransformAppliedReturnsContextError(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -154,7 +152,7 @@ func TestQueryViewTransformSegment_WaitTransformAppliedReturnsContextError(t *te
 
 func TestQueryViewTransformSegment_ReturnsErrorForMalformedDeletePrimaryKeys(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 
 	var err error
 	require.NotPanics(t, func() {

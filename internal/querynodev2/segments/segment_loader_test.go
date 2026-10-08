@@ -56,7 +56,7 @@ func TestGetLocalDiskUsage(t *testing.T) {
 		usage: atomic.NewInt64(0),
 		err:   atomic.NewError(nil),
 	}
-	loader := &segmentLoader{duf: duf}
+	loader := &segmentLoader{LoadResourceBudget: &LoadResourceBudget{duf: duf}}
 	usage, err := loader.GetLocalDiskUsage()
 	assert.NoError(t, err)
 	assert.Zero(t, usage)
@@ -2421,6 +2421,7 @@ func TestCheckLogicalSegmentSizeUsesJSONKeyStatsExpansionFactor(t *testing.T) {
 	collectionManager := NewMockCollectionManager(t)
 	segmentManager := NewMockSegmentManager(t)
 	loader := &segmentLoader{
+		LoadResourceBudget: &LoadResourceBudget{},
 		manager: &Manager{
 			Collection: collectionManager,
 			Segment:    segmentManager,

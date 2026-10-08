@@ -16,7 +16,7 @@ import (
 
 func TestPartialTransformFailureKeepsAllDeletesAtFailedBoundary(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
-	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)
+	wrapped := newQueryViewTransformSegment(segment, "v1", 50)
 	calls := 0
 	failure := merr.WrapErrServiceUnavailableMsg("second block failed")
 	patch := mockey.Mock((*fakeQVSegment).Delete).To(func(_ *fakeQVSegment, _ context.Context, _ storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
