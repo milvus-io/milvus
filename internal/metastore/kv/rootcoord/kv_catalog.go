@@ -696,8 +696,9 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
 	collectionKeys := []string{BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)}
-	if err := kc.Txn.RemoveWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionInfo.CollectionID)); err != nil {
-		return merr.Wrapf(err, "failed to remove RLS principals for collection %d", collectionInfo.CollectionID)
+	prefix := BuildRLSPrincipalPrefix(collectionInfo.CollectionID)
+	if err := kc.Txn.RemoveWithPrefix(ctx, prefix); err != nil {
+		return merr.Wrapf(err, "failed to remove RLS principals with prefix %q", prefix)
 	}
 
 	var delMetakeysSnap []string

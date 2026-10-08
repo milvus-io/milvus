@@ -104,22 +104,14 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		return ctx, nil
 	}
 	username, password, roleNames := subject.username, subject.password, subject.roleNames
-	ctx = SetRBACRolesToContext(ctx, roleNames)
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
 	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 
 	// Resolve alias to actual collection name for RBAC checks
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
-		if objectName != util.AnyWord && objectName != "" {
-			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, dbName, objectName); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(resolveErr))
-			} else {
-				objectName = actualCollectionName
-			}
-		}
+	if objectNameIndex != 0 {
+		objectName = resolveRBACObjectName(ctx, dbName, objectType, objectName)
 	}
 
 	if isCurUserObject(objectType, username, objectName) {
@@ -137,17 +129,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
 		resolvedNames := make([]string, 0, len(objectNames))
 		for _, name := range objectNames {
-			if name == util.AnyWord || name == "" {
-				resolvedNames = append(resolvedNames, name)
-				continue
-			}
-			if actualName, resolveErr := resolveCollectionAlias(ctx, dbName, name); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(resolveErr))
-				resolvedNames = append(resolvedNames, name)
-			} else {
-				resolvedNames = append(resolvedNames, actualName)
-			}
+			resolvedNames = append(resolvedNames, resolveRBACObjectName(ctx, dbName, objectType, name))
 		}
 		objectNames = resolvedNames
 	}
@@ -251,8 +233,9 @@ func checkManageRLSPrivilege(ctx context.Context, req *milvuspb.AlterCollectionR
 	return err
 }
 
-// resolveRLSEnforcement applies a request-scoped bypass to the collection's
-// RLS setting. rls.force always wins over authorization and SkipRLS grants.
+// resolveRLSEnforcement returns whether RLS remains enabled after processing a
+// request-scoped bypass. rls.force takes precedence over both authorization
+// configuration and SkipRLS privileges.
 func resolveRLSEnforcement(ctx context.Context, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
 	if !rlsEnabled || !skipRLS {
 		return rlsEnabled, nil
@@ -311,11 +294,11 @@ func isCurrentUserPermitted(ctx context.Context, dbName, objectType, objectName,
 	}
 	objectName = resolveRBACObjectName(ctx, dbName, objectType, objectName)
 	for _, roleName := range subject.roleNames {
-		permitted, err := isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
+		isPermit, err := isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
 		if err != nil {
 			return false, err
 		}
-		if permitted {
+		if isPermit {
 			return true, nil
 		}
 	}

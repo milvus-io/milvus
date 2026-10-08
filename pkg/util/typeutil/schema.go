@@ -2796,7 +2796,8 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if validData := field.GetValidData(); len(validData) > 0 {
+	if len(field.GetValidData()) > 0 {
+		validData := field.GetValidData()
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {

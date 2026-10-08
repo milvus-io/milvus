@@ -447,8 +447,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	t.schema = colInfo.schema
-	t.partitionKeyMode = t.schema.hasPartitionKeyField
+	schema := colInfo.schema
+	t.schema = schema
+	t.partitionKeyMode = schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -487,7 +488,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	if t.ids != nil {
 		pkField := ""
-		for _, field := range t.schema.Fields {
+		for _, field := range schema.Fields {
 			if field.IsPrimaryKey {
 				pkField = field.Name
 			}
@@ -504,13 +505,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		log.Debug("determine timezone from collection", zap.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
-	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}
+	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
 		return err
 	}
 	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
 	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName,
-			rls.QueryAction(t.queryParams.isIterator), t.schema.schemaHelper)
+		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.schemaHelper)
 		if err != nil {
 			return err
 		}
@@ -562,12 +563,20 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.Username = username
 	}
 
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	if err2 != nil {
+		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
+			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),
+			zap.Error(err2))
+		return err2
+	}
+
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
-		consistencyLevel = colInfo.consistencyLevel
+		consistencyLevel = collectionInfo.consistencyLevel
 		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
@@ -586,8 +595,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
 	// see also schema change design
-	if colInfo.updateTimestamp > guaranteeTs {
-		guaranteeTs = colInfo.updateTimestamp
+	if collectionInfo.updateTimestamp > guaranteeTs {
+		guaranteeTs = collectionInfo.updateTimestamp
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
@@ -598,13 +607,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if colInfo.collectionTTL != 0 {
+	if collectionInfo.collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(colInfo.collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), colInfo.collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -714,24 +723,31 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
-	if !t.reQuery && !t.preserveRawFields {
-		if len(t.queryParams.extractTimeFields) > 0 {
-			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
-			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)
-			if err != nil {
-				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
-				return err
-			}
-		} else {
-			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
-			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
-			if err != nil {
-				log.Warn("fail to translate timestamp", zap.Error(err))
-				return err
-			}
-		}
+	if err := t.formatTimeFields(ctx); err != nil {
+		return err
 	}
 	log.Debug("Query PostExecute done")
+	return nil
+}
+
+func (t *queryTask) formatTimeFields(ctx context.Context) error {
+	if t.reQuery || t.preserveRawFields {
+		return nil
+	}
+	if len(t.queryParams.extractTimeFields) > 0 {
+		log.Ctx(ctx).Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
+		if err := extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields); err != nil {
+			log.Ctx(ctx).Warn("fail to extract fields for timestamptz", zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
+	log.Ctx(ctx).Debug("translate timestamp to ISO string", zap.String("timezone", t.resolvedTimezoneStr))
+	if err := timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr); err != nil {
+		log.Ctx(ctx).Warn("fail to translate timestamp", zap.Error(err))
+		return err
+	}
 	return nil
 }
 

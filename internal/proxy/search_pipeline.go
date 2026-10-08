@@ -937,6 +937,8 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		GuaranteeTimestamp:    op.guaranteeTimestamp,
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
+	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
+	// not resolve a separate Query-action policy for this internal retrieval.
 	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
 		return nil, segcore.StorageCost{}, err
 	}
