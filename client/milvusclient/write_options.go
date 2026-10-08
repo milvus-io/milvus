@@ -534,6 +534,7 @@ func (opt *rowBasedDataOption) WithSkipRLS(skip bool) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithSkipRLS(skip)
 	return opt
 }
+
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
@@ -659,6 +660,7 @@ func (opt *deleteOption) WithSkipRLS(skip bool) *deleteOption {
 	opt.skipRLS = skip
 	return opt
 }
+
 func NewDeleteOption(collectionName string) *deleteOption {
 	return &deleteOption{collectionName: collectionName}
 }

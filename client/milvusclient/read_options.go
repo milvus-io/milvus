@@ -327,6 +327,7 @@ func (opt *searchOption) WithSkipRLS(skip bool) *searchOption {
 	opt.skipRLS = skip
 	return opt
 }
+
 func (opt *searchOption) WithFilter(expr string) *searchOption {
 	opt.annRequest.WithFilter(expr)
 	return opt
@@ -508,6 +509,7 @@ func (opt *hybridSearchOption) WithSkipRLS(skip bool) *hybridSearchOption {
 	opt.skipRLS = skip
 	return opt
 }
+
 func (opt *hybridSearchOption) WithOutputFields(outputFields ...string) *hybridSearchOption {
 	opt.outputFields = outputFields
 	return opt
@@ -672,6 +674,7 @@ func (opt *queryOption) WithSkipRLS(skip bool) *queryOption {
 	opt.skipRLS = skip
 	return opt
 }
+
 func (opt *queryOption) WithIDs(ids column.Column) *queryOption {
 	opt.expr = pks2Expr(ids)
 	return opt

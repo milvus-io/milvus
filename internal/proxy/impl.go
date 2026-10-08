@@ -7170,7 +7170,8 @@ func (node *Proxy) resolveRLSRequestTarget(ctx context.Context, req rlsManagemen
 	if err != nil {
 		return "", "", err
 	}
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), "", collectionID)
+	// The 2.6 cache is name-indexed; retain the resolved ID as the authority.
+	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), collectionID)
 	if err != nil {
 		return "", "", err
 	}
