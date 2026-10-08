@@ -57,6 +57,7 @@ func (s *SearchIteratorSuite) TestSearchIteratorOptionWithRLSContext() {
 	s.Equal("alice", req.GetRlsPrincipal())
 	s.True(req.GetSkipRls())
 }
+
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {
@@ -452,6 +453,7 @@ func (s *QueryIteratorSuite) TestQueryIteratorOptionWithRLSContext() {
 	s.Equal("alice", req.GetRlsPrincipal())
 	s.True(req.GetSkipRls())
 }
+
 func (s *QueryIteratorSuite) TestQueryIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {

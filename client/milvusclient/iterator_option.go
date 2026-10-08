@@ -76,6 +76,7 @@ func (opt *searchIteratorOption) WithSkipRLS(skip bool) *searchIteratorOption {
 	opt.searchOption.WithSkipRLS(skip)
 	return opt
 }
+
 func (opt *searchIteratorOption) WithFilter(expr string) *searchIteratorOption {
 	opt.annRequest.WithFilter(expr)
 	return opt
@@ -230,6 +231,7 @@ func (opt *queryIteratorOption) WithSkipRLS(skip bool) *queryIteratorOption {
 	opt.skipRLS = skip
 	return opt
 }
+
 func (opt *queryIteratorOption) WithFilter(expr string) *queryIteratorOption {
 	opt.expr = expr
 	return opt

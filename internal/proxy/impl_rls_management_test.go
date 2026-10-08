@@ -60,7 +60,7 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 	cache := NewMockCache(t)
 	setRLSManagementMetaCache(t, cache)
 	cache.EXPECT().GetCollectionID(mock.Anything, requestDBName, requestCollectionName).Return(int64(1), nil).Times(8)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, requestDBName, "", int64(1)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, requestDBName, requestCollectionName, int64(1)).Return(&collectionInfo{
 		collID: int64(1),
 		dbName: canonicalDBName,
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: canonicalCollectionName}},
@@ -203,6 +203,33 @@ func TestProxyRLSAPIsForwardToMixCoord(t *testing.T) {
 	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 }
 
+func TestRLSManagementCollectionHintKeepsResolvedID(t *testing.T) {
+	cache, err := NewMetaCache(nil)
+	require.NoError(t, err)
+	target := &collectionInfo{
+		collID: 1,
+		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "target"}},
+	}
+	cache.collInfo["db"] = map[string]*collectionInfo{
+		"target": target,
+		"replacement": {
+			collID: 2,
+			schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "replacement"}},
+		},
+	}
+	cache.aliasInfo["db"] = map[string]*aliasEntry{
+		"alias": {collectionName: "replacement"},
+	}
+	// A retargeted alias, reused name, or missing hint must not change the ID.
+	for _, hint := range []string{"target", "alias", "replacement", "missing"} {
+		t.Run(hint, func(t *testing.T) {
+			info, err := cache.GetCollectionInfo(context.Background(), "db", hint, target.collID)
+			require.NoError(t, err)
+			require.Same(t, target, info)
+		})
+	}
+}
+
 func TestProxyRLSAPIReauthorizesCanonicalTarget(t *testing.T) {
 	const (
 		oldDBName     = "old_db"
@@ -251,7 +278,7 @@ func TestProxyRLSAPIReauthorizesCanonicalTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	cache.EXPECT().GetCollectionID(mock.Anything, oldDBName, aliasName).Return(int64(2), nil).Once()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, oldDBName, "", int64(2)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, oldDBName, aliasName, int64(2)).Return(&collectionInfo{
 		collID: int64(2),
 		dbName: newDBName,
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: newCollection}},
@@ -309,7 +336,7 @@ func TestProxyRLSAPIReauthorizesAliasWhenResolutionDisabled(t *testing.T) {
 	require.NoError(t, err)
 
 	cache.EXPECT().GetCollectionID(mock.Anything, requestDBName, aliasName).Return(int64(2), nil).Once()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, requestDBName, "", int64(2)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, requestDBName, aliasName, int64(2)).Return(&collectionInfo{
 		collID: int64(2),
 		dbName: canonicalDBName,
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: canonicalCollection}},
@@ -487,7 +514,7 @@ func TestProxySetRLSPrincipalTagsDefersCreationLimitToRootCoord(t *testing.T) {
 	cache := NewMockCache(t)
 	setRLSManagementMetaCache(t, cache)
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "coll").Return(int64(1), nil).Once()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "", int64(1)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "coll", int64(1)).Return(&collectionInfo{
 		collID: int64(1),
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "coll"}},
 	}, nil).Once()
@@ -519,7 +546,7 @@ func TestProxyUpdateRowPolicyIgnoresCreationNameLimit(t *testing.T) {
 	cache := NewMockCache(t)
 	setRLSManagementMetaCache(t, cache)
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "coll").Return(int64(1), nil).Once()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "", int64(1)).Return(&collectionInfo{
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "coll", int64(1)).Return(&collectionInfo{
 		collID: int64(1),
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "coll"}},
 	}, nil).Once()
