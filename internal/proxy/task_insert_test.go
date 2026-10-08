@@ -296,6 +296,7 @@ func TestInsertTask(t *testing.T) {
 		assert.ElementsMatch(t, channels, it.pChannels)
 	})
 }
+
 func TestMaxInsertSize(t *testing.T) {
 	t.Run("test MaxInsertSize", func(t *testing.T) {
 		paramtable.Init()

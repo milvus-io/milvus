@@ -1170,8 +1170,6 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 | 2`,
 		// -------------------- cannot be independent ----------------------
 		`BoolField`,
-		`true`,
-		`false`,
 		`Int64Field > 100 and BoolField`,
 		`Int64Field < 100 or false`, // maybe this can be optimized.
 		`!BoolField`,

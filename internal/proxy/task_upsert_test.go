@@ -341,6 +341,7 @@ func TestUpsertTask(t *testing.T) {
 		assert.ElementsMatch(t, channels, ut.pChannels)
 	})
 }
+
 func TestUpsertTaskForReplicate(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()

@@ -2910,7 +2910,8 @@ func TestRESTV2ForwardsRLSFields(t *testing.T) {
 	matchesRLS := func(req interface {
 		GetRlsPrincipal() string
 		GetSkipRls() bool
-	}) bool {
+	},
+	) bool {
 		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
 	}
 	mp := mocks.NewMockProxy(t)
