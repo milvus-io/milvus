@@ -257,7 +257,7 @@ func (s *DataFrameSuite) TestCopyFieldMetadata_IncludesNullable() {
 		},
 	}
 
-	source, err := FromSearchResultData(resultData, s.pool, []string{"nullable_col"})
+	source, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_col"))
 	s.Require().NoError(err)
 	defer source.Release()
 
@@ -389,7 +389,7 @@ func (s *DataFrameSuite) createTestDataFrame() *DataFrame {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"int_col", "str_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "int_col", "str_col"))
 	s.Require().NoError(err)
 	return df
 }

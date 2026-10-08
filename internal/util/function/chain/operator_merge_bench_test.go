@@ -54,7 +54,7 @@ func BenchmarkMergeOp(b *testing.B) {
 				dfs := make([]*DataFrame, bc.inputs)
 				for j := range dfs {
 					resultData := generateSearchResultData(bc.nq, bc.topK, 2)
-					df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(2))
+					df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(2)...))
 					if err != nil {
 						b.Fatal(err)
 					}

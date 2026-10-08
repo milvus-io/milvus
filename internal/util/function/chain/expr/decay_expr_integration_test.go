@@ -137,7 +137,9 @@ func (s *DecayExprIntegrationTestSuite) createTestDataFrame(fieldType schemapb.D
 		FieldsData: []*schemapb.FieldData{fieldData},
 	}
 
-	df, err := chain.FromSearchResultData(resultData, s.pool, []string{"distance"})
+	df, err := chain.FromSearchResultData(resultData, s.pool, &chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{{
+		LogicalName: "distance", SourceFieldID: 100, FieldName: "distance", DataType: fieldType,
+	}}})
 	s.Require().NoError(err)
 	return df
 }
@@ -202,7 +204,9 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_NullDecayFactorTreatedAs
 		},
 		FieldsData: []*schemapb.FieldData{fieldData},
 	}
-	df, err := chain.FromSearchResultData(resultData, s.pool, []string{"distance"})
+	df, err := chain.FromSearchResultData(resultData, s.pool, &chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{{
+		LogicalName: "distance", SourceFieldID: 100, FieldName: "distance", DataType: schemapb.DataType_Int64,
+	}}})
 	s.Require().NoError(err)
 	defer df.Release()
 

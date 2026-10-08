@@ -308,7 +308,7 @@ func BenchmarkDataFrame_FromSearchResultData(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				df, err := FromSearchResultData(resultData, pool, neededFields)
+				df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, neededFields...))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -335,7 +335,7 @@ func BenchmarkDataFrame_ToSearchResultData(b *testing.B) {
 		b.Run(bc.name, func(b *testing.B) {
 			// Generate and convert to DataFrame
 			resultData := generateSearchResultData(bc.nq, bc.topK, bc.numFields)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(bc.numFields))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(bc.numFields)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -374,7 +374,7 @@ func BenchmarkFilterOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -416,7 +416,7 @@ func BenchmarkSortOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -456,7 +456,7 @@ func BenchmarkLimitOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -498,7 +498,7 @@ func BenchmarkMapOp(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -541,7 +541,7 @@ func BenchmarkChain_FilterSortLimit(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -582,7 +582,7 @@ func BenchmarkChain_MapFilter(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 5)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(5))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(5)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -622,7 +622,7 @@ func BenchmarkChain_FullPipeline(b *testing.B) {
 	for _, bc := range benchCases {
 		b.Run(bc.name, func(b *testing.B) {
 			resultData := generateSearchResultData(bc.nq, bc.topK, 5)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(5))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(5)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -662,7 +662,7 @@ func BenchmarkScale_VaryingNQ(b *testing.B) {
 	for _, nq := range nqValues {
 		b.Run(fmt.Sprintf("NQ_%d", nq), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -694,7 +694,7 @@ func BenchmarkScale_VaryingTopK(b *testing.B) {
 	for _, topK := range topKValues {
 		b.Run(fmt.Sprintf("TopK_%d", topK), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -727,7 +727,7 @@ func BenchmarkScale_VaryingColumns(b *testing.B) {
 	for _, numCols := range columnCounts {
 		b.Run(fmt.Sprintf("Cols_%d", numCols), func(b *testing.B) {
 			resultData := generateSearchResultData(nq, topK, numCols)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(numCols))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(numCols)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -772,7 +772,7 @@ func BenchmarkWithCheckedAllocator(b *testing.B) {
 			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 
 			resultData := generateSearchResultData(bc.nq, bc.topK, 3)
-			df, err := FromSearchResultData(resultData, pool, fieldNamesForNumFields(3))
+			df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, fieldNamesForNumFields(3)...))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -834,7 +834,7 @@ func BenchmarkEndToEnd_Pipeline(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				// Import
-				df, err := FromSearchResultData(resultData, pool, neededFields)
+				df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, neededFields...))
 				if err != nil {
 					b.Fatal(err)
 				}

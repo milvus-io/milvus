@@ -190,8 +190,8 @@ func TestL0ThenL1RerankPrunesStageLocalColumns(t *testing.T) {
 	mockL1FieldReader(t, defaultAllocator, []int32{0, 0, 0}, []int64{20, 30, 10}, []int64{1, 2, 3})
 
 	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
-		chain:         l1Repr,
-		inputFieldIDs: []int64{101},
+		chain:     l1Repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
 	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
