@@ -32,15 +32,11 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	collID := it.collectionID
 	it.insertMsg.CollectionID = collID
 
-	channelNames := it.vChannels
-	if len(channelNames) == 0 {
-		var err error
-		channelNames, err = it.chMgr.GetVChannels(collID)
-		if err != nil {
-			mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-			it.result.Status = merr.Status(err)
-			return err
-		}
+	channelNames, err := it.chMgr.GetVChannels(collID)
+	if err != nil {
+		mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
+		it.result.Status = merr.Status(err)
+		return err
 	}
 
 	mlog.Debug(ctx, "send insert request to virtual channels",
@@ -57,7 +53,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
-	var err error
 	if it.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.GetMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil)
 	} else {

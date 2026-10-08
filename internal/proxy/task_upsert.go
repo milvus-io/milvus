@@ -1867,6 +1867,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+
 	log.Debug(ctx, "Proxy Upsert insertPreExecute done")
 
 	return nil

@@ -324,6 +324,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+
 	log.Debug(ctx, "Proxy Insert PreExecute done")
 
 	return nil
