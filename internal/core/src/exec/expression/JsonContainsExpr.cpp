@@ -47,13 +47,24 @@
 namespace milvus {
 namespace exec {
 
+template <typename ArrayType>
+bool
+ArrayElementValid(const ArrayType& array, size_t index) {
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return array.child().isValid(static_cast<int>(array.begin() + index));
+    } else {
+        return array.is_element_valid(index);
+    }
+}
+
 // Replaces per-row std::set copy with a value->bit-index map built once.
 // For <= 64 targets uses uint64_t bitmask (zero heap alloc per row).
 // For > 64 targets uses vector<uint64_t> dynamic bitset.
 template <typename T>
 class ContainsAllMatcher {
  public:
-    explicit ContainsAllMatcher(const std::set<T>& targets) {
+    template <typename Compare>
+    explicit ContainsAllMatcher(const std::set<T, Compare>& targets) {
         target_count_ = targets.size();
         use_small_ = (target_count_ <= 64);
         uint32_t idx = 0;
@@ -421,6 +432,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             const auto& array = data[i];
             const auto array_size = GetArrayRowSize(array);
             for (size_t j = 0; j < array_size; ++j) {
+                if (!ArrayElementValid(array, j)) {
+                    continue;
+                }
                 if (elements.find(array.template get_data_unchecked<GetType>(
                         j)) != elements.end()) {
                     return true;
@@ -1019,7 +1033,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ContainsTargetLess<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueWithCastNumber<GetType>(element));
         }
@@ -1027,8 +1042,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+    auto elements = std::static_pointer_cast<
+        std::set<GetType, ContainsTargetLess<GetType>>>(arg_cached_set_);
     int processed_cursor = 0;
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
@@ -1042,7 +1057,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::set<GetType>& elements) {
+            const std::set<GetType, ContainsTargetLess<GetType>>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1057,6 +1072,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             if (matcher.use_small()) {
                 uint64_t found = 0;
                 for (size_t j = 0; j < array_size; ++j) {
+                    if (!ArrayElementValid(data[i], j)) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found)) {
@@ -1068,6 +1086,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (size_t j = 0; j < array_size; ++j) {
+                    if (!ArrayElementValid(data[i], j)) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found_large,
@@ -1166,7 +1187,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ContainsTargetLess<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueFromProto<GetType>(element));
         }
@@ -1174,8 +1196,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+    auto elements = std::static_pointer_cast<
+        std::set<GetType, ContainsTargetLess<GetType>>>(arg_cached_set_);
     int processed_cursor = 0;
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
@@ -1190,7 +1212,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::set<GetType>& elements) {
+            const std::set<GetType, ContainsTargetLess<GetType>>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1319,7 +1341,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ContainsTargetLess<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueFromProto<GetType>(element));
         }
@@ -1327,8 +1350,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         arg_inited_ = true;
     }
 
-    auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+    auto elements = std::static_pointer_cast<
+        std::set<GetType, ContainsTargetLess<GetType>>>(arg_cached_set_);
     if (elements->empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
@@ -1363,8 +1386,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 TargetBitmapView target_res_view(target_res);
                 TargetBitmap target_valid(active_count_, true);
                 TargetBitmapView target_valid_view(target_valid);
-                ShreddingArrayBsonContainsAllExecutor<GetType> executor(
-                    *elements);
+                ShreddingArrayBsonContainsAllExecutor<
+                    GetType,
+                    ContainsTargetLess<GetType>>
+                    executor(*elements);
 
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,

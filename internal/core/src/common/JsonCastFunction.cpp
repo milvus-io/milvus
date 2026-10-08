@@ -1,7 +1,6 @@
 #include "common/JsonCastFunction.h"
 
 #include <simdjson.h>
-#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -32,13 +31,9 @@ template <>
 std::optional<double>
 JsonCastFunction::cast<double, std::string>(const std::string& t) const {
     try {
-        auto value = std::stod(t);
-        // A NaN is not a valid numeric projection for a sorted scalar index.
-        // Treat it like any other failed cast without changing the source JSON.
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
-        return value;
+        // A successfully parsed NaN is a valid numeric projection. Indexes
+        // preserve its validity separately from comparable sorted entries.
+        return std::stod(t);
     } catch (const std::exception&) {
         return std::nullopt;
     }
@@ -53,9 +48,6 @@ JsonCastFunction::cast<double, int64_t>(const int64_t& t) const {
 template <>
 std::optional<double>
 JsonCastFunction::cast<double, double>(const double& t) const {
-    if (std::isnan(t)) {
-        return std::nullopt;
-    }
     return t;
 }
 

@@ -26,6 +26,16 @@ Non-null empty arrays remain valid rows with no postings. Row nulls remain false
 
 ARRAY_CONTAINS_ANY uses the union of matching row postings. ARRAY_CONTAINS_ALL uses the existing intersection of per-element match bitmaps. Negation and empty query behavior remain the expression evaluator's responsibility.
 
+### NaN query semantics
+
+A successfully produced floating NaN is a valid non-null value, whether it comes from a scalar field, a valid array/Struct member, or a successful JSON numeric cast. It never enters STL_SORT ordered entries. Equality and IN cannot match NaN; ordered comparisons with either operand NaN are false. Inequality, NOT IN and logical NOT follow the same floating comparisons and validity masks as a raw scan. IS NULL is false and IS NOT NULL is true for a valid NaN. An invalid member or source NULL remains invalid even if its ignored payload contains NaN.
+
+Contains ANY treats a NaN target as an equality that cannot match. Contains ALL with any NaN target cannot match; it must not discard that target during deduplication. Scan and index evaluation must agree for NaN-only and mixed finite/NaN targets, irrespective of target ordering, and both skip invalid member payloads.
+
+Full JSON flat indexes currently record exact-path scalar presence rather than array-container validity. Contains queries with a NaN target therefore use raw evaluation to preserve the same validity mask and negation semantics; finite-target flat queries retain their existing execution path. This does not add container metadata or repair historical indexes.
+
+A raw JSON string such as "NaN" remains a string. Only a successful STRING_TO_DOUBLE projection is a numeric NaN; unconverted string comparisons retain their source-type semantics. Genuine parse failures remain cast failures.
+
 ### Persistence and rolling upgrades
 
 Packed V3 indexes already persist row count, validity, postings, and offset data. Reuse that layout and the existing memory/mmap synchronous and asynchronous loaders. The legacy numeric BinarySet path gains an optional validity entry to preserve empty-array row validity; old numeric indexes without this entry retain their existing reader behavior.
@@ -34,7 +44,7 @@ Advertise scalar engine version 6 through the existing QueryNode session capabil
 
 Nested inverted indexes with nullable members store null offsets in the element domain and carry an explicit marker. New member-null metadata is gated on reader capability 6; an older build target rejects it. Existing markerless metadata keeps its previous interpretation. Bitmap and sorted nested indexes preserve element offsets and skip invalid-member postings. Ordinary inverted indexes use logical-to-physical row access for compact nullable arrays.
 
-Typed JSON scalar paths retain HYBRID selection. JSON ARRAY_* AUTO requests route to their supported inverted array projection. Full JSON keeps the flat multi-type index; neither is sent through a single-valued sorted projection. STRING_TO_DOUBLE treats NaN as cast failure while preserving the source JSON and path existence.
+Typed JSON scalar paths retain HYBRID selection. JSON ARRAY_* AUTO requests route to their supported inverted array projection. Array-projection validity follows the source container: empty arrays and arrays with no matching member values remain valid; missing paths, JSON null and non-array values are invalid for contains predicates. This mask is independent of the existing EXISTS policy and is persisted in the existing inverted null-offset metadata, so positive and negated contains predicates agree with scans. Full JSON keeps the flat multi-type index; neither is sent through a single-valued sorted projection. A successful STRING_TO_DOUBLE conversion that yields NaN retains a valid numeric projection and follows the same NaN comparison and null semantics as a floating field. Invalid strings remain cast failures; the source JSON value and path existence are preserved.
 
 ## Empty-index behavior
 

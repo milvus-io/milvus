@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <functional>
 #include <map>
 #include <memory>
@@ -40,11 +42,14 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/JsonContainsExpr.h"
+#include "index/json_stats/bson_builder.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
 #include "index/StringIndexSort.h"
+#include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -3840,5 +3845,349 @@ TEST(Expr, OrdinaryArraySortedIndexContainsMatchesRaw) {
                 EXPECT_EQ(index_valid[i], i != 0) << "row " << i;
             }
         }
+    }
+}
+
+TEST(Expr, OrdinaryArraySortedNaNContainsMatchesRaw) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField(
+        "tags", DataType::ARRAY, DataType::DOUBLE, true, false);
+    schema->set_primary_field_id(pk);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<std::vector<double>> rows{
+        {nan}, {3}, {nan, 3}, {3}, {}, {9}, {3}, {}};
+    for (size_t i = 0; i < 70; ++i) {
+        rows.back().push_back(static_cast<double>(i));
+    }
+    const int64_t n = rows.size();
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto scalar;
+        auto* strings = scalar.mutable_double_data();
+        for (const auto& value : row) {
+            strings->add_data(value);
+        }
+        arrays.emplace_back(scalar);
+    }
+    const uint8_t valid_bitmap = 0xbf;
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::DOUBLE, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_segment = CreateSealedSegment(schema);
+    auto index_segment = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
+    raw_segment->LoadFieldData(field_info);
+    index_segment->LoadFieldData(field_info);
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("tags");
+    field_schema.set_fieldid(fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Double);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(false);
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4010, 4010};
+    auto sorted = std::make_unique<index::ScalarIndexSort<double>>(ctx);
+    EXPECT_FALSE(sorted->HasRawData());
+    sorted->BuildWithFieldData({field_data});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = DataType::ARRAY;
+    info.element_type = DataType::DOUBLE;
+    info.num_rows = n;
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index =
+        CreateTestCacheIndex("array_sorted_nan_contains", std::move(sorted));
+    index_segment->LoadIndex(info);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+
+    std::vector<std::vector<double>> target_sets{
+        {}, {nan}, {3}, {3, nan}, {nan, 3}, {nan, 9}, {9, nan}};
+    std::vector<double> large_targets;
+    for (size_t i = 0; i < 65; ++i) {
+        large_targets.push_back(static_cast<double>(i));
+    }
+    target_sets.push_back(large_targets);
+    large_targets.push_back(nan);
+    target_sets.push_back(large_targets);
+    std::rotate(
+        large_targets.begin(), large_targets.end() - 1, large_targets.end());
+    target_sets.push_back(large_targets);
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& targets : target_sets) {
+            std::vector<proto::plan::GenericValue> values;
+            for (const auto& target : targets) {
+                proto::plan::GenericValue value;
+                value.set_float_val(target);
+                values.push_back(std::move(value));
+            }
+            auto expr = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(
+                    fid, DataType::ARRAY, DataType::DOUBLE, {}, true),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expr);
+            auto raw = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), n, MAX_TIMESTAMP);
+            auto indexed = milvus::test::gen_filter_res(
+                plan.get(), index_segment.get(), n, MAX_TIMESTAMP);
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+            BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                       indexed->size());
+            ASSERT_EQ(raw->size(), n);
+            ASSERT_EQ(indexed->size(), n);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(index_bits[i], raw_bits[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], raw_valid[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], i != 6) << "row " << i;
+                auto contains = [&](double target) {
+                    return std::find(rows[i].begin(), rows[i].end(), target) !=
+                           rows[i].end();
+                };
+                const bool expected =
+                    i != 6 &&
+                    (op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll
+                         ? std::all_of(targets.begin(), targets.end(), contains)
+                         : std::any_of(
+                               targets.begin(), targets.end(), contains));
+                EXPECT_EQ(raw_bits[i], expected) << "raw row " << i;
+                EXPECT_EQ(index_bits[i], expected) << "indexed row " << i;
+            }
+        }
+    }
+}
+
+TEST(Expr, ScalarSortedNaNOperatorsMatchRawIEEE) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField("value", DataType::DOUBLE, true);
+    schema->set_primary_field_id(pk);
+    constexpr size_t n = 96;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<double> rows(n);
+    std::vector<uint8_t> validity((n + 7) / 8, 0);
+    for (size_t row = 0; row < n; ++row) {
+        rows[row] = row % 3 == 0 ? nan : 3.0;
+        if (row % 3 != 2) {
+            validity[row / 8] |= uint8_t(1) << (row % 8);
+        }
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::DOUBLE, DataType::NONE, true);
+    field_data->FillFieldData(rows.data(), validity.data(), n, 0);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_segment = CreateSealedSegment(schema);
+    auto index_segment = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
+    raw_segment->LoadFieldData(field_info);
+    index_segment->LoadFieldData(field_info);
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(fid.get());
+    field_schema.set_data_type(proto::schema::DataType::Double);
+    field_schema.set_nullable(true);
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4011, 4011};
+    auto sorted = std::make_unique<index::ScalarIndexSort<double>>(ctx);
+    sorted->BuildWithFieldData({field_data});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = DataType::DOUBLE;
+    info.num_rows = n;
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index =
+        CreateTestCacheIndex("scalar_sorted_nan_syntax", std::move(sorted));
+    index_segment->LoadIndex(info);
+    const expr::ColumnInfo column(fid, DataType::DOUBLE, {}, true);
+    auto check = [&](const expr::TypedExprPtr& expression,
+                     auto predicate,
+                     bool null_operator = false) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        auto raw = milvus::test::gen_filter_res(
+            plan.get(), raw_segment.get(), n, MAX_TIMESTAMP);
+        auto indexed = milvus::test::gen_filter_res(
+            plan.get(), index_segment.get(), n, MAX_TIMESTAMP);
+        BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+        BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+        BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+        BitsetTypeView index_valid(indexed->GetValidRawData(), indexed->size());
+        for (size_t row = 0; row < n; ++row) {
+            const bool valid = row % 3 != 2;
+            const bool expected_valid = null_operator || valid;
+            const bool expected = expected_valid && predicate(rows[row], valid);
+            EXPECT_EQ(raw_bits[row], expected) << "raw row " << row;
+            EXPECT_EQ(index_bits[row], expected) << "index row " << row;
+            EXPECT_EQ(raw_valid[row], expected_valid)
+                << "raw validity row " << row;
+            EXPECT_EQ(index_valid[row], expected_valid)
+                << "index validity row " << row;
+        }
+    };
+    for (double target : {nan, 3.0}) {
+        proto::plan::GenericValue value;
+        value.set_float_val(target);
+        for (auto op : {proto::plan::Equal,
+                        proto::plan::NotEqual,
+                        proto::plan::LessThan,
+                        proto::plan::LessEqual,
+                        proto::plan::GreaterThan,
+                        proto::plan::GreaterEqual}) {
+            auto unary =
+                std::make_shared<expr::UnaryRangeFilterExpr>(column, op, value);
+            check(unary, [op, target](double source, bool) {
+                switch (op) {
+                    case proto::plan::Equal:
+                        return source == target;
+                    case proto::plan::NotEqual:
+                        return source != target;
+                    case proto::plan::LessThan:
+                        return source < target;
+                    case proto::plan::LessEqual:
+                        return source <= target;
+                    case proto::plan::GreaterThan:
+                        return source > target;
+                    case proto::plan::GreaterEqual:
+                        return source >= target;
+                    default:
+                        return false;
+                }
+            });
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                      expr::LogicalUnaryExpr::OpType::LogicalNot, unary),
+                  [op, target](double source, bool) {
+                      switch (op) {
+                          case proto::plan::Equal:
+                              return !(source == target);
+                          case proto::plan::NotEqual:
+                              return !(source != target);
+                          case proto::plan::LessThan:
+                              return !(source < target);
+                          case proto::plan::LessEqual:
+                              return !(source <= target);
+                          case proto::plan::GreaterThan:
+                              return !(source > target);
+                          case proto::plan::GreaterEqual:
+                              return !(source >= target);
+                          default:
+                              return false;
+                      }
+                  });
+        }
+        auto terms = std::make_shared<expr::TermFilterExpr>(
+            column, std::vector<proto::plan::GenericValue>{value});
+        check(terms,
+              [target](double source, bool) { return source == target; });
+        check(std::make_shared<expr::LogicalUnaryExpr>(
+                  expr::LogicalUnaryExpr::OpType::LogicalNot, terms),
+              [target](double source, bool) { return !(source == target); });
+    }
+    check(
+        std::make_shared<expr::NullExpr>(column,
+                                         proto::plan::NullExpr_NullOp_IsNull),
+        [](double, bool valid) { return !valid; },
+        true);
+    check(
+        std::make_shared<expr::NullExpr>(
+            column, proto::plan::NullExpr_NullOp_IsNotNull),
+        [](double, bool valid) { return valid; },
+        true);
+}
+
+TEST(Expr, RawJsonArrayNaNContainsTargetsRemainUnmatchable) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField("doc", DataType::JSON);
+    schema->set_primary_field_id(pk);
+    const std::vector<std::vector<double>> arrays{{3}, {9}, {}};
+    std::vector<milvus::Json> docs;
+    for (const auto* text : {R"({"a":[3]})", R"({"a":[9]})", R"({"a":[]})"}) {
+        docs.emplace_back(std::string_view(text));
+    }
+    auto field_data =
+        storage::CreateFieldData(DataType::JSON, DataType::NONE, false);
+    field_data->FillFieldData(docs.data(), docs.size());
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment = CreateSealedSegment(schema);
+    auto info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
+    segment->LoadFieldData(info);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& targets :
+             std::vector<std::vector<double>>{{3}, {nan}, {3, nan}, {nan, 3}}) {
+            std::vector<proto::plan::GenericValue> values;
+            for (double target : targets) {
+                proto::plan::GenericValue value;
+                value.set_float_val(target);
+                values.push_back(value);
+            }
+            auto expression = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(fid, DataType::JSON, {"a"}, false),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), docs.size(), MAX_TIMESTAMP);
+            BitsetTypeView bits(result->GetRawData(), result->size());
+            BitsetTypeView valid(result->GetValidRawData(), result->size());
+            for (size_t row = 0; row < arrays.size(); ++row) {
+                auto contains = [&](double target) {
+                    return std::find(arrays[row].begin(),
+                                     arrays[row].end(),
+                                     target) != arrays[row].end();
+                };
+                const bool expected =
+                    op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll
+                        ? std::all_of(targets.begin(), targets.end(), contains)
+                        : std::any_of(targets.begin(), targets.end(), contains);
+                EXPECT_EQ(bits[row], expected) << "row " << row;
+                EXPECT_TRUE(valid[row]) << "row " << row;
+            }
+        }
+    }
+}
+
+TEST(Expr, ShreddingBsonArrayAllNaNTargetCannotBeErased) {
+    const auto bytes = index::BuildBsonArrayBytesFromJsonString("[3]");
+    const std::string_view source(reinterpret_cast<const char*>(bytes.data()),
+                                  bytes.size());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& targets :
+         std::vector<std::vector<double>>{{3}, {nan}, {3, nan}, {nan, 3}}) {
+        std::set<double, exec::ContainsTargetLess<double>> set(targets.begin(),
+                                                               targets.end());
+        exec::ShreddingArrayBsonContainsAllExecutor<
+            double,
+            exec::ContainsTargetLess<double>>
+            executor(set);
+        TargetBitmap result(1, false), valid(1, true);
+        executor(&source,
+                 nullptr,
+                 1,
+                 TargetBitmapView(result),
+                 TargetBitmapView(valid));
+        EXPECT_EQ(result[0], targets.size() == 1 && targets[0] == 3);
+        EXPECT_TRUE(valid[0]);
     }
 }

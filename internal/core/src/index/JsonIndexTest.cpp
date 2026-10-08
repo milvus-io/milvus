@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <map>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -43,6 +44,7 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/JsonScalarIndexWrapper.h"
+#include "index/JsonFlatIndex.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "pb/plan.pb.h"
@@ -681,6 +683,12 @@ TEST(JsonIndexTest, TypedStringArrayContainsAllAnyAndExistsAfterReload) {
     for (size_t i = 0; i < rows.size(); ++i) {
         EXPECT_EQ(exists[i], expected_exists[i]) << "row " << i;
     }
+    const auto known = scalar->IsNotNull();
+    const std::vector<bool> expected_known{
+        true, true, true, false, false, true, false, false, false};
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(known[i], expected_known[i]) << "row " << i;
+    }
     const std::string apple = "apple";
     const auto apple_hits = scalar->In(1, &apple);
     EXPECT_EQ(apple_hits.count(), 2);
@@ -727,6 +735,209 @@ TEST(JsonIndexTest, TypedStringArrayContainsAllAnyAndExistsAfterReload) {
                     expected = i == 0 || i == 1 || i == 5;
                 }
                 EXPECT_EQ(result[i], expected) << "row " << i;
+            }
+        }
+    }
+}
+
+TEST(JsonIndexTest, ArrayContainsContainerValidityMatchesRawForNaNNegatives) {
+    using Value = proto::plan::GenericValue;
+    auto number = [](double v) {
+        Value value;
+        value.set_float_val(v);
+        return value;
+    };
+    auto text = [](const std::string& v) {
+        Value value;
+        value.set_string_val(v);
+        return value;
+    };
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& cast_type : {std::string("ARRAY_DOUBLE"),
+                                  std::string("ARRAY_VARCHAR"),
+                                  std::string("JSON")}) {
+        SCOPED_TRACE(cast_type);
+        const bool strings = cast_type == "ARRAY_VARCHAR";
+        const bool flat = cast_type == "JSON";
+        const std::vector<std::string> rows =
+            strings
+                ? std::vector<std::string>{R"({"a":["apple","NaN","apple"]})",
+                                           R"({"a":[]})",
+                                           R"({"a":null})",
+                                           R"({"b":[]})",
+                                           R"({"a":"apple"})",
+                                           R"({"a":[1,true,null]})",
+                                           R"({"a":["NaN",1,null]})",
+                                           R"(null)",
+                                           R"({})"}
+                : std::vector<std::string>{R"({"a":[1,2,1]})",
+                                           R"({"a":[]})",
+                                           R"({"a":null})",
+                                           R"({"b":[]})",
+                                           R"({"a":1})",
+                                           R"({"a":["wrong"]})",
+                                           R"({"a":[2,"wrong",null]})",
+                                           R"(null)",
+                                           R"({})"};
+        const std::vector<bool> containers{
+            true, true, false, false, false, true, true, false, false};
+        const std::vector<std::vector<Value>> members =
+            strings ? std::vector<std::vector<Value>>{{text("apple"),
+                                                       text("NaN"),
+                                                       text("apple")},
+                                                      {},
+                                                      {},
+                                                      {},
+                                                      {},
+                                                      {number(1)},
+                                                      {text("NaN"), number(1)},
+                                                      {},
+                                                      {}}
+                    : std::vector<std::vector<Value>>{
+                          {number(1), number(2), number(1)},
+                          {},
+                          {},
+                          {},
+                          {},
+                          {text("wrong")},
+                          {number(2), text("wrong")},
+                          {},
+                          {}};
+        auto schema = std::make_shared<Schema>();
+        const auto fid = schema->AddDebugField("json", DataType::JSON, true);
+        const auto root_path = (boost::filesystem::path(TestLocalPath) /
+                                boost::filesystem::unique_path(
+                                    "json-container-validity-%%%%-%%%%"))
+                                   .string();
+        auto storage_config = gen_local_storage_config(root_path);
+        auto cm = storage::CreateChunkManager(storage_config);
+        auto fs = storage::InitArrowFileSystem(storage_config);
+        ChunkManagerWrapper cm_guard(cm);
+        auto field_meta =
+            segcore::gen_field_meta(1, 2, 3, fid.get(), DataType::JSON);
+        field_meta.field_schema.set_nullable(true);
+        storage::FileManagerContext ctx(
+            field_meta, gen_index_meta(3, fid.get(), 4200, 4200), cm, fs);
+        CreateIndexInfo info;
+        info.index_type = INVERTED_INDEX_TYPE;
+        info.json_cast_type = JsonCastType::FromString(cast_type);
+        info.json_path = flat ? "" : "/a";
+        info.tantivy_index_version = 7;
+        arrow::BinaryBuilder builder;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i == 8) {
+                ASSERT_TRUE(builder.AppendNull().ok());
+            } else {
+                ASSERT_TRUE(
+                    builder.Append(rows[i].data(), rows[i].size()).ok());
+            }
+        }
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder.Finish(&array).ok());
+        auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        field->FillFieldData(array);
+        auto built = IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
+        if (!strings && !flat) {
+            dynamic_cast<ScalarIndex<double>*>(built.get())
+                ->BuildWithFieldData({field});
+        } else {
+            dynamic_cast<ScalarIndex<std::string>*>(built.get())
+                ->BuildWithFieldData({field});
+        }
+        auto stats = built->UploadUnified({});
+        ctx.set_for_loading_index(true);
+        auto loaded = IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
+        Config config;
+        config[INDEX_FILES] = stats->GetIndexFiles();
+        config[ENABLE_MMAP] = false;
+        if (!strings && !flat) {
+            dynamic_cast<ScalarIndex<double>*>(loaded.get())
+                ->LoadUnified(config);
+        } else {
+            dynamic_cast<ScalarIndex<std::string>*>(loaded.get())
+                ->LoadUnified(config);
+        }
+        auto raw_segment = segcore::CreateSealedSegment(schema);
+        auto indexed_segment = segcore::CreateSealedSegment(schema);
+        auto binlog =
+            PrepareSingleFieldInsertBinlog(1, 2, 3, fid.get(), {field}, cm);
+        raw_segment->LoadFieldData(binlog);
+        indexed_segment->LoadFieldData(binlog);
+        segcore::LoadIndexInfo index_info;
+        index_info.field_id = fid.get();
+        index_info.field_type = DataType::JSON;
+        index_info.index_params = {{JSON_PATH, info.json_path},
+                                   {JSON_CAST_TYPE, cast_type}};
+        index_info.cache_index = CreateTestCacheIndex(
+            "json-container-" + cast_type, std::move(loaded));
+        indexed_segment->LoadIndex(index_info);
+        std::vector<std::vector<Value>> queries{
+            {number(nan)}, {number(nan), number(1)}, {number(1), number(nan)}};
+        if (!flat) {
+            if (strings) {
+                queries.push_back({text("apple")});
+                queries.push_back({text("apple"), text("NaN")});
+            } else {
+                queries.push_back({number(1)});
+                queries.push_back({number(1), number(2)});
+            }
+        }
+        for (const auto& targets : queries) {
+            for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                            proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+                auto contains = std::make_shared<expr::JsonContainsExpr>(
+                    expr::ColumnInfo(fid, DataType::JSON, {"a"}, true),
+                    op,
+                    true,
+                    targets);
+                for (bool negate : {false, true}) {
+                    expr::TypedExprPtr predicate = contains;
+                    if (negate) {
+                        predicate = std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot,
+                            contains);
+                    }
+                    auto plan = std::make_shared<plan::FilterBitsNode>(
+                        DEFAULT_PLANNODE_ID, predicate);
+                    auto raw = query::ExecuteQueryExpr(
+                        plan, raw_segment.get(), rows.size(), MAX_TIMESTAMP);
+                    auto indexed =
+                        query::ExecuteQueryExpr(plan,
+                                                indexed_segment.get(),
+                                                rows.size(),
+                                                MAX_TIMESTAMP);
+                    for (size_t row = 0; row < rows.size(); ++row) {
+                        bool match =
+                            op ==
+                            proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+                        for (const auto& target : targets) {
+                            bool found = false;
+                            for (const auto& member : members[row]) {
+                                if (target.has_float_val() &&
+                                    member.has_float_val()) {
+                                    found |= target.float_val() ==
+                                             member.float_val();
+                                } else if (target.has_string_val() &&
+                                           member.has_string_val()) {
+                                    found |= target.string_val() ==
+                                             member.string_val();
+                                }
+                            }
+                            if (op == proto::plan::
+                                          JSONContainsExpr_JSONOp_ContainsAll) {
+                                match &= found;
+                            } else {
+                                match |= found;
+                            }
+                        }
+                        const bool expected =
+                            containers[row] && (negate ? !match : match);
+                        EXPECT_EQ(raw[row], expected)
+                            << "raw row " << row << " negate " << negate;
+                        EXPECT_EQ(indexed[row], expected)
+                            << "index row " << row << " negate " << negate;
+                    }
+                }
             }
         }
     }
