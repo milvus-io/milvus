@@ -403,6 +403,21 @@ func TestProxyRLSAPIsRejectInvalidPayloadBeforeForwarding(t *testing.T) {
 	require.NoError(t, err)
 	assertErrorStatus(t, status, merr.ErrServiceQuotaExceeded)
 
+	for _, tags := range []string{`{"groups":["sales",1]}`, `{"groups":[1.0,"sales"]}`} {
+		status, err = node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
+			DbName: "db", CollectionName: "coll", PrincipalName: "alice", Tags: tags,
+		})
+		require.NoError(t, err)
+		assertErrorStatus(t, status, merr.ErrParameterInvalid)
+		require.Contains(t, status.GetReason(), "array cannot mix strings and numbers")
+	}
+	status, err = node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
+		DbName: "db", CollectionName: "coll", PrincipalName: "alice", Tags: `{"groups":[9007199254740993,1.0]}`,
+	})
+	require.NoError(t, err)
+	assertErrorStatus(t, status, merr.ErrParameterInvalid)
+	require.Contains(t, status.GetReason(), "without losing precision")
+
 	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key, "1"))
 	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.Key, "1"))
 	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.Key, "1"))
