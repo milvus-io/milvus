@@ -444,6 +444,32 @@ func TestDiagnosticsTracksGenericRequerySelectionStreak(t *testing.T) {
 	require.EqualValues(t, 2, diagnosticHistogram(t, d.streak).GetSampleSum())
 }
 
+func TestDiagnosticsFinishesRequerySelectionStreakOnIdle(t *testing.T) {
+	paramtable.Init()
+	resetDiagnosticMetrics()
+	d := newSchedulerDiagnostics(schedulePolicyNameFIFO, false)
+	policy := newFIFOPolicy()
+	now := time.Now()
+	ctx := contextutil.WithQueryLabel(context.Background(), metrics.ReQueryLabel)
+	task := newMockTask(mockTaskConfig{ctx: ctx})
+	queued := newQueuedTask(task, now)
+	queued.diagnostics = d.admission(task, now)
+	queued.diagnostics.pushed(1, nil)
+	_, err := policy.Push(queued)
+	require.NoError(t, err)
+
+	s := &scheduler{policy: policy, diagnostics: d}
+	selected, _, _ := s.setupExecListener(nil, now)
+	require.Same(t, task, selected.Task)
+	require.EqualValues(t, 1, d.requeryStreak)
+
+	idle, _, _ := s.setupExecListener(nil, now)
+	require.False(t, idle.valid())
+	require.Zero(t, d.requeryStreak)
+	require.EqualValues(t, 1, diagnosticHistogram(t, d.streak).GetSampleCount())
+	require.EqualValues(t, 1, diagnosticHistogram(t, d.streak).GetSampleSum())
+}
+
 func diagnosticSelectionOrder(t *testing.T, policyName string, enabled bool) []string {
 	t.Helper()
 	cfg := &paramtable.Get().QueryNodeCfg

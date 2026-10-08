@@ -438,6 +438,9 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 		for {
 			lastWaitingTask = s.policy.Pop(now)
 			if !lastWaitingTask.valid() {
+				if s.diagnostics != nil {
+					s.diagnostics.finishStreak()
+				}
 				break
 			}
 			if err := lastWaitingTask.Context().Err(); err != nil {
