@@ -78,7 +78,7 @@ Incoming QueryView(Preparing)
                  -> TransformLogBuffer.Acquire
                  -> QueryViewCollectionRuntimeManager.Acquire
                       -> QueryViewLoadMetadataProvider.DescribeCollection
-                      -> collectionManager.PutOrRef
+                      -> pin CCollection by (CollectionID, logical SchemaVersion)
                  -> record transform refs and waiters
                  -> report empty OnReady if this QN has no assigned segments
                  -> ViewScopedPhysicalSegmentManager.Acquire for every assigned segment
@@ -157,8 +157,27 @@ type QueryViewLoadMetadataProvider interface {
 ```
 
 Collection runtime acquisition resolves and validates the QueryView's exact load-info
-version and collection ID, retains an immutable LoadInfo on its guard, then pins the local collection runtime through `collectionManager.PutOrRef` before
-any segment load task is submitted.
+version and collection ID, retains an immutable LoadInfo on its guard, then pins a
+native `segcore.CCollection` in a QV-owned registry keyed by `(CollectionID,
+Schema.Version)`. The version is the logical schema version, not the collection
+metadata update timestamp. Different versions coexist; a version is released
+only after its last view, segment, and in-flight query reference is gone.
+Neither acquisition nor release uses the legacy `segments.CollectionManager`.
+
+Each physical segment owns a `segcore.CSegment` and its own collection guard.
+Load and Reopen consume explicit immutable metadata snapshots, with no lookup
+in the legacy SegmentManager or Loader. Reopen retains its target collection
+before native work and publishes the new guard and LoadInfo only on success;
+failure releases the tentative guard. This does not change CSegment schema
+evolution or LazyCheckSchema behavior.
+
+Resource estimation reuses `segcore/loadresource` against the pinned schema.
+QueryNode constructs one `segments.LoadResourceBudget` and injects it into both
+the legacy loader and QV admission, so their concurrent reservations compete
+for the same node budget. The shared delta/Bloom-filter load helpers take an
+explicit schema, chunk manager, and load target. Persisted deletes still use
+`LoadDeletedRecord` on the load pool; online Transform deletes use `Delete` on
+the mutate pool. Bloom-filter accounting is refunded with the owning segment.
 
 Segment metadata has a separate streaming boundary. QueryNode owns one shared
 `SegmentLoadInfoStream`. Every live physical segment state owns one subscription

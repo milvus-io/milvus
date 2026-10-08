@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -156,12 +157,12 @@ func (s fakeReadableSegment) Release(context.Context) error {
 	return nil
 }
 
-func (s fakeReadableSegment) QuerySegment() segments.Segment {
-	return nil
-}
+var executorTestCollection = &segcore.CCollection{}
 
-func (s fakeReadableSegment) Collection() *segments.Collection {
-	return nil
+type executorNativeSegment struct{ segcore.CSegment }
+
+func (s fakeReadableSegment) ReadView() qnview.SegmentReadView {
+	return qnview.SegmentReadView{Collection: executorTestCollection, Segment: &executorNativeSegment{}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: s.id, InsertChannel: s.vchannel}}
 }
 
 type fakeTransformOnlySegment struct {

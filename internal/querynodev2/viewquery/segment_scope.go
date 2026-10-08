@@ -26,14 +26,27 @@ func segmentExecutionScope(handles []qnview.SealedSegmentHandle) (*segments.Coll
 	selected := make([]segments.Segment, 0, len(handles))
 	var collection *segments.Collection
 	for _, handle := range handles {
-		readable, ok := handle.Segment().(qnview.ReadableSealedSegment)
+		readable, ok := handle.(qnview.ReadableSealedSegment)
+		if !ok {
+			readable, ok = handle.Segment().(qnview.ReadableSealedSegment)
+		}
 		if !ok {
 			return nil, nil, nil, merr.WrapErrServiceInternalMsg("querynode QueryView segment %d is not readable", handle.ID())
 		}
-		if collection == nil {
-			collection = readable.Collection()
+		view := readable.ReadView()
+		if view.Collection == nil || view.Segment == nil || view.LoadInfo == nil {
+			return nil, nil, nil, merr.WrapErrServiceInternalMsg("querynode QueryView segment %d has incomplete native query resources", handle.ID())
 		}
-		selected = append(selected, readable.QuerySegment())
+		if collection == nil {
+			var err error
+			collection, err = segments.NewCollectionFromCCollectionForViewQuery(view.Collection, view.DatabaseName)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		} else if collection.GetCCollection() != view.Collection {
+			return nil, nil, nil, merr.WrapErrServiceInternalMsg("query execution group mixes collection runtimes")
+		}
+		selected = append(selected, segments.NewSealedSegmentForViewQuery(view.LoadInfo, view.Segment, view.DatabaseName))
 	}
 	return collection, selected, handles, nil
 }

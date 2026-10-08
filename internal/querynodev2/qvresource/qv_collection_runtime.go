@@ -2,31 +2,45 @@ package qvresource
 
 import (
 	"context"
+	"encoding/base64"
+	"sync"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+type collectionRuntimeKey struct {
+	collectionID  int64
+	schemaVersion int64
+}
+type collectionRuntime struct {
+	key          collectionRuntimeKey
+	schema       *schemapb.CollectionSchema
+	databaseName string
+	ccollection  *segcore.CCollection
+	refs         int
+	mu           sync.Mutex // serializes native index metadata updates
+}
 type queryViewCollectionRuntimeManager struct {
 	meta        qnview.QueryViewLoadMetadataProvider
-	collections qvCollectionManager
+	mu          sync.Mutex
+	collections map[collectionRuntimeKey]*collectionRuntime
 }
 
-func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvider, collections qvCollectionManager) *queryViewCollectionRuntimeManager {
-	return &queryViewCollectionRuntimeManager{
-		meta:        meta,
-		collections: collections,
-	}
+func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvider) *queryViewCollectionRuntimeManager {
+	return &queryViewCollectionRuntimeManager{meta: meta, collections: make(map[collectionRuntimeKey]*collectionRuntime)}
 }
 
 func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.CollectionRuntimeGuard, bool, error) {
@@ -61,36 +75,35 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 			}
 		}
 	}
-	if err := m.collections.PutOrRef(
-		meta.GetCollectionId(),
-		collection.GetSchema(),
-		segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.GetSchema()),
-		&querypb.LoadMetaInfo{
-			LoadType:        querypb.LoadType_LoadCollection,
-			CollectionID:    meta.GetCollectionId(),
-			PartitionIDs:    loadInfoPartitionIDs(loadInfo, view.ViewOfQueryNode()),
-			DbName:          collection.GetDbName(),
-			LoadFields:      loadInfoFieldIDs(loadInfo),
-			SchemaBarrierTs: collection.GetUpdateTimestamp(),
-		},
-	); err != nil {
-		return nil, false, err
+	key := collectionRuntimeKey{meta.GetCollectionId(), int64(collection.GetSchema().GetVersion())}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime := m.collections[key]
+	if runtime == nil {
+		schema := proto.Clone(collection.GetSchema()).(*schemapb.CollectionSchema)
+		native, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: key.collectionID, Schema: schema, IndexMeta: segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, schema)})
+		if err != nil {
+			return nil, false, err
+		}
+		// Use the same version domain for native query plans and explicit Reopen.
+		if err = native.UpdateSchema(schema, uint64(key.schemaVersion)); err != nil {
+			native.Release()
+			return nil, false, err
+		}
+		if hookutil.IsClusterEncryptionEnabled() {
+			if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), key.collectionID); ez != nil {
+				keyBytes := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if err = segcore.PutOrRefPluginContext(ez, base64.StdEncoding.EncodeToString(keyBytes)); err != nil {
+					native.Release()
+					return nil, false, err
+				}
+			}
+		}
+		runtime = &collectionRuntime{key: key, schema: schema, databaseName: collection.GetDbName(), ccollection: native}
+		m.collections[key] = runtime
 	}
-	localCollection := m.collections.Get(meta.GetCollectionId())
-	var ccollection *segcore.CCollection
-	if localCollection != nil {
-		ccollection = localCollection.GetCCollection()
-	}
-	return &queryViewCollectionRuntimeGuard{
-		loadInfo:      loadInfo,
-		collections:   m.collections,
-		collection:    localCollection,
-		collectionID:  meta.GetCollectionId(),
-		databaseName:  collection.GetDbName(),
-		schema:        collection.GetSchema(),
-		schemaVersion: int64(collection.GetUpdateTimestamp()),
-		ccollection:   ccollection,
-	}, false, nil
+	runtime.refs++
+	return &queryViewCollectionRuntimeGuard{runtime: runtime, owner: m, loadInfo: loadInfo}, false, nil
 }
 
 func isRetryableCollectionRuntimeError(err error) bool {
@@ -109,70 +122,57 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 }
 
 type queryViewCollectionRuntimeGuard struct {
-	loadInfo      qnview.QueryViewLoadInfo
-	collections   qvCollectionManager
-	collection    *segments.Collection
-	collectionID  int64
-	databaseName  string
-	schema        *schemapb.CollectionSchema
-	schemaVersion int64
-	ccollection   *segcore.CCollection
+	runtime  *collectionRuntime
+	owner    *queryViewCollectionRuntimeManager
+	loadInfo qnview.QueryViewLoadInfo
+	once     sync.Once
 }
 
-func (g *queryViewCollectionRuntimeGuard) CollectionID() int64 {
-	return g.collectionID
-}
-
-func (g *queryViewCollectionRuntimeGuard) DatabaseName() string {
-	return g.databaseName
-}
-
+func (g *queryViewCollectionRuntimeGuard) CollectionID() int64  { return g.runtime.key.collectionID }
+func (g *queryViewCollectionRuntimeGuard) DatabaseName() string { return g.runtime.databaseName }
 func (g *queryViewCollectionRuntimeGuard) Schema() *schemapb.CollectionSchema {
-	return g.schema
+	return g.runtime.schema
 }
-
-func (g *queryViewCollectionRuntimeGuard) SchemaVersion() int64 {
-	return g.schemaVersion
-}
-
+func (g *queryViewCollectionRuntimeGuard) SchemaVersion() int64 { return g.runtime.key.schemaVersion }
 func (g *queryViewCollectionRuntimeGuard) CCollection() *segcore.CCollection {
-	return g.ccollection
+	return g.runtime.ccollection
 }
 
-func (g *queryViewCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
-	return g.collection
+// Retain pins this concrete runtime independently of the originating view.
+func (g *queryViewCollectionRuntimeGuard) Retain() (qnview.CollectionRuntimeGuard, error) {
+	g.owner.mu.Lock()
+	defer g.owner.mu.Unlock()
+	if g.runtime.refs == 0 {
+		return nil, merr.WrapErrCollectionNotFound(g.CollectionID())
+	}
+	g.runtime.refs++
+	return &queryViewCollectionRuntimeGuard{runtime: g.runtime, owner: g.owner, loadInfo: g.loadInfo}, nil
 }
 
 func (g *queryViewCollectionRuntimeGuard) UpdateIndexMeta(ctx context.Context, indexes []*indexpb.IndexInfo) error {
-	indexMeta := segments.ComposeIndexMeta(ctx, indexes, g.schema)
-	return g.collection.UpdateIndexMeta(indexMeta)
+	g.runtime.mu.Lock()
+	defer g.runtime.mu.Unlock()
+	return g.runtime.ccollection.UpdateIndexMeta(segments.ComposeIndexMeta(ctx, indexes, g.Schema()))
 }
 
 func (g *queryViewCollectionRuntimeGuard) Release() {
-	g.collections.Unref(g.collectionID, 1)
-}
-
-func loadInfoPartitionIDs(info qnview.QueryViewLoadInfo, fallback *viewpb.QueryViewOfQueryNode) []int64 {
-	if len(info.PartitionIDs) > 0 {
-		return append([]int64(nil), info.PartitionIDs...)
-	}
-	return qvViewPartitionIDs(fallback)
-}
-
-func loadInfoFieldIDs(info qnview.QueryViewLoadInfo) []int64 {
-	fields := make([]int64, 0, len(info.LoadFields))
-	for _, field := range info.LoadFields {
-		fields = append(fields, field.GetFieldId())
-	}
-	return fields
-}
-
-func qvViewPartitionIDs(view *viewpb.QueryViewOfQueryNode) []int64 {
-	partitions := make([]int64, 0, len(view.GetPartitions()))
-	for _, partition := range view.GetPartitions() {
-		partitions = append(partitions, partition.GetPartitionId())
-	}
-	return partitions
+	g.once.Do(func() {
+		g.owner.mu.Lock()
+		defer g.owner.mu.Unlock()
+		g.runtime.refs--
+		if g.runtime.refs != 0 {
+			return
+		}
+		delete(g.owner.collections, g.runtime.key)
+		g.runtime.ccollection.Release()
+		if hookutil.IsClusterEncryptionEnabled() {
+			if ez := hookutil.GetEzByCollProperties(g.Schema().GetProperties(), g.CollectionID()); ez != nil {
+				if err := segcore.UnRefPluginContext(ez); err != nil {
+					mlog.Error(context.TODO(), "release QueryView collection encryption context", mlog.Err(err))
+				}
+			}
+		}
+	})
 }
 
 func (g *queryViewCollectionRuntimeGuard) LoadInfo() qnview.QueryViewLoadInfo {

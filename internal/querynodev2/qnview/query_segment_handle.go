@@ -114,3 +114,16 @@ func (m *QueryViewSegmentReadinessManager) releaseViewQueryRef(ref *transformVie
 		m.release(req)
 	}
 }
+
+func (h *sealedSegmentHandle) ReadView() SegmentReadView {
+	readable, ok := h.segment.(ReadableSealedSegment)
+	if !ok {
+		return SegmentReadView{}
+	}
+	view := readable.ReadView()
+	if collection := h.view.collectionGuard; collection != nil {
+		view.Collection = collection.CCollection()
+		view.DatabaseName = collection.DatabaseName()
+	}
+	return view
+}

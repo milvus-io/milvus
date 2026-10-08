@@ -5,104 +5,26 @@ package qvresource
 import (
 	"context"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 )
 
-type fakeQVCollectionManager struct {
-	collection      *segments.Collection
-	getCount        int
-	putCollectionID int64
-	putSchema       *schemapb.CollectionSchema
-	putIndexMeta    *segcorepb.CollectionIndexMeta
-	putLoadMeta     *querypb.LoadMetaInfo
-	putCount        int
-	refCollection   int64
-	refCount        uint32
-	unrefCollection int64
-	unrefCount      uint32
-	err             error
-}
-
-func (m *fakeQVCollectionManager) Get(int64) *segments.Collection {
-	m.getCount++
-	return m.collection
-}
-
-func (m *fakeQVCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
-	m.putCollectionID = collectionID
-	m.putSchema = schema
-	m.putIndexMeta = indexMeta
-	m.putLoadMeta = loadMeta
-	m.putCount++
-	return m.err
-}
-
-func (m *fakeQVCollectionManager) Ref(collectionID int64, count uint32) bool {
-	m.refCollection = collectionID
-	m.refCount = count
-	return true
-}
-
-func (m *fakeQVCollectionManager) Unref(collectionID int64, count uint32) bool {
-	m.unrefCollection = collectionID
-	m.unrefCount = count
-	return true
-}
-
-type fakeQVSegmentManager struct {
-	removed []int64
-}
-
-func (m *fakeQVSegmentManager) Remove(_ context.Context, segmentID int64, scope querypb.DataScope) (int, int) {
-	if scope == querypb.DataScope_All {
-		m.removed = append(m.removed, segmentID)
-	}
-	return 0, 1
-}
-
 type fakeQVLoader struct {
-	collectionID    int64
-	version         int64
-	infos           []*querypb.SegmentLoadInfo
-	segment         qvLoadedSegment
-	newCalled       bool
-	loadCalled      bool
-	reopenCalled    bool
-	loadIndexCalled bool
-	deltaCalled     bool
-	pkCalled        bool
-	err             error
-}
-
-type fakeQVResourceLoader struct {
-	info        *querypb.SegmentLoadInfo
-	reservation segments.LoadResourceReservation
-	err         error
-}
-
-func (l *fakeQVResourceLoader) ReserveLoadResource(_ context.Context, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, error) {
-	if len(infos) > 0 {
-		l.info = infos[0]
-	}
-	return l.reservation, l.err
-}
-
-type fakeQVResourceReservation struct {
-	released bool
-}
-
-func (r *fakeQVResourceReservation) Release() {
-	r.released = true
+	collectionID int64
+	version      int64
+	infos        []*querypb.SegmentLoadInfo
+	segment      qvLoadedSegment
+	newCalled    bool
+	loadCalled   bool
+	reopenCalled bool
+	deltaCalled  bool
+	pkCalled     bool
+	err          error
 }
 
 type fakeQVLoadMetadataProvider struct {
@@ -141,15 +63,8 @@ func (l *fakeQVLoader) LoadSegment(_ context.Context, segment qvLoadedSegment, i
 	return l.err
 }
 
-func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
+func (l *fakeQVLoader) ReopenSegment(_ context.Context, segment qvLoadedSegment, collection qnview.CollectionRuntime, info *querypb.SegmentLoadInfo) error {
 	l.reopenCalled = true
-	l.infos = append(l.infos, info)
-	return l.err
-}
-
-func (l *fakeQVLoader) LoadIndex(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error {
-	l.loadIndexCalled = true
-	l.version = version
 	l.infos = append(l.infos, info)
 	return l.err
 }
@@ -166,13 +81,6 @@ func (l *fakeQVLoader) LoadPKCandidate(_ context.Context, segment qvLoadedSegmen
 	return l.err
 }
 
-func (l *fakeQVLoader) Load(_ context.Context, collectionID int64, version int64, infos ...*querypb.SegmentLoadInfo) ([]qvLoadedSegment, error) {
-	l.collectionID = collectionID
-	l.version = version
-	l.infos = infos
-	return nil, assert.AnError
-}
-
 type fakeQVSegment struct {
 	id           int64
 	partitionID  int64
@@ -186,7 +94,6 @@ type fakeQVSegment struct {
 }
 
 type fakeQVCollectionRuntime struct {
-	collection    *segments.Collection
 	collectionID  int64
 	databaseName  string
 	schema        *schemapb.CollectionSchema
@@ -211,10 +118,6 @@ func (r fakeQVCollectionRuntime) SchemaVersion() int64 {
 
 func (r fakeQVCollectionRuntime) CCollection() *segcore.CCollection {
 	return nil
-}
-
-func (r fakeQVCollectionRuntime) PinnedCollection() *segments.Collection {
-	return r.collection
 }
 
 func (s *fakeQVSegment) ID() int64 {

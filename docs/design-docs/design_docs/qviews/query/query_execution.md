@@ -70,6 +70,21 @@ have different resource models and execution adapters:
 
 The shared contract is lifecycle and correctness, not a common Go handle type.
 
+QueryNode sealed handles expose a borrowed `SegmentReadView` containing the
+native CSegment, applied LoadInfo, and the requesting view's CCollection. The
+collection comes from the view's guard even if the shared physical segment has
+since reopened under another guard. The executor creates
+`NewCollectionFromCCollectionForViewQuery` and `NewSealedSegmentForViewQuery`
+wrappers only at the execution boundary, then calls the existing
+`SearchTask`/`QueryTask.ExecuteOnSegments`. These wrappers do not register in
+legacy resource managers and do not own or release native resources.
+
+Arrow field retrieval and boost scoring borrow native segment capability rather
+than requiring `*LocalSegment`. Legacy segments retain their existing pin/unpin
+checks; QV wrappers rely on the outer query handles, which remain held through
+execution and result cleanup. Sealed retrieval preserves publish-gate retries.
+
+
 ## 3. Task Provider
 
 `ViewQueryService` depends on a local task provider:

@@ -5,7 +5,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -213,18 +212,9 @@ func (s *transformStartSegment) TransformStartAfterTimeTick() uint64 {
 	return s.startAfter
 }
 
-func (s *transformStartSegment) QuerySegment() segments.Segment {
-	readable, ok := s.TransformSegment.(ReadableSealedSegment)
-	if !ok {
-		return nil
+func (s *transformStartSegment) ReadView() SegmentReadView {
+	if readable, ok := s.TransformSegment.(ReadableSealedSegment); ok {
+		return readable.ReadView()
 	}
-	return readable.QuerySegment()
-}
-
-func (s *transformStartSegment) Collection() *segments.Collection {
-	readable, ok := s.TransformSegment.(ReadableSealedSegment)
-	if !ok {
-		return nil
-	}
-	return readable.Collection()
+	return SegmentReadView{}
 }

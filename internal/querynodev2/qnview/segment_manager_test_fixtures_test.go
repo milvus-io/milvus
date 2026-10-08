@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -71,16 +70,12 @@ func (s *fakeTransformSegment) Release(context.Context) error {
 
 type fakeReadableTransformSegment struct {
 	fakeTransformSegment
-	querySegment segments.Segment
-	collection   *segments.Collection
+	querySegment segcore.CSegment
+	collection   *segcore.CCollection
 }
 
-func (s *fakeReadableTransformSegment) QuerySegment() segments.Segment {
-	return s.querySegment
-}
-
-func (s *fakeReadableTransformSegment) Collection() *segments.Collection {
-	return s.collection
+func (s *fakeReadableTransformSegment) ReadView() SegmentReadView {
+	return SegmentReadView{Collection: s.collection, Segment: s.querySegment}
 }
 
 type fakeTransformRegistration struct {
@@ -225,10 +220,6 @@ func (g *fakeCollectionRuntimeGuard) SchemaVersion() int64 {
 }
 
 func (g *fakeCollectionRuntimeGuard) CCollection() *segcore.CCollection {
-	return nil
-}
-
-func (g *fakeCollectionRuntimeGuard) PinnedCollection() *segments.Collection {
 	return nil
 }
 

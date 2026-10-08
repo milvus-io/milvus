@@ -18,11 +18,9 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/apache/arrow/go/v17/arrow"
 
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -60,20 +58,14 @@ func computeScorerScoresOnChunkedOffsets(
 		return nil, merr.WrapErrServiceInternal("segment is nil")
 	}
 
-	local, ok := segment.(*LocalSegment)
-	if !ok {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("segment %d does not support boost score", segment.ID()))
+	native, release, err := borrowNativeSegment(segment)
+	if err != nil {
+		return nil, err
 	}
-	if local.csegment == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("segment %d has nil CSegment", segment.ID()))
-	}
-	if !local.ptrLock.PinIf(state.IsNotReleased) {
-		return nil, merr.WrapErrSegmentNotLoaded(segment.ID(), "segment released")
-	}
-	defer local.ptrLock.Unpin()
+	defer release()
 
 	if async {
-		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, local.csegment, searchReq, scorer, offsets)
+		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, native, searchReq, scorer, offsets)
 	}
-	return segcore.ComputeScorerScoresOnChunkedOffsets(local.csegment, searchReq, scorer, offsets)
+	return segcore.ComputeScorerScoresOnChunkedOffsets(native, searchReq, scorer, offsets)
 }

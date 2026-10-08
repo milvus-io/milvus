@@ -8,9 +8,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -18,19 +17,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func patchCollectionLifetime(t *testing.T, patch *mockey.Mocker) {
-	t.Helper()
-	t.Cleanup(func() { patch.UnPatch() })
-}
+type lifetimeNativeSegment struct{ segcore.CSegment }
 
-func pinnedCollectionForTest(t *testing.T) (qvCollectionManager, *queryViewCollectionRuntimeGuard) {
+func (*lifetimeNativeSegment) ID() int64 { return 10 }
+func (*lifetimeNativeSegment) Release()  { panic("mockey") }
+func pinnedCollectionForTest(t *testing.T) (*queryViewCollectionRuntimeManager, *queryViewCollectionRuntimeGuard) {
 	t.Helper()
-	schema := &schemapb.CollectionSchema{Name: "collection"}
-	collection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
-	patchCollectionLifetime(t, mockey.Mock(segments.NewCollection).Return(collection, nil).Build())
-	manager := segments.NewCollectionManager()
-	require.NoError(t, manager.PutOrRef(1, schema, nil, nil))
-	runtime := &queryViewCollectionRuntimeGuard{collections: manager, collection: collection, collectionID: 1, schema: schema}
+	patchNativeCollections(t)
+	manager := newQueryViewCollectionRuntimeManager(collectionMetadata(1))
+	runtime := acquireRuntime(t, manager, 1)
 	t.Cleanup(runtime.Release)
 	return manager, runtime
 }
@@ -69,17 +64,15 @@ func (*lifetimeTransformRegistration) Unregister()                       { panic
 
 func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 	collections, runtime := pinnedCollectionForTest(t)
-	native := &segments.LocalSegment{}
-	patchCollectionLifetime(t, mockey.Mock(segments.NewSegment).Return(native, nil).Build())
-	patchCollectionLifetime(t, mockey.Mock((*segments.LocalSegment).ID).Return(int64(10)).Build())
-	patchCollectionLifetime(t, mockey.Mock((*segments.LocalSegment).Partition).Return(int64(100)).Build())
-	release := mockey.Mock((*segments.LocalSegment).Release).Return().Build()
+	native := &lifetimeNativeSegment{}
+	patchCollectionLifetime(t, mockey.Mock(segcore.CreateCSegment).Return(native, nil).Build())
+	release := mockey.Mock((*lifetimeNativeSegment).Release).Return().Build()
 	patchCollectionLifetime(t, release)
-	loader := realQVSegmentLoader{collections: collections}
-	loaded, err := loader.NewSegment(context.Background(), runtime, &querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10})
+	loader := realQVSegmentLoader{}
+	loaded, err := loader.NewSegment(context.Background(), runtime, &querypb.SegmentLoadInfo{CollectionID: 1, SegmentID: 10, PartitionID: 100})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, loaded.Release(context.Background())) })
-	segment := newQueryViewTransformSegment(loaded, &fakeQVSegmentManager{}, "p_1v0", 0)
+	segment := newQueryViewTransformSegment(loaded, "p_1v0", 0)
 	patchCollectionLifetime(t, mockey.Mock((*lifetimePhysicalManager).Acquire).To(func(_ *lifetimePhysicalManager, req qnview.AcquirePhysicalSegments) {
 		req.OnLoaded([]qnview.TransformSegment{segment})
 	}).Build())
@@ -121,14 +114,14 @@ func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 		t.Fatal("view did not drop")
 	}
 	readable := second[0].Segment().(qnview.ReadableSealedSegment)
-	require.Same(t, runtime.collection, collections.Get(1))
-	require.Same(t, runtime.collection, readable.Collection())
-	require.Same(t, native, readable.QuerySegment())
+	require.Same(t, runtime.runtime, collections.collections[runtime.runtime.key])
+	require.Same(t, runtime.CCollection(), readable.ReadView().Collection)
+	require.Same(t, native, readable.ReadView().Segment)
 	require.Equal(t, 0, release.Times())
 	first[0].Release()
-	require.NotNil(t, collections.Get(1))
+	require.NotNil(t, collections.collections[runtime.runtime.key])
 	second[0].Release()
-	require.Nil(t, collections.Get(1), "last query must release the collection")
+	require.Nil(t, collections.collections[runtime.runtime.key], "last query must release the collection")
 	require.Equal(t, 1, release.Times())
 	require.NoError(t, loaded.Release(context.Background()))
 	require.Equal(t, 1, release.Times(), "release must be idempotent")
@@ -138,7 +131,7 @@ func TestPhysicalSegmentCollectionReferenceFailureCleanup(t *testing.T) {
 	for _, stage := range []string{"new-segment", "load-segment", "delta-logs", "pk-candidate", "missing-collection"} {
 		t.Run(stage, func(t *testing.T) {
 			collections, runtime := pinnedCollectionForTest(t)
-			loader := realQVSegmentLoader{collections: collections}
+			loader := realQVSegmentLoader{}
 			if stage == "missing-collection" {
 				runtime.Release()
 				_, err := loader.NewSegment(context.Background(), runtime, &querypb.SegmentLoadInfo{CollectionID: 1})
@@ -146,13 +139,13 @@ func TestPhysicalSegmentCollectionReferenceFailureCleanup(t *testing.T) {
 				return
 			}
 			loadErr := merr.WrapErrServiceInternalMsg("injected load failure")
-			native := &segments.LocalSegment{}
+			native := &lifetimeNativeSegment{}
 			var newErr error
 			if stage == "new-segment" {
 				newErr = loadErr
 			}
-			patchCollectionLifetime(t, mockey.Mock(segments.NewSegment).Return(native, newErr).Build())
-			release := mockey.Mock((*segments.LocalSegment).Release).Return().Build()
+			patchCollectionLifetime(t, mockey.Mock(segcore.CreateCSegment).Return(native, newErr).Build())
+			release := mockey.Mock((*lifetimeNativeSegment).Release).Return().Build()
 			patchCollectionLifetime(t, release)
 			for _, method := range []struct {
 				name string
@@ -164,12 +157,12 @@ func TestPhysicalSegmentCollectionReferenceFailureCleanup(t *testing.T) {
 				}
 				patchCollectionLifetime(t, mockey.Mock(method.fn).Return(err).Build())
 			}
-			physical := newQueryViewPhysicalSegmentLoader(collections, &fakeQVSegmentManager{}, loader)
+			physical := newQueryViewPhysicalSegmentLoader(loader)
 			_, err := physical.Load(context.Background(), &querypb.SegmentLoadInfo{CollectionID: 1}, runtime)
 			require.ErrorIs(t, err, loadErr)
-			require.Same(t, runtime.collection, collections.Get(1), "load failure must preserve the view's reference")
+			require.Same(t, runtime.runtime, collections.collections[runtime.runtime.key], "load failure must preserve the view's reference")
 			runtime.Release()
-			require.Nil(t, collections.Get(1), "load failure must not leak a collection reference")
+			require.Nil(t, collections.collections[runtime.runtime.key], "load failure must not leak a collection reference")
 			wantReleases := 1
 			if stage == "new-segment" {
 				wantReleases = 0
