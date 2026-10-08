@@ -2,8 +2,8 @@ package transformlogbuffer
 
 import (
 	"context"
-	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Buffer struct {
@@ -88,7 +89,7 @@ func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSe
 	buf := b.channels[segment.VChannel()]
 	b.mu.Unlock()
 	if buf == nil {
-		return nil, fmt.Errorf("transform log buffer for vchannel %q is not acquired", segment.VChannel())
+		return nil, merr.WrapErrServiceUnavailableMsg("transform log buffer for vchannel %q is not acquired", segment.VChannel())
 	}
 	return buf.registerSegment(ctx, segment)
 }
@@ -371,7 +372,7 @@ func (b *vchannelBuffer) acquireLocked(startFrom uint64) error {
 		return b.err
 	}
 	if startFrom < b.retentionStart {
-		return fmt.Errorf("transform log buffer range starts from %d, cannot serve %d", b.retentionStart, startFrom)
+		return merr.WrapErrServiceUnavailableMsg("transform log buffer range starts from %d, cannot serve %d", b.retentionStart, startFrom)
 	}
 	b.guards[startFrom]++
 	return nil
@@ -386,7 +387,7 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 	startFrom := segment.TransformStartAfterTimeTick()
 	if startFrom < b.retentionStart {
 		b.mu.Unlock()
-		return nil, fmt.Errorf("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
+		return nil, merr.WrapErrServiceUnavailableMsg("transform log buffer range starts from %d, cannot serve segment %d from %d", b.retentionStart, segment.ID(), startFrom)
 	}
 	reg := newRegistration(b, segment)
 	b.pending[segment.ID()] = reg
@@ -437,8 +438,8 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 			if err := reg.applyEntry(entry); err != nil {
 				return err
 			}
-			if entry.GetTimeTick() > reg.drainedTo {
-				reg.drainedTo = entry.GetTimeTick()
+			if entry.GetTimeTick() > reg.drainedTo.Load() {
+				reg.drainedTo.Store(entry.GetTimeTick())
 			}
 		}
 	}
@@ -458,7 +459,7 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 	}
 	batch := make([]*streamingpb.TransformLogEntry, 0)
 	for _, entry := range b.entries {
-		if entry.GetTimeTick() > reg.drainedTo {
+		if entry.GetTimeTick() > reg.drainedTo.Load() {
 			batch = append(batch, entry)
 		}
 	}
@@ -700,7 +701,7 @@ type registration struct {
 	buffer     *vchannelBuffer
 	segment    qnview.TransformSegment
 	startFrom  uint64
-	drainedTo  uint64
+	drainedTo  atomic.Uint64
 	ctx        context.Context
 	cancel     context.CancelFunc
 	applyMu    sync.Mutex
@@ -714,15 +715,16 @@ type registration struct {
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // registration owns cancellation through Unregister
-	return &registration{
+	reg := &registration{
 		buffer:    buffer,
 		segment:   segment,
 		startFrom: segment.TransformStartAfterTimeTick(),
-		drainedTo: segment.TransformStartAfterTimeTick(),
 		ctx:       ctx,
 		cancel:    cancel,
 		done:      make(chan struct{}),
 	}
+	reg.drainedTo.Store(reg.startFrom)
+	return reg
 }
 
 func (r *registration) WaitCatchup(ctx context.Context) error {
@@ -736,7 +738,7 @@ func (r *registration) WaitCatchup(ctx context.Context) error {
 				mlog.FieldVChannel(r.buffer.vchannel),
 				mlog.FieldSegmentID(r.segment.ID()),
 				mlog.Uint64("startAfterTimeTick", r.startFrom),
-				mlog.Uint64("drainedTo", r.drainedTo),
+				mlog.Uint64("drainedTo", r.drainedTo.Load()),
 				mlog.Err(r.err),
 			)
 		}
@@ -747,7 +749,7 @@ func (r *registration) WaitCatchup(ctx context.Context) error {
 			mlog.FieldVChannel(r.buffer.vchannel),
 			mlog.FieldSegmentID(r.segment.ID()),
 			mlog.Uint64("startAfterTimeTick", r.startFrom),
-			mlog.Uint64("drainedTo", r.drainedTo),
+			mlog.Uint64("drainedTo", r.drainedTo.Load()),
 			mlog.Err(ctx.Err()),
 		)
 		return ctx.Err()
