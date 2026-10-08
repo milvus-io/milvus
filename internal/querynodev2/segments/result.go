@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -238,7 +239,9 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			results = append(results, partialSearchResult.ResultData)
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
-			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			// fastpb: hand-written decoder for the search reduce hot path
+			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
+			err := fastpb.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
 			if err != nil {
 				return nil, err
 			}

@@ -5,7 +5,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -13,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -618,7 +618,9 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			results = append(results, partialSearchResult.ResultData)
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
-			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			// fastpb: hand-written decoder for the search reduce hot path
+			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
+			err := fastpb.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
 			if err != nil {
 				return nil, err
 			}
