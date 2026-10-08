@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ SegmentTaskExecutor = (*DirectSegmentTaskExecutor)(nil)
@@ -32,6 +33,9 @@ func NewDirectSegmentTaskExecutorForTest(serverID int64, searchRunner SearchTask
 }
 
 func (e *DirectSegmentTaskExecutor) Search(ctx context.Context, tasks []qnview.QNSearchSegmentTask) (*internalpb.SearchResults, error) {
+	if len(tasks) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("segment search executor requires at least one task")
+	}
 	collection, selected, handles, err := searchExecutionScope(tasks)
 	if err != nil {
 		return nil, err
@@ -41,6 +45,9 @@ func (e *DirectSegmentTaskExecutor) Search(ctx context.Context, tasks []qnview.Q
 }
 
 func (e *DirectSegmentTaskExecutor) Query(ctx context.Context, tasks []qnview.QNQuerySegmentTask) (*internalpb.RetrieveResults, error) {
+	if len(tasks) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("segment query executor requires at least one task")
+	}
 	collection, selected, handles, err := queryExecutionScope(tasks)
 	if err != nil {
 		return nil, err

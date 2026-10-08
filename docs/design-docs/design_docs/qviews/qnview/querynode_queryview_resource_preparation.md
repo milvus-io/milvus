@@ -420,6 +420,10 @@ Release order:
 6. `OnDropped` acknowledges completion if it was not already acknowledged at
    logical removal.
 
+Releasing a physical Transform segment wakes outstanding `WaitTransformApplied`
+calls with a segment-not-loaded error. Subsequent waits also fail, including
+waits at an already applied timestamp; release is not successful catch-up.
+
 Task cancellation is asynchronous. Load release correctness depends on context
 cancellation, ref validation, and waiting for in-flight callbacks rather than
 synchronous object-storage termination. The physical segment state retains the

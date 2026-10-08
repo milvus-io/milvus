@@ -84,6 +84,11 @@ than requiring `*LocalSegment`. Legacy segments retain their existing pin/unpin
 checks; QV wrappers rely on the outer query handles, which remain held through
 execution and result cleanup. Sealed retrieval preserves publish-gate retries.
 
+The service returns an empty local result when task selection is empty. The
+direct segment executor requires at least one task, since tasks carry its
+request and MVCC; calling it with an empty slice returns an internal error
+before accessing a collection, a segment, or a runner.
+
 
 ## 3. Task Provider
 

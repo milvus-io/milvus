@@ -21,6 +21,7 @@ type queryViewTransformSegment struct {
 	mu          sync.Mutex
 	applied     uint64
 	waiters     map[uint64][]chan struct{}
+	released    bool
 	releaseOnce sync.Once
 	releaseErr  error
 }
@@ -123,12 +124,13 @@ func (s *queryViewTransformSegment) AppliedTransformTimeTick() uint64 {
 }
 
 func (s *queryViewTransformSegment) WaitTransformApplied(ctx context.Context, timetick uint64) error {
-	if timetick == 0 {
-		return nil
-	}
 	waiter := make(chan struct{})
 
 	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return merr.WrapErrSegmentNotLoaded(s.ID())
+	}
 	if s.applied >= timetick {
 		s.mu.Unlock()
 		return nil
@@ -138,6 +140,12 @@ func (s *queryViewTransformSegment) WaitTransformApplied(ctx context.Context, ti
 
 	select {
 	case <-waiter:
+		s.mu.Lock()
+		released := s.released
+		s.mu.Unlock()
+		if released {
+			return merr.WrapErrSegmentNotLoaded(s.ID())
+		}
 		return nil
 	case <-ctx.Done():
 		s.removeTransformWaiter(timetick, waiter)
@@ -201,6 +209,15 @@ func parseTransformDeletePrimaryKeys(ids *schemapb.IDs) (pks storage.PrimaryKeys
 
 func (s *queryViewTransformSegment) Release(ctx context.Context) error {
 	s.releaseOnce.Do(func() {
+		s.mu.Lock()
+		s.released = true
+		for _, waiters := range s.waiters {
+			for _, waiter := range waiters {
+				close(waiter)
+			}
+		}
+		s.waiters = nil
+		s.mu.Unlock()
 		s.releaseErr = s.segment.Release(ctx)
 	})
 	return s.releaseErr
