@@ -61,9 +61,18 @@ queryNode:
 
 - `file` is the default and retains the existing file-backed mmap behavior.
 - `dax` enables the DAX backend. The initial implementation supports a Linux device-DAX region specified by a valid DAX device path.
+- Backend selection occurs only after the existing per-type mmap eligibility settings have marked an object as mmap-eligible. Setting `queryNode.mmap.backend: dax` selects the backend for eligible objects only; it does not enable mmap for objects whose existing mmap settings are disabled.
+- In particular, the existing settings for vector fields, vector indexes, scalar fields, scalar indexes, growing data, and JSON statistics continue to determine whether their corresponding objects are mmap-eligible.
 - Selecting `dax` on an unsupported host, with an unavailable path, or with an invalid region causes QueryNode initialization to fail with a clear error. Milvus must not silently fall back to file-backed mmap.
 
-The implementation may expose operational metrics for DAX region capacity, allocated bytes, available bytes, allocation failures, and allocation latency.
+The implementation must expose the following operational metrics so operators can distinguish DAX-capacity failures from other segment-load failures:
+
+- DAX region total capacity;
+- DAX region allocated capacity;
+- DAX region available capacity; and
+- DAX allocation failure count.
+
+Metric names will follow existing Milvus conventions. Allocation latency and additional device-health metrics may be exposed as optional metrics.
 
 ### Hardware integration and extensibility
 
@@ -130,6 +139,14 @@ During segment release or failed-load cleanup, the DAX Region Manager returns th
 
 DAX allocations are runtime-only. After a QueryNode restart, data is loaded again through the normal Milvus loading path; no DAX-resident data is treated as persistent Milvus state.
 
+### Runtime DAX device failure
+
+The initial implementation does not provide transparent fallback, in-place remapping, or continued query serving after a post-startup DAX device failure.
+
+If the DAX Region Provider detects that the configured device is unavailable before an access fault occurs, the DAX Region Manager transitions to an unhealthy state. It rejects new DAX allocations and new segment loads, and any allocations created by an in-progress load are rolled back.
+
+If an access to an already mapped DAX region produces an unrecoverable access error, such as a SIGBUS or machine-check condition reported by the platform, the QueryNode treats the event as a process-level fatal failure. The process must leave service and be restarted; recovery relies on the normal Milvus segment recovery path. The initial implementation does not attempt to preserve the mapping or silently reload the affected segments in process.
+
 ## Compatibility, Deprecation, and Migration Plan
 
 Existing deployments are unaffected because `queryNode.mmap.backend` defaults to `file`.
@@ -150,6 +167,8 @@ No deprecation is proposed.
 - Integration tests comparing query and vector-search results between file mmap and DAX backends for the same collection and dataset.
 - Hardware validation on a DAX-capable memory device.
 - Performance measurements comparing file-backed mmap and DAX under the same workload, reported separately from correctness requirements.
+- Failure-injection tests verifying that a provider-reported unavailable device marks the Region Manager unhealthy, rejects new loads, and rolls back partial allocations.
+- Where the validation environment supports device-failure injection, an integration test verifying that a mapped-region access failure takes the QueryNode out of service and that recovery uses the normal segment recovery path.
 
 ## Rejected Alternatives
 
