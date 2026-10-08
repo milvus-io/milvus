@@ -25,9 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -49,8 +51,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -486,6 +490,223 @@ func TestServer_CreateIndex(t *testing.T) {
 		assert.Equal(t, 1, len(indexes))
 		assert.NotEqual(t, int64(0), indexes[0].IndexID)
 	})
+}
+
+type (
+	createIndexBrokerMock       struct{ broker.Broker }
+	createIndexAllocatorMock    struct{ allocator.Allocator }
+	createIndexBroadcastAPIMock struct{ broadcaster.BroadcastAPI }
+)
+
+func TestCreateIndexExternalSchemaVersionGate(t *testing.T) {
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name:    "ext",
+		Version: 2,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{
+				FieldID:       fieldID,
+				Name:          "vec",
+				DataType:      schemapb.DataType_FloatVector,
+				ExternalField: "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+
+	indexMeta := newSegmentIndexMeta(nil)
+	fakeBroker := &createIndexBrokerMock{}
+	mockDescribeCollection := mockey.Mock((*createIndexBrokerMock).DescribeCollectionInternal).
+		To(func(_ *createIndexBrokerMock, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			require.EqualValues(t, collID, collectionID)
+			return &milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				Schema:              schema,
+				CollectionID:        collID,
+				CollectionName:      schema.GetName(),
+				DbName:              "default",
+				VirtualChannelNames: []string{"vchan1"},
+			}, nil
+		}).Build()
+	defer mockDescribeCollection.UnPatch()
+	fakeAllocator := &createIndexAllocatorMock{}
+	mockAllocID := mockey.Mock((*createIndexAllocatorMock).AllocID).Return(int64(1), nil).Build()
+	defer mockAllocID.UnPatch()
+	fakeBroadcastAPI := &createIndexBroadcastAPIMock{}
+	mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).
+		Return(fakeBroadcastAPI, nil).Build()
+	defer mockStartBroadcast.UnPatch()
+	mockCloseBroadcast := mockey.Mock((*createIndexBroadcastAPIMock).Close).Return().Build()
+	defer mockCloseBroadcast.UnPatch()
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:     collID,
+		Schema: schema,
+	})
+	server := &Server{
+		meta: &meta{
+			collections: collections,
+			segments:    NewSegmentsInfo(),
+			indexMeta:   indexMeta,
+		},
+		allocator:       fakeAllocator,
+		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          fakeBroker,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.meta.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  collID,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		ManifestPath:  `{"base_path":"seg10","ver":1}`,
+		SchemaVersion: 1,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100, fieldID},
+		}},
+	}))
+
+	newRequest := func() *indexpb.CreateIndexRequest {
+		return &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    "_default_idx",
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "128"},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: indexparamcheck.AutoIndex},
+			},
+		}
+	}
+
+	t.Run("reject new index while segment schema is stale", func(t *testing.T) {
+		status, err := server.CreateIndex(context.Background(), newRequest())
+		require.NoError(t, err)
+		statusErr := merr.Error(status)
+		require.ErrorIs(t, statusErr, merr.ErrCollectionSchemaVersionNotReady)
+		require.True(t, status.GetRetriable())
+		require.Contains(t, status.GetReason(), "schema version 1")
+		require.Contains(t, status.GetReason(), "collection schema version 2")
+		require.Contains(t, status.GetReason(), "RefreshExternalCollection")
+	})
+
+	t.Run("allow idempotent existing index while segment schema is stale", func(t *testing.T) {
+		req := newRequest()
+		indexMeta.indexes[collID] = map[UniqueID]*model.Index{
+			10: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      10,
+				IndexName:    req.GetIndexName(),
+				TypeParams:   req.GetTypeParams(),
+				IndexParams:  req.GetIndexParams(),
+			},
+		}
+
+		status, err := server.CreateIndex(context.Background(), req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+	})
+}
+
+func TestValidateExternalIndexSchemaVersion_Branches(t *testing.T) {
+	const collID = UniqueID(100)
+
+	newServer := func() *Server {
+		return &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	}
+	t.Run("non_external_collection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "regular",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      100,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("external_collection_without_flushed_segments", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:    "ext",
+			Version: 2,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int64},
+			},
+		}
+		err := newServer().validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      101,
+		})
+		require.NoError(t, err)
+	})
+}
+
+func TestValidateExternalIndexSchemaVersion_UsesExactVersion(t *testing.T) {
+	const (
+		collID  = UniqueID(100)
+		fieldID = UniqueID(101)
+	)
+	schema := &schemapb.CollectionSchema{
+		Name:    "ext",
+		Version: 7,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{FieldID: fieldID, Name: "age", DataType: schemapb.DataType_Int64},
+		},
+	}
+	server := &Server{meta: &meta{segments: NewSegmentsInfo()}}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            10,
+		CollectionID:  collID,
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		ManifestPath:  `{"base_path":"seg10","ver":1}`,
+		SchemaVersion: 6,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID:     0,
+			ChildFields: []int64{100, fieldID},
+		}},
+	})
+	server.meta.segments.SetSegment(segment.GetID(), segment)
+
+	err := server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.True(t, merr.Status(err).GetRetriable())
+	require.Contains(t, err.Error(), "schema version 6")
+
+	segment.SchemaVersion = schema.GetVersion()
+	segment.Binlogs = nil
+	err = server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.NoError(t, err)
+
+	segment.SchemaVersion = schema.GetVersion() + 1
+	err = server.validateExternalIndexSchemaVersion(context.Background(), schema, &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+	})
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.True(t, merr.Status(err).GetRetriable())
+	require.Contains(t, err.Error(), "schema version 8")
+	require.Contains(t, err.Error(), "RefreshExternalCollection")
 }
 
 func TestServer_AlterIndex(t *testing.T) {

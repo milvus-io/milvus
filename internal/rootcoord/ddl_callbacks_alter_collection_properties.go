@@ -218,12 +218,14 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 func validateReservedCollectionProperties(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
 	for _, property := range properties {
-		if property.GetKey() == common.MaxFieldIDKey {
-			return merr.WrapErrParameterInvalidMsg("cannot alter reserved collection property %s", common.MaxFieldIDKey)
+		if property.GetKey() == common.MaxFieldIDKey || property.GetKey() == common.MilvusTableTargetOnlyFieldIDsKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter reserved collection property %s", property.GetKey())
 		}
 	}
-	if funcutil.SliceContain(deleteKeys, common.MaxFieldIDKey) {
-		return merr.WrapErrParameterInvalidMsg("cannot delete reserved collection property %s", common.MaxFieldIDKey)
+	for _, key := range deleteKeys {
+		if key == common.MaxFieldIDKey || key == common.MilvusTableTargetOnlyFieldIDsKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete reserved collection property %s", key)
+		}
 	}
 	return nil
 }
