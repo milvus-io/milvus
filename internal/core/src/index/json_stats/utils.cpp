@@ -151,7 +151,8 @@ CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     for (const auto& [key, type] : column_map) {
         switch (type) {
             case JsonKeyLayoutType::SHARED:
-                builders_map[key.ToColumnName()] = shared_builder;
+                // Shared paths are appended together through the final BSON
+                // builder, never looked up as independent Arrow columns.
                 break;
             case JsonKeyLayoutType::TYPED:
             case JsonKeyLayoutType::TYPED_NOT_ALL:
@@ -169,6 +170,21 @@ CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
         }
     }
     builders.push_back(shared_builder);
+    return {std::move(builders), std::move(builders_map)};
+}
+
+std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
+          std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
+CreateArrowBuildersForColumns(const std::set<JsonKey>& column_keys) {
+    std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
+    builders.reserve(column_keys.size() + 1);
+    std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>> builders_map;
+    for (const auto& key : column_keys) {
+        auto builder = CreateArrowBuilder(key.type_);
+        builders_map[key.ToColumnName()] = builder;
+        builders.push_back(std::move(builder));
+    }
+    builders.push_back(CreateSharedArrowBuilder());
     return {std::move(builders), std::move(builders_map)};
 }
 

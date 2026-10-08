@@ -120,6 +120,17 @@ class SegmentReadSnapshot {
     virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
                       FieldSkipMetricsView>
     GetDataScanResources(FieldId field_id) const = 0;
+
+    // Column-only accessor for the per-chunk hot loop. Returns a borrowed
+    // column pointer owned by the published state; callers must not retain it
+    // past the request. Default implementation routes through
+    // GetDataScanResources so test snapshots that only override the pair
+    // accessor keep working; sealed snapshots override this with a zero
+    // ref-count lookup.
+    virtual const ChunkedColumnInterface*
+    GetColumn(FieldId field_id) const {
+        return GetDataScanResources(field_id).first.get();
+    }
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -310,6 +321,10 @@ class SegmentInterface {
 
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
+
+    // Reports whether JSON stats are registered without initializing them.
+    virtual bool
+    HasJsonStats(FieldId field_id) const = 0;
 
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
@@ -698,6 +713,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
+    bool
+    HasJsonStats(FieldId field_id) const override {
+        std::shared_lock lock(mutex_);
+        auto iter = json_stats_.find(field_id);
+        return iter != json_stats_.end() && iter->second != nullptr;
+    }
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search

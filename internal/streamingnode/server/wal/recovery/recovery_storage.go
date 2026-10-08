@@ -3,55 +3,71 @@ package recovery
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 )
 
 type WALCheckpoint = utility.WALCheckpoint
 
-const RecoveryMagicStreamingInitialized = utility.RecoveryMagicStreamingInitialized
-
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
-	VChannels          map[string]*streamingpb.VChannelMeta
-	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
-	Checkpoint         *WALCheckpoint
-	TxnBuffer          *utility.TxnBuffer
-	// Used during WAL alteration process
-	AlterWALInfo *AlterWALInfo
-	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
-	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
-	SalvageCheckpoint *utility.ReplicateCheckpoint
-
-	// SummarySnapshots contains the recovered in-memory summary snapshots. They are
-	// plain data: the idempotency interceptor is today's only consumer and turns
-	// them into its dedup window, but nothing here is specific to that use. Rebuilt
-	// from the pchannel summary store during recovery, never persisted to etcd.
+	WritePathRecovery *moduleapi.WritePathRecoveryModuleSnapshot
+	// Checkpoint is the in-memory completed frontier after bounded startup
+	// replay. It fences write-path recovery, but is not catalog-published until
+	// the background persistence transaction stores all required snapshots.
+	Checkpoint      *WALCheckpoint
+	PChannelControl *streamingpb.PChannelRecoveryControlMeta
+	TxnBuffer       *utility.TxnBuffer // independent startup snapshot; never the live scanner buffer
+	// SummarySnapshots restores the interceptor windows from retained summary
+	// history and startup replay before the WAL accepts writes.
 	SummarySnapshots map[string]*idempotencyview.Snapshot
 }
 
-// AlterWALInfo contains information about WAL alteration process.
-type AlterWALInfo struct {
-	FoundAlterWALMsg bool
-	TargetWALName    commonpb.WALName
-	AlterWALConfig   map[string]string
-	AlterWALTs       uint64
+type dirtyPersistSnapshot struct {
+	Checkpoint        *WALCheckpoint
+	LogicalEndOffset  uint64
+	CheckpointDirty   bool
+	ModuleDirtySnaps  []moduleapi.DirtySnapshot
+	SalvageCheckpoint *utility.ReplicateCheckpoint
+}
+
+func clonePChannelControl(control *streamingpb.PChannelRecoveryControlMeta) *streamingpb.PChannelRecoveryControlMeta {
+	if control == nil {
+		return &streamingpb.PChannelRecoveryControlMeta{}
+	}
+	return proto.Clone(control).(*streamingpb.PChannelRecoveryControlMeta)
 }
 
 type BuildRecoveryStreamParam struct {
 	StartCheckpoint message.MessageID
-	EndTimeTick     uint64
+	// RecoveryBarrier marks the startup snapshot boundary. The stream continues
+	// after this message with the same ordering and transaction state.
+	RecoveryBarrier message.ImmutableMessage
 }
 
 // RecoveryMetrics is the metrics of the recovery info.
 type RecoveryMetrics struct {
-	RecoveryTimeTick uint64
+	RecoveryTimeTick  uint64
+	RecoveryTailBytes uint64
+	BlockingBytes     uint64
+	PublishLagBytes   uint64
+}
+
+// RecoveryTailRateLimiter is the WAL append-pressure surface used by
+// RecoveryStorage. AdaptiveRateLimitController satisfies this interface.
+type RecoveryTailRateLimiter interface {
+	EnterSlowdownMode(ratelimit.SlowdownChecker)
+	EnterRejectMode()
+	EnterRecoveryMode()
 }
 
 // RecoveryStreamBuilder is an interface that is used to build a recovery stream from the WAL.
@@ -63,7 +79,7 @@ type RecoveryStreamBuilder interface {
 	Channel() types.PChannelInfo
 
 	// Build builds a recovery stream from the given channel info.
-	// The recovery stream will return the messages from the start checkpoint to the end time tick.
+	// The stream replays from StartCheckpoint and remains open after RecoveryBarrier.
 	Build(param BuildRecoveryStreamParam) RecoveryStream
 
 	// Return the underlying walimpls.WALImpls.
@@ -76,37 +92,30 @@ type RecoveryStream interface {
 	// The channel is closed when the recovery stream is done.
 	Chan() <-chan message.ImmutableMessage
 
-	// Error should be called after the stream `Chan()` is consumed.
-	// It returns the error if the stream is not done.
-	// If the stream is full consumed, it returns nil.
+	// Error waits for the stream to finish and returns its terminal error.
+	// Reaching RecoveryBarrier does not finish the stream.
 	Error() error
 
-	// TxnBuffer returns the uncommitted txn buffer after recovery stream is done.
-	// Can be only called the stream is drained and Error() return nil.
+	// TxnBuffer returns an independent snapshot of unfinished transactions at
+	// RecoveryBarrier. Call only after consuming that barrier from Chan().
 	TxnBuffer() *utility.TxnBuffer
 
 	// Close closes the recovery stream.
 	Close() error
 }
 
-// RecoveryStorage is an interface that is used to observe the messages from the WAL.
+// RecoveryStorage owns WAL recovery state for one pchannel.
 type RecoveryStorage interface {
 	// Metrics gets the metrics of the recovery storage.
 	Metrics() RecoveryMetrics
 
-	// TODO: should be removed in future,
-	// GetSchema gets last schema of the collection which timetick is less than the given timetick.
-	GetSchema(ctx context.Context, vchannel string, timetick uint64) (*schemapb.CollectionSchema, error)
+	// GetCheckpoint returns the latest global checkpoint published to the
+	// catalog. Every component snapshot required by this point is already
+	// visible when it is returned.
+	GetCheckpoint(ctx context.Context) *WALCheckpoint
 
-	// ObserveMessage observes the message from the WAL.
-	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
-
-	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
-	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
-	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
-
-	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
-	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
+	// VChannelManager returns the PChannel-local vchannel recovery manager.
+	VChannelManager() *vchannel.PChannelRecoveryManager
 
 	// Close closes the recovery storage.
 	Close()

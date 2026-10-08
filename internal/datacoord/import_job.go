@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -67,7 +68,7 @@ type UpdateJobAction func(job ImportJob)
 const importJobReasonAbortedByUser = "aborted by user"
 
 // UnfailableJobStates are the committed states: the commit fence is out and
-// HandleCommitVchannel may already have made segments visible, so failing the
+// the commit callback may already have made segments visible, so failing the
 // job would drop committed data.
 var UnfailableJobStates = typeutil.NewSet(
 	internalpb.ImportJobState_Committing,
@@ -120,6 +121,21 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	}
 }
 
+// UpdateJobIDRanges applies the per-file ID ranges allocated and broadcast after
+// preimport. The slice is keyed by position: the caller guarantees
+// len(ranges) == len(job.GetFiles()), so entry i belongs to Files[i]. Each range is
+// sized to that file's exact post-preimport row count, so its size is also the
+// cross-cluster divergence authority the gate compares each cluster's local count
+// against. The range configures the datanode's PK/RowID cursor.
+func UpdateJobIDRanges(ranges []*commonpb.IDRange) UpdateJobAction {
+	return func(job ImportJob) {
+		j := job.(*importJob)
+		for i, r := range ranges {
+			j.Files[i].IdRange = r
+		}
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
@@ -139,6 +155,8 @@ type ImportJob interface {
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
+	GetCommitByCoordinator() bool
+	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

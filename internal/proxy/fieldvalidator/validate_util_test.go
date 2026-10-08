@@ -20,6 +20,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestCheckJSONDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name, document string
+		valid          bool
+	}{
+		{"empty_containers_at_limit", strings.Repeat("[", MaxJSONDepth) + strings.Repeat("]", MaxJSONDepth), true},
+		{"scalar_at_limit", strings.Repeat("[", MaxJSONDepth-1) + "0" + strings.Repeat("]", MaxJSONDepth-1), true},
+		{"scalar_past_limit", strings.Repeat("[", MaxJSONDepth) + "0" + strings.Repeat("]", MaxJSONDepth), false},
+		{"container_past_limit", strings.Repeat("[", MaxJSONDepth+1) + strings.Repeat("]", MaxJSONDepth+1), false},
+		{"object_at_limit", strings.Repeat(`{"x":`, MaxJSONDepth-1) + `{}` + strings.Repeat("}", MaxJSONDepth-1), true},
+		{"object_value_past_limit", strings.Repeat(`{"x":`, MaxJSONDepth) + `null` + strings.Repeat("}", MaxJSONDepth), false},
+		{"brackets_in_strings", `{"x":"[[{\\\"","large":9007199254740993}`, true},
+		{"invalid_json", `{"x":?}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckJSONDepth("metadata", []byte(tc.document))
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			}
+		})
+	}
+}
+
 func testArrayTypeSchema(element *schemapb.TypeSchema, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
 	return &schemapb.TypeSchema{
 		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: element},

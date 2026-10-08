@@ -32,11 +32,15 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -66,9 +70,9 @@ func NewImportTask(req *datapb.ImportRequest,
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
 	}
-	// Local allocator for binlog logIDs (and the legacy autoID fallback when a file
-	// carries no primary-allocated PK range). Deterministic cross-cluster autoID PKs
-	// are derived per file from ImportFile.PreAllocatedAutoIds, not from this allocator.
+	// Local allocator for binlog logIDs, and the legacy fallback when a file carries no
+	// per-file ID range. Deterministic cross-cluster PK/RowID come from the file's
+	// ImportFile.IdRange, not from this allocator.
 	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
@@ -166,6 +170,18 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
+	rlsPredicate := t.req.GetRlsCheckPredicate()
+	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
+		err := merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
+		mlog.Warn(t.ctx, "invalid import RLS predicate", WrapLogFields(t, mlog.Err(err))...)
+		t.manager.Update(t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Failed),
+			UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			return nil, err
+		})}
+	}
+
 	bufferSize := t.GetBufferSize()
 	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		mlog.Int64("bufferSize", bufferSize),
@@ -186,23 +202,18 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 			return err
 		}
 		defer reader.Close()
-		// Deterministic autoID: each file owns a disjoint PK range replicated from
-		// the primary. A nil cursor (no range) falls back to the local allocator.
-		var cur *pkCursor
-		if r := file.GetPreAllocatedAutoIds(); r.GetEnd() > r.GetBegin() {
-			cur = &pkCursor{begin: r.GetBegin(), end: r.GetEnd(), next: r.GetBegin()}
-		} else if pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema()); err == nil &&
-			pkField.GetAutoID() && !importutilv2.IsBackup(req.GetOptions()) && !importutilv2.IsL0Import(req.GetOptions()) {
-			// The coordinator assigns a range to every autoID import, so an absent one
-			// means this job predates the mechanism or the coordinator is older than
-			// this datanode. Keys then come from the local allocator, which diverges
-			// from the source cluster if the job is replicated -- log it so the
-			// rolling-upgrade window is greppable instead of silent.
-			mlog.Warn(t.ctx, "no PK range on an autoID import file, falling back to the local allocator",
+		// Deterministic PK/RowID: a per-file range replicated from the primary, used for the
+		// PK on autoID collections and the RowID on explicit-PK ones. A nil range (a job
+		// that predates the mechanism) falls back to the log id range, which diverges from
+		// the source cluster if the job is replicated -- log it so the rolling-upgrade
+		// window is greppable instead of silent.
+		cur := importid.NewFileIDRange(file)
+		if cur == nil && importid.NeedsFileIDRanges(t.GetSchema(), req.GetOptions()) {
+			mlog.Warn(t.ctx, "no per-file range on an import file, falling back to the local allocator",
 				WrapLogFields(t, mlog.String("file", file.String()))...)
 		}
 		start := time.Now()
-		err = t.importFile(reader, cur)
+		err = t.importFile(reader, cur, rlsPredicate)
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -232,7 +243,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileIDRange, rlsPredicate *planpb.Expr) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -265,6 +276,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error
 		err = FillDynamicData(t.GetSchema(), data, rowNum)
 		if err != nil {
 			return err
+		}
+		if rlsPredicate != nil {
+			if err = rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, rlsPredicate, "import", "check"); err != nil {
+				return err
+			}
 		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)

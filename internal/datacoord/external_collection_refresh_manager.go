@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -63,7 +65,7 @@ const externalRefreshManifestReadConcurrency = 16
 // exploreTempDirForJob returns the root directory for every Explore attempt of
 // one refresh job. Terminal cleanup removes this root and all attempt manifests.
 func exploreTempDirForJob(jobID int64) string {
-	return fmt.Sprintf("__explore_temp__/coord_%d", jobID)
+	return fmt.Sprintf("%s/coord_%d", common.ExploreTempRootPath, jobID)
 }
 
 // exploreTempDirForAttempt isolates manifests produced by retried planning
@@ -910,6 +912,17 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// in the resulting plan can read their assigned ranges.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
+		if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, merr.ErrOperationNotSupported) {
+			// Include only the object path: source URLs can carry credentials
+			// in user info or query parameters, which must not enter job reasons.
+			objectPath := "<invalid>"
+			if sourceURL, parseErr := url.Parse(job.GetExternalSource()); parseErr == nil {
+				objectPath = sourceURL.EscapedPath()
+			}
+			return nil, newNonRetriableJobError(
+				"cannot explore external collection %d, object=%q: %s",
+				job.GetCollectionId(), objectPath, err.Error())
+		}
 		// Hard explore failures are terminal for this job: the source is
 		// unreachable, denied, malformed, absent, or its snapshot metadata
 		// is incompatible with the requested external format. Surface them
@@ -1193,7 +1206,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		extfs,
 	)
 	if err != nil {
-		return nil, "", merr.WrapErrServiceInternalErr(err, "failed to explore files returning manifest path")
+		return nil, "", merr.Wrap(err, "failed to explore files returning manifest path")
 	}
 
 	// Convert to proto type

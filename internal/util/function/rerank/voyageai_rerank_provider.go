@@ -88,13 +88,11 @@ func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string
 }
 
 func (provider *voyageaiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
+	rerankResp, err := provider.voyageaiClient.Rerank(provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, result := range rerankResp.Data {
-		scores[i] = result.RelevanceScore
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(rerankResp.Data), func(i int) (int, float32) {
+		return rerankResp.Data[i].Index, rerankResp.Data[i].RelevanceScore
+	})
 }

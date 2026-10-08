@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -19,14 +19,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// QueryHook is the interface for search/query parameter optimizer.
-type QueryHook interface {
-	Run(map[string]any) error
-	Init(string) error
-	InitTuningConfig(map[string]string) error
-	DeleteTuningConfig(string) error
-	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
-}
+// QueryHook is extension.QueryHook: the tuning hook a queryNode.soPath plug-in
+// exports, or the one a distribution compiled in. It lives in pkg/extension so
+// a distribution can implement it; every consumer in the tree keeps this name.
+type QueryHook = extension.QueryHook
 
 // OptimizeSearchParams optimizes search parameters using the query hook and applies Knowhere search defaults.
 // numSegments is the effective segment number, pre-computed by the caller via CalculateEffectiveSegmentNum.
@@ -141,7 +137,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		}
 
-		changed, err := applyStrictGroupSettings(queryInfo)
+		changed, err := applyStrictGroupSettings(ctx, queryInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +180,7 @@ func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int
 // applyStrictGroupSettings runs after the hook, including when it is disabled.
 // Server settings override caller/hook values; unrelated JSON values retain
 // their exact numeric/string types. The serialized plan freezes this snapshot.
-func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
+func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool, error) {
 	raw := info.GetSearchParams()
 	if raw == "" {
 		raw = "{}"
@@ -196,27 +192,39 @@ func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
 	if params == nil {
 		params = make(map[string]json.RawMessage)
 	}
-	_, hadThreshold := params[common.StrictGroupAcceptanceThresholdKey]
-	_, hadProbe := params[common.StrictGroupProbeCandidatesKey]
-	delete(params, common.StrictGroupAcceptanceThresholdKey)
-	delete(params, common.StrictGroupProbeCandidatesKey)
-	// Aggregation plans use only the plural field, even for one grouping key.
-	hasGroupBy := info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0
-	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && hasGroupBy
+	_, hadStrategy := params[common.StrictGroupStrategyKey]
+	_, hadPhase1 := params[common.StrictGroupPhase1CandidateWeightKey]
+	_, hadSkipRefine := params[common.StrictGroupSkipRefineKey]
+	delete(params, common.StrictGroupStrategyKey)
+	delete(params, common.StrictGroupPhase1CandidateWeightKey)
+	delete(params, common.StrictGroupSkipRefineKey)
+	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
 	if eligible {
 		cfg := &paramtable.Get().QueryNodeCfg
-		threshold, err := strconv.ParseFloat(cfg.StrictGroupAcceptanceThreshold.GetValue(), 64)
-		if err != nil || math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 1 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupAcceptanceThreshold.Key)
+		phase1, err := strconv.ParseInt(cfg.StrictGroupPhase1CandidateWeight.GetValue(), 10, 64)
+		if err != nil || phase1 < 0 {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupPhase1CandidateWeight.Key)
 		}
-		probe, err := strconv.ParseInt(cfg.StrictGroupProbeCandidates.GetValue(), 10, 64)
-		if err != nil || probe <= 0 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupProbeCandidates.Key)
+		skipRefine, err := strconv.ParseBool(cfg.StrictGroupSkipRefine.GetValue())
+		if err != nil {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupSkipRefine.Key)
 		}
-		params[common.StrictGroupAcceptanceThresholdKey] = json.RawMessage(strconv.FormatFloat(threshold, 'g', -1, 64))
-		params[common.StrictGroupProbeCandidatesKey] = json.RawMessage(strconv.FormatInt(probe, 10))
+		params[common.StrictGroupPhase1CandidateWeightKey] = json.RawMessage(strconv.FormatInt(phase1, 10))
+		params[common.StrictGroupSkipRefineKey] = json.RawMessage(strconv.FormatBool(skipRefine))
+		strategy := cfg.StrictGroupStrategy.GetValue()
+		if strategy != "original" && strategy != "per_group" {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupStrategy.Key)
+		}
+		params[common.StrictGroupStrategyKey] = json.RawMessage(strconv.Quote(strategy))
+		// Log the injected snapshot, not a second read that could race a refresh.
+		// Caller payloads are never logged. Use the standard logging level.
+		mlog.Debug(ctx, "strict_group_config_snapshot",
+			mlog.Int64("node_id", paramtable.GetNodeID()),
+			mlog.String("strategy", strategy),
+			mlog.Int64("phase1_candidate_weight", phase1),
+			mlog.Bool("skip_refine", skipRefine))
 	}
-	if !eligible && !hadThreshold && !hadProbe {
+	if !eligible && !hadStrategy && !hadPhase1 && !hadSkipRefine {
 		return false, nil
 	}
 	encoded, err := json.Marshal(params)

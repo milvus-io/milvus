@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/minio/MinioChunkManager.h"
+#include "storage/minio/GuardedS3EndpointProvider.h"
 
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
@@ -270,6 +271,7 @@ MinioChunkManager::BuildS3Client(
 
 void
 MinioChunkManager::PreCheck(const StorageConfig& config) {
+    InstallS3EndpointAuthGuard(*client_);
     LOG_INFO("start to precheck chunk manager with configuration: {}",
              config.ToString());
     try {

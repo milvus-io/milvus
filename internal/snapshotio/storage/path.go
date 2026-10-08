@@ -186,6 +186,13 @@ func buildSnapshotObjectURI(cfg *objectstorage.Config, bucket, objectPath string
 	return result, nil
 }
 
+// effectiveAzureSnapshotEndpoint returns the canonical account-qualified Azure
+// endpoint, "<account>.blob.<suffix>". The Milvus instance config carries the
+// port minio.address was normalized with (cloud deployments typically resolve
+// to "core.windows.net:443"), while snapshot URIs and endpoint identity
+// parsing drop ports, so all comparisons and emitted URIs would disagree on
+// the port spelling alone. Strip the scheme's default port here so every
+// consumer sees one canonical form; non-default ports are preserved.
 func effectiveAzureSnapshotEndpoint(cfg *objectstorage.Config) (string, error) {
 	if cfg == nil {
 		return "", merr.WrapErrServiceInternalMsg("Azure storage config is nil")
@@ -206,7 +213,7 @@ func effectiveAzureSnapshotEndpoint(cfg *objectstorage.Config) (string, error) {
 			if strings.Trim(endpoint.Path, "/") != "" {
 				return "", merr.WrapErrServiceInternalMsg("Azure storage endpoints with path prefixes are not supported")
 			}
-			return endpoint.Host, nil
+			return stripDefaultEndpointPort(endpoint.Host, endpoint.Scheme != "http"), nil
 		}
 	}
 
@@ -215,7 +222,7 @@ func effectiveAzureSnapshotEndpoint(cfg *objectstorage.Config) (string, error) {
 	if account == "" || suffix == "" {
 		return "", merr.WrapErrServiceInternalMsg("Azure account name and endpoint suffix are required")
 	}
-	return account + ".blob." + suffix, nil
+	return stripDefaultEndpointPort(account+".blob."+suffix, cfg.UseSSL), nil
 }
 
 func parseForeignURI(raw string, allowEmptyObjectKey bool) (bucket, objectKey, endpointHost string, err error) {

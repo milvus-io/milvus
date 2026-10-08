@@ -19,6 +19,9 @@ package milvusclient
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -29,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 	"github.com/milvus-io/milvus/client/v3/row"
 )
@@ -53,6 +57,8 @@ type columnBasedDataOption struct {
 	collName      string
 	partitionName string
 	namespace     *string
+	rlsPrincipal  string
+	skipRLS       bool
 	columns       []column.Column
 	partialUpdate bool
 
@@ -330,18 +336,10 @@ func (opt *columnBasedDataOption) WithStructArrayColumn(colName string, structSc
 }
 
 func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) (column.Column, error) {
-	if structSchema == nil {
-		return nil, errors.New("structSchema is required for WithStructArrayColumn")
+	structCol, err := column.NewColumnStructArrayFromSchema(colName, structSchema)
+	if err != nil {
+		return nil, err
 	}
-	subColumns := make([]column.Column, 0, len(structSchema.Fields))
-	for _, sub := range structSchema.Fields {
-		subColumn, err := newStructSubColumn(sub)
-		if err != nil {
-			return nil, err
-		}
-		subColumns = append(subColumns, subColumn)
-	}
-	structCol := column.NewColumnStructArray(colName, subColumns)
 	for _, row := range rows {
 		if row == nil {
 			structCol.SetNullable(true)
@@ -356,59 +354,6 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 	return structCol, nil
 }
 
-func newStructSubColumn(field *entity.Field) (column.Column, error) {
-	switch field.DataType {
-	case entity.FieldTypeBool:
-		return column.NewColumnBoolArray(field.Name, nil), nil
-	case entity.FieldTypeInt8:
-		return column.NewColumnInt8Array(field.Name, nil), nil
-	case entity.FieldTypeInt16:
-		return column.NewColumnInt16Array(field.Name, nil), nil
-	case entity.FieldTypeInt32:
-		return column.NewColumnInt32Array(field.Name, nil), nil
-	case entity.FieldTypeInt64:
-		return column.NewColumnInt64Array(field.Name, nil), nil
-	case entity.FieldTypeFloat:
-		return column.NewColumnFloatArray(field.Name, nil), nil
-	case entity.FieldTypeDouble:
-		return column.NewColumnDoubleArray(field.Name, nil), nil
-	case entity.FieldTypeVarChar, entity.FieldTypeString:
-		return column.NewColumnVarCharArray(field.Name, nil), nil
-	case entity.FieldTypeFloatVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBinaryVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeInt8Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
-	default:
-		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
-	}
-}
-
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
 	opt.partitionName = partitionName
 	return opt
@@ -419,6 +364,16 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 // primary keys unique across namespaces in the same collection.
 func (opt *columnBasedDataOption) WithNamespace(namespace string) *columnBasedDataOption {
 	opt.namespace = &namespace
+	return opt
+}
+
+func (opt *columnBasedDataOption) WithRLSPrincipal(principal string) *columnBasedDataOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *columnBasedDataOption) WithSkipRLS(skip bool) *columnBasedDataOption {
+	opt.skipRLS = skip
 	return opt
 }
 
@@ -436,9 +391,8 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 // request (schema-mismatch / rate-limit) reuse the key, which is exactly what
 // idempotent replay needs; do NOT reuse one key across different payloads or
 // collections: the server would answer the second insert with the first one's
-// IDs. Only Insert honors the key, and only when idempotent write is enabled
-// both globally (streaming.idempotency.enabled) and on the target collection;
-// Upsert rejects a configured option key.
+// IDs. Insert enables idempotency when a non-empty key is supplied; without a
+// key, every request is a new write. Upsert rejects a configured option key.
 func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
 	opt.idempotencyKey = idempotencyKey
 	return opt
@@ -465,23 +419,39 @@ func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBased
 	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
 }
 
+// WithPathReplace replaces the value selected by a request-wide relative path,
+// such as "[1]", "[1][age]", or `["profile"][1]["age"]` for JSON fields.
+// A missing final JSON object key is added; intermediate containers must exist.
+func (opt *columnBasedDataOption) WithPathReplace(fieldName, path string) *columnBasedDataOption {
+	opt.setFieldPartialUpdateOp(&schemapb.FieldPartialUpdateOp{
+		FieldName: fieldName,
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      path,
+	})
+	return opt
+}
+
 // WithFieldPartialOp attaches an explicit FieldPartialUpdateOp to the field
 // with name `fieldName`. Intended for advanced callers; typical users should
 // prefer the op-specific helpers (WithArrayAppend, WithArrayRemove).
 func (opt *columnBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *columnBasedDataOption {
-	if op == schemapb.FieldPartialUpdateOp_REPLACE {
-		// REPLACE is the default; clear any prior directive rather than
-		// transmitting a no-op message.
-		if opt.partialOps != nil {
-			delete(opt.partialOps, fieldName)
-		}
-		return opt
-	}
+	opt.setFieldPartialUpdateOp(&schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op})
+	return opt
+}
+
+func (opt *columnBasedDataOption) setFieldPartialUpdateOp(op *schemapb.FieldPartialUpdateOp) {
 	if opt.partialOps == nil {
 		opt.partialOps = make(map[string]*schemapb.FieldPartialUpdateOp)
 	}
-	opt.partialOps[fieldName] = &schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op}
-	return opt
+	// Builder calls configure the final request; they are not themselves wire
+	// operations. Preserve the existing last-write-wins behavior here and let
+	// Proxy reject requests that actually contain duplicate field_ops entries.
+	fieldName := op.GetFieldName()
+	if op.GetOp() == schemapb.FieldPartialUpdateOp_REPLACE {
+		delete(opt.partialOps, fieldName)
+		return
+	}
+	opt.partialOps[fieldName] = op
 }
 
 // buildFieldOps materializes the recorded FieldPartialUpdateOp directives
@@ -498,7 +468,13 @@ func (opt *columnBasedDataOption) buildFieldOps() []*schemapb.FieldPartialUpdate
 	}
 	out := make([]*schemapb.FieldPartialUpdateOp, 0, len(opt.partialOps))
 	for _, op := range opt.partialOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_REPLACE {
+			continue
+		}
 		out = append(out, op)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -519,6 +495,8 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
 		Namespace:       opt.namespace,
+		RlsPrincipal:    opt.rlsPrincipal,
+		SkipRls:         opt.skipRLS,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -548,6 +526,8 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
 		Namespace:       opt.namespace,
+		RlsPrincipal:    opt.rlsPrincipal,
+		SkipRls:         opt.skipRLS,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -592,6 +572,16 @@ func (opt *rowBasedDataOption) WithNamespace(namespace string) *rowBasedDataOpti
 	return opt
 }
 
+func (opt *rowBasedDataOption) WithRLSPrincipal(principal string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithRLSPrincipal(principal)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithSkipRLS(skip bool) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithSkipRLS(skip)
+	return opt
+}
+
 func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithPartialUpdate(partialUpdate)
 	return opt
@@ -599,6 +589,14 @@ func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDa
 
 func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithArrayAppend(fieldName)
+	return opt
+}
+
+// WithPathReplace replaces the value selected by a request-wide relative path,
+// such as "[1]", "[1][age]", or `["profile"][1]["age"]` for JSON fields.
+// Use encoded JSON bytes for scalar, array and JSON null operands.
+func (opt *rowBasedDataOption) WithPathReplace(fieldName, path string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPathReplace(fieldName, path)
 	return opt
 }
 
@@ -626,6 +624,8 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
 		Namespace:      opt.namespace,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
@@ -635,10 +635,17 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	if opt.idempotencyKey != "" {
 		return nil, unsupportedDMLIdempotencyKeyError("Upsert")
 	}
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
+	conversionSchema, err := opt.pathReplaceRowSchema(coll.Schema)
+	if err != nil {
+		return nil, err
+	}
 	// An AutoID primary key is a lookup key for Upsert. Unlike Insert, Upsert
 	// must always send it so the server can distinguish an update from a
 	// generated insert-on-not-found row.
-	columns, err := row.AnyToColumns(opt.rows, true, coll.Schema)
+	columns, err := row.AnyToColumns(opt.rows, true, conversionSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -656,11 +663,117 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
 		Namespace:      opt.namespace,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
 		FieldOps:       fieldOps,
 	}, nil
+}
+
+func (opt *rowBasedDataOption) pathReplaceRowSchema(schema *entity.Schema) (*entity.Schema, error) {
+	conversionSchema := schema
+	for fieldIndex, field := range schema.Fields {
+		op := opt.partialOps[field.Name]
+		// Unknown fields and non-Struct Array fields stay server-authoritative.
+		if op.GetOp() != schemapb.FieldPartialUpdateOp_PATH_REPLACE ||
+			field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+			continue
+		}
+		mask, err := pathReplaceStructFieldMask(opt.rows, field.Name)
+		if err != nil {
+			return nil, errors.Wrapf(err, "PATH_REPLACE field %q", field.Name)
+		}
+		structSchema, err := selectPathReplaceStructSchema(field, mask)
+		if err != nil {
+			return nil, err
+		}
+		// The operand must match the object selected by the path, not narrow it.
+		// Canonical path grammar remains server-authoritative.
+		if strings.Count(op.GetPath(), "[") == 1 {
+			if len(mask) != len(field.StructSchema.Fields) {
+				return nil, errors.Newf("PATH_REPLACE field %q whole element requires all struct children", field.Name)
+			}
+		} else if len(mask) != 1 || !strings.HasSuffix(op.GetPath(), "["+mask[0]+"]") {
+			return nil, errors.Newf("PATH_REPLACE field %q path requires exactly the selected child", field.Name)
+		}
+		if conversionSchema == schema {
+			cloned := *schema
+			cloned.Fields = slices.Clone(schema.Fields)
+			conversionSchema = &cloned
+		}
+		clonedField := *field
+		clonedField.StructSchema = structSchema
+		conversionSchema.Fields[fieldIndex] = &clonedField
+	}
+	return conversionSchema, nil
+}
+
+func selectPathReplaceStructSchema(field *entity.Field, mask []string) (*entity.StructSchema, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no child schema", field.Name)
+	}
+	selected := make(map[string]struct{}, len(mask))
+	for _, name := range mask {
+		selected[name] = struct{}{}
+	}
+	result := entity.NewStructSchema()
+	for _, child := range field.StructSchema.Fields {
+		if _, ok := selected[child.Name]; ok {
+			result.WithField(child)
+			delete(selected, child.Name)
+		}
+	}
+	for name := range selected {
+		return nil, errors.Newf("struct array field %q has no child %q", field.Name, name)
+	}
+	return result, nil
+}
+
+func pathReplaceStructFieldMask(rows []interface{}, fieldName string) ([]string, error) {
+	var expected []string
+	for rowIndex, inputRow := range rows {
+		fields, err := rowutil.ParseFields(reflect.ValueOf(inputRow))
+		if err != nil {
+			return nil, err
+		}
+		field, found := fields[fieldName]
+		if !found {
+			return nil, errors.Newf("row %d is missing struct array field %q", rowIndex, fieldName)
+		}
+		value := field.Value
+		for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Ptr) {
+			if value.IsNil() {
+				return nil, errors.Newf(
+					"row %d struct array field %q must not be null for PATH_REPLACE", rowIndex, fieldName)
+			}
+			value = value.Elem()
+		}
+		if !value.IsValid() || value.Kind() != reflect.Map || value.Type().Key().Kind() != reflect.String {
+			return nil, errors.Newf(
+				"row %d struct array field %q must be map[string]any, got %s", rowIndex, fieldName, value.Kind())
+		}
+		mask := make([]string, 0, value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			mask = append(mask, iter.Key().String())
+		}
+		sort.Strings(mask)
+		if len(mask) == 0 {
+			return nil, errors.Newf("row %d struct array field %q child mask must not be empty", rowIndex, fieldName)
+		}
+		if rowIndex == 0 {
+			expected = mask
+			continue
+		}
+		if !slices.Equal(expected, mask) {
+			return nil, errors.Newf(
+				"row %d struct array field %q child mask %v does not match request mask %v",
+				rowIndex, fieldName, mask, expected)
+		}
+	}
+	return expected, nil
 }
 
 func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Column) error {
@@ -706,6 +819,8 @@ type deleteOption struct {
 	collectionName string
 	partitionName  string
 	namespace      *string
+	rlsPrincipal   string
+	skipRLS        bool
 	expr           string
 	templateParams map[string]any
 }
@@ -715,6 +830,8 @@ func (opt *deleteOption) Request() (*milvuspb.DeleteRequest, error) {
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
 		Namespace:      opt.namespace,
+		RlsPrincipal:   opt.rlsPrincipal,
+		SkipRls:        opt.skipRLS,
 		Expr:           opt.expr,
 	}
 	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue, len(opt.templateParams))
@@ -763,6 +880,16 @@ func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 // across namespaces in the same collection.
 func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
 	opt.namespace = &namespace
+	return opt
+}
+
+func (opt *deleteOption) WithRLSPrincipal(principal string) *deleteOption {
+	opt.rlsPrincipal = principal
+	return opt
+}
+
+func (opt *deleteOption) WithSkipRLS(skip bool) *deleteOption {
+	opt.skipRLS = skip
 	return opt
 }
 

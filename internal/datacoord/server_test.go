@@ -76,6 +76,11 @@ const maxOperationsPerTxn = int64(64)
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	// The two-phase exact ID range path is version-gated: without the MixCoord
+	// confirmator running it resolves to its pre-switch value, so activate it for
+	// the package tests. Tests that exercise the pre-switch (legacy) path flip it
+	// back to "false" with SwapTempValue.
+	Params.DataCoordCfg.ImportEnableIDRangeMsg.SwapTempValue("true")
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)

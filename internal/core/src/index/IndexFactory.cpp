@@ -87,8 +87,8 @@ namespace {
 // Bounds for the synchronous encrypted entry-stream implementation.
 struct EntryStreamLoadInfo {
     bool encrypted{false};
-    size_t total_transient_bytes{0};
-    size_t max_task_transient_bytes{0};
+    uint64_t total_transient_bytes{0};
+    uint64_t max_task_transient_bytes{0};
 };
 
 uint64_t

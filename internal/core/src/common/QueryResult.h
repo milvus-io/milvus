@@ -209,8 +209,8 @@ class ChunkMergeIterator : public VectorIterator {
 };
 
 struct SearchResult {
-    using VectorIteratorRecreateFn =
-        std::function<void(const BitsetView&, SearchResult&)>;
+    using FilteredVectorSearchFn =
+        std::function<void(const BitsetView&, int64_t, SearchResult&)>;
     SearchResult() = default;
 
     int64_t
@@ -269,36 +269,30 @@ struct SearchResult {
     }
 
     void
-    SetVectorIteratorRecreator(const BitsetView& base_filter,
-                               VectorIteratorRecreateFn recreate_fn) {
-        vector_iterator_base_filter_.reset();
-        vector_iterator_base_filter_view_ = base_filter;
-        // The execution pipeline shares its input column. Direct low-level
-        // callers without an owner retain the original defensive-copy contract.
-        if (!vector_iterator_filter_owner_) {
-            GetVectorIteratorBaseFilter();
+    SetVectorSearchProvider(const BitsetView& base_filter,
+                            FilteredVectorSearchFn provider) {
+        vector_search_base_filter_.reset();
+        vector_search_base_filter_view_ = base_filter;
+        // The execution pipeline owns its input column. Direct callers without
+        // an owner retain a defensive copy of their filter.
+        if (!vector_search_filter_owner_) {
+            GetVectorSearchBaseFilter();
         }
-        vector_iterator_recreate_fn_ = std::move(recreate_fn);
+        filtered_vector_search_fn_ = std::move(provider);
     }
 
     void
-    ClearVectorIteratorRecreator() {
-        vector_iterator_recreate_fn_ = {};
-        vector_iterator_base_filter_view_ = {};
-        vector_iterator_base_filter_.reset();
-        vector_iterator_filter_owner_.reset();
-    }
-
-    bool
-    CanRecreateVectorIterator() const {
-        return allow_vector_iterator_recreation_ &&
-               static_cast<bool>(vector_iterator_recreate_fn_);
+    ClearVectorSearchProvider() {
+        filtered_vector_search_fn_ = {};
+        vector_search_base_filter_view_ = {};
+        vector_search_base_filter_.reset();
+        vector_search_filter_owner_.reset();
     }
 
     const TargetBitmap*
-    GetVectorIteratorBaseFilter() {
-        const auto& base_filter = vector_iterator_base_filter_view_;
-        if (!vector_iterator_base_filter_ && !base_filter.empty()) {
+    GetVectorSearchBaseFilter() {
+        const auto& base_filter = vector_search_base_filter_view_;
+        if (!vector_search_base_filter_ && !base_filter.empty()) {
             auto copied_filter =
                 std::make_unique<TargetBitmap>(base_filter.size(), false);
             if (!base_filter.has_out_ids()) {
@@ -310,44 +304,41 @@ struct SearchResult {
                     (*copied_filter)[i] = base_filter.test(i);
                 }
             }
-            vector_iterator_base_filter_ = std::move(copied_filter);
-            vector_iterator_base_filter_view_ =
-                BitsetView(*vector_iterator_base_filter_);
+            vector_search_base_filter_ = std::move(copied_filter);
+            vector_search_base_filter_view_ =
+                BitsetView(*vector_search_base_filter_);
         }
-        return vector_iterator_base_filter_.get();
+        return vector_search_base_filter_.get();
     }
 
-    // The returned SearchResult owns every bitmap and raw chunk buffer used by
-    // its iterators. Keep it alive while consuming the batch, then release it
-    // before recreating the next batch.
+    bool
+    CanSearchFilteredVectors() const {
+        return allow_filtered_vector_search_ &&
+               static_cast<bool>(filtered_vector_search_fn_);
+    }
+
+    // Synchronous ordinary top-k search. Serial callers may reuse the bitmap
+    // after releasing the result; each invocation gets a fresh BitsetView.
     std::optional<std::unique_ptr<SearchResult>>
-    RecreateVectorIterators(TargetBitmap additional_filter) {
-        if (!CanRecreateVectorIterator()) {
+    SearchFilteredVectors(const std::shared_ptr<TargetBitmap>& filter,
+                          int64_t topk) {
+        if (!filter || topk <= 0 || !CanSearchFilteredVectors()) {
             return std::nullopt;
         }
-        GetVectorIteratorBaseFilter();
-        if (vector_iterator_base_filter_ != nullptr &&
-            vector_iterator_base_filter_->size() != additional_filter.size()) {
+        const auto* base = GetVectorSearchBaseFilter();
+        if (base && base->size() != filter->size()) {
             return std::nullopt;
         }
-
-        auto combined_filter = std::move(additional_filter);
-        if (vector_iterator_base_filter_ != nullptr) {
-            combined_filter |= *vector_iterator_base_filter_;
+        if (base) {
+            *filter |= *base;
         }
-
-        auto recreated_result = std::make_unique<SearchResult>();
-        recreated_result->allow_vector_iterator_recreation_ = false;
-        auto combined_view =
-            recreated_result->PinBitset(std::move(combined_filter));
-        vector_iterator_recreate_fn_(combined_view, *recreated_result);
-        if (!recreated_result->vector_iterators_.has_value()) {
-            // The combined filter may exclude every row. The provider ran
-            // successfully, but there is no iterator to assemble.
-            recreated_result->vector_iterators_ =
-                std::vector<std::shared_ptr<VectorIterator>>{};
-        }
-        return recreated_result;
+        auto result = std::make_unique<SearchResult>();
+        result->allow_filtered_vector_search_ = false;
+        result->vector_search_filter_owner_ = filter;
+        filtered_vector_search_fn_(BitsetView(*filter), topk, *result);
+        AssertInfo(!result->vector_iterators_.has_value(),
+                   "ordinary filtered search must not return iterators");
+        return result;
     }
 
  public:
@@ -404,11 +395,11 @@ struct SearchResult {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
-    VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
-    TargetBitmapPtr vector_iterator_base_filter_{};
-    BitsetView vector_iterator_base_filter_view_{};
-    std::shared_ptr<const void> vector_iterator_filter_owner_{};
-    bool allow_vector_iterator_recreation_{true};
+    FilteredVectorSearchFn filtered_vector_search_fn_{};
+    TargetBitmapPtr vector_search_base_filter_{};
+    BitsetView vector_search_base_filter_view_{};
+    std::shared_ptr<const void> vector_search_filter_owner_{};
+    bool allow_filtered_vector_search_{true};
 
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)

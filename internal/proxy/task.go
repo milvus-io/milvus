@@ -19,8 +19,8 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -42,52 +42,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
-	SumScorer string = "sum"
-	MaxScorer string = "max"
-	AvgScorer string = "avg"
-)
-
-const (
-	IgnoreGrowingKey     = "ignore_growing"
-	ReduceStopForBestKey = "reduce_stop_for_best"
-	IteratorField        = "iterator"
-	CollectionID         = "collection_id"
-	GroupByFieldKey      = "group_by_field"
-	GroupSizeKey         = "group_size"
-	StrictGroupSize      = "strict_group_size"
-	JSONPath             = "json_path"
-	JSONType             = "json_type"
-	StrictCastKey        = "strict_cast"
-	RankGroupScorer      = "rank_group_scorer"
-	AnnsFieldKey         = "anns_field"
-	AnalyzerKey          = "analyzer_name"
-	TopKKey              = "topk"
-	NQKey                = "nq"
-	MetricTypeKey        = common.MetricTypeKey
-	ParamsKey            = common.ParamsKey
-	ExprParamsKey        = "expr_params"
-	RoundDecimalKey      = "round_decimal"
-	OffsetKey            = "offset"
-	LimitKey             = "limit"
-	// key for timestamptz translation
-	TimefieldsKey = "time_fields"
-
-	SearchIterV2Key        = "search_iter_v2"
-	SearchIterBatchSizeKey = "search_iter_batch_size"
-	SearchIterLastBoundKey = "search_iter_last_bound"
-	SearchIterIdKey        = "search_iter_id"
-	QueryIterLastPKKey     = "query_iter_last_pk"
-	QueryIterLastOffsetKey = "query_iter_last_element_offset"
-	GroupByFieldsKey       = "group_by_fields"
-	OrderByFieldsKey       = "order_by_fields"
-	PipelineTraceKey       = "pipeline_trace"
-
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
@@ -134,14 +93,6 @@ const (
 	AddFieldTaskName              = "AddFieldTaskName"
 	AddStructFieldTaskName        = "AddStructFieldTaskName"
 	AlterCollectionSchemaTaskName = "AlterCollectionSchemaTaskName"
-
-	// minFloat32 minimum float.
-	minFloat32 = -1 * float32(math.MaxFloat32)
-
-	RankTypeKey      = "strategy"
-	RRFParamsKey     = "k"
-	WeightsParamsKey = "weights"
-	NormScoreKey     = "norm_score"
 )
 
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
@@ -405,9 +356,6 @@ func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSc
 }
 
 func (t *createCollectionTask) validateTTL() error {
-	if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
-		return err
-	}
 	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
 	if err != nil {
 		return err
@@ -549,6 +497,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	// validate namespace sharding
 	if err := common.ValidateNamespaceShardingEnabled(t.GetProperties()...); err != nil {
+		return err
+	}
+
+	// validate row level security
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -1697,7 +1650,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = AppendUserInfoForRPC(ctx)
+	ctx = describeCollectionRPCContext(ctx)
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
@@ -2110,6 +2063,53 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
+	var collInfo *collectionInfo
+	resolveCollectionInfo := func() error {
+		if collInfo != nil {
+			return nil
+		}
+		collectionID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return err
+		}
+		collInfo, err = t.GetMetaCache().GetCollectionInfo(ctx, t.GetDbName(), t.CollectionName, collectionID)
+		if err != nil {
+			return err
+		}
+		if collInfo == nil || collInfo.Schema == nil || collInfo.Schema.GetName() == "" {
+			return merr.WrapErrServiceInternalMsg("failed to resolve collection metadata for alter collection target %d", collectionID)
+		}
+		t.CollectionID = collectionID
+		return nil
+	}
+	requiresManageRLS := false
+	for _, property := range t.GetProperties() {
+		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
+			requiresManageRLS = true
+			break
+		}
+	}
+	if !requiresManageRLS {
+		for _, key := range t.GetDeleteKeys() {
+			if key == common.RLSEnabledKey || key == common.RLSForceKey {
+				requiresManageRLS = true
+				break
+			}
+		}
+	}
+	if requiresManageRLS {
+		if err := resolveCollectionInfo(); err != nil {
+			return err
+		}
+		canonicalDBName := collInfo.DBName
+		if canonicalDBName == "" {
+			canonicalDBName = t.GetDbName()
+		}
+		if err := checkManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
+			canonicalDBName, collInfo.Schema.GetName()); err != nil {
+			return err
+		}
+	}
 
 	// External source/spec form an atomic tuple bound to the physical data
 	// layout. The only supported way to change them is RefreshExternalCollection,
@@ -2131,20 +2131,24 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
 	}
+	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
+		return err
+	}
 	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
 	}
-
-	collSchema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
-	}
-	collectionID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
+	for _, key := range t.GetDeleteKeys() {
+		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
+			if strings.EqualFold(key, expected) && key != expected {
+				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
+			}
+		}
 	}
 
-	t.CollectionID = collectionID
+	if err := resolveCollectionInfo(); err != nil {
+		return err
+	}
+	collSchema := collInfo.Schema
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
@@ -2197,9 +2201,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 
-		if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
-			return err
-		}
 		hasTTL, err := validateCollectionTTL(t.GetProperties())
 		if err != nil {
 			return err
@@ -2247,14 +2248,8 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	isPartitionKeyMode, err := isPartitionKeyMode(ctx, t.GetMetaCache(), t.GetDbName(), t.CollectionName)
-	if err != nil {
-		return err
-	}
-	collBasicInfo, err := t.GetMetaCache().GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, t.CollectionID)
-	if err != nil {
-		return err
-	}
+	isPartitionKeyMode := collSchema.IsPartitionKeyCollection()
+	collBasicInfo := collInfo
 	newIsoValue, isoChanged, err := detectBoolPropChange(
 		collBasicInfo.PartitionKeyIsolation, common.PartitionKeyIsolationKey,
 		t.Properties, t.GetDeleteKeys(),
@@ -3202,13 +3197,20 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		mlog.FieldSchema(request.Schema),
 		mlog.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return merr.Wrap(err, "call query coordinator LoadCollection")
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 	return nil
 }
 
 func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
+	if t.result != nil && !merr.Ok(t.result) {
+		return nil
+	}
+
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	mlog.Debug(ctx, "loadCollectionTask PostExecute",
 		mlog.String("role", typeutil.ProxyRole),
@@ -3474,8 +3476,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		mlog.FieldSchema(request.Schema),
 		mlog.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadPartitions(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return err
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 
 	return nil
@@ -4223,108 +4228,4 @@ func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
 
 func (t *RunAnalyzerTask) PostExecute(ctx context.Context) error {
 	return nil
-}
-
-// git highlight after search
-type HighlightTask struct {
-	baseTask
-	Condition
-	*querypb.GetHighlightRequest
-	ctx            context.Context
-	collectionName string
-	collectionID   typeutil.UniqueID
-	dbName         string
-	lb             shardclient.LBPolicy
-
-	result *querypb.GetHighlightResponse
-}
-
-func (t *HighlightTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *HighlightTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *HighlightTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *HighlightTask) Name() string {
-	return HighlightTaskName
-}
-
-func (t *HighlightTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *HighlightTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *HighlightTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *HighlightTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *HighlightTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_Undefined
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *HighlightTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
-	t.Channel = channel
-	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
-	if err != nil {
-		return err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return err
-	}
-	t.result = resp
-	return nil
-}
-
-func (t *HighlightTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.collectionName,
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
-		Exec:           t.getHighlightOnShardleader,
-	})
-
-	return err
-}
-
-func (t *HighlightTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// isIgnoreGrowing is used to check if the request should ignore growing
-func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
-	for _, kv := range params {
-		if kv.GetKey() == IgnoreGrowingKey {
-			ignoreGrowing, err := strconv.ParseBool(kv.GetValue())
-			if err != nil {
-				return false, merr.WrapErrParameterInvalidMsg("parse ignore growing field failed")
-			}
-			return ignoreGrowing, nil
-		}
-	}
-	return false, nil
 }

@@ -2534,7 +2534,11 @@ class TestPartitionOperations(TestMilvusClientV2Base):
             upsert_data,
             partition_name=partition_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "must assign pk when upsert"},
+            # PyMilvus rejects the missing primary key before sending the Upsert RPC.
+            check_items={
+                ct.err_code: 1,
+                ct.err_msg: f"Insert missed an field `{ct.default_int64_field_name}`",
+            },
         )
 
     @pytest.mark.tags(CaseLabel.L1)

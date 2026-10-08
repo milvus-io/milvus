@@ -24,56 +24,43 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SaveRecoverySnapshot saves a WAL recovery snapshot in one compound
-// operation: segment assignments, vchannels, salvage checkpoint, and
-// strictly last the consume checkpoint - the commit point of the snapshot.
+// operation: module upserts/removals, salvage checkpoint, and strictly last
+// the consume checkpoint - the commit point of the snapshot.
 // Nil or empty parts of the snapshot are skipped.
 //
-// The ops are staged into a txn.Builder (reusing the per-key encoders -
-// buildSegmentAssignmentKey, getRemovalAndSaveForVChannel,
-// buildSalvageCheckpointPath, buildConsumeCheckpointKey) and applied via
-// txn.Commit: atomically in a single guarded txn when the whole op set fits
-// the store's txn op limit, otherwise via the ordered chunked fallback. Either
-// way the consume checkpoint is the last write to become visible -- staged with
-// CommitSaveIfValue when it already exists, created by a version CAS after the
-// component commit on first creation -- so a crash before it lands leaves the
-// whole snapshot invisible and the next retry re-persists everything (every
-// part is an idempotent put on a deterministic key).
-//
-// Advancement is fenced by term: see the compare-and-swap below.
+// Every component transaction compares the checkpoint value captured before
+// writing, including every batch of an oversized snapshot. The final checkpoint
+// remains the last write. Initial ownership must be established with a
+// checkpoint-only snapshot before publishing components.
 func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *metastore.WALRecoverySnapshot) error {
 	if snapshot == nil {
 		return nil
 	}
 	b := txn.New()
-	// Aggregate every removal and every save across segments, vchannels and
-	// the salvage checkpoint into two disjoint sets first, then stage all
-	// removals before all saves. The keys never overlap (a segment/schema/
-	// vchannel key is either removed or saved, never both; segment, vchannel,
-	// schema and salvage keyspaces are disjoint), so this global two-phase
-	// ordering is equivalent to the per-entry ordering while letting the
-	// chunked fallback coalesce into a single remove run and a single save run
-	// (O(total/limit) round trips) instead of alternating per entry.
-	// Pre-size to the segment count (a lower bound - vchannels add more) to
-	// avoid the first rounds of slice/map growth on a segment-heavy snapshot.
-	removes := make([]string, 0, len(snapshot.SegmentAssignments))
-	saves := make(map[string]string, len(snapshot.SegmentAssignments))
+	// Aggregate every module mutation before adding the checkpoint commit
+	// marker. Closed and tombstoned recovery metadata remains persisted until
+	// the growing-module cleanup task explicitly includes its removal here.
+	removes := make([]string, 0, len(snapshot.RemovedSegmentIDs))
+	schemaSaves := make(map[string]string)
+	vchannelSaves := make(map[string]string, len(snapshot.VChannels)+len(snapshot.VChannelBaseMetas))
+	segmentSaves := make(map[string]string, len(snapshot.SegmentAssignments))
 	for _, info := range snapshot.SegmentAssignments {
 		key := buildSegmentAssignmentKey(pChannelName, info.GetSegmentId())
-		if info.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-			// Flushed segment should be removed from meta.
-			removes = append(removes, key)
-			continue
-		}
 		data, err := proto.Marshal(info)
 		if err != nil {
-			return errors.Wrapf(err, "marshal segment %d at pchannel %s failed", info.GetSegmentId(), pChannelName)
+			return merr.WrapErrSerializationFailed(err, "marshal segment %d at pchannel %s", info.GetSegmentId(), pChannelName)
 		}
-		saves[key] = string(data)
+		segmentSaves[key] = string(data)
+	}
+	for _, segmentID := range snapshot.RemovedSegmentIDs {
+		removes = append(removes, buildSegmentAssignmentKey(pChannelName, segmentID))
 	}
 	for _, info := range snapshot.VChannels {
 		vremoves, kvs, err := c.getRemovalAndSaveForVChannel(pChannelName, info)
@@ -81,14 +68,56 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			return err
 		}
 		removes = append(removes, vremoves...)
+		baseKey := buildVChannelKey(pChannelName, info.GetVchannel())
+		vchannelSaves[baseKey] = kvs[baseKey]
+		delete(kvs, baseKey)
 		for k, v := range kvs {
-			saves[k] = v
+			schemaSaves[k] = v
+		}
+	}
+	for _, info := range snapshot.VChannelBaseMetas {
+		data, err := marshalVChannelBaseMeta(pChannelName, info)
+		if err != nil {
+			return err
+		}
+		vchannelSaves[buildVChannelKey(pChannelName, info.GetVchannel())] = data
+	}
+	// A vchannel cleanup also removes its transform-log meta. Keep the
+	// vchannel removal last so the chunked fallback never exposes an orphaned
+	// transform log for a vchannel that has already disappeared.
+	for _, info := range snapshot.RemovedVChannels {
+		removes = append(removes, buildVChannelKey(pChannelName, info.GetVchannel()))
+		for _, schema := range info.GetCollectionInfo().GetSchemas() {
+			removes = append(removes, buildVChannelSchemaKey(
+				pChannelName,
+				info.GetVchannel(),
+				schema.GetCheckpointTimeTick(),
+			))
+		}
+	}
+	for vchannel, timeticks := range snapshot.RemovedVChannelSchemas {
+		for _, timetick := range timeticks {
+			key := buildVChannelSchemaKey(pChannelName, vchannel, timetick)
+			removes = append(removes, key)
+			// A schema change can be frozen after cleanup selected these durable
+			// tombstones. Do not rewrite them from that newer full snapshot.
+			delete(schemaSaves, key)
 		}
 	}
 	for _, r := range removes {
 		b.Remove(r)
 	}
-	for k, v := range saves {
+	// On chunked fallback, schemas must land before the base that publishes
+	// their visibility through its checkpoint. Recovery ignores schemas ahead
+	// of that checkpoint if a crash interrupts publication. The base must in
+	// turn precede dependent segments. Atomic commits are unaffected.
+	for k, v := range schemaSaves {
+		b.Save(k, v)
+	}
+	for k, v := range vchannelSaves {
+		b.Save(k, v)
+	}
+	for k, v := range segmentSaves {
 		b.Save(k, v)
 	}
 	// The salvage checkpoint must be persisted before the consume checkpoint
@@ -100,14 +129,14 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 		key := buildSalvageCheckpointPath(pChannelName, snapshot.SalvageCheckpoint.GetClusterId())
 		data, err := proto.Marshal(snapshot.SalvageCheckpoint)
 		if err != nil {
-			return errors.Wrapf(err, "marshal salvage checkpoint at pchannel %s failed", pChannelName)
+			return merr.WrapErrSerializationFailed(err, "marshal salvage checkpoint at pchannel %s", pChannelName)
 		}
 		b.Save(key, string(data))
 	}
 	// The consume checkpoint is the commit point of the snapshot: staging it
 	// with CommitSave makes it the last write to become visible, after every
 	// other part of the snapshot has landed. Its advancement is additionally
-	// guarded by a value compare-and-swap (CommitSaveIfValue): the checkpoint
+	// guarded by a value comparison on every transaction: the checkpoint
 	// may only advance when the recorded term is not newer than the
 	// publisher's own term, so an older-term publisher that survived a
 	// takeover can never advance it past the successor's inherited manifest
@@ -122,21 +151,22 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	checkpointKey := buildConsumeCheckpointKey(pChannelName)
 	checkpointValue := ""
 	checkpointFirstCreation := false
+	var current string
+	var snapshotKV kv.TxnKV = c.metaKV
 	if snapshot.ConsumeCheckpoint != nil {
 		data, err := proto.Marshal(snapshot.ConsumeCheckpoint)
 		if err != nil {
-			return errors.Wrapf(err, "marshal consume checkpoint at pchannel %s failed", pChannelName)
+			return merr.WrapErrSerializationFailed(err, "marshal consume checkpoint at pchannel %s", pChannelName)
 		}
 		checkpointValue = string(data)
-		current, err := c.metaKV.Load(ctx, checkpointKey)
+		current, err = c.metaKV.Load(ctx, checkpointKey)
 		if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 			return err
 		}
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			// No checkpoint yet (first persistence of the pchannel, or a
-			// recreated one): create it after the component commit with a
-			// version CAS on the absent key, so two concurrent first
-			// publishers cannot both succeed.
+			if len(removes)+len(schemaSaves)+len(vchannelSaves)+len(segmentSaves) != 0 || snapshot.SalvageCheckpoint != nil {
+				return merr.WrapErrServiceInternalMsg("initialize consume checkpoint before publishing components of pchannel %s", pChannelName)
+			}
 			checkpointFirstCreation = true
 		} else {
 			// Fast-fail on a strictly older publisher before the commit txn.
@@ -148,7 +178,11 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 					pChannelName, currentCP.GetTerm(), snapshot.ConsumeCheckpoint.GetTerm(),
 				)
 			}
-			b.CommitSaveIfValue(checkpointKey, current, checkpointValue)
+			b.CommitSave(checkpointKey, checkpointValue)
+		}
+		snapshotKV = &recoverySnapshotKV{
+			TxnKV: c.metaKV,
+			guard: predicates.ValueEqual(checkpointKey, current),
 		}
 	}
 	// A guarded commit is not retried by the kv wrapper, because its predicate
@@ -158,8 +192,10 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	// does not say whether the write landed -- only a read does. Re-read before
 	// deciding: finding our own value there means the commit applied and the
 	// error described the reply, not the write.
-	commitErr := txn.Commit(ctx, c.metaKV, b)
-	if commitErr != nil && (snapshot.ConsumeCheckpoint == nil || checkpointFirstCreation) {
+	commitErr := txn.Commit(ctx, snapshotKV, b)
+	// An unchanged checkpoint cannot prove that component writes landed.
+	// Keep the dirty snapshot and retry instead of acknowledging an uncertain write.
+	if commitErr != nil && (snapshot.ConsumeCheckpoint == nil || checkpointFirstCreation || current == checkpointValue) {
 		return commitErr
 	}
 	if commitErr != nil {
@@ -199,4 +235,24 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 		}
 	}
 	return nil
+}
+
+// recoverySnapshotKV applies the same ownership guard to every transaction,
+// including component batches before the final checkpoint commit. Other catalog
+// users retain txn.Commit's ordinary chunked behavior.
+type recoverySnapshotKV struct {
+	kv.TxnKV
+	guard predicates.Predicate
+}
+
+func (k *recoverySnapshotKV) MultiSave(ctx context.Context, saves map[string]string) error {
+	return k.MultiSaveAndRemove(ctx, saves, nil)
+}
+
+func (k *recoverySnapshotKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	return k.TxnKV.MultiSaveAndRemove(ctx, saves, removals, append(preds, k.guard)...)
+}
+
+func (k *recoverySnapshotKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	return k.TxnKV.MultiSaveAndRemoveWithPrefix(ctx, saves, removals, append(preds, k.guard)...)
 }

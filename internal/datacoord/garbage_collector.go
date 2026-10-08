@@ -185,6 +185,12 @@ func (gc *gcPauseRecords) DeleteByID(id int64) {
 	gc.deleteMatching(func(r gcPauseRecord) bool { return r.id == id })
 }
 
+// Clear drops every record, whatever ticket it holds. It backs the ticket-less
+// resume, which has no ticket to match on and means "GC must not be paused".
+func (gc *gcPauseRecords) Clear() {
+	gc.deleteMatching(func(gcPauseRecord) bool { return true })
+}
+
 // deleteMatching rebuilds the heap without the matching records, dropping
 // already-expired records along the way.
 func (gc *gcPauseRecords) deleteMatching(match func(gcPauseRecord) bool) {
@@ -517,6 +523,20 @@ func (gc *garbageCollector) rollbackPause(cmd gcCmd, recordID int64) {
 }
 
 func (gc *garbageCollector) resume(cmd gcCmd) {
+	// A resume carrying no ticket is the pre collection level GC control
+	// semantic: release every outstanding pause. Pauses issued through the proxy
+	// route always carry a generated ticket, so a ticket-scoped delete would
+	// match nothing here and leave GC paused while reporting success.
+	if cmd.ticket == "" {
+		gc.pauseUntil.Clear()
+		gc.pausedCollection.Range(func(collectionID int64, _ *gcPauseRecords) bool {
+			gc.pausedCollection.Remove(collectionID)
+			return true
+		})
+		mlog.Info(gc.ctx, "garbage collection resumed", mlog.Bool("stillPaused", false))
+		return
+	}
+
 	// reset to zero value
 	var afterResume time.Time
 	if cmd.collectionID <= 0 {
@@ -889,14 +909,23 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		}
 	}
 
+	dmlTs := segmentEffectiveDmlTs(segment.SegmentInfo)
+	if dmlTs <= cpTimestamp {
+		return true
+	}
+
+	// A removed channel no longer needs checkpoint protection. Its checkpoint
+	// may stop advancing, while collection cleanup waits for segment GC.
 	segInsertChannel := segment.GetInsertChannel()
-	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
-	// We do this because collection meta drop relies on all segment being GCed.
-	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
-		// segment gc shall only happen when channel cp is after segment dml cp.
+	channelExists, err := gc.meta.catalog.ChannelExists(gc.ctx, segInsertChannel)
+	if err != nil {
+		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
+			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
+		return false
+	}
+	if channelExists {
 		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
+			mlog.Uint64("dmlPosTs", dmlTs),
 			mlog.Uint64("channelCpTs", cpTimestamp),
 		)
 		return false

@@ -210,8 +210,118 @@ const (
 	// JSONStatsPath storage path const for json stats
 	JSONStatsPath = "json_stats"
 
+	// SnapshotRootPath storage path const for snapshot metadata and manifests.
+	// Layout: {rootPath}/snapshots/{collection_id}/{metadata|manifests}/...
+	SnapshotRootPath = "snapshots"
+
+	// WoodpeckerRootPath storage path const for the Woodpecker WAL, written
+	// under both minio.rootPath and localStorage.path.
+	WoodpeckerRootPath = "wp"
+
+	// LocalCacheRootPath storage path const for node-local caches (growing mmap,
+	// local chunk cache, bm25, file resources, expr cache), written under
+	// localStorage.path. Under common.storageType=local that path is also the
+	// ChunkManager root, which is why this is a top-level segment there.
+	// Layout: {localStorage.path}/cache/{nodeID}/{growing_mmap|local_chunk|...}/...
+	//
+	// This entry also covers everything segcore writes, which is why the C++
+	// segment names (raw_datas, ngram_log, tmp, rtree-index) are NOT listed
+	// separately: segcore's ChunkManager is initialized with
+	// pathutil.GetPath(LocalChunkPath, nodeID), i.e.
+	// {localStorage.path}/cache/{nodeID}/local_chunk (see
+	// internal/util/initcore/query_node.go and
+	// internal/datanode/index/init_segcore.go), so those directories sit under
+	// this subtree rather than at the storage root. Registering them at the root
+	// would deny paths Milvus never writes.
+	LocalCacheRootPath = "cache"
+
+	// ExploreTempRootPath storage path const for Explore planning manifests.
+	// Layout: {localStorage.path}/__explore_temp__/coord_{jobID}/attempt_{n}/...
+	// Under a remote root these manifests live at the bucket root, outside
+	// minio.rootPath, which is why this is a local-only segment.
+	ExploreTempRootPath = "__explore_temp__"
+
+	// ExternalRefreshResultsRootPath storage path const for external collection
+	// refresh task results, written under the ChunkManager root on every
+	// storage type.
+	// Layout: {rootPath}/external_refresh_results/{collectionID}/{jobID}/{taskID}/{version}/{checksum}.pb
+	ExternalRefreshResultsRootPath = "external_refresh_results"
+
+	// WalSummaryRootPath storage path const for WAL summary chunks and
+	// manifests, written under the ChunkManager root on every storage type.
+	// Layout: {rootPath}/walsummary/{pchannel}/{chunk|manifest}/...
+	WalSummaryRootPath = "walsummary"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
+
+// InternalStorageRootSegments lists the top-level directories that Milvus
+// creates directly under the storage root path (ChunkManager.RootPath())
+// regardless of storage type. Segments that are rooted at localStorage.path
+// only live in LocalOnlyStorageRootSegments below.
+//
+// Import path validation in datacoord refuses ordinary imports that point into
+// any of these, so a directory missing from this list is a directory that bulk
+// import can read. When adding a new storage path constant above, add it here
+// too -- TestInternalStorageRootSegmentsIsExhaustive fails otherwise.
+//
+// Constants that are NOT top-level directories (leaf file names, sub-paths)
+// must be listed in that test's nonTopLevelSegments instead.
+//
+// Scope limit, deliberately stated: the guard test enforces that every storage
+// path constant declared in THIS file is classified. It cannot see a writer in
+// another package -- still less one in another language -- that joins a bare
+// string literal onto the storage root. Every omission found so far came from
+// human review, not from the guard: "wp" (Go, pkg/streaming), "cache" (Go,
+// internal/util/pathutil), and the four C++ segments (raw_datas, ngram_log, tmp,
+// rtree-index), which turned out to sit under the "cache" subtree rather than at
+// the root -- see LocalCacheRootPath above (milvus#51894 review). A green guard
+// is evidence that this file is self-consistent, NOT
+// that the registry is complete; a new writer under the shared root must add
+// its segment here by hand.
+var InternalStorageRootSegments = []string{
+	SegmentInsertLogPath,
+	SegmentDeltaLogPath,
+	SegmentStatslogPath,
+	SegmentIndexV0Path,
+	SegmentIndexV1Path,
+	SegmentBm25LogPath,
+	PartitionStatsPath,
+	AnalyzeStatsPath,
+	TextIndexPath,
+	JSONIndexPath,
+	JSONStatsPath,
+	SnapshotRootPath,
+	WoodpeckerRootPath,
+	ExternalRefreshResultsRootPath,
+	WalSummaryRootPath,
+}
+
+// LocalOnlyStorageRootSegments lists top-level directories that are rooted at
+// localStorage.path rather than at the ChunkManager root.
+//
+// They coincide with the ChunkManager root only under common.storageType=local,
+// where datacoord's root IS localStorage.path. Under a remote (MinIO/S3) root
+// Milvus never writes these keys, so denying them there would reject caller
+// paths for no benefit. Consumers must therefore append this list only when the
+// storage type is local; see ValidateImportFilePaths.
+//
+// Woodpecker is deliberately NOT here: it writes under both minio.rootPath and
+// localStorage.path (pkg/streaming/walimpls/impls/wp/builder.go), so it belongs
+// in the unconditional list above.
+//
+// "mmap" is deliberately NOT here either, even though queryNode.mmap.mmapDirPath
+// formats to {localStorage.path}/mmap by default -- a sibling of "cache". The
+// directory is deprecated and nothing writes it: the value reaches segcore only
+// as CMmapConfig.json_stats_mmap_path (internal/util/initcore/init_core.go), and
+// the terminal consumer JsonKeyStats::Load ignores it, taking the local
+// ChunkManager root instead, i.e. {localStorage.path}/cache/{nodeID}/local_chunk,
+// which the "cache" entry already covers. Registering it would deny a path
+// Milvus never writes.
+var LocalOnlyStorageRootSegments = []string{
+	LocalCacheRootPath,
+	ExploreTempRootPath,
+}
 
 const (
 	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
@@ -220,17 +330,18 @@ const (
 
 // Search, Index parameter keys
 const (
-	TopKKey                           = "topk"
-	SearchParamKey                    = "search_param"
-	SegmentNumKey                     = "segment_num"
-	WithFilterKey                     = "with_filter"
-	DataTypeKey                       = "data_type"
-	ChannelNumKey                     = "channel_num"
-	WithOptimizeKey                   = "with_optimize"
-	CollectionKey                     = "collection"
-	RecallEvalKey                     = "recall_eval"
-	StrictGroupAcceptanceThresholdKey = "strict_group_acceptance_threshold"
-	StrictGroupProbeCandidatesKey     = "strict_group_probe_candidates"
+	TopKKey                             = "topk"
+	SearchParamKey                      = "search_param"
+	SegmentNumKey                       = "segment_num"
+	WithFilterKey                       = "with_filter"
+	DataTypeKey                         = "data_type"
+	ChannelNumKey                       = "channel_num"
+	WithOptimizeKey                     = "with_optimize"
+	CollectionKey                       = "collection"
+	RecallEvalKey                       = "recall_eval"
+	StrictGroupStrategyKey              = "strict_group_strategy"
+	StrictGroupPhase1CandidateWeightKey = "strict_group_phase1_candidate_weight"
+	StrictGroupSkipRefineKey            = "strict_group_skip_refine"
 
 	GlobalRefineKey    = "global_refine"
 	SearchTopkRatioKey = "search_topk_ratio"
@@ -286,25 +397,6 @@ const (
 	CollectionExternalSpec      = "collection.external_spec"
 	CollectionTTLFieldKey       = "ttl_field"
 	MaxTTLSeconds               = 3155760000 // 100 years
-
-	// CollectionInsertIdempotencyEnabledKey enables idempotency keys for Insert.
-	// Delete and Upsert are already idempotent and do not use this property.
-	//
-	// SEMANTICS — read before enabling. When a client supplies no explicit
-	// idempotency key, the proxy derives one from the insert destination plus a
-	// hash of the client payload ("auto key"). Enabling this property therefore
-	// means CONTENT-ADDRESSED dedup: a byte-identical insert into the same
-	// db/collection/partition/namespace, while the first one is still inside the
-	// deduplication window, is answered with the first insert's result and its
-	// rows are NOT written again. The window is bounded by BYTES of subsequent
-	// writes, not by elapsed time (streaming.idempotency.maxBytesPerWindow), so on
-	// a quiet shard it can reach back a long way. That is the intended retry protection for clients that
-	// cannot pass keys (SDK-internal retries), but it also means workloads that
-	// legitimately insert identical content twice (e.g. duplicate log records
-	// into an autoID collection) MUST NOT enable this property, or must supply
-	// distinct explicit keys per logical request. The dedup horizon is bounded
-	// by the window TTL/entry caps, so the collapse is time-dependent by design.
-	CollectionInsertIdempotencyEnabledKey = "collection.insert.idempotency.enabled"
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -395,6 +487,7 @@ const (
 	RLSEnabledKey       = "rls.enabled"
 	RLSForceKey         = "rls.force"
 	RLSPrincipalNameKey = "rls.principal_name"
+	RLSClearAllCacheKey = "rls.clear_all_cache"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -774,29 +867,16 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
 			}
 			seen[RLSEnabledKey] = struct{}{}
-			enabled, err := IsRLSEnabled(kv)
-			if err != nil {
+			if _, err := IsRLSEnabled(kv); err != nil {
 				return err
-			}
-			// The management plane lands before the data-plane enforcement in
-			// the stacked rollout. Keep the public switch fail-closed until the
-			// enforcement slice removes this temporary gate.
-			if enabled {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
 			}
 		case RLSForceKey:
 			if _, ok := seen[RLSForceKey]; ok {
 				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
 			}
 			seen[RLSForceKey] = struct{}{}
-			force, err := IsRLSForce(kv)
-			if err != nil {
+			if _, err := IsRLSForce(kv); err != nil {
 				return err
-			}
-			// rls.force only affects runtime enforcement. Reject it together
-			// with rls.enabled while the enforcement slice is not available.
-			if force {
-				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
 			}
 		default:
 			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
@@ -805,6 +885,23 @@ func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateRLSForceRequiresEnabled rejects an effective collection property set
+// that enables rls.force without enabling RLS itself.
+func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
+	force, err := IsRLSForce(kvs...)
+	if err != nil || !force {
+		return err
+	}
+	enabled, err := IsRLSEnabled(kvs...)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
 	}
 	return nil
 }

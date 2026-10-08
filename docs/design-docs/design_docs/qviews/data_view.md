@@ -143,8 +143,9 @@ compaction advancing a Segment's Manifest version hard-triggers `compact_version
 +1`: a Manifest-version change has no dedicated counter and is expressed as a
 content change of the rebuilt snapshot. The flush path is the only
 `streaming_version` advance, and it is
-independent of membership content (a flush of a Segment already present is an
-idempotent replay returning the current snapshot).
+independent of membership content. Internally, PrepareFlush returns the current
+snapshot for unchanged membership; SaveBinlogPaths instead returns the Segment's
+persisted first-publication version for an already completed Flush.
 
 Flush membership is published atomically with SegmentMeta. `PrepareFlush`
 builds the post-flush snapshot under the Collection lock; the caller composes it
@@ -155,6 +156,31 @@ the lock without touching memory). Both callbacks are idempotent. A DataView
 that becomes visible therefore implies its SegmentMeta is already committed; the
 previous behavior of reporting a DataView catalog failure to StreamingNode
 after SegmentMeta committed is gone.
+
+## Segment Flush publication binding
+
+The recovery-storage integration stores `SegmentInfo.sealed_at_data_version`
+in the same transaction as the Segment's first Flush DataView. If binlog writes
+exceed the transaction limit, they are written first; the Segment record with
+the binding and the DataView stay together in the final transaction.
+SaveBinlogPaths returns the original version through Status.ExtraInfo. StreamingNode
+stores it in SegmentAssignmentMeta before releasing the Flush message handle.
+
+The binding is immutable. A repeated Flush returns it without republishing
+membership, even if other segments advanced the collection version, old DataViews
+were GCed, or compaction marked the original Segment Dropped. A concurrent retry
+rechecks SegmentInfo while holding the PrepareFlush collection lock. The manager's
+unchanged-membership result is a current snapshot, not the first-publication
+version; callers must not confuse the two.
+
+Empty Segments are retired without DataView membership. Their response explicitly
+identifies retirement, and SN persists a lifecycle tombstone rather than a fake
+version. A normal successful commit with no version is a protocol error. The
+existing integer `SegmentInfo.data_version` retains its content-update semantics.
+
+The binding survives DataView snapshot GC while SegmentMeta exists. Full QueryView
+integration must additionally protect Segment records and objects needed by old
+views or unacknowledged publications; this change does not enable that GC protocol.
 
 ## Async reconciliation
 

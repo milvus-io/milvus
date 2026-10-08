@@ -94,6 +94,12 @@ typedef struct CStorageConfig {
     uint32_t max_connections;
     const char* tls_min_version;
     bool use_crc32c_checksum;
+    uint32_t talon_mode;
+    uint32_t talon_small_read_threshold;
+    const char* talon_coordinator;
+    uint32_t talon_block_size;
+    uint32_t talon_max_idle_per_addr;
+    bool talon_enable_for_external_table;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {

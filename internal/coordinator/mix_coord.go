@@ -63,15 +63,21 @@ type mixCoordImpl struct {
 	tikvCli *txnkv.Client
 	address string
 
-	proxyCreator       proxyutil.ProxyCreator
-	proxyWatcher       *proxyutil.ProxyWatcher
-	proxyClientManager proxyutil.ProxyClientManagerInterface
+	proxyCreator proxyutil.ProxyCreator
+	proxyWatcher *proxyutil.ProxyWatcher
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 	stateCode           atomic.Int32
-	initOnce            sync.Once
-	startOnce           sync.Once
-	session             *sessionutil.Session
+
+	// onActive holds callbacks to run once this replica becomes ACTIVE -
+	// after initInternal has built the sub-coordinators and the state moved
+	// to Healthy. A standby replica never fires them; see OnActive.
+	onActiveMu sync.Mutex
+	onActive   []func()
+	activated  bool
+	initOnce   sync.Once
+	startOnce  sync.Once
+	session    *sessionutil.Session
 
 	factory dependency.Factory
 
@@ -293,6 +299,32 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
+
+	s.onActiveMu.Lock()
+	s.activated = true
+	fns := s.onActive
+	s.onActive = nil
+	s.onActiveMu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// OnActive runs fn once this replica is ACTIVE: sub-coordinators initialized,
+// state Healthy. A callback registered after activation runs immediately; one
+// registered on a replica that stays standby never runs, which is the point -
+// work hung off this hook (a coordinator engine doing resource-group
+// accounting, say) must run on exactly one replica, and before activation the
+// sub-coordinators it would read are not initialized at all.
+func (s *mixCoordImpl) OnActive(fn func()) {
+	s.onActiveMu.Lock()
+	if s.activated {
+		s.onActiveMu.Unlock()
+		fn()
+		return
+	}
+	s.onActive = append(s.onActive, fn)
+	s.onActiveMu.Unlock()
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
@@ -773,6 +805,38 @@ func (s *mixCoordImpl) ListPrivilegeGroups(ctx context.Context, req *milvuspb.Li
 
 func (s *mixCoordImpl) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.OperatePrivilegeGroup(ctx, req)
+}
+
+func (s *mixCoordImpl) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CreateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.UpdateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DropRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.rootcoordServer.ListRowPolicies(ctx, req)
+}
+
+func (s *mixCoordImpl) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.rootcoordServer.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.rootcoordServer.ListRLSPrincipals(ctx, req)
+}
+
+func (s *mixCoordImpl) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DeleteRLSPrincipalTags(ctx, req)
 }
 
 // GetComponentStates get states of components

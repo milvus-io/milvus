@@ -28,6 +28,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "Meta.h"
@@ -44,6 +45,7 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/SortedMembership.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
@@ -345,7 +347,8 @@ ScalarIndexSort<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
@@ -506,21 +509,19 @@ const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        const auto target = IndexStructure<T>(*(values + i));
-        auto lb = std::lower_bound(begin(), end(), target);
-        auto ub = std::upper_bound(lb, end(), target);
-        for (; lb < ub; ++lb) {
-            if (lb->a_ != target.a_) {
-                LOG_ERROR(
-                    "error happens in ScalarIndexSort<T>::In, "
-                    "expected value is: {}, but real value is: {}",
-                    target.a_,
-                    lb->a_);
-            }
-            bitset[lb->idx_] = true;
+
+    auto visit = [&](int32_t row) { bitset[row] = true; };
+    auto validate = [](const T target, const auto& entry) {
+        if (entry.a_ != target) {
+            LOG_ERROR(
+                "error happens in ScalarIndexSort<T>::In, "
+                "expected value is: {}, but real value is: {}",
+                target,
+                entry.a_);
         }
-    }
+    };
+
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
@@ -530,21 +531,19 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     // NotIn must keep null rows false, so start from the validity bitmap.
     auto bitset = valid_bitset_.clone();
-    for (size_t i = 0; i < n; ++i) {
-        const auto target = IndexStructure<T>(*(values + i));
-        auto lb = std::lower_bound(begin(), end(), target);
-        auto ub = std::upper_bound(lb, end(), target);
-        for (; lb < ub; ++lb) {
-            if (lb->a_ != target.a_) {
-                LOG_ERROR(
-                    "error happens in ScalarIndexSort<T>::NotIn, "
-                    "expected value is: {}, but real value is: {}",
-                    target.a_,
-                    lb->a_);
-            }
-            bitset[lb->idx_] = false;
+
+    auto visit = [&](int32_t row) { bitset[row] = false; };
+    auto validate = [](const T target, const auto& entry) {
+        if (entry.a_ != target) {
+            LOG_ERROR(
+                "error happens in ScalarIndexSort<T>::NotIn, "
+                "expected value is: {}, but real value is: {}",
+                target,
+                entry.a_);
         }
-    }
+    };
+
+    detail::VisitSortedMatches(begin(), end(), n, values, visit, validate);
     return bitset;
 }
 
@@ -1223,9 +1222,9 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     is_built_ = true;
     ComputeByteSize();
 
-    LOG_INFO("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
-             field_id_,
-             is_mmap_);
+    LOG_DEBUG("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
+              field_id_,
+              is_mmap_);
 }
 
 template class ScalarIndexSort<bool>;

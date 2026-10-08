@@ -155,9 +155,9 @@ func (s *TestGetVectorSuite) run() {
 		CollectionNames: []string{collection},
 	})
 	s.Require().NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collection]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collection]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collection]
 	s.Require().True(has)

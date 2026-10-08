@@ -1092,11 +1092,13 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         index_params.add_index("embeddings", index_type="FLAT", metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
 
-        # insert 10 entities with half null vector
-        num_entities_with_not_null_vector = ct.default_limit // 2
+        # insert 10 entities with mixed null/non-null vectors
+        null_ids = {"0", "4", "8"}
+        num_entities_with_null_vector = len(null_ids)
+        num_entities_with_not_null_vector = ct.default_limit - num_entities_with_null_vector
         rows = []
-        for i in range(num_entities_with_not_null_vector * 2):
-            if i % 2 == 0:
+        for i in range(ct.default_limit):
+            if str(i) in null_ids:
                 rows.append({"id_string": str(i), "embeddings": None})
             else:
                 rows.append(
@@ -1126,26 +1128,46 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             },
         )
 
-        # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
-        self.search(
+        # vector null predicates are accepted. NULL vectors are not ANN
+        # candidates, so "is null" filters out every vector search result.
+        null_search_res = self.search(
             client,
             collection_name,
             vectors_to_search,
             search_params={},
             filter="embeddings is null",
             limit=ct.default_limit,
-            check_task=CheckTasks.err_res,
-            check_items=error,
-        )
-        self.query(
+        )[0]
+        assert len(null_search_res) == ct.default_nq
+        for hits in null_search_res:
+            assert len(hits) == 0
+
+        not_null_search_res = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            search_params={},
+            filter="embeddings is not null",
+            limit=ct.default_limit,
+        )[0]
+        assert len(not_null_search_res) == ct.default_nq
+        for hits in not_null_search_res:
+            assert len(hits) == num_entities_with_not_null_vector
+
+        null_count_res = self.query(
+            client,
+            collection_name,
+            filter="embeddings is null",
+            output_fields=["count(*)"],
+        )[0]
+        not_null_count_res = self.query(
             client,
             collection_name,
             filter="embeddings is not null",
             output_fields=["count(*)"],
-            check_task=CheckTasks.err_res,
-            check_items=error,
-        )
+        )[0]
+        assert null_count_res[0]["count(*)"] == num_entities_with_null_vector
+        assert not_null_count_res[0]["count(*)"] == num_entities_with_not_null_vector
 
         # search by ids that belong to not null vectors
         ids_to_search = ["1", "3"]
@@ -1165,7 +1187,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             },
         )
         # search by ids that belong to null vectors
-        ids_to_search = ["0", "2"]
+        ids_to_search = ["0", "4"]
         res = self.search(
             client,
             collection_name,
@@ -1178,7 +1200,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         for i in range(len(ids_to_search)):
             assert len(res[i]) == 0  # null vectors return empty results
         # search by ids have both not null and null vectors
-        ids_to_search = ["0", "1", "2", "3"]
+        ids_to_search = ["0", "1", "4", "3"]
         res = self.search(
             client,
             collection_name,
@@ -1189,10 +1211,10 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )[0]
         assert len(res) == len(ids_to_search)
         for i in range(len(ids_to_search)):
-            if ids_to_search[i] in ["0", "2"]:
+            if ids_to_search[i] in ["0", "4"]:
                 assert len(res[i]) == 0
             else:
-                assert len(res[i]) == num_entities_with_not_null_vector  # only 5 non-null vectors exist
+                assert len(res[i]) == num_entities_with_not_null_vector  # only non-null vectors are candidates
 
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)

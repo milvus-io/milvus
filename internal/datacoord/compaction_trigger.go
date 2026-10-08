@@ -376,13 +376,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 
 		if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {
 			log.RatedInfo(context.TODO(), rate.Limit(20), "collection auto compaction disabled")
-			return nil
+			if signal.collectionID != 0 {
+				return nil
+			}
+			// A global signal spans every collection, so one collection opting
+			// out must only skip its own group, not end the whole tick.
+			continue
 		}
 
 		ct, err := getCompactTime(tsoutil.ComposeTSByTime(time.Now()), coll)
 		if err != nil {
-			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction")
-			return err
+			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction", mlog.Err(err))
+			if signal.collectionID != 0 {
+				return err
+			}
+			continue
 		}
 
 		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)

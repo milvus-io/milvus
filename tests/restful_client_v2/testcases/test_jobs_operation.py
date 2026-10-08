@@ -2592,8 +2592,14 @@ class TestCreateImportJob(RestImportTestBase):
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
 
-    def test_import_parquet_array_float_nan_validation(self):
-        """Test Parquet import with Array<Float> containing NaN - should fail"""
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "invalid_value",
+        [float("nan"), float("inf"), float("-inf"), None],
+        ids=["nan", "positive_inf", "negative_inf", "null_element"],
+    )
+    def test_import_parquet_array_float_nan_validation(self, invalid_value):
+        """Import rejects non-finite and null Array<Float> elements without exposing rows."""
         name = gen_collection_name()
         dim = 128
 
@@ -2619,13 +2625,12 @@ class TestCreateImportJob(RestImportTestBase):
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
-        # Create DataFrame with NaN in float array
+        # Build Arrow arrays directly so NaN is not normalized to a null element.
         data = {
             "id": [1, 2],
             "vector": [[random.random() for _ in range(dim)] for _ in range(2)],
-            "float_array": [[1.0, 2.0, 3.0], [4.0, None, 6.0]],  # Second row has None
+            "float_array": [[1.0, 2.0, 3.0], [4.0, invalid_value, 6.0]],
         }
-        df = pd.DataFrame(data)
 
         # Save to Parquet
         file_name = f"test_parquet_nan_{uuid4()}.parquet"
@@ -2635,13 +2640,18 @@ class TestCreateImportJob(RestImportTestBase):
         pa_schema = pa.schema(
             [("id", pa.int64()), ("vector", pa.list_(pa.float32())), ("float_array", pa.list_(pa.float32()))]
         )
-        table = pa.Table.from_pandas(df, schema=pa_schema)
+        table = pa.Table.from_pydict(data, schema=pa_schema)
+        element = table["float_array"].combine_chunks().values[4]
+        if invalid_value is None:
+            assert not element.is_valid
+        else:
+            assert element.is_valid and not np.isfinite(element.as_py())
         logger.info(f"table: {table}")
         pq.write_table(table, file_path)
 
         self.storage_client.upload_file(file_path, file_name)
 
-        # Import should fail due to NaN
+        # Import should fail due to the invalid array element.
         payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
         job_id = rsp["data"]["jobId"]
@@ -2653,13 +2663,14 @@ class TestCreateImportJob(RestImportTestBase):
             rsp = self.import_job_client.get_import_job_progress(job_id)
             if rsp["data"]["state"] == "Failed":
                 reason = rsp["data"].get("reason", "").lower()
-                assert "nan" in reason or "infinite" in reason or "invalid" in reason
+                assert "nan" in reason or "inf" in reason or "null" in reason or "invalid" in reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to NaN value"
+                assert False, "Import should have failed due to an invalid array element"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
+        assert self._query_count(name) == 0
 
     def test_import_csv_extra_columns_without_dynamic(self):
         """Test CSV import with extra columns when dynamic field is disabled - should be ignored"""

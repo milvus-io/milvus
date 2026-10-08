@@ -210,6 +210,28 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	keys = append(keys, propUseCRC32CChecksum)
 	values = append(values, strconv.FormatBool(storageConfig.GetUseCrc32CChecksum()))
 
+	if storageConfig.GetStorageType() != "local" {
+		for _, property := range []struct {
+			key   string
+			value uint32
+		}{
+			{"fs.talon.mode", storageConfig.GetTalonMode()},
+			{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+			{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+			{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+		} {
+			if property.key != "fs.talon.mode" && property.value == 0 {
+				continue
+			}
+			keys = append(keys, property.key)
+			values = append(values, strconv.FormatUint(uint64(property.value), 10))
+		}
+		if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+			keys = append(keys, "fs.talon.coordinator")
+			values = append(values, coordinator)
+		}
+	}
+
 	count := len(keys)
 	if count == 0 {
 		return C.LoonProperties{}, nil

@@ -469,7 +469,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} merged {} row groups into {} cells "
         "(cell_target_size_bytes={})",
         key_,
@@ -603,7 +603,7 @@ ManifestGroupTranslator::get_cells_legacy(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         });
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
         "column group {}",
         key_,
@@ -821,7 +821,7 @@ ManifestGroupTranslator::load_group_chunk(
                                     writeback_mode_);
     }
 
-    return std::make_unique<milvus::GroupChunk>(chunks);
+    return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }
 
 int64_t

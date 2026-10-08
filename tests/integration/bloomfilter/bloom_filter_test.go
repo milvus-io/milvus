@@ -130,10 +130,10 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
 		})
-		s.NoError(err)
-		segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+		s.Require().NoError(merr.CheckRPCCall(flushResp, err))
+		segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 		ids := segmentIDs.GetData()
-		s.Require().NotEmpty(segmentIDs)
+		s.Require().NotEmpty(ids)
 		s.Require().True(has)
 		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 		s.True(has)

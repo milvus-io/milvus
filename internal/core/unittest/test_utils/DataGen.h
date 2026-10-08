@@ -1474,26 +1474,54 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::VECTOR_FLOAT: {
                 auto raw_data = data->vectors().float_vector().data().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_FLOAT, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_FLOAT,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_FLOAT, dim);
+                }
                 break;
             }
             case DataType::VECTOR_BINARY: {
                 auto raw_data = data->vectors().binary_vector().data();
                 dim = field_meta.get_dim();
                 AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
-                createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_BINARY,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_BINARY, dim);
+                }
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
                 auto raw_data = data->vectors().float16_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_FLOAT16, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_FLOAT16,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_FLOAT16, dim);
+                }
                 break;
             }
             case DataType::VECTOR_BFLOAT16: {
                 auto raw_data = data->vectors().bfloat16_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_BFLOAT16,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_BFLOAT16, dim);
+                }
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
@@ -1505,7 +1533,14 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::VECTOR_INT8: {
                 auto raw_data = data->vectors().int8_vector().data();
                 dim = field_meta.get_dim();
-                createFieldData(raw_data, DataType::VECTOR_INT8, dim);
+                if (field_meta.is_nullable()) {
+                    createNullableFieldData(raw_data,
+                                            row_valid_data.data(),
+                                            DataType::VECTOR_INT8,
+                                            dim);
+                } else {
+                    createFieldData(raw_data, DataType::VECTOR_INT8, dim);
+                }
                 break;
             }
             case DataType::VECTOR_ARRAY: {

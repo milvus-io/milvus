@@ -420,7 +420,8 @@ VectorDiskAnnIndex<T>::Upload(const Config& config) {
                       KnowhereStatusString(stat));
         }
     }
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalFileSize(),
                                       remote_paths_to_size);
 }

@@ -34,6 +34,7 @@ const (
 	MessageTypeDropPartition             MessageType = MessageType(messagespb.MessageType_DropPartition)
 	MessageTypeImport                    MessageType = MessageType(messagespb.MessageType_Import)
 	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
+	MessageTypeUpdateImport              MessageType = MessageType(messagespb.MessageType_UpdateImport)
 	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
@@ -117,6 +118,8 @@ type (
 	ImportMsg                              = msgpb.ImportMsg
 	CommitImportMessageHeader              = messagespb.CommitImportMessageHeader
 	CommitImportMessageBody                = messagespb.CommitImportMessageBody
+	UpdateImportMessageHeader              = messagespb.UpdateImportMessageHeader
+	UpdateImportMessageBody                = messagespb.UpdateImportMessageBody
 	RollbackImportMessageHeader            = messagespb.RollbackImportMessageHeader
 	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
@@ -708,6 +711,56 @@ var MustAsBroadcastCommitImportMessageV2 = MustAsSpecializedBroadcastMessage[*Co
 
 // NewCommitImportMessageBuilderV2 creates a new message builder for CommitImportMessageV2
 var NewCommitImportMessageBuilderV2 = newMutableMessageBuilder[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// Type aliases for UpdateImportMessageV2
+type (
+	MutableUpdateImportMessageV2           = specializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	ImmutableUpdateImportMessageV2         = SpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	OwnedImmutableUpdateImportMessageV2    = SpecializedOwnedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	RetainedImmutableUpdateImportMessageV2 = SpecializedRetainedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	BroadcastUpdateImportMessageV2         = SpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	BroadcastResultUpdateImportMessageV2   = BroadcastResult[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	AckResultUpdateImportMessageV2         = AckResult[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+)
+
+// MessageTypeWithVersion for UpdateImportMessageV2
+var MessageTypeUpdateImportV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeUpdateImport,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for UpdateImportMessageV2
+var SpecializedTypeUpdateImportV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*UpdateImportMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*UpdateImportMessageHeader)(nil)),
+}
+
+// AsMutableUpdateImportMessageV2 converts a BasicMessage to MutableUpdateImportMessageV2
+var AsMutableUpdateImportMessageV2 = asSpecializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsMutableUpdateImportMessageV2 converts a BasicMessage to MutableUpdateImportMessageV2, panics on error
+var MustAsMutableUpdateImportMessageV2 = mustAsSpecializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// AsImmutableUpdateImportMessageV2 converts an ImmutableMessage to ImmutableUpdateImportMessageV2
+var AsImmutableUpdateImportMessageV2 = asSpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsImmutableUpdateImportMessageV2 converts an ImmutableMessage to ImmutableUpdateImportMessageV2, panics on error
+var MustAsImmutableUpdateImportMessageV2 = MustAsSpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsOwnedImmutableUpdateImportMessageV2 converts an OwnedImmutableMessage to OwnedImmutableUpdateImportMessageV2, panics on error
+var MustAsOwnedImmutableUpdateImportMessageV2 = MustAsSpecializedOwnedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsRetainedImmutableUpdateImportMessageV2 converts a RetainedImmutableMessage to RetainedImmutableUpdateImportMessageV2, panics on error
+var MustAsRetainedImmutableUpdateImportMessageV2 = MustAsSpecializedRetainedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// AsBroadcastUpdateImportMessageV2 converts a BasicMessage to BroadcastUpdateImportMessageV2
+var AsBroadcastUpdateImportMessageV2 = asSpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsBroadcastUpdateImportMessageV2 converts a BasicMessage to BroadcastUpdateImportMessageV2, panics on error
+var MustAsBroadcastUpdateImportMessageV2 = MustAsSpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// NewUpdateImportMessageBuilderV2 creates a new message builder for UpdateImportMessageV2
+var NewUpdateImportMessageBuilderV2 = newMutableMessageBuilder[*UpdateImportMessageHeader, *UpdateImportMessageBody]
 
 // Type aliases for RollbackImportMessageV2
 type (
@@ -2989,6 +3042,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):                  MessageTypeTimeTick,
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
+	reflect.TypeOf(&messagespb.UpdateImportMessageHeader{}):              MessageTypeUpdateImport,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -3064,6 +3118,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeTimeTickV1:                  SpecializedTypeTimeTickV1,
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
+	MessageTypeUpdateImportV2:              SpecializedTypeUpdateImportV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
@@ -3123,4 +3178,5 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeTimeTickV1:                  MessageTypeTimeTickV1,
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,
+	SpecializedTypeUpdateImportV2:              MessageTypeUpdateImportV2,
 }

@@ -352,9 +352,10 @@ func (s *Server) initDataCoord() (initErr error) {
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
-		commitImport:         s.broadcastCommitImportMessage,
-		rollbackImport:       s.broadcastRollbackImportMessage,
-		isReplicatingCluster: s.isReplicatingClusterNow,
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
 	})
 
 	// init file resource observer

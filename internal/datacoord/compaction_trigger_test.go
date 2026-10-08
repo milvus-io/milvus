@@ -2686,6 +2686,171 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 	})
 }
 
+// TestGlobalSignalContinuesPastSkippedCollection guards the collection-less
+// signal sent by the periodic scheduler: a collection that opts out of auto
+// compaction, an external collection, or a collection whose TTL property is
+// invalid must only skip its own groups, never end the tick for the
+// remaining collections.
+func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection() {
+	const (
+		enabledCollectionID = int64(101)
+		enabledChannel      = "dml_0_101v0"
+		enabledSegmentID    = int64(7)
+		// Group order comes from map iteration, so a single tick only exposes
+		// an early return when the skipped collection happens to be iterated
+		// first. Repeating the tick makes the check deterministic in practice.
+		ticks = 16
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	// A second collection with one flushed, sorted segment. A lone segment is
+	// below the minimum merge count, so evaluating it never produces a plan.
+	addEnabledCollection := func() {
+		seg := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             enabledSegmentID,
+				CollectionID:   enabledCollectionID,
+				PartitionID:    s.partitionID,
+				LastExpireTime: 100,
+				NumOfRows:      60,
+				MaxRowNum:      110,
+				InsertChannel:  enabledChannel,
+				State:          commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{EntriesNum: 5, LogPath: "log7", LogSize: 100, MemorySize: 100},
+						},
+					},
+				},
+				IsSorted: true,
+			},
+			lastFlushTime: time.Now(),
+		}
+		s.meta.segments.segments[enabledSegmentID] = seg
+		s.meta.segments.secondaryIndexes.coll2Segments[enabledCollectionID] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
+		s.meta.segments.secondaryIndexes.channel2Segments[enabledChannel] = map[UniqueID]*SegmentInfo{enabledSegmentID: seg}
+		s.meta.collections.Insert(enabledCollectionID, &collectionInfo{ID: enabledCollectionID, Schema: schema})
+	}
+
+	run := func(skipped *collectionInfo) {
+		// Rebuild the fixture inside the subtest so the mocks are bound to the
+		// subtest's T and any unexpected call fails this subtest.
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+		addEnabledCollection()
+
+		s.inspector.EXPECT().isFull().Return(false)
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(skipped, nil)
+		enabledLookups := 0
+		s.handler.EXPECT().GetCollection(mock.Anything, enabledCollectionID).
+			RunAndReturn(func(context.Context, int64) (*collectionInfo, error) {
+				enabledLookups++
+				return &collectionInfo{ID: enabledCollectionID, Schema: schema}, nil
+			})
+
+		for i := 0; i < ticks; i++ {
+			s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+		}
+		s.EqualValues(ticks, enabledLookups, "the enabled collection must be evaluated on every global tick")
+	}
+
+	s.Run("autoCompactionDisabledByProperty", func() {
+		run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		})
+	})
+
+	s.Run("externalCollection", func() {
+		// IsExternal() keys off a field-level ExternalField, so build the
+		// external schema on its own field slice rather than reusing the
+		// shared one, which the enabled collection also relies on.
+		skipped := &collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:       s.vecFieldID,
+						DataType:      schemapb.DataType_FloatVector,
+						ExternalField: "vec_col",
+					},
+				},
+			},
+		}
+		s.Require().True(skipped.IsExternal())
+		run(skipped)
+	})
+
+	s.Run("invalidCollectionTTL", func() {
+		run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "not-a-number",
+			},
+		})
+	})
+}
+
+// TestCollectionScopedSignalKeepsEarlyReturn pins the unchanged semantics of
+// collection-scoped signals: a collection that opts out of auto compaction
+// still ends the signal with nil, and a getCompactTime failure still
+// surfaces as an error to the caller.
+func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	run := func(coll *collectionInfo) error {
+		// Rebuild the fixture inside the subtest so the mocks are bound to the
+		// subtest's T and any unexpected call fails this subtest.
+		s.SetupTest()
+		pt := paramtable.Get()
+		pt.Save(pt.DataCoordCfg.IndexBasedCompaction.Key, "false")
+		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
+
+		s.inspector.EXPECT().isFull().Return(false)
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(coll, nil)
+		return s.tr.handleSignal(NewCompactionSignal().
+			WithCollectionID(s.collectionID).
+			WithPartitionID(s.partitionID).
+			WithChannel(s.channel))
+	}
+
+	s.Run("autoCompactionDisabledByProperty", func() {
+		s.NoError(run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionAutoCompactionKey: "false",
+			},
+		}))
+	})
+
+	s.Run("invalidCollectionTTL", func() {
+		s.Error(run(&collectionInfo{
+			ID:     s.collectionID,
+			Schema: schema,
+			Properties: map[string]string{
+				common.CollectionTTLConfigKey: "not-a-number",
+			},
+		}))
+	})
+}
+
 func TestCompactionTriggerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerSuite))
 }

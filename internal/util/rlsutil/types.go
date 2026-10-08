@@ -19,11 +19,14 @@ package rlsutil
 import (
 	"encoding/json"
 	"io"
+	"math"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TagValueKind int32
@@ -33,6 +36,7 @@ const (
 	TagValueKindString
 	TagValueKindInt64
 	TagValueKindDouble
+	TagValueKindArray
 )
 
 type TagValue struct {
@@ -40,6 +44,38 @@ type TagValue struct {
 	StringValue string
 	Int64Value  int64
 	DoubleValue float64
+	// arrayValue is immutable after construction so TagValue remains safely
+	// shallow-copyable across metadata snapshots and caches.
+	arrayValue *tagArray
+}
+
+const tagValueRetainedSize = int64(unsafe.Sizeof(TagValue{}))
+
+// Exactly one typed slice is populated. Empty arrays have kind Unknown.
+type tagArray struct {
+	kind     TagValueKind
+	strings  []string
+	integers []int64
+	doubles  []float64
+}
+
+const tagArrayRetainedSize = int64(unsafe.Sizeof(tagArray{}))
+
+func (a *tagArray) len() int {
+	return len(a.strings) + len(a.integers) + len(a.doubles)
+}
+
+func (a *tagArray) at(i int) TagValue {
+	switch a.kind {
+	case TagValueKindString:
+		return NewStringTagValue(a.strings[i])
+	case TagValueKindInt64:
+		return NewInt64TagValue(a.integers[i])
+	case TagValueKindDouble:
+		return NewDoubleTagValue(a.doubles[i])
+	default:
+		return TagValue{}
+	}
 }
 
 func NewStringTagValue(value string) TagValue {
@@ -54,50 +90,231 @@ func NewDoubleTagValue(value float64) TagValue {
 	return TagValue{Kind: TagValueKindDouble, DoubleValue: value}
 }
 
+func promoteArrayInteger(value int64, index int) (float64, error) {
+	promoted := float64(value)
+	if !isExactInt64(promoted) || int64(promoted) != value {
+		return 0, merr.WrapErrParameterInvalidMsg("RLS principal tag array element %d cannot be promoted from int64 to double without losing precision", index)
+	}
+	return promoted, nil
+}
+
+// appendDecoded is used only before publishing the immutable array. The first
+// double promotes the accumulated integer buffer once; no wide union slice is
+// built while decoding metadata.
+func (a *tagArray) appendDecoded(value TagValue) error {
+	if a.kind == TagValueKindUnknown {
+		a.kind = value.Kind
+	}
+	if (a.kind == TagValueKindString) != (value.Kind == TagValueKindString) {
+		return merr.WrapErrParameterInvalidMsg("RLS principal tag array cannot mix strings and numbers")
+	}
+	if a.kind == TagValueKindString {
+		a.strings = append(a.strings, value.StringValue)
+		return nil
+	}
+	if a.kind == TagValueKindInt64 && value.Kind == TagValueKindDouble {
+		doubles := make([]float64, len(a.integers), max(cap(a.integers), len(a.integers)+1))
+		for i, integer := range a.integers {
+			promoted, err := promoteArrayInteger(integer, i)
+			if err != nil {
+				return err
+			}
+			doubles[i] = promoted
+		}
+		a.integers = nil
+		a.doubles = doubles
+		a.kind = TagValueKindDouble
+	}
+	if a.kind == TagValueKindDouble {
+		number := value.DoubleValue
+		if value.Kind == TagValueKindInt64 {
+			var err error
+			number, err = promoteArrayInteger(value.Int64Value, len(a.doubles))
+			if err != nil {
+				return err
+			}
+		}
+		a.doubles = append(a.doubles, number)
+	} else {
+		a.integers = append(a.integers, value.Int64Value)
+	}
+	return nil
+}
+
+// PrincipalTagsSize returns the bytes charged to the principal cache. Values
+// include their TagValue storage, and arrays include their backing elements, so
+// scalar representation growth and empty strings cannot bypass the cap.
+func PrincipalTagsSize(principalName string, tags map[string]TagValue) (int64, error) {
+	size := int64(len(principalName))
+	for key, value := range tags {
+		size += int64(len(key))
+		valueSize, ok := tagValueSize(value)
+		if !ok {
+			return 0, merr.WrapErrServiceInternalMsg("RLS principal tag %q has unsupported internal value type", key)
+		}
+		size += valueSize
+	}
+	return size, nil
+}
+
+func tagValueSize(value TagValue) (int64, bool) {
+	size := tagValueRetainedSize
+	switch value.Kind {
+	case TagValueKindString:
+		if int64(len(value.StringValue)) > math.MaxInt64-size {
+			return 0, false
+		}
+		return size + int64(len(value.StringValue)), true
+	case TagValueKindInt64, TagValueKindDouble:
+		return size, true
+	case TagValueKindArray:
+		if value.arrayValue == nil {
+			return 0, false
+		}
+		array := value.arrayValue
+		size += tagArrayRetainedSize + int64(cap(array.strings))*int64(unsafe.Sizeof("")) +
+			int64(cap(array.integers)+cap(array.doubles))*8
+		for _, element := range array.strings {
+			if int64(len(element)) > math.MaxInt64-size {
+				return 0, false
+			}
+			size += int64(len(element))
+		}
+		return size, true
+	default:
+		return 0, false
+	}
+}
+
 func TagsFromJSON(payload string) (map[string]TagValue, error) {
+	return tagsFromJSON(payload, 0)
+}
+
+// TagsFromJSONWithLimit bounds the raw payload, object members, and array
+// elements while decoding untrusted requests. Call ValidateTags afterwards to
+// apply write-time key/value semantics and quotas at the admission boundary.
+func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
+	return tagsFromJSON(payload, maxTags)
+}
+
+func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
+	if err := validatePrincipalTagsJSONTransportSize(payload, maxTags); err != nil {
+		return nil, err
+	}
+	maxArrayElements := maxRLSArrayTagElements
+	maxTagKeyLength := 0
+	if maxTags > 0 {
+		maxArrayElements = min(maxArrayElements, paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt())
+		maxTagKeyLength = paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
+	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
-	var raw map[string]any
-	if err := decoder.Decode(&raw); err != nil {
+	token, err := decoder.Token()
+	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
 	}
-	if raw == nil {
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '{' {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a JSON object")
+	}
+
+	tags := make(map[string]TagValue)
+	entryCount := 0
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
+		}
+		entryCount++
+		if maxTags > 0 && entryCount > maxTags {
+			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
+		}
+		if maxTags > 0 {
+			if len(key) > maxTagKeyLength {
+				return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxTagKeyLength)
+			}
+		}
+
+		tagValue, err := decodeTagValue(decoder, key, maxArrayElements, true)
+		if err != nil {
+			return nil, err
+		}
+		tags[key] = tagValue
+	}
+	closingToken, err := decoder.Token()
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+	}
+	closingDelim, ok := closingToken.(json.Delim)
+	if !ok || closingDelim != '}' {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
 		return nil, err
 	}
-	tags := make(map[string]TagValue, len(raw))
-	for key, value := range raw {
-		switch typed := value.(type) {
-		case string:
-			tags[key] = NewStringTagValue(typed)
-		case json.Number:
-			if strings.ContainsAny(typed.String(), ".eE") {
-				value, err := strconv.ParseFloat(typed.String(), 64)
-				if err != nil {
-					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid double value", key)
-				}
-				tags[key] = NewDoubleTagValue(value)
-			} else {
-				value, err := strconv.ParseInt(typed.String(), 10, 64)
-				if err == nil {
-					tags[key] = NewInt64TagValue(value)
-					continue
-				}
-				// encoding/json may serialize an integral double without a decimal
-				// point. Preserve values outside int64 as doubles on round trip.
-				doubleValue, doubleErr := strconv.ParseFloat(typed.String(), 64)
-				if doubleErr != nil {
-					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
-				}
-				tags[key] = NewDoubleTagValue(doubleValue)
-			}
-		default:
-			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, or double", key)
-		}
-	}
 	return tags, nil
+}
+
+func decodeTagValue(decoder *json.Decoder, key string, maxArrayElements int, allowArray bool) (TagValue, error) {
+	value, err := decoder.Token()
+	if err != nil {
+		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+	}
+	switch typed := value.(type) {
+	case string:
+		return NewStringTagValue(typed), nil
+	case json.Number:
+		number := typed.String()
+		if strings.ContainsAny(number, ".eE") {
+			value, err := strconv.ParseFloat(number, 64)
+			if err != nil {
+				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid double value", key)
+			}
+			return NewDoubleTagValue(value), nil
+		}
+		value, err := strconv.ParseInt(number, 10, 64)
+		if err == nil {
+			return NewInt64TagValue(value), nil
+		}
+		// encoding/json may serialize an integral double without a decimal
+		// point. Preserve values outside int64 as doubles on round trip.
+		doubleValue, doubleErr := strconv.ParseFloat(number, 64)
+		if doubleErr != nil {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
+		}
+		return NewDoubleTagValue(doubleValue), nil
+	case json.Delim:
+		if typed != '[' || !allowArray {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, double, or one-dimensional array of those types", key)
+		}
+		array := &tagArray{}
+		for decoder.More() {
+			if maxArrayElements > 0 && array.len() >= maxArrayElements {
+				return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
+			}
+			element, err := decodeTagValue(decoder, key, maxArrayElements, false)
+			if err != nil {
+				return TagValue{}, err
+			}
+			if err := array.appendDecoded(element); err != nil {
+				return TagValue{}, merr.Wrapf(err, "RLS principal tag %q", key)
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
+		if closing != json.Delim(']') {
+			return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
+		}
+		return TagValue{Kind: TagValueKindArray, arrayValue: array}, nil
+	default:
+		return TagValue{}, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, double, or one-dimensional array of those types", key)
+	}
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -114,26 +331,48 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 func TagsToJSON(tags map[string]TagValue) (string, error) {
 	values := make(map[string]any, len(tags))
 	for key, value := range tags {
-		switch value.Kind {
-		case TagValueKindString:
-			values[key] = value.StringValue
-		case TagValueKindInt64:
-			values[key] = value.Int64Value
-		case TagValueKindDouble:
-			encoded := strconv.FormatFloat(value.DoubleValue, 'g', -1, 64)
-			if !strings.ContainsAny(encoded, ".eE") {
-				encoded += ".0"
-			}
-			values[key] = json.Number(encoded)
-		default:
+		encoded, ok := tagValueToJSON(value)
+		if !ok {
 			return "", merr.WrapErrServiceInternalMsg("RLS principal tag %q has unsupported internal value type", key)
 		}
+		values[key] = encoded
 	}
 	payload, err := json.Marshal(values)
 	if err != nil {
 		return "", merr.WrapErrDataIntegrity(err, "encode RLS principal tags")
 	}
 	return string(payload), nil
+}
+
+func tagValueToJSON(value TagValue) (any, bool) {
+	switch value.Kind {
+	case TagValueKindString:
+		return value.StringValue, true
+	case TagValueKindInt64:
+		return value.Int64Value, true
+	case TagValueKindDouble:
+		encoded := strconv.FormatFloat(value.DoubleValue, 'g', -1, 64)
+		if !strings.ContainsAny(encoded, ".eE") {
+			encoded += ".0"
+		}
+		return json.Number(encoded), true
+	case TagValueKindArray:
+		if value.arrayValue == nil {
+			return nil, false
+		}
+		values := make([]any, value.arrayValue.len())
+		for i := range values {
+			element := value.arrayValue.at(i)
+			var ok bool
+			values[i], ok = tagValueToJSON(element)
+			if !ok || element.Kind == TagValueKindArray {
+				return nil, false
+			}
+		}
+		return values, true
+	default:
+		return nil, false
+	}
 }
 
 type PolicyType int32
@@ -171,23 +410,46 @@ const (
 func (action PolicyAction) String() string {
 	switch action {
 	case PolicyActionQuery:
-		return "RowPolicyActionQuery"
-	case PolicyActionQueryIterator:
-		return "RowPolicyActionQueryIterator"
+		return "Query"
 	case PolicyActionSearch:
-		return "RowPolicyActionSearch"
-	case PolicyActionSearchIterator:
-		return "RowPolicyActionSearchIterator"
-	case PolicyActionHybridSearch:
-		return "RowPolicyActionHybridSearch"
-	case PolicyActionDelete:
-		return "RowPolicyActionDelete"
+		return "Search"
 	case PolicyActionInsert:
-		return "RowPolicyActionInsert"
+		return "Insert"
+	case PolicyActionDelete:
+		return "Delete"
 	case PolicyActionUpsert:
-		return "RowPolicyActionUpsert"
+		return "Upsert"
+	case PolicyActionQueryIterator:
+		return "QueryIterator"
+	case PolicyActionSearchIterator:
+		return "SearchIterator"
+	case PolicyActionHybridSearch:
+		return "HybridSearch"
 	default:
-		return "RowPolicyActionUnknown"
+		return "Unknown"
+	}
+}
+
+func PolicyActionOperation(action PolicyAction) string {
+	switch action {
+	case PolicyActionQuery:
+		return "query"
+	case PolicyActionQueryIterator:
+		return "query iterator"
+	case PolicyActionSearch:
+		return "search"
+	case PolicyActionSearchIterator:
+		return "search iterator"
+	case PolicyActionHybridSearch:
+		return "hybrid search"
+	case PolicyActionDelete:
+		return "delete"
+	case PolicyActionInsert:
+		return "insert"
+	case PolicyActionUpsert:
+		return "upsert"
+	default:
+		return "unknown"
 	}
 }
 

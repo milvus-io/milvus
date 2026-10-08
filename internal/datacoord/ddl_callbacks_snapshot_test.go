@@ -25,12 +25,15 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -50,12 +53,18 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
 		assert.Equal(t, int64(3600), compactionProtectionSeconds)
+		assert.Len(t, positions, 2)
+		assert.Equal(t, "p1_100v0", positions[0].GetChannelName())
+		assert.Equal(t, uint64(100), positions[0].GetTimestamp())
+		assert.Equal(t, "p2_100v1", positions[1].GetChannelName())
+		assert.Equal(t, uint64(200), positions[1].GetTimestamp())
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -83,6 +92,11 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 
 	result := message.BroadcastResultCreateSnapshotMessageV2{
 		Message: typedMsg,
+		Results: map[string]*message.AppendResult{
+			"p1_100v0":                       {TimeTick: 100, LastConfirmedMessageID: rmq.NewRmqID(10)},
+			"p2_100v1":                       {TimeTick: 200, LastConfirmedMessageID: rmq.NewRmqID(20)},
+			funcutil.GetControlChannel("p0"): {TimeTick: 999, LastConfirmedMessageID: rmq.NewRmqID(30)},
+		},
 	}
 
 	// Execute
@@ -105,6 +119,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		collectionID int64,
 		name, description string,
 		compactionProtectionSeconds int64,
+		positions []*msgpb.MsgPosition,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()

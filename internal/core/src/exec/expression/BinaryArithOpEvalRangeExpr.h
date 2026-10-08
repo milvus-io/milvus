@@ -710,7 +710,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  public:
     PhyBinaryArithOpEvalRangeExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,
@@ -784,6 +784,27 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         }
         if (!has_raw) {
             exec_path_ = ExprExecPath::RawData;
+        }
+    }
+
+    bool
+    SupportsRawExprCache() const override {
+        if (expr_->column_.element_level_) {
+            return false;
+        }
+        switch (expr_->column_.data_type_) {
+            case DataType::BOOL:
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+            case DataType::JSON:
+            case DataType::ARRAY:
+                return true;
+            default:
+                return false;
         }
     }
 

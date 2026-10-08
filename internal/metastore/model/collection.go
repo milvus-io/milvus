@@ -42,10 +42,8 @@ type Collection struct {
 	Fields            []*Field
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
-	// RLS metadata is an internal RootCoord cache. It is persisted in its own
-	// KV namespace and must not be marshaled into collection info.
+	// RLS policies are cached by RootCoord and persisted in their own KV namespace.
 	RLSPolicies          map[string]*RLSPolicy
-	RLSPrincipals        []*RLSPrincipal
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -100,7 +98,6 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		RLSPolicies:          maps.Clone(c.RLSPolicies),
-		RLSPrincipals:        slices.Clone(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
@@ -143,7 +140,6 @@ func (c *Collection) Clone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
-		RLSPrincipals:        CloneRLSPrincipals(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
@@ -213,11 +209,6 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			for _, policy := range c.RLSPolicies {
 				if policy != nil {
 					policy.DBID = updates.DbId
-				}
-			}
-			for _, principal := range c.RLSPrincipals {
-				if principal != nil {
-					principal.DBID = updates.DbId
 				}
 			}
 		case message.FieldMaskCollectionName:

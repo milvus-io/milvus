@@ -664,10 +664,10 @@ CreateArrowBuilder(DataType data_type,
 
 std::shared_ptr<arrow::Scalar>
 CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
-    auto default_var = field_meta.default_value();
+    const auto& default_var = field_meta.default_value();
     AssertInfo(default_var.has_value(),
                "cannot create Arrow Scalar from empty default value");
-    auto default_value = default_var.value();
+    const auto& default_value = default_var.value();
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
             return std::make_shared<arrow::BooleanScalar>(
@@ -1312,6 +1312,12 @@ ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
+        conf.talon_mode = storage_config.talon_mode;
+        conf.talon_small_read_threshold =
+            storage_config.talon_small_read_threshold;
+        conf.talon_coordinator = storage_config.talon_coordinator;
+        conf.talon_block_size = storage_config.talon_block_size;
+        conf.talon_max_idle_per_addr = storage_config.talon_max_idle_per_addr;
     }
     return conf;
 }
@@ -1776,7 +1782,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                 }
             }
         }
-        row_group_lists.push_back(all_row_groups);
+        row_group_lists.push_back(std::move(all_row_groups));
 
         // create a schema with only the field id
         auto field_schema = reader->schema()->field(col_offset)->Copy();

@@ -48,7 +48,7 @@ struct TermIndexFunc {
 class PhyTermFilterExpr : public SegmentExpr {
  public:
     PhyTermFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -82,6 +82,11 @@ class PhyTermFilterExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
 
     bool
     IsSource() const override {

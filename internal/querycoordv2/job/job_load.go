@@ -19,6 +19,7 @@ package job
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -113,6 +115,10 @@ func (job *LoadCollectionJob) Execute() error {
 			mlog.Int("localReplicaCount", len(localReplicas)))
 	}
 
+	// Classify the request before spawn, because spawn is what mutates the
+	// replica meta both of the following read.
+	incrementalExpansion := job.isIncrementalExpansion(req, replicas)
+
 	// 2. create replica if not exist (may also remove redundant replicas)
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
@@ -131,15 +137,83 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// 3. put load info meta
-	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
-	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
-	for _, loadField := range req.GetLoadFields() {
-		if loadField.GetIndexId() != 0 {
-			fieldIndexIDs[loadField.GetFieldId()] = loadField.GetIndexId()
-		}
-		fieldIDs = append(fieldIDs, loadField.GetFieldId())
-	}
+	fieldIndexIDs, fieldIDs := requestedLoadFields(req)
 	replicaNumber := int32(len(replicas))
+
+	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
+
+	// 3.1 incremental resource group expansion: this request adds resource
+	// groups to a collection that is already loaded and changes nothing else,
+	// so the collection and partition meta it would write is the meta that is
+	// already there -- except for Status and LoadPercentage, which the write
+	// would reset to Loading/0 and take the resource groups that are serving
+	// right now down with them. Skip the overwrite; the added replicas are
+	// loaded by the checkers, as an added replica is on any other path.
+	//
+	// Everything on this path is idempotent, and it has to be: the spawn
+	// above is persisted before any of it, and if this process fails or dies
+	// between the two the message is replayed. The replay finds the added
+	// replicas already in meta, the predicate still says expansion (an
+	// identical replica set on a Loaded collection is exactly a replay), and
+	// each step below either writes the value that is already there or
+	// re-pulls a target that has not changed. Taking the native path on a
+	// replay instead would write the collection back to Loading/0 and make
+	// the group that is serving unreadable until the added one finishes - the
+	// incident this path exists to remove.
+	if incrementalExpansion {
+		// Nothing keeps this span on this path: the collection holds the
+		// LoadSpan of the load that created it, and that span is what
+		// UpdateCollectionLoadPercent ends. End this one here rather than leak
+		// it.
+		defer sp.End()
+
+		mlog.Info(job.ctx, "incremental resource group expansion, keeping loaded collection meta",
+			mlog.Int64("collectionID", req.GetCollectionId()),
+			mlog.Int32("replicaNumber", replicaNumber))
+
+		// No observer task is registered for the added groups, deliberately.
+		// The collection stays Loaded, so there is no status to write back and
+		// no aggregate to complete; how far a group has loaded and whether it
+		// can serve are answered from the live target and distribution
+		// (utils.LoadPercentageByResourceGroup and
+		// utils.ShardLeaderReadinessByResourceGroup), and the checkers load the
+		// added replicas on their own schedule. This is what upstream's
+		// UpdateLoadConfig does when it adds a replica to a loaded collection:
+		// spawn, write the count, pull the target, and leave the loading to the
+		// checkers. A group whose replicas never load is the caller's to
+		// release, exactly as an added replica that never loads is upstream.
+
+		// The replica count is the one property of the collection this request
+		// legitimately changes; the predicate has established that everything
+		// else is unchanged. UpdateReplicaNumber writes it to the collection and
+		// its partitions without touching their Status or LoadPercentage, so
+		// the already-serving resource groups stay Loaded at 100%. Leaving it
+		// stale instead would misreport the collection's replica count to every
+		// later UpdateLoadConfig, which reads it as the replica number to keep.
+		//
+		// The number written is the replicas that exist, counted inside the
+		// collection manager's critical section (SyncReplicaNumber), rather
+		// than the request's own count: they are the same unless a release of
+		// one of the groups runs beside this ack, and then the request's count
+		// written last would stand one above the replicas there are.
+		userSpecifiedReplicaMode := req.GetUserSpecifiedReplicaMode()
+		if _, err := job.meta.SyncReplicaNumber(job.ctx, req.GetCollectionId(), func() int32 {
+			return int32(len(job.meta.GetByCollection(job.ctx, req.GetCollectionId())))
+		}, &userSpecifiedReplicaMode); err != nil {
+			msg := "failed to update replica number"
+			mlog.Warn(job.ctx, msg, mlog.Err(err))
+			return merr.Wrapf(err, "%s", msg)
+		}
+
+		// The target is unchanged -- same partitions, same segments -- but the
+		// pull is cheap and keeps this path's ordering identical to the one
+		// below, where the observer only ever sees a populated next target.
+		if _, err = job.targetObserver.UpdateNextTarget(req.GetCollectionId()); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -153,7 +227,6 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	})
 
-	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:             req.GetCollectionId(),
@@ -221,6 +294,130 @@ func (job *LoadCollectionJob) Execute() error {
 		mlog.Info(context.TODO(), "wait for partition released done", mlog.Int64s("toReleasePartitions", toReleasePartitions))
 	}
 	return nil
+}
+
+// requestedLoadFields splits the request's load-field configs into the
+// field-to-index map and the plain list of field IDs that meta.Collection
+// stores, so that the predicate below compares exactly the values the
+// collection would have been overwritten with.
+func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int64]int64, []int64) {
+	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
+	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
+	for _, loadField := range req.GetLoadFields() {
+		if loadField.GetIndexId() != 0 {
+			fieldIndexIDs[loadField.GetFieldId()] = loadField.GetIndexId()
+		}
+		fieldIDs = append(fieldIDs, loadField.GetFieldId())
+	}
+	return fieldIndexIDs, fieldIDs
+}
+
+// isIncrementalExpansion reports whether req asks for nothing but additional
+// resource groups on a collection that is already loaded. That is the one shape
+// of request whose collection/partition meta write is pure loss: the write
+// stores values identical to the stored ones except for Status and
+// LoadPercentage, which it resets to Loading and 0, dropping resource groups
+// that are serving queries right now out of Loaded until the observer has
+// walked them back up to 100%.
+//
+// Every other request keeps the overwrite. The predicate is therefore
+// deliberately conservative -- it is false unless every part of the request
+// matches what is stored -- and in particular it is false for a first load, for
+// a reload, and for a plain replica-number change, so a deployment that never
+// loads one collection into several resource groups never leaves the path this
+// job has always taken.
+//
+// The legs, and what each one protects:
+//
+//   - collection exists and is Loaded: there is serving state to protect, and
+//     an unfinished load must keep its Loading status and its observer task.
+//   - same DbID, same LoadType, same partition set, same load fields, same
+//     field-to-index map: everything the skipped write would have stored is
+//     already stored, so skipping it loses nothing. The partition leg also
+//     covers the partition-release branch below, which the fast path skips.
+//   - every existing replica appears in the new set, in the same resource
+//     group: no replica is being released or moved, so no resource group is
+//     losing state that the collection meta still claims it has.
+//
+// The whole path is a form's: it answers false on a stock binary
+// (extension.FormInstalled), which keeps master's behavior exactly - every load
+// of an already-loaded collection, a two-group LoadCollection included, writes
+// the collection back to Loading/0 and the collection-wide observer walks it up
+// again. The deployment shape that loads one collection into several resource
+// groups independently, and cannot afford that reset, is the one a form
+// builds.
+//
+// The new set need not be LARGER. A request whose replica set is exactly the
+// stored one, on a Loaded collection, is this job's own message replayed: the
+// spawn persisted the added replicas, the process failed before the rest of
+// the fast path ran, and the message came back. Nothing else produces that
+// shape - a request that changes nothing is dropped before it is broadcast
+// (GenerateAlterLoadConfigMessage) - and taking the overwrite on it would
+// write a serving collection back to Loading/0, which is the one outcome this
+// predicate exists to prevent. Deciding from the requested set against what is
+// stored, rather than from the count growing, is what makes the replay land on
+// the same path as the original.
+func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadConfigMessageHeader, newReplicas []*messagespb.LoadReplicaConfig) bool {
+	if !extension.FormInstalled() {
+		return false
+	}
+	existing := job.meta.GetCollection(job.ctx, req.GetCollectionId())
+	if existing == nil || existing.GetStatus() != querypb.LoadStatus_Loaded {
+		return false
+	}
+	if existing.GetDbID() != req.GetDbId() {
+		return false
+	}
+	if existing.GetLoadType() != querypb.LoadType_LoadCollection {
+		return false
+	}
+
+	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	if len(currentPartitions) != incomingPartitions.Len() {
+		return false
+	}
+	for _, partition := range currentPartitions {
+		if !incomingPartitions.Contain(partition.GetPartitionID()) {
+			return false
+		}
+	}
+
+	fieldIndexIDs, fieldIDs := requestedLoadFields(req)
+	if !maps.Equal(typeutil.NewSet(fieldIDs...), typeutil.NewSet(existing.GetLoadFields()...)) {
+		return false
+	}
+	if !maps.Equal(fieldIndexIDs, existing.GetFieldIndexID()) {
+		return false
+	}
+
+	existingReplicas := job.meta.GetByCollection(job.ctx, req.GetCollectionId())
+	if len(newReplicas) < len(existingReplicas) {
+		return false // a replica is being released
+	}
+	existingRGByReplica := make(map[int64]string, len(existingReplicas))
+	for _, replica := range existingReplicas {
+		existingRGByReplica[replica.GetID()] = replica.GetResourceGroup()
+	}
+
+	seen := typeutil.NewSet[int64]()
+	for _, replica := range newReplicas {
+		seen.Insert(replica.GetReplicaId())
+		rgName, isExisting := existingRGByReplica[replica.GetReplicaId()]
+		if isExisting {
+			if rgName != replica.GetResourceGroupName() {
+				return false // an existing replica is being moved to another resource group
+			}
+			continue
+		}
+	}
+	for _, replica := range existingReplicas {
+		if !seen.Contain(replica.GetID()) {
+			return false // an existing replica is being released
+		}
+	}
+
+	return true
 }
 
 // getLocalReplicaConfig reads the local cluster-level replica config and generates LoadReplicaConfig entries.

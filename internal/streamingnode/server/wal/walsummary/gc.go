@@ -18,104 +18,141 @@ package walsummary
 
 import (
 	"context"
-	"math"
-	"sort"
+	"sync/atomic"
 
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// orphanSweepBudget caps how many objects one sweep deletes, so a store that
-// accumulated a backlog drains over several rounds instead of holding the
-// background task for a whole walk.
+// orphanSweepBudget limits physical deletion work per scheduler execution.
 const orphanSweepBudget = 1000
 
-// GCOnce releases the oldest retained chunks while the retained set is above
-// either retention bound -- total bytes, or number of chunks. Both are soft
-// bounds over whole objects: release frees an object at a time, so the retained
-// set crosses back under a bound in object-sized steps rather than landing on
-// it exactly.
-//
-// Release is also what collects the objects a superseded term left behind: see
-// sweepRetiredTerms.
-//
-// The manifest is the only index into the chunk set, so release is a manifest
-// edit: the chunk moves from `chunks` to `pending_gc`, the manifest is
-// published, and only then is the object deleted. `pending_gc` is both the
-// work queue and the progress record: a crash between the manifest write and
-// the delete leaves the entry in `pending_gc`, and the next GC run finishes
-// the delete. The delete itself is best-effort — a leftover object is inert
-// (nothing references it) and is reaped by a later run or by store removal.
-//
-// A manifest write that fails mid-GC is safe: the in-memory manifest still
-// lists everything, and the next attempt redoes the same computation. All
-// manifest edits go through publishManifest, which serializes concurrent
-// publishers (this GC and the write task) with the single manager lock plus a
-// compare-and-swap on the manifest version.
+// GCOnce requests retention and garbage collection. Manifest publication and
+// physical deletion are asynchronous. Cross-owner exclusion remains the design
+// TODO; readMu protects consumers of this manager only.
 func (m *Manager) GCOnce(ctx context.Context) error {
-	// Snapshot the pending queue: removePendingGC compacts the live array in
-	// place, so ranging over the live slice while deleting would shift the
-	// indexes and skip entries.
 	m.mu.Lock()
-	pendingGC := make([]*streamingpb.PChannelSummaryChunkRef, 0, len(m.manifest.GetPendingGc()))
-	pendingGC = append(pendingGC, m.manifest.GetPendingGc()...)
+	terminal := m.terminalErr
 	m.mu.Unlock()
-	for _, ref := range pendingGC {
-		if err := m.cfg.Store.DeleteChunk(ctx, ref.GetGeneration(), ref.GetTerm()); err != nil {
-			return err
-		}
-		m.removePendingGC(ref)
+	if terminal != nil {
+		return terminal
 	}
-
 	released := m.computeRetention()
-	if len(released) == 0 {
+	m.mu.Lock()
+	if len(released) > 0 {
+		for _, ref := range released {
+			for _, chunk := range m.manifest.Chunks {
+				if chunk.GetGeneration() != ref.Generation {
+					continue
+				}
+				for _, index := range chunk.GetVchannels() {
+					if index.GetTransform() == nil {
+						continue
+					}
+					end := index.GetTransform().GetEndTimeTick()
+					if m.manifest.TransformFastForwardTimeTick == nil {
+						m.manifest.TransformFastForwardTimeTick = make(map[string]uint64)
+					}
+					vc := index.GetVchannel()
+					m.manifest.TransformFastForwardTimeTick[vc] = max(m.manifest.TransformFastForwardTimeTick[vc], end)
+				}
+			}
+			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)
+		}
+		m.manifestVersion++
+		m.notifyReadersLocked()
+	}
+	m.mu.Unlock()
+	m.scheduleManifest()
+	m.mu.Lock()
+	if m.cfg.Runtime.Scheduler == nil || (m.gcTask != nil && !m.gcTask.Done()) {
+		m.mu.Unlock()
 		return nil
 	}
-	// Collect the retired terms BEFORE the manifest edit below: that edit is
-	// what disarms this trigger, so an interruption anywhere above it leaves
-	// the next round to recompute the same release set and repeat the sweep.
-	finished, err := m.sweepRetiredTerms(ctx, released)
-	if err != nil {
+	task := &summaryGCTask{manager: m}
+	m.gcTask = task
+	m.mu.Unlock()
+	m.cfg.Runtime.Scheduler.Submit(task)
+	return nil
+}
+
+type summaryGCTask struct {
+	manager *Manager
+	done    atomic.Bool
+}
+
+func (t *summaryGCTask) Done() bool { return t.done.Load() }
+func (t *summaryGCTask) Execute(ctx context.Context) error {
+	if t.Done() {
+		return nil
+	}
+	m := t.manager
+	// Do not occupy a shared scheduler worker waiting for a reader or publisher.
+	if !m.readMu.TryLock() {
+		return nodescheduler.ErrDelay
+	}
+	if !m.publishMu.TryLock() {
+		m.readMu.Unlock()
+		return nodescheduler.ErrDelay
+	}
+	m.mu.Lock()
+	if m.terminalErr != nil {
+		err := m.terminalErr
+		t.done.Store(true)
+		m.mu.Unlock()
+		m.publishMu.Unlock()
+		m.readMu.Unlock()
 		return err
+	}
+	if !m.manifestPublished || m.manifestVersion != m.publishedVersion {
+		m.mu.Unlock()
+		m.publishMu.Unlock()
+		m.readMu.Unlock()
+		return nodescheduler.ErrDelay
+	}
+	refs := make(map[ChunkRef]struct{}, len(m.manifest.Chunks))
+	for _, chunk := range m.manifest.Chunks {
+		refs[ChunkRef{Generation: chunk.GetGeneration(), Term: chunk.GetTerm()}] = struct{}{}
+	}
+	version := m.manifestVersion
+	var coverage *streamingpb.SummaryCoverage
+	if m.manifest.Coverage != nil {
+		coverage = proto.Clone(m.manifest.Coverage).(*streamingpb.SummaryCoverage)
+	}
+	m.mu.Unlock()
+	m.publishMu.Unlock()
+	m.readMu.Unlock()
+	// Reference retirement is published and all older local readers have left.
+	// New readers cannot capture the retired objects. New chunks have generations
+	// beyond this frozen coverage and the sweep excludes them, even if they are
+	// published during deletion. References from older terms are only inherited
+	// at Restore, never added by this live manager. Keep the frozen refs/coverage
+	// throughout I/O; cross-owner deletion fencing remains a separate TODO.
+	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, coverage, refs, orphanSweepBudget)
+	if err != nil {
+		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	if !finished {
-		// The budget ran out. Leave the release for a later round so the
-		// trigger stays armed until the retired terms are fully collected.
-		return nil
+		return nodescheduler.ErrDelay
 	}
-	// Move the released chunks into pending_gc and publish. The edit is made
-	// on a clone by publishManifest and only installed after the write
-	// succeeds, so a concurrent marshal never sees a half-edited manifest and
-	// a failed write leaves the in-memory state untouched for the next run to
-	// recompute.
-	if err := m.publishManifest(ctx, func(next *streamingpb.PChannelSummaryManifest) {
-		for _, ref := range released {
-			next.Chunks = removeChunkEntry(next.Chunks, ref.GetGeneration())
-			next.PendingGc = append(next.PendingGc, ref)
-		}
-	}); err != nil {
-		return err
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.manifestVersion != version {
+		return nodescheduler.ErrDelay
 	}
-	// The objects are deleted only after the manifest records the move, so a
-	// crash in between leaves them referenced by pending_gc for the next run.
-	for _, ref := range released {
-		if err := m.cfg.Store.DeleteChunk(ctx, ref.GetGeneration(), ref.GetTerm()); err != nil {
-			return err
-		}
-		m.removePendingGC(ref)
-	}
+	t.done.Store(true)
 	return nil
 }
 
 // computeRetention returns the chunk refs, oldest first, that may be released
 // to bring the retained bytes back under the budget.
 //
-// Release is bounded by bytes alone: no consumer of the summary reports a
-// position it still needs. The idempotency view does not need to -- a record
-// released early costs a dedup opportunity, which degrades to the behavior
-// without the feature. A consumer that cannot afford that (a delete log, whose
-// records must survive until materialized) has to introduce its own floor here
-// along with the frontier that feeds it.
+// Idempotency records may expire at the byte or chunk-count budget. Transform
+// records must remain until their materialization or cleanup frontier is durable,
+// so the oldest chunk with an unconsumed transform stops retention release.
 func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -133,6 +170,9 @@ func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	}
 	released := make([]*streamingpb.PChannelSummaryChunkRef, 0)
 	for _, chunk := range chunks {
+		if !m.chunkReleasedLocked(chunk) {
+			break
+		}
 		released = append(released, &streamingpb.PChannelSummaryChunkRef{
 			Generation: chunk.GetGeneration(),
 			Term:       chunk.GetTerm(),
@@ -168,32 +208,6 @@ func (m *Manager) overRetentionLocked(retained uint64, count int) bool {
 	return false
 }
 
-// removePendingGC drops a finished deletion from the pending queue and, when
-// that empties the queue, publishes the manifest so recovery stops probing the
-// deleted objects.
-func (m *Manager) removePendingGC(ref *streamingpb.PChannelSummaryChunkRef) {
-	m.mu.Lock()
-	pending := m.manifest.GetPendingGc()[:0]
-	for _, existing := range m.manifest.GetPendingGc() {
-		if existing.GetGeneration() == ref.GetGeneration() {
-			continue
-		}
-		pending = append(pending, existing)
-	}
-	m.manifest.PendingGc = pending
-	needsPublish := len(pending) == 0
-	m.mu.Unlock()
-	if needsPublish {
-		if err := m.publishManifest(context.TODO(), func(next *streamingpb.PChannelSummaryManifest) {
-			next.PendingGc = nil
-		}); err != nil {
-			if logger := m.cfg.Logger; logger != nil {
-				logger.Warn(context.TODO(), "summary gc failed to publish drained pending_gc", mlog.Err(err))
-			}
-		}
-	}
-}
-
 // removeChunkEntry drops one chunk from the manifest by generation.
 func removeChunkEntry(chunks []*streamingpb.PChannelSummaryChunkIndexEntry, generation uint64) []*streamingpb.PChannelSummaryChunkIndexEntry {
 	out := chunks[:0]
@@ -209,94 +223,40 @@ func removeChunkEntry(chunks []*streamingpb.PChannelSummaryChunkIndexEntry, gene
 	return out
 }
 
-// sortChunkEntries keeps the manifest index in generation order.
-func sortChunkEntries(chunks []*streamingpb.PChannelSummaryChunkIndexEntry) {
-	sort.Slice(chunks, func(i, j int) bool {
-		return chunks[i].GetGeneration() < chunks[j].GetGeneration()
-	})
+func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkIndexEntry) bool {
+	for _, index := range chunk.GetVchannels() {
+		if index.GetTransform() == nil {
+			continue
+		}
+		floor := m.gcFrontiers[index.GetVchannel()]
+		if floor == 0 {
+			// No GC position yet: nothing of this vchannel may be released.
+			return false
+		}
+		end := index.GetTransform().GetEndTimeTick()
+		if end > floor {
+			// The chunk still holds records past the GC position.
+			return false
+		}
+	}
+	return true
 }
 
-// sweepRetiredTerms collects what a superseded term left behind, at the moment
-// retention retires the last chunk any manifest still holds for it.
-//
-// An object is unreachable once a manifest with content exists at a HIGHER
-// term, because recovery adopts the highest such manifest and probes forward
-// only on that term. This release makes that true for every term below the
-// floor it leaves behind: whatever those terms wrote is either released here or
-// was never referenced at all -- a chunk a fenced owner wrote after its
-// successor's probe, or one whose manifest write failed.
-//
-// The trigger is what makes the sweep safe against a superseded owner that is
-// still running. Reaching it costs a further MaxRetainedChunks objects or
-// RetentionMaxBytes of writes, which is orders of magnitude past the etcd
-// session TTL that bounds such an owner's lifetime -- by the time a term is
-// retired here, nothing is writing under it any more. Sweeping at takeover
-// instead cannot be made to work: a delete punches a hole in the generation run
-// that forward probing stops at, so an object the superseded owner writes after
-// the sweep would fall behind that hole and never be found again.
-//
-// Deletion precedes every bookkeeping step, so an interrupted sweep only leaves
-// work for the next round and each delete is a no-op the second time. Nothing
-// is recorded about where it stopped: the deletions are the progress.
-func (m *Manager) sweepRetiredTerms(ctx context.Context, released []*streamingpb.PChannelSummaryChunkRef) (bool, error) {
-	releasing := make(map[ChunkRef]struct{}, len(released))
-	for _, ref := range released {
-		releasing[ChunkRef{Generation: ref.GetGeneration(), Term: ref.GetTerm()}] = struct{}{}
-	}
-
+// CanCleanupVChannel reports whether recovery no longer needs the VChannel's
+// durable materialization frontier to retire any retained Delete history.
+// The WAL cleanup fence independently prevents replay from recreating it.
+func (m *Manager) CanCleanupVChannel(vchannel string, through uint64) bool {
 	m.mu.Lock()
-	chunks := m.manifest.GetChunks()
-	referenced := make(map[ChunkRef]struct{}, len(chunks)+len(m.manifest.GetPendingGc()))
-	floorBefore, floorAfter := int64(math.MaxInt64), int64(math.MaxInt64)
-	for _, chunk := range chunks {
-		ref := ChunkRef{Generation: chunk.GetGeneration(), Term: chunk.GetTerm()}
-		referenced[ref] = struct{}{}
-		if chunk.GetTerm() < floorBefore {
-			floorBefore = chunk.GetTerm()
-		}
-		if _, gone := releasing[ref]; !gone && chunk.GetTerm() < floorAfter {
-			floorAfter = chunk.GetTerm()
+	defer m.mu.Unlock()
+	if m.terminalErr != nil || m.lastAcked < through || m.manifestVersion != m.publishedVersion {
+		return false
+	}
+	for _, chunk := range m.manifest.GetChunks() {
+		for _, index := range chunk.GetVchannels() {
+			if index.GetVchannel() == vchannel && index.GetTransform() != nil {
+				return false
+			}
 		}
 	}
-	// A chunk already released but not yet deleted is still referenced: the
-	// normal gc path owns it, and sweeping it here would only race that path.
-	for _, ref := range m.manifest.GetPendingGc() {
-		referenced[ChunkRef{Generation: ref.GetGeneration(), Term: ref.GetTerm()}] = struct{}{}
-	}
-	m.mu.Unlock()
-
-	if floorBefore == math.MaxInt64 {
-		return true, nil
-	}
-	if floorAfter == math.MaxInt64 {
-		// The release empties the retained set. This term's manifest is still
-		// the highest one, so everything below its own term is unreachable.
-		floorAfter = m.cfg.Term
-	}
-	if floorAfter <= floorBefore {
-		// No term lost its last chunk in this release.
-		return true, nil
-	}
-
-	deleted, finished, err := m.cfg.Store.SweepUnreferencedChunksBelowTerm(ctx, floorAfter, referenced, orphanSweepBudget)
-	if err != nil {
-		return false, err
-	}
-	if logger := m.cfg.Logger; logger != nil && deleted > 0 {
-		logger.Info(ctx, "swept summary objects of retired terms",
-			mlog.String("pchannel", m.cfg.PChannel),
-			mlog.Int64("belowTerm", floorAfter),
-			mlog.Int("chunks", deleted),
-			mlog.Bool("finished", finished))
-	}
-	if !finished {
-		return false, nil
-	}
-	// Only once the chunks are gone: a manifest is what makes an older term
-	// reachable at all, so dropping it first would strand anything the sweep
-	// had not reached yet.
-	if err := m.cfg.Store.DeleteManifestsBelowTerm(ctx, floorAfter); err != nil {
-		return false, err
-	}
-	return true, nil
+	return true
 }

@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -46,17 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// ErrPKRangeTooSmall marks the one AssembleImportRequest failure a retry can never
-// fix: the PK range was reserved at broadcast from an upper bound, and preimport
-// has since produced a larger exact row count. Neither number changes by
-// rescheduling, so the task must fail now and keep the precise reason.
-//
-// The scheduler cannot key this off merr classification. ErrImportSysFailed also
-// carries genuinely transient cases ("job %d not found, waiting for import job
-// creation"), and merr.IsNonRetryableErr is a deny-list over ErrIo* sentinels that
-// AssembleImportRequest never returns.
-var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
 
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
@@ -346,25 +338,21 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Pre-allocate IDs for autoIDs and logIDs.
-	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
-	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
-	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
-	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
-
-	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
-		ids, ide, e := alloc.AllocN(int64(n))
-		return ids, ide, e
-	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
+	// Reserve the task-level log id range. AutoID jobs whose files carry per-file row id
+	// ranges consume it only for binlog logIDs; backup/L0 and legacy no-range jobs may also
+	// consume it per row for PK/RowID. ReserveLogIDs also checks every file's ID range
+	// against the exact preimport count and fails terminally with ErrIDRangeTooSmall when
+	// a range cannot hold its rows.
+	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
+		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
 
 	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("fieldsNum", fieldsNum),
-		mlog.Int64("idBegin", idBegin),
-		mlog.Int64("idEnd", idEnd),
+		mlog.Int64("idBegin", idRange.GetBegin()),
+		mlog.Int64("idEnd", idRange.GetEnd()),
 		mlog.Uint64("ts", ts))...,
 	)
 
@@ -372,45 +360,29 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	// The PK reservation was sized at broadcast from an upper bound; pre-import has
-	// since produced the exact row count. Compare them here, before any segment is
-	// written, instead of letting pkCursor.take trip mid-import on the datanode.
-	for _, fileStat := range task.GetFileStats() {
-		f := fileStat.GetImportFile()
-		r := f.GetPreAllocatedAutoIds()
-		reserved := r.GetEnd() - r.GetBegin()
-		if reserved > 0 && fileStat.GetTotalRows() > reserved {
-			// Marked so the scheduler can tell this apart from the retriable
-			// failures AssembleImportRequest also returns. The merr code stays
-			// ErrImportSysFailed; markers.Mark only adds the sentinel to the chain.
-			return nil, merr.Mark(merr.WrapErrImportSysFailedMsg(
-				"reserved PK range too small for file %v: %d rows, %d ids reserved",
-				f.GetPaths(), fileStat.GetTotalRows(), reserved), ErrPKRangeTooSmall)
-		}
-	}
-
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
 	req := &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    job.GetPartitionIDs(),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storageVersion,
-		PluginContext:   GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:      useLoonFFI,
+		ClusterID:         Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:             task.GetJobID(),
+		TaskID:            task.GetTaskID(),
+		CollectionID:      task.GetCollectionID(),
+		PartitionIDs:      job.GetPartitionIDs(),
+		Vchannels:         job.GetVchannels(),
+		Schema:            job.GetSchema(),
+		Files:             importFiles,
+		Options:           job.GetOptions(),
+		Ts:                ts,
+		IDRange:           idRange,
+		RequestSegments:   requestSegments,
+		StorageConfig:     createStorageConfig(),
+		TaskSlot:          task.GetTaskSlot(),
+		StorageVersion:    storageVersion,
+		PluginContext:     GetReadPluginContext(job.GetOptions()),
+		UseLoonFfi:        useLoonFFI,
+		RlsCheckPredicate: job.GetRlsCheckPredicate(),
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
@@ -598,7 +570,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // GetJobProgress calculates the importing job progress.
 // The weight of each status is as follows:
 // 10%: Pending
-// 30%: PreImporting
+// 30%: PreImporting/AssigningIDRange
 // 30%: Importing
 // 10%: Stats
 // 10%: IndexBuilding
@@ -617,7 +589,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		progress := getPendingProgress(ctx, jobID, importMeta)
 		return int64(progress * 10), internalpb.ImportJobState_Pending, 0, 0, ""
 
-	case internalpb.ImportJobState_PreImporting:
+	case internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_AssigningIDRange:
 		progress := getPreImportingProgress(ctx, jobID, importMeta)
 		return 10 + int64(progress*30), internalpb.ImportJobState_Importing, 0, 0, ""
 
@@ -791,6 +763,192 @@ func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
 	}
 	mlog.Info(context.TODO(), "import result info", mlog.FieldJobID(jobID),
 		mlog.Int64("totalRows", totalRows), mlog.Int64("totalSize", totalSize))
+}
+
+// normalizeStorageKey folds a storage key into a single namespace so that a
+// candidate path and a deny-list entry are always comparable.
+//
+// Rooting at "/" before cleaning does three things at once:
+//   - an absolute storage root (localStorage.path, e.g. /var/lib/milvus/data)
+//     and a relative one (minio.rootPath, e.g. files) end up in the same
+//     namespace, so the deny list applies to both;
+//   - any number of leading slashes collapses to one, so "//files/insert_log"
+//     cannot dodge an entry that "/files/insert_log" matches;
+//   - a leading ".." is resolved away rather than preserved, which path.Clean
+//     cannot do for a relative path. This matters because LocalChunkManager
+//     opens the caller's path with os.Open, where "../files/insert_log/x"
+//     resolves against the process working directory.
+//
+// Applying POSIX cleaning to REMOTE object keys is deliberate, not an oversight.
+// An S3/MinIO key is an opaque string and RemoteChunkManager passes it through
+// verbatim, so literal prefix matching would describe what a single backend does
+// more precisely -- and would let "files/../files/insert_log/x" and every other
+// syntactic variant of an internal prefix through. RemoteChunkManager fronts
+// MinIO, S3, GCS, Azure Blob, OSS and COS, whose key normalization is not uniform
+// and has historically included key-to-filesystem-path mappings; on any backend
+// that does normalize, those variants read real internal data. The deny list
+// therefore compares the cleaned form on purpose, accepting that a caller key
+// which cleans onto an internal prefix (say "files//insert_log/x", a distinct
+// object on a literal backend) is over-rejected. Over-rejecting is recoverable;
+// under-rejecting is not, and no syntax distinguishes an accidental doubled
+// slash from a deliberate one.
+func normalizeStorageKey(key string) string {
+	return path.Clean("/" + key)
+}
+
+// comparableStorageKey returns the form of key that the deny list compares.
+// Under local storage the read is os.Open, which follows symlinks and /proc
+// magic links such as /proc/self/root, so the key is resolved first. A key
+// that cannot be resolved is an error, which rejects the import.
+//
+// This resolve and the later open are not atomic, and the datanode opens the
+// caller's original string rather than what was resolved here. A caller who can
+// write to the staging directory can swap a symlink in between. Closing that
+// needs O_NOFOLLOW or a resolve-and-recheck at the read.
+func comparableStorageKey(key string, localStorage bool) (string, error) {
+	if localStorage {
+		resolved, err := filepath.EvalSymlinks(key)
+		if err != nil {
+			// Classified by the caller: a candidate path is caller-supplied,
+			// while the storage root is the server's own configuration.
+			return "", err
+		}
+		key = resolved
+	}
+	return normalizeStorageKey(key), nil
+}
+
+// appendDenied adds one internal directory to the deny list.
+//
+// Under local storage it adds the resolved form as well. rootPath is already
+// resolved, but a directory below it can itself be a symlink -- an operator
+// moving the cache subtree onto another disk is the ordinary case. Candidate
+// paths are compared after full resolution, so an entry that exists only in
+// its unresolved spelling would never match one. Both forms are kept: the
+// unresolved one still matches a caller who spells the alias, and a segment
+// that does not exist yet cannot be resolved and cannot be read either.
+func appendDenied(denied []string, dir string, localStorage bool) []string {
+	lexical := normalizeStorageKey(dir)
+	denied = append(denied, lexical)
+	if !localStorage {
+		return denied
+	}
+	resolved, err := filepath.EvalSymlinks(lexical)
+	if err != nil {
+		return denied
+	}
+	if key := normalizeStorageKey(resolved); key != lexical {
+		denied = append(denied, key)
+	}
+	return denied
+}
+
+// ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
+// point into Milvus's own internal storage layout under the storage root path.
+//
+// RBAC authorizes an import against the target collection name only; the file
+// paths never participate in that decision. Refusing Milvus's own data
+// directories keeps an ordinary import inside caller-supplied staging data.
+//
+// Binlog import (backup=true) and L0 import are exempt: reading insert_log and
+// delta_log is exactly what they do. They are gated instead by the cluster-level
+// ImportBinlog privilege, checked in the proxy.
+func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	if importutilv2.IsBackup(options) || importutilv2.IsL0Import(options) {
+		return nil
+	}
+
+	// Segments rooted at localStorage.path share the ChunkManager root only when
+	// the storage type is local. Denying them on a MinIO-backed cluster would
+	// reject caller paths Milvus never writes -- <minio.rootPath>/tmp/... being
+	// the one people actually stage imports under.
+	localStorage := paramtable.Get().CommonCfg.StorageType.GetValue() == "local"
+
+	segments := make([]string, 0,
+		len(common.InternalStorageRootSegments)+len(common.LocalOnlyStorageRootSegments))
+	segments = append(segments, common.InternalStorageRootSegments...)
+	if localStorage {
+		segments = append(segments, common.LocalOnlyStorageRootSegments...)
+	}
+
+	rootPath, err := comparableStorageKey(cm.RootPath(), localStorage)
+	if err != nil {
+		// localStorage.path is operator-owned, so an unresolvable root is a
+		// server-side fault: a dropped mount or a missing directory. Reporting
+		// it as an InputError would bucket it as a bad caller path and stop
+		// retry.Do from retrying a recoverable condition.
+		return merr.WrapErrImportSysFailedMsg(
+			"cannot resolve storage root %s: %v", cm.RootPath(), err)
+	}
+	denied := make([]string, 0, 2*len(segments)+2)
+	for _, segment := range segments {
+		denied = appendDenied(denied, path.Join(rootPath, segment), localStorage)
+	}
+	if localStorage {
+		// Legacy StorageV3 segments stay at <localStorage.path>/<minio.rootPath>/insert_log
+		// across an upgrade and are read in place: migration protects exactly that
+		// directory (storage/localmigrate/migrate.go legacyNamespace) and an update to
+		// a legacy manifest keeps its base. An empty or "." prefix collapses onto the
+		// <root>/insert_log entry above.
+		legacyInsertLog := path.Join(rootPath,
+			paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath)
+		denied = appendDenied(denied, legacyInsertLog, localStorage)
+	} else {
+		// Explore planning manifests live at the bucket root on remote storage,
+		// outside minio.rootPath (external_collection_refresh_manager.go
+		// exploreDirForChunkManager), so no root-anchored entry can reach them.
+		// They are milvus-table-explore.json, which the import extension
+		// whitelist accepts, so nothing else bounds them either.
+		denied = appendDenied(denied, common.ExploreTempRootPath, localStorage)
+	}
+
+	for _, file := range files {
+		for _, filePath := range file.GetPaths() {
+			// The deny entries are anchored at the storage root, but under local
+			// storage the read is os.Open, which resolves a relative key against
+			// the datanode's working directory instead. The two namespaces never
+			// meet, so a relative key can never match a deny entry no matter how
+			// it is normalized -- with WORKDIR /milvus and
+			// localStorage.path=/milvus/data, "data/snapshots/..." reads the
+			// snapshot directory while comparing as "/data/snapshots/...".
+			// Every legitimate local staging path is absolute, so refuse the rest.
+			if localStorage && !path.IsAbs(filePath) {
+				return merr.WrapErrImportFailedMsg(
+					"import path %s must be absolute under common.storageType=local", filePath)
+			}
+
+			cleaned, err := comparableStorageKey(filePath, localStorage)
+			if err != nil {
+				return merr.WrapErrImportFailedMsg(
+					"cannot resolve import path %s: %v", filePath, err)
+			}
+			// Compare both forms of the candidate. The resolved one catches an
+			// alias of the path as a whole -- /proc/self/root, a staging symlink
+			// into the root. The lexical one catches a symlink at any depth
+			// BELOW a registered segment: with <root>/cache/1 -> /nvme/cache-1
+			// the resolved form leaves the root's namespace entirely, so no
+			// root-anchored entry can match it, while the lexical form still
+			// reads <root>/cache/... and hits the entry. A caller who spells the
+			// relocated directory directly is out of reach of either form; that
+			// needs canonicalization at the read, see Known limitations.
+			forms := []string{cleaned}
+			if lexical := normalizeStorageKey(filePath); lexical != cleaned {
+				forms = append(forms, lexical)
+			}
+			for _, deniedPath := range denied {
+				for _, form := range forms {
+					// Boundary match, not a raw prefix match: a raw prefix would also
+					// reject a caller's own "files/insert_logs_2026/a.json".
+					if form == deniedPath || strings.HasPrefix(form, deniedPath+"/") {
+						return merr.WrapErrImportFailedMsg(
+							"import path %s is not allowed: %s is a Milvus internal storage directory",
+							filePath, deniedPath)
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateBinlogImportRequest validates the binlog import request.

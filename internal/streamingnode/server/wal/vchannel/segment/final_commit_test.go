@@ -12,10 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 type testSegmentLifecycle struct {
+	Lifecycle
 	err   error
 	calls int
 }
@@ -28,9 +30,9 @@ func (*testSegmentLifecycle) EnsureGrowingSegment(context.Context, *streamingpb.
 	return nil
 }
 
-func (l *testSegmentLifecycle) CommitL1Segment(context.Context, *streamingpb.SegmentAssignmentMeta) error {
+func (l *testSegmentLifecycle) CommitL1Segment(context.Context, *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
 	l.calls++
-	return l.err
+	return &viewpb.DataVersion{StreamingVersion: 1}, l.err
 }
 
 func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
@@ -53,7 +55,7 @@ func TestFinalCommitPersistsStorageOwnedCompletionMarker(t *testing.T) {
 	view.mu.Unlock()
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 1, lifecycle.calls)
-	require.True(t, view.AssignmentMeta().GetL1CommitDone())
+	require.NotNil(t, view.AssignmentMeta().GetSealedAtDataVersion())
 	view.mu.Lock()
 	require.True(t, view.dirty)
 	view.mu.Unlock()
@@ -128,7 +130,7 @@ func TestFinalCommitFailureKeepsMessageDurabilityPending(t *testing.T) {
 	view.mu.Unlock()
 	err := task.Execute(context.Background())
 	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
-	require.False(t, view.AssignmentMeta().GetL1CommitDone())
+	require.Nil(t, view.AssignmentMeta().GetSealedAtDataVersion())
 	require.False(t, view.finalCommitDone.Load())
 }
 
@@ -203,27 +205,15 @@ func TestBuildCommitL1SegmentRequestPreservesDurableStorageState(t *testing.T) {
 	assert.Equal(t, int64(45), req.GetStats().GetDeltaBinlogSize())
 	assert.True(t, req.GetWithFullBinlogs())
 
-	// The checkpoint position must be non-nil or DataCoord skips the update
-	// and the flushed segment drops out of channel recovery.
-	require.Len(t, req.GetCheckPoints(), 1)
-	cp := req.GetCheckPoints()[0]
-	assert.Equal(t, int64(3), cp.GetSegmentID())
-	assert.Equal(t, int64(10), cp.GetNumOfRows())
-	require.NotNil(t, cp.GetPosition())
-	assert.Equal(t, "v1", cp.GetPosition().GetChannelName())
-	assert.Equal(t, uint64(50), cp.GetPosition().GetTimestamp())
-
-	require.Len(t, req.GetStartPositions(), 1)
-	sp := req.GetStartPositions()[0]
-	assert.Equal(t, int64(3), sp.GetSegmentID())
-	require.NotNil(t, sp.GetStartPosition())
-	assert.Equal(t, "v1", sp.GetStartPosition().GetChannelName())
-	assert.Equal(t, uint64(20), sp.GetStartPosition().GetTimestamp())
+	// Data packs publish complete positions before final commit. Sealing must
+	// preserve those Coordinator-owned positions, also after SN recovery.
+	require.Empty(t, req.GetCheckPoints())
+	require.Empty(t, req.GetStartPositions())
 }
 
 // TestEnsureFinalCommitSurvivesTerminalError covers the low-1 ordering fix:
 // a segment whose L1 commit already landed (finalCommitDone == true, e.g.
-// restored from meta.L1CommitDone on recovery) is durably committed regardless
+// restored from meta.SealedAtDataVersion on recovery) is durably committed regardless
 // of any later task failure. finalCommitDone is the authoritative fact and is
 // checked before the terminal gate, so a terminal error must not invert the
 // answer for an already-committed segment (EnsureFinalCommit stays true), and
@@ -232,11 +222,11 @@ func TestBuildCommitL1SegmentRequestPreservesDurableStorageState(t *testing.T) {
 func TestEnsureFinalCommitSurvivesTerminalError(t *testing.T) {
 	committed := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:          1,
-			Vchannel:           "v1",
-			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick: 10,
-			L1CommitDone:       true,
+			SegmentId:           1,
+			Vchannel:            "v1",
+			State:               streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick:  10,
+			SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 		},
 		10,
 		false,
@@ -244,10 +234,10 @@ func TestEnsureFinalCommitSurvivesTerminalError(t *testing.T) {
 		nil,
 		runtimeConfig{runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}},
 	)
-	require.True(t, committed.finalCommitDone.Load(), "L1CommitDone is restored into finalCommitDone")
+	require.True(t, committed.finalCommitDone.Load(), "SealedAtDataVersion is restored into finalCommitDone")
 
 	committed.markUnrecoverable(context.Background(), errors.New("terminal"))
 	require.True(t, committed.EnsureFinalCommit(),
 		"a durably committed segment stays committed even after a later terminal task error")
-	require.True(t, committed.AssignmentMeta().GetL1CommitDone())
+	require.NotNil(t, committed.AssignmentMeta().GetSealedAtDataVersion())
 }

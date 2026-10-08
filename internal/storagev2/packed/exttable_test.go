@@ -927,6 +927,107 @@ func TestNormalizeFileInfos_StableSortAndFilter(t *testing.T) {
 	assert.Equal(t, skippedA, skippedB)
 }
 
+func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mode             string
+		enableExternal   bool
+		wantExternalMode string
+	}{
+		{name: "external_disabled", mode: "2", wantExternalMode: "0"},
+		{name: "external_small_reads", mode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_all_reads", mode: "1", enableExternal: true, wantExternalMode: "1"},
+		{name: "talon_disabled", mode: "0", enableExternal: true, wantExternalMode: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			for key, value := range map[string]string{
+				"mode":               tc.mode,
+				"smallReadThreshold": "65536",
+				"coordinator":        "127.0.0.1:7000",
+				"blockSize":          "8388608",
+				"maxIdlePerAddr":     "32",
+			} {
+				require.NoError(t, params.Save("common.storage.talon."+key, value))
+			}
+			if tc.enableExternal {
+				require.NoError(t, params.Save("common.storage.talon.enableForExternalTable", "true"))
+			}
+
+			for _, storageType := range []string{"remote", "local"} {
+				t.Run(storageType, func(t *testing.T) {
+					require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, tc.mode))
+					config := CreateStorageConfig()
+					// The request configuration must not be overwritten by later process changes.
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "0"))
+					cConfig := GetCStorageConfig(config)
+					assert.Equal(t, config.GetTalonMode(), uint32(cConfig.talon_mode))
+					assert.Equal(t, config.GetTalonEnableForExternalTable(), bool(cConfig.talon_enable_for_external_table))
+					DeleteCStorageConfig(cConfig)
+					props, err := MakePropertiesFromStorageConfig(config, nil)
+					require.NoError(t, err)
+					defer FreeProperties(props)
+					if storageType == "local" {
+						assert.Equal(t, "0", loonPropertyString(props, "fs.talon.mode"))
+					} else {
+						for key, want := range map[string]string{
+							"mode":                 tc.mode,
+							"small_read_threshold": "65536",
+							"coordinator":          "127.0.0.1:7000",
+							"block_size":           "8388608",
+							"max_idle_per_addr":    "32",
+						} {
+							assert.Equal(t, want, loonPropertyString(props, "fs.talon."+key), key)
+						}
+					}
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet"}`))
+					assert.Equal(t, tc.wantExternalMode, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Equal(t, "127.0.0.1:7000", loonPropertyString(props, "extfs.42.talon.coordinator"))
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet","extfs":{"storage_type":"local"}}`))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.mode"))
+				})
+			}
+		})
+	}
+}
+
+func TestMakePropertiesFromStorageConfig_TalonThresholdDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override string
+		want     uint32
+	}{
+		{name: "default", want: 524288},
+		{name: "configured", override: "1048576", want: 1048576},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "2"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonCoordinator.Key, "talon:7000"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnableForExternalTable.Key, "true"))
+			if tc.override != "" {
+				require.NoError(t, params.Save(params.CommonCfg.StorageTalonSmallReadThreshold.Key, tc.override))
+			}
+			config := CreateStorageConfig()
+			assert.Equal(t, tc.want, config.GetTalonSmallReadThreshold())
+			cConfig := GetCStorageConfig(config)
+			assert.Equal(t, tc.want, uint32(cConfig.talon_small_read_threshold))
+			DeleteCStorageConfig(cConfig)
+			props, err := MakePropertiesFromStorageConfig(config, nil)
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "fs.talon.small_read_threshold"))
+			require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", ""))
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "extfs.42.talon.small_read_threshold"))
+		})
+	}
+}
+
 func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
 	// Test that extraKVs can add per-collection extfs properties
 	config := &indexpb.StorageConfig{
@@ -1921,6 +2022,134 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_NoStorageV2(t *testing.T)
 	assert.True(t, IsMilvusTableStorageV2ManifestListMissing(err))
 	assert.Contains(t, err.Error(), "storagev2_manifest_list")
 	assert.Contains(t, err.Error(), "common.storage.useLoonFFI=true")
+}
+
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SegmentFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{"no_reader", "requires source segment manifests"},
+		{"read_error", "read source segment manifest"},
+		{"empty_segment", "empty segment"},
+		{"empty_manifest", "empty storagev2 manifest"},
+		{"resolve_error", "resolve source segment manifest"},
+		{"missing_segment", "no source segment manifest"},
+		{"zero_rows", "non-positive row count"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{
+				ManifestList: []string{"segment.avro"},
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+					{SegmentId: 10, Manifest: MarshalManifestPath("source/10", 1)},
+				},
+			}
+			read := func(string, int32) (*datapb.SegmentDescription, error) {
+				switch tc.name {
+				case "read_error":
+					return nil, context.DeadlineExceeded
+				case "empty_segment":
+					return nil, nil
+				case "missing_segment":
+					return &datapb.SegmentDescription{SegmentId: 20, NumOfRows: 1}, nil
+				case "zero_rows":
+					return &datapb.SegmentDescription{SegmentId: 10}, nil
+				default:
+					return &datapb.SegmentDescription{SegmentId: 10, NumOfRows: 1}, nil
+				}
+			}
+			if tc.name == "no_reader" {
+				read = nil
+			}
+			if tc.name == "empty_manifest" {
+				metadata.Storagev2ManifestList[0].Manifest = ""
+			}
+			resolve := func(manifest string) (string, error) {
+				if tc.name == "resolve_error" {
+					return "", context.DeadlineExceeded
+				}
+				return manifest, nil
+			}
+			data, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+			_, err = buildMilvusTableFileInfosFromSnapshotMetadata(data, read, resolve)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.reason)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
+func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		wantErr error
+	}{
+		{"truncated_json", `{"corrupt manifest`, merr.ErrDataIntegrity},
+		{"empty_object", "", merr.ErrDataIntegrity},
+		{"invalid_field_type", `{"format_version":"invalid"}`, merr.ErrDataIntegrity},
+		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Exercise both consumers with real parsing. Only object I/O is patched.
+			read := mockey.Mock(readExternalSourceFile).Return([]byte(tc.data), nil).Build()
+			defer read.UnPatch()
+			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.ErrorIs(t, merr.Wrap(err, "outer context"), tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+			assert.Contains(t, err.Error(), "parse milvus snapshot metadata")
+
+			_, err = buildMilvusTableFileInfosFromSnapshotMetadata([]byte(tc.data), nil, nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+		})
+	}
+}
+
+func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *testing.T) {
+	for _, readErr := range []error{context.DeadlineExceeded, ErrLoonTransient} {
+		t.Run(readErr.Error(), func(t *testing.T) {
+			read := mockey.Mock(readExternalSourceFile).Return(nil, readErr).Build()
+			defer read.UnPatch()
+			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, readErr)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
+func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
+	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
+	defer read.UnPatch()
+	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), metadata.GetFormatVersion())
+}
+
+func TestReadMilvusTableSnapshotMetadata_InvalidSource(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		spec   string
+	}{
+		{"s3://bucket/directory", `{"format":"milvus-table"}`},
+		{"s3://bucket/metadata.json", `{`},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			_, err := ReadMilvusTableSnapshotMetadata(tc.source, tc.spec, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
 }
 
 func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SourceSegmentDeltalogsSkipped(t *testing.T) {

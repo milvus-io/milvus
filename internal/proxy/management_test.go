@@ -21,6 +21,7 @@ import (
 	gojson "encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -120,6 +121,51 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 		})
 
 		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume+"?collection_id=100", nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.ResumeDatacoordGC(recorder, req)
+
+		s.Equal(http.StatusOK, recorder.Code)
+	})
+
+	s.Run("without_ticket", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().GcControl(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.GcControlRequest, options ...grpc.CallOption) (*commonpb.Status, error) {
+			s.Equal(datapb.GcCommand_Resume, req.GetCommand())
+			// an empty collection_id must not be forwarded, the coordinator
+			// fails to parse it and rejects the whole request
+			for _, kv := range req.GetParams() {
+				s.NotEqual("collection_id", kv.GetKey())
+			}
+			return &commonpb.Status{}, nil
+		})
+
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume, nil)
+		s.Require().NoError(err)
+
+		recorder := httptest.NewRecorder()
+		s.proxy.ResumeDatacoordGC(recorder, req)
+
+		s.Equal(http.StatusOK, recorder.Code)
+	})
+
+	s.Run("with_ticket", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+		s.mixcoord.EXPECT().GcControl(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.GcControlRequest, options ...grpc.CallOption) (*commonpb.Status, error) {
+			s.Equal(datapb.GcCommand_Resume, req.GetCommand())
+			params := make(map[string]string, len(req.GetParams()))
+			for _, kv := range req.GetParams() {
+				params[kv.GetKey()] = kv.GetValue()
+			}
+			s.Equal("100", params["collection_id"])
+			return &commonpb.Status{}, nil
+		})
+
+		ticket := EncodeTicket("mock_token", "100")
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume+"?ticket="+url.QueryEscape(ticket), nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()

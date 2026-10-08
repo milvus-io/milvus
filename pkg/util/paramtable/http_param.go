@@ -18,6 +18,7 @@ package paramtable
 
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
+	EnableV1              ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
@@ -48,6 +49,18 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.Enabled.Init(base.mgr)
+
+	p.EnableV1 = ParamItem{
+		Key:          "proxy.http.enableV1",
+		DefaultValue: "true",
+		Version:      "3.0.1",
+		Doc: `Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+Disabling requires a restart and leaves the HTTP listeners, /v2/vectordb/*, probes, and metrics available.
+The non-underscore /api/v1/* REST API has been removed regardless of this setting.
+WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.`,
+		Export: true,
+	}
+	p.EnableV1.Init(base.mgr)
 
 	p.DebugMode = ParamItem{
 		Key:          "proxy.http.debug_mode",
