@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +35,7 @@ const (
 
 var (
 	once         sync.Once
+	initialized  atomic.Bool
 	params       ComponentParam
 	runtimeParam = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
@@ -56,6 +58,7 @@ func Init() {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
@@ -65,7 +68,17 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
+}
+
+// GetIfInitialized returns fully initialized parameters without triggering Init.
+// Code used during initialization may safely take its default path when nil.
+func GetIfInitialized() *ComponentParam {
+	if !initialized.Load() {
+		return nil
+	}
+	return &params
 }
 
 func Get() *ComponentParam {

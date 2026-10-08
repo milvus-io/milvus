@@ -91,8 +91,10 @@ func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 	// Fast path for the top-level hot RPC messages supported by TryUnmarshal:
 	// RetrieveResults, InsertRequest, and UpsertRequest. Unsupported message
 	// types fall through to the official codec.
-	if handled, err := fastpb.TryUnmarshal(v, buf.ReadOnlyData()); handled {
-		return err
+	if fastPBEnabled() {
+		if handled, err := fastpb.TryUnmarshal(v, buf.ReadOnlyData()); handled {
+			return err
+		}
 	}
 	return proto.Unmarshal(buf.ReadOnlyData(), msg)
 }

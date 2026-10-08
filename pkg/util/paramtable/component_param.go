@@ -298,6 +298,8 @@ func (p *ComponentParam) CleanEvent() {
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
+	EnableFastPB ParamItem `refreshable:"true"`
+
 	ClusterPrefix ParamItem `refreshable:"false"`
 
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
@@ -442,6 +444,14 @@ type commonConfig struct {
 }
 
 func (p *commonConfig) init(base *BaseTable) {
+	p.EnableFastPB = ParamItem{
+		Key:          "common.enableFastPB",
+		DefaultValue: "true",
+		Doc:          "Use fastPB for supported protobuf decoding paths. Set false for an immediate fallback to the official protobuf decoder.",
+		Export:       true,
+	}
+	p.EnableFastPB.Init(base.mgr)
+
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.cluster",

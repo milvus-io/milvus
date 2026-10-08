@@ -12,10 +12,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -618,9 +618,8 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			results = append(results, partialSearchResult.ResultData)
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
-			// fastpb: hand-written decoder for the search reduce hot path
-			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
-			err := fastpb.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
+			// Decode internal search results with the dynamically selected decoder.
+			err := resource.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
 			if err != nil {
 				return nil, err
 			}
