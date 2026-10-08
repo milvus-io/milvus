@@ -39,6 +39,15 @@ type LoadConfigStore struct {
 
 	// snapshot is the resident immutable view returned to Balancer.
 	snapshot *LoadConfigSnapshot
+
+	observers []func(collectionID int64, released bool)
+}
+
+// LoadConfigEntry captures an immutable config and its version in one read.
+// Config is nil and ConfigVersion is zero when the collection is absent.
+type LoadConfigEntry struct {
+	Config        *LoadConfig
+	ConfigVersion uint64
 }
 
 // RecoverLoadConfigStore constructs a LoadConfigStore and rebuilds its
@@ -143,6 +152,7 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	s.version++
 	s.versions[collectionID] = s.version
 	s.mu.Unlock()
+	s.notifyObservers(collectionID, false)
 	return nil
 }
 
@@ -173,7 +183,31 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 	s.version++
 	delete(s.versions, collectionID)
 	s.mu.Unlock()
+	s.notifyObservers(collectionID, true)
 	return nil
+}
+
+// RegisterObserver observes future committed changes. Callbacks run under the
+// collection guard so a release notification precedes any subsequent reload.
+// They must only signal waiters, never perform I/O or reenter the store.
+func (s *LoadConfigStore) RegisterObserver(observer func(collectionID int64, released bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observers = append(s.observers, observer)
+}
+
+func (s *LoadConfigStore) notifyObservers(collectionID int64, released bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, observer := range s.observers {
+		observer(collectionID, released)
+	}
+}
+
+// Get reads one collection and its version without materializing a snapshot.
+func (s *LoadConfigStore) Get(collectionID int64) LoadConfigEntry {
+	config, version := s.GetConfigWithVersion(collectionID)
+	return LoadConfigEntry{Config: config, ConfigVersion: version}
 }
 
 // Contains reports whether a collection has a live load config without
