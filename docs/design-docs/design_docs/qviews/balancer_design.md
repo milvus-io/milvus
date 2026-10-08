@@ -383,8 +383,7 @@ info used when the local state machine acquires resources.
 - **LoadPercentage**: `count(current-config Up expected shards) / count(expected shards) * 100`.
 
 `loadstatus.Get` is the shared progress/readiness calculation. Collection and
-partition status use it; readiness consumers, including AutoLoad when integrated,
-should use its `Ready()` result. It reads LoadConfig and its version atomically,
+partition status and AutoLoad readiness use it and its `Ready()` result. It reads LoadConfig and its version atomically,
 reads one scoped Registry snapshot, then rechecks the config version. If the
 version changed, it reports zero progress for the current configuration (or no
 configuration after release). Store versions increase across release/reload, so

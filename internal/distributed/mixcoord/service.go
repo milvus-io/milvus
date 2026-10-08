@@ -750,6 +750,10 @@ func (s *Server) OperatePrivilegeGroup(ctx context.Context, request *milvuspb.Op
 	return s.mixCoord.OperatePrivilegeGroup(ctx, request)
 }
 
+func (s *Server) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.EnsureCollectionReady(ctx, req)
+}
+
 // ShowCollections shows the collections in the QueryCoord.
 func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return s.mixCoord.ShowLoadCollections(ctx, req)

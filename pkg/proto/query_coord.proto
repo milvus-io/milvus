@@ -111,6 +111,7 @@ service QueryCoord {
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -1251,7 +1252,8 @@ message ListLoadedSegmentsResponse {
     repeated int64 segmentIDs = 2;
 }
 
-
-
-
-
+message EnsureCollectionReadyRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated string expected_vchannels = 3;
+}

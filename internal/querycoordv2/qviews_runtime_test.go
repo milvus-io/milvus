@@ -107,10 +107,11 @@ func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
 func testPersistedQueryView(collectionID int64, shardID qviews.ShardID) *viewpb.QueryViewOfShard {
 	return &viewpb.QueryViewOfShard{
 		Meta: &viewpb.QueryViewMeta{
-			CollectionId: collectionID,
-			ReplicaId:    shardID.ReplicaID,
-			Vchannel:     shardID.VChannel,
-			State:        viewpb.QueryViewState_QueryViewStateUp,
+			CollectionId:    collectionID,
+			ReplicaId:       shardID.ReplicaID,
+			Vchannel:        shardID.VChannel,
+			State:           viewpb.QueryViewState_QueryViewStateUp,
+			LoadInfoVersion: 1,
 			Version: &viewpb.QueryViewVersion{
 				DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1},
 				QueryVersion: 1,

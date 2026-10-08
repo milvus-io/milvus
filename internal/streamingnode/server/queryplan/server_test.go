@@ -17,6 +17,7 @@ import (
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const testVChannel = "by-dev-rootcoord-dml_0_100v0"
@@ -118,6 +119,32 @@ func TestServerGetQueryPlanProjectsViewErrorToGRPCStatus(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestServerGetQueryPlanProjectsReleasedLoadInfoAsViewInvalidated(t *testing.T) {
+	loadInfoErr := merr.CheckRPCCall(merr.Status(merr.WrapErrCollectionNotLoaded(100)), nil)
+	require.ErrorIs(t, loadInfoErr, merr.ErrCollectionNotLoaded)
+	planErr := merr.Wrap(loadInfoErr, "get sealed BM25 resources for data version 6/5")
+	manager := &fakeWALManager{wal: &fakeProviderWAL{err: planErr}}
+	server := NewServer(manager)
+
+	_, err := server.GetQueryPlan(newIncomingPChannelContext("by-dev-rootcoord-dml_0"), &viewpb.GetQueryPlanRequest{
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: testVChannel},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	viewErr := viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err))
+	require.True(t, viewErr.IsViewInvalidated())
+	require.Contains(t, viewErr.Cause, "get sealed BM25 resources for data version 6/5")
+	require.Contains(t, viewErr.Cause, "collection not loaded")
+}
+
+func TestToRPCErrorLeavesOtherMerrAsUnknown(t *testing.T) {
+	err := toRPCError(merr.WrapErrServiceInternalMsg("BM25 resource response is invalid"))
+	require.Equal(t, codes.Unknown, status.Code(err))
+	require.Equal(t, viewpb.ViewCode_VIEW_CODE_UNKNOWN,
+		viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", err)).Code)
 }
 
 func TestServerGetQueryPlanRejectsMismatchedPChannelMetadata(t *testing.T) {

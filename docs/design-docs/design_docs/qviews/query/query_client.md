@@ -512,3 +512,29 @@ internal/views/
 internal/streamingnode/client/handler/
 └── handler_client.go          # (existing) Extended with QueryPlanClient + SN ViewQueryService
 ```
+
+
+## Automatic collection loading and idle release
+
+With `proxy.enableAutoLoad` enabled, each external Search, HybridSearch, or Query
+attempt first calls QueryCoord's `EnsureCollectionReady`. QueryCoord shares
+loading work per collection and waits for the same expected-shard/current-config
+completion condition used by explicit load-status APIs (`loadstatus.Get`).
+Configuration and shard-state notifications wake waiters; a release permanently
+invalidates existing waiters even if the collection is immediately reloaded.
+Each caller can cancel independently of the shared load operation.
+
+A released or invalidated view restarts the external DQL attempt, including the
+readiness check. Each attempt creates fresh tasks. Search preserves the current
+RLS snapshot and search-by-primary-key request-copy rules; internal requery
+errors propagate to the external attempt. Query request accounting is recorded
+once, outside the retry loop.
+
+`queryCoord.autoRelease.enabled` defaults to false and is effective only while
+AutoLoad is also enabled. The coordinator tracks DQL attempts and releases idle
+collections through the existing DropLoadConfig broadcast path. The default
+idle TTL is 600 seconds, scan interval 30 seconds, and release concurrency 16;
+these settings support runtime updates. Disabling either feature clears usage
+state; re-enabling starts a fresh TTL on the first scan. Activity tracks request
+attempts rather than running-query leases, so an individual query can outlive
+the idle TTL.

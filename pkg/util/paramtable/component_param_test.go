@@ -249,6 +249,61 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 	})
 }
 
+func TestProxyEnableAutoLoad(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	item := &params.EnableAutoLoad
+
+	assert.Equal(t, "proxy.enableAutoLoad", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, base.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, base.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestQueryCoordAutoRelease(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := queryCoordConfig{}
+	params.init(base)
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
+	}
+
+	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
+	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
+	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
+	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
+	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
+
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+
+	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+}
+
 func TestComponentParam_StorageIopsParams(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))

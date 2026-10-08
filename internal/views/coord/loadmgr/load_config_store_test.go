@@ -2,10 +2,12 @@ package loadmgr
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,6 +29,75 @@ func newTestStore(t *testing.T) (*LoadConfigStore, *mocks.QueryCoordCatalog) {
 	store, err := RecoverLoadConfigStore(context.Background(), catalog)
 	require.NoError(t, err)
 	return store, catalog
+}
+
+func TestLoadConfigGetPreservesConfigVersionDuringPut(t *testing.T) {
+	store, catalog := newTestStore(t)
+	const updates = 200
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Times(updates + 1)
+	put := func(revision int64) error {
+		return store.Put(context.Background(), &LoadConfig{
+			CollectionID: 1,
+			LoadFields:   []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: revision}},
+		})
+	}
+	require.NoError(t, put(1))
+	// Expose a write between individual getters even with a single test CPU.
+	// Get must read the config and version together, rather than combine getters.
+	var getConfig func(*LoadConfigStore, int64) *LoadConfig
+	getter := mockey.Mock((*LoadConfigStore).GetConfig).Origin(&getConfig).To(func(s *LoadConfigStore, id int64) *LoadConfig {
+		config := getConfig(s, id)
+		runtime.Gosched()
+		return config
+	}).Build()
+	defer getter.UnPatch()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	initialVersion := store.Get(1).ConfigVersion
+	start := make(chan struct{})
+	done := make(chan struct{})
+	var writeErr error
+	go func() {
+		defer close(done)
+		<-start
+		for revision := int64(2); revision <= updates+1; revision++ {
+			if writeErr = ctx.Err(); writeErr != nil {
+				return
+			}
+			if writeErr = put(revision); writeErr != nil {
+				return
+			}
+			runtime.Gosched()
+		}
+	}()
+	close(start)
+	defer func() { cancel(); <-done }()
+
+reading:
+	for {
+		entry := store.Get(1)
+		assert.Equal(t, uint64(entry.Config.LoadFields[0].IndexId+1), entry.ConfigVersion)
+		select {
+		case <-done:
+			require.NoError(t, writeErr)
+			break reading
+		case <-ctx.Done():
+			t.Fatal("concurrent config updates did not finish")
+		default:
+			runtime.Gosched()
+		}
+	}
+	final := store.Get(1)
+	require.Greater(t, final.ConfigVersion, initialVersion)
+	require.EqualValues(t, updates+1, final.Config.LoadFields[0].IndexId)
+	require.Equal(t, uint64(final.Config.LoadFields[0].IndexId+1), final.ConfigVersion)
+
+	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(1)).Return(nil).Once()
+	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(1)).Return(nil).Once()
+	require.NoError(t, store.Remove(context.Background(), 1))
+	entry := store.Get(1)
+	assert.Nil(t, entry.Config)
+	assert.Zero(t, entry.ConfigVersion)
 }
 
 func sampleConfig() *LoadConfig {

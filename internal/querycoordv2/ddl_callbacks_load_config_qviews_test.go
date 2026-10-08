@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -63,7 +62,8 @@ func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 		CollectionID: collectionID,
 	}))
 	require.NotNil(t, captured)
-	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	// The broadcaster resolves an empty target list to the control channel.
+	assert.Empty(t, captured.BroadcastHeader().VChannels)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 	assert.Empty(t, server.meta.GetAll(ctx))
 	catalog.AssertNotCalled(t, "SaveCollection", mock.Anything, mock.Anything)
@@ -89,7 +89,8 @@ func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {
 		PartitionIDs: []int64{10},
 	}))
 	require.NotNil(t, captured)
-	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	// The broadcaster resolves an empty target list to the control channel.
+	assert.Empty(t, captured.BroadcastHeader().VChannels)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
@@ -121,7 +122,8 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 		CollectionID: collectionID,
 	}))
 	require.NotNil(t, captured)
-	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	// The broadcaster resolves an empty target list to the control channel.
+	assert.Empty(t, captured.BroadcastHeader().VChannels)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
@@ -131,20 +133,9 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	require.NoError(t, server.meta.PutCollection(ctx, &meta.Collection{
-		CollectionLoadInfo: &querypb.CollectionLoadInfo{
-			CollectionID: collectionID,
-			Status:       querypb.LoadStatus_Loaded,
-			LoadType:     querypb.LoadType_LoadPartition,
-			LoadFields:   []int64{100},
-			FieldIndexID: map[int64]int64{100: 200},
-		},
-	}, &meta.Partition{
-		PartitionLoadInfo: &querypb.PartitionLoadInfo{
-			CollectionID: collectionID,
-			PartitionID:  10,
-			Status:       querypb.LoadStatus_Loaded,
-		},
+	require.NoError(t, server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
+		CollectionID: collectionID,
+		PartitionIDs: []int64{10},
 	}))
 
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
@@ -161,7 +152,8 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, collectionReleased)
 	require.NotNil(t, captured)
-	assert.Equal(t, []string{streaming.WAL().ControlChannel()}, captured.BroadcastHeader().VChannels)
+	// The broadcaster resolves an empty target list to the control channel.
+	assert.Empty(t, captured.BroadcastHeader().VChannels)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
@@ -199,10 +191,13 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	m.HandleNodeUp(context.Background(), 1)
 
 	broker := meta.NewMockBroker(t)
+	usage := newCollectionUsageManager(runtime.loadConfigStore, nil)
+	t.Cleanup(usage.close)
 	return &Server{
-		meta:          m,
-		broker:        broker,
-		qviewsRuntime: runtime,
+		meta:            m,
+		broker:          broker,
+		qviewsRuntime:   runtime,
+		collectionUsage: usage,
 	}, catalog, broker
 }
 

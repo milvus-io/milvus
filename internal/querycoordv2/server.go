@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -137,6 +138,12 @@ type Server struct {
 
 	// query view runtime
 	qviewsRuntime *qviewsRuntime
+
+	// DQL activity tracking and TTL-based collection release.
+	collectionUsage *collectionUsageManager
+
+	// One shared automatic load and readiness wait per collection across Proxies.
+	autoLoadCollectionGroup singleflight.Group
 
 	// query view segment load info watch
 	segmentLoadInfoWatcher *queryViewSegmentLoadInfoWatcher
@@ -400,6 +407,10 @@ func (s *Server) initQViewsRuntime() error {
 		return err
 	}
 	s.qviewsRuntime = runtime
+	s.collectionUsage = newCollectionUsageManager(
+		runtime.loadConfigStore,
+		s.autoReleaseCollection,
+	)
 	return nil
 }
 
@@ -531,12 +542,20 @@ func (s *Server) startServerLoop() {
 	if s.qviewsRuntime != nil {
 		s.qviewsRuntime.start(s.ctx)
 	}
+	if s.collectionUsage != nil {
+		s.collectionUsage.start(s.ctx)
+	}
 }
 
 func (s *Server) Stop() error {
 	// FOLLOW the dependence graph:
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
+
+	if s.collectionUsage != nil {
+		mlog.Info(s.ctx, "stop collection usage manager...")
+		s.collectionUsage.close()
+	}
 
 	if s.loadConfigWatcher != nil {
 		mlog.Info(s.ctx, "stop load config watcher...")

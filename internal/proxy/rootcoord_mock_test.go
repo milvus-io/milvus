@@ -104,14 +104,15 @@ type MixCoordMock struct {
 
 	// TODO(dragondriver): TimeTick-related
 
-	lastTs                  typeutil.Timestamp
-	lastTsMtx               sync.Mutex
-	checkHealthFunc         func(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
-	GetIndexStateFunc       func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error)
-	DescribeIndexFunc       func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error)
-	GetShardLeadersFunc     func(ctx context.Context, request *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error)
-	ShowLoadPartitionsFunc  func(ctx context.Context, request *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error)
-	ShowLoadCollectionsFunc func(ctx context.Context, request *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error)
+	lastTs                    typeutil.Timestamp
+	lastTsMtx                 sync.Mutex
+	checkHealthFunc           func(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
+	GetIndexStateFunc         func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error)
+	DescribeIndexFunc         func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error)
+	GetShardLeadersFunc       func(ctx context.Context, request *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error)
+	ShowLoadPartitionsFunc    func(ctx context.Context, request *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error)
+	EnsureCollectionReadyFunc func(context.Context, *querypb.EnsureCollectionReadyRequest, ...grpc.CallOption) (*commonpb.Status, error)
+	ShowLoadCollectionsFunc   func(ctx context.Context, request *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error)
 	GetGetCredentialFunc
 	DescribeCollectionFunc
 	ShowPartitionsFunc
@@ -1556,6 +1557,13 @@ func (coord *MixCoordMock) GetIndexBuildProgress(ctx context.Context, req *index
 	return &indexpb.GetIndexBuildProgressResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	if coord.EnsureCollectionReadyFunc != nil {
+		return coord.EnsureCollectionReadyFunc(ctx, req, opts...)
+	}
+	return merr.Success(), nil
 }
 
 func (coord *MixCoordMock) ShowLoadCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
