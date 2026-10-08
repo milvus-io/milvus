@@ -56,8 +56,13 @@ type ChangeGroupDataViewEvent struct {
 // only compact_version and applies membership both ways: NewSegments are added
 // and SupersededSegmentIDs removed in the same snapshot. An idempotent replay
 // of an already-published batch (e.g. the READY-replay probe after recovery)
-// leaves the membership unchanged and returns the current snapshot without a
-// new version.
+// that leaves both the membership AND the Manifest versions unchanged returns
+// the current snapshot without burning a version; a replay carrying a higher
+// Manifest version is new information (addSegments advances the stored version
+// monotonically) and therefore advances compact_version too. A publish that
+// adds and removes nothing over an empty base produces an empty snapshot (no
+// shards), which the caller must not compose into the catalog txn — same
+// degenerate-publish contract as PrepareFlush.
 func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDataViewEvent) (*viewpb.DataViewOfCollection, func(), func(), error) {
 	state, unlock := m.lockStateForMutation(event.CollectionID)
 	if state == nil {
@@ -73,6 +78,10 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 	next := canonicalDataViewClone(base)
 	if next == nil {
 		next = &viewpb.DataViewOfCollection{CollectionId: event.CollectionID}
+	}
+	if err := rejectMemberSupersededOverlap(event.NewSegments, event.SupersededSegmentIDs); err != nil {
+		unlock()
+		return nil, nil, nil, err
 	}
 	if err := addSegments(next, event.NewSegments); err != nil {
 		unlock()
@@ -129,6 +138,29 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		once.Do(unlock)
 	}
 	return next, commit, abort, nil
+}
+
+// rejectMemberSupersededOverlap rejects a publish event whose NewSegments and
+// SupersededSegmentIDs intersect: a Segment in both lists would be added by
+// addSegments and then silently deleted by removeSegments, making a published
+// member vanish. The group model guarantees disjointness, so this is a
+// defensive guard mirroring addSegments' conflicting-location check; a
+// non-positive or duplicate ID is rejected by the per-list validations.
+func rejectMemberSupersededOverlap(newSegments []LoadableSegment, supersededSegmentIDs []int64) error {
+	if len(supersededSegmentIDs) == 0 {
+		return nil
+	}
+	superseded := make(map[int64]struct{}, len(supersededSegmentIDs))
+	for _, id := range supersededSegmentIDs {
+		superseded[id] = struct{}{}
+	}
+	for _, segment := range newSegments {
+		if _, ok := superseded[segment.SegmentID]; ok {
+			return merr.WrapErrDataIntegrityMsg(
+				"Segment %d is both a new member and a superseded parent in one publish", segment.SegmentID)
+		}
+	}
+	return nil
 }
 
 // removeSegments removes the given Segment IDs from every shard/partition of

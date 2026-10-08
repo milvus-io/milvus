@@ -259,6 +259,25 @@ func TestManagerPublishChangeRejectsInvalidRemovalID(t *testing.T) {
 	require.Nil(t, abort)
 }
 
+func TestManagerPublishChangeRejectsMemberSupersededOverlap(t *testing.T) {
+	ctx := context.Background()
+	manager, _ := newTestManager()
+	_, err := manager.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+
+	// A Segment in both lists would be added then silently deleted, making a
+	// published member vanish; the group model guarantees disjointness, so the
+	// manager rejects the caller misuse defensively.
+	_, commit, abort, err := manager.PublishChange(ctx, ChangeGroupDataViewEvent{
+		CollectionID:         1,
+		NewSegments:          []LoadableSegment{segment(20, "ch-1", 100)},
+		SupersededSegmentIDs: []int64{20},
+	})
+	require.Error(t, err)
+	require.Nil(t, commit)
+	require.Nil(t, abort)
+}
+
 func TestManagerPublishChangePublishErrorKeepsState(t *testing.T) {
 	ctx := context.Background()
 	manager, catalog := newTestManager()
@@ -278,6 +297,7 @@ func TestManagerPublishChangePublishErrorKeepsState(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, view)
+	require.Error(t, catalog.SaveDataView(ctx, view))
 	abort()
 
 	ref, err := manager.Latest(ctx, 1)
