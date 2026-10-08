@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -73,11 +75,11 @@ func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.
 		&fakeTransformSegment{id: 1001, partitionID: 10},
 	}
 
-	var physicalReq AcquirePhysicalSegments
+	acquired := make(chan AcquirePhysicalSegments, 1)
 	physical := fakePhysicalSegmentManager{
 		acquire: func(req AcquirePhysicalSegments) {
-			physicalReq = req
 			req.OnLoaded(loaded)
+			acquired <- req
 		},
 		release: func(req ReleaseSegments) {
 			req.OnDropped()
@@ -93,11 +95,14 @@ func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable") },
 	})
 
-	require.Eventually(t, func() bool {
-		return physicalReq.Key == key
-	}, time.Second, 10*time.Millisecond)
-	require.Equal(t, meta, physicalReq.Meta)
-	require.Equal(t, view, physicalReq.View)
+	select {
+	case physicalReq := <-acquired:
+		require.Equal(t, key, physicalReq.Key)
+		require.True(t, proto.Equal(meta, physicalReq.Meta))
+		require.True(t, proto.Equal(view, physicalReq.View))
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for physical acquire")
+	}
 
 	select {
 	case <-readyCh:
@@ -657,6 +662,36 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 	assert.False(t, segment.released)
 }
 
+// Capture each submission by value inside the mock callback, then publish it
+// through a channel so assertions and manual completions observe a full task.
+func newReadinessLoadScheduler(t *testing.T) (nodescheduler.Scheduler, func() SegmentLoadTask) {
+	t.Helper()
+	scheduler := &fakeNodeScheduler{}
+	loads := make(chan SegmentLoadTask, 2)
+	patch := mockey.Mock((*fakeNodeScheduler).Submit).To(func(_ *fakeNodeScheduler, task nodescheduler.Task) nodescheduler.TaskHandle {
+		switch task := task.(type) {
+		case schedulerTaskFunc:
+			_ = task.Execute(context.Background())
+		case *SegmentLoadTask:
+			loads <- *task
+		default:
+			t.Errorf("unexpected scheduled task %T", task)
+		}
+		return noopNodeTaskHandle{}
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return scheduler, func() SegmentLoadTask {
+		t.Helper()
+		select {
+		case task := <-loads:
+			return task
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for physical load submission")
+			return SegmentLoadTask{}
+		}
+	}
+}
+
 func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailure(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
 	meta1.Version.DataVersion = &viewpb.DataVersion{}
@@ -669,7 +704,7 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeNodeScheduler{}
+	scheduler, nextLoad := newReadinessLoadScheduler(t)
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{registerErr: errors.New("register failed")}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
@@ -680,11 +715,9 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 		OnReady:         func(map[int64][]int64) { t.Fatal("unexpected ready for first view") },
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
-	}, time.Second, 10*time.Millisecond)
+	firstLoad := nextLoad()
 	firstSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[0].OnLoaded(firstSegment)
+	firstLoad.OnLoaded(firstSegment)
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -701,12 +734,10 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 		OnReady:         func(ready map[int64][]int64) { ready2 <- ready },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
-	}, time.Second, 10*time.Millisecond, "retry after registration failure should submit a new physical load")
+	secondLoad := nextLoad()
 
 	secondSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(secondSegment)
+	secondLoad.OnLoaded(secondSegment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
@@ -731,7 +762,7 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeNodeScheduler{}
+	scheduler, nextLoad := newReadinessLoadScheduler(t)
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
@@ -742,10 +773,8 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 		OnReady:         func(map[int64][]int64) { t.Fatal("unexpected ready for first view") },
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
-	}, time.Second, 10*time.Millisecond)
-	scheduler.tasks[0].OnUnrecoverable(errors.New("load failed"))
+	firstLoad := nextLoad()
+	firstLoad.OnUnrecoverable(errors.New("load failed"))
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -758,12 +787,10 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 		OnReady:         func(ready map[int64][]int64) { ready2 <- ready },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
-	}, time.Second, 10*time.Millisecond, "retry after scheduler failure should submit a new physical load")
+	secondLoad := nextLoad()
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(segment)
+	secondLoad.OnLoaded(segment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
@@ -788,7 +815,7 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
-	scheduler := &fakeNodeScheduler{}
+	scheduler, nextLoad := newReadinessLoadScheduler(t)
 	physical := newTestViewScopedPhysicalSegmentManager(t, scheduler)
 	buffer := &fakeTransformLogBuffer{}
 	mgr := newTestQueryViewSegmentReadinessManager(t, physical, buffer)
@@ -799,10 +826,8 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 		OnReady:         func(map[int64][]int64) { t.Fatal("unexpected ready for first view") },
 		OnUnrecoverable: func() { unrecoverable1 <- struct{}{} },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 1
-	}, time.Second, 10*time.Millisecond)
-	scheduler.tasks[0].OnUnrecoverable(errors.New("load failed"))
+	firstLoad := nextLoad()
+	firstLoad.OnUnrecoverable(errors.New("load failed"))
 	select {
 	case <-unrecoverable1:
 	case <-time.After(time.Second):
@@ -815,12 +840,10 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 		OnReady:         func(ready map[int64][]int64) { ready2 <- ready },
 		OnUnrecoverable: func() { t.Fatal("unexpected unrecoverable for second view") },
 	})
-	require.Eventually(t, func() bool {
-		return len(scheduler.tasks) == 2
-	}, time.Second, 10*time.Millisecond)
+	secondLoad := nextLoad()
 
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
-	scheduler.tasks[1].OnLoaded(segment)
+	secondLoad.OnLoaded(segment)
 	require.Eventually(t, func() bool {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
