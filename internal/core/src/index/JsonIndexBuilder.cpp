@@ -65,17 +65,6 @@ ProcessJsonFieldData(
                 error_recorder(
                     *json_column, nested_path, simdjson::NO_SUCH_FIELD);
                 non_exist_adder(offset);
-                if (is_array) {
-                    // JSON EXISTS excludes empty arrays, but CONTAINS still
-                    // has a valid array container for []. Keep its validity
-                    // independent from the path-existence bitmap.
-                    auto array = json_column->dom_doc()
-                                     .at_pointer(nested_path)
-                                     .get_array();
-                    if (array.error() != simdjson::SUCCESS) {
-                        null_adder(offset);
-                    }
-                }
                 data_adder(nullptr, 0, offset++);
                 continue;
             }
@@ -85,7 +74,6 @@ ProcessJsonFieldData(
                 auto doc = json_column->dom_doc();
                 auto array_res = doc.at_pointer(nested_path).get_array();
                 if (array_res.error() != simdjson::SUCCESS) {
-                    null_adder(offset);
                     error_recorder(
                         *json_column, nested_path, array_res.error());
                 } else {

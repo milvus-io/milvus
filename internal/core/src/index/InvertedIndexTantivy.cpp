@@ -116,7 +116,6 @@ struct TantivyLoadContext {
     std::shared_ptr<IndexDirectoryLoadContext> directory;
     std::shared_ptr<std::vector<size_t>> null_offsets;
     bool has_null{false};
-    bool null_offsets_are_elements{false};
     bool load_in_mmap{true};
 };
 
@@ -209,9 +208,7 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
     lock.unlock();
     BinarySet res_set;
     if (index_valid_data_length > 0) {
-        res_set.Append(null_offsets_are_elements_
-                           ? INDEX_NULL_ELEMENT_OFFSET_FILE_NAME
-                           : INDEX_NULL_OFFSET_FILE_NAME,
+        res_set.Append(INDEX_NULL_OFFSET_FILE_NAME,
                        index_valid_data,
                        index_valid_data_length);
     }
@@ -277,10 +274,6 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    supports_nested_element_nulls_ =
-        GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(kLastVersionWithoutHybridIndexConfig) >=
-        kArrayHybridStlSortMinVersion;
     auto field_datas = storage::CacheRawDataAndFillMissing(
         std::static_pointer_cast<MemFileManager>(this->file_manager_), config);
     BuildWithFieldData(field_datas);
@@ -331,14 +324,6 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
-    null_offsets_are_elements_ = std::any_of(
-        index_files.begin(), index_files.end(), [](const std::string& file) {
-            return boost::filesystem::path(file).filename().string().find(
-                       INDEX_NULL_ELEMENT_OFFSET_FILE_NAME) == 0;
-        });
-    const auto& null_file_name = null_offsets_are_elements_
-                                     ? INDEX_NULL_ELEMENT_OFFSET_FILE_NAME
-                                     : INDEX_NULL_OFFSET_FILE_NAME;
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
         null_offset_.resize((size_t)size / sizeof(size_t));
         milvus::fastmem::FastMemcpy(null_offset_.data(), data, (size_t)size);
@@ -346,7 +331,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
             return boost::filesystem::path(file).filename().string() ==
-                   null_file_name;
+                   INDEX_NULL_OFFSET_FILE_NAME;
         });
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
@@ -357,7 +342,8 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         // null offset file is not sliced
         auto index_datas = this->file_manager_->LoadIndexToMemory(
             {*null_offset_file_itr}, load_priority);
-        auto null_offset_data = std::move(index_datas.at(null_file_name));
+        auto null_offset_data =
+            std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
         fill_null_offsets(null_offset_data->PayloadData(),
                           null_offset_data->PayloadSize());
         return;
@@ -366,7 +352,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
     std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
-        if (file_name.find(null_file_name) != std::string::npos) {
+        if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
 
@@ -385,7 +371,7 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
 
         auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
         auto null_offsets_data_codecs = CompactIndexDatasByKey(
-            null_file_name, std::move(slice_meta), index_datas);
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
         AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
                    "null offset file is empty");
         auto null_offsets_codec =
@@ -450,9 +436,13 @@ InvertedIndexTantivy<T>::IsNull() {
         return bitset;
     }
 
-    if (is_nested_index_ && !null_offsets_are_elements_) {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid and none is null.
+    if (is_nested_index_) {
         return TargetBitmap(count);
     }
+
     TargetBitmap bitset(count);
     {
         std::shared_lock<folly::SharedMutex> lock(mutex_);
@@ -476,12 +466,12 @@ InvertedIndexTantivy<T>::MaterializeValidBitmap() {
         return;
     }
     int64_t count = Count();
-    if ((is_nested_index_ && !null_offsets_are_elements_) ||
-        null_offset_.empty()) {
+    if (is_nested_index_ || null_offset_.empty()) {
         // A non-null empty bitmap marks finalization without retaining a
         // rows/8 allocation for non-nullable fields or fields with no nulls.
-        // Nested NULL members use element offsets; NULL parent rows emit no
-        // element offsets and never appear in this vector.
+        // Nested results use the element domain: null rows emit no elements,
+        // so their materialized element validity is also all-valid even when
+        // null_offset_ still contains row offsets for persistence.
         // Share one empty sentinel per scalar type instead of allocating one
         // control block for every all-valid index.
         static const auto all_valid_bitmap =
@@ -527,9 +517,12 @@ InvertedIndexTantivy<T>::ApplyValidityMask(TargetBitmap& bitset) {
         return;
     }
 
-    if (is_nested_index_ && !null_offsets_are_elements_) {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Segment-level validity handles null rows.
+    if (is_nested_index_) {
         return;
     }
+
     std::shared_lock<folly::SharedMutex> lock(mutex_);
     auto end =
         std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
@@ -562,9 +555,13 @@ InvertedIndexTantivy<T>::IsNotNull() {
         return valid_bitmap_->clone();
     }
 
-    if (is_nested_index_ && !null_offsets_are_elements_) {
+    // Growing nested results are in the element domain, while null_offset_
+    // contains row offsets. Null rows emit no elements, so every indexed
+    // element is valid.
+    if (is_nested_index_) {
         return TargetBitmap(count, true);
     }
+
     TargetBitmap bitset(count, true);
     {
         std::shared_lock<folly::SharedMutex> lock(mutex_);
@@ -846,25 +843,6 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    if (is_nested_index_ && !supports_nested_element_nulls_) {
-        for (const auto& data : field_datas) {
-            for (int64_t row = 0; row < data->get_num_rows(); ++row) {
-                if (!data->is_valid(row)) {
-                    continue;
-                }
-                const auto* array =
-                    static_cast<const Array*>(data->RawValue(row));
-                for (size_t member = 0; member < array->length(); ++member) {
-                    if (!array->is_element_valid(member)) {
-                        ThrowInfo(Unsupported,
-                                  "nested inverted NULL members require scalar "
-                                  "index version >= {}",
-                                  kArrayHybridStlSortMinVersion);
-                    }
-                }
-            }
-        }
-    }
     if (schema_.nullable()) {
         int64_t total = 0;
         for (const auto& data : field_datas) {
@@ -934,7 +912,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
 
         case proto::schema::DataType::Array: {
             if (is_nested_index_) {
-                null_offsets_are_elements_ = true;
                 build_index_for_array_nested(field_datas);
             } else {
                 build_index_for_array(field_datas);
@@ -958,42 +935,30 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    using ElementType = std::conditional_t<std::is_same_v<T, int8_t> ||
-                                               std::is_same_v<T, int16_t>,
+    using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
+                                               std::is_same<T, int16_t>::value,
                                            int32_t,
                                            T>;
     int64_t offset = 0;
     for (const auto& data : field_datas) {
-        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++offset) {
-            const bool valid = data->is_valid(i);
-            if (!valid) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset_.push_back(offset);
             }
-            const auto* array =
-                valid ? static_cast<const Array*>(data->RawValue(i)) : nullptr;
-            const auto length = array == nullptr ? 0 : array->length();
-            std::unique_ptr<ElementType[]> filtered;
-            const ElementType* values =
-                array == nullptr
-                    ? nullptr
-                    : reinterpret_cast<const ElementType*>(array->data());
-            size_t count = length;
-            if (array != nullptr && array->is_element_nullable()) {
-                filtered = std::make_unique<ElementType[]>(length);
-                count = 0;
-                for (size_t j = 0; j < length; ++j) {
-                    if (array->is_element_valid(j)) {
-                        filtered[count++] = array->get_data_unchecked<T>(j);
-                    }
-                }
-                values = filtered.get();
-            }
-            // One document per parent, including NULL and valid empty arrays.
-            if (inverted_index_single_segment_) {
-                wrapper_->add_array_data_by_single_segment_writer(values,
-                                                                  count);
+            auto length = data->is_valid(i) ? array_column[i].length() : 0;
+            if (!inverted_index_single_segment_) {
+                wrapper_->add_array_data(reinterpret_cast<const ElementType*>(
+                                             array_column[i].data()),
+                                         length,
+                                         offset++);
             } else {
-                wrapper_->add_array_data(values, count, offset);
+                wrapper_->add_array_data_by_single_segment_writer(
+                    reinterpret_cast<const ElementType*>(
+                        array_column[i].data()),
+                    length);
+                offset++;
             }
         }
     }
@@ -1004,27 +969,30 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
-    std::vector<std::string> values;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
-        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++offset) {
-            values.clear();
-            if (!data->is_valid(i)) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
                 null_offset_.push_back(offset);
             } else {
-                const auto* array =
-                    static_cast<const Array*>(data->RawValue(i));
-                for (size_t j = 0; j < array->length(); ++j) {
-                    if (array->is_element_valid(j)) {
-                        values.push_back(
-                            array->get_data_unchecked<std::string>(j));
-                    }
-                }
+                Assert(IsStringDataType(array_column[i].get_element_type()));
+                Assert(IsStringDataType(
+                    static_cast<DataType>(schema_.element_type())));
             }
-            if (inverted_index_single_segment_) {
-                wrapper_->add_array_data_by_single_segment_writer(
-                    values.data(), values.size());
+            output.clear();
+            for (int64_t j = 0; j < array_column[i].length(); j++) {
+                output.push_back(
+                    array_column[i].template get_data_unchecked<std::string>(
+                        j));
+            }
+            auto length = data->is_valid(i) ? output.size() : 0;
+            if (!inverted_index_single_segment_) {
+                wrapper_->add_array_data(output.data(), length, offset++);
             } else {
-                wrapper_->add_array_data(values.data(), values.size(), offset);
+                wrapper_->add_array_data_by_single_segment_writer(output.data(),
+                                                                  length);
             }
         }
     }
@@ -1034,45 +1002,30 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    using ElementType = std::conditional_t<std::is_same_v<T, int8_t> ||
-                                               std::is_same_v<T, int16_t>,
+    using ElementType = std::conditional_t<std::is_same<T, int8_t>::value ||
+                                               std::is_same<T, int16_t>::value,
                                            int32_t,
                                            T>;
+
     int64_t offset = 0;
+    int64_t row_offset = 0;
     for (const auto& data : field_datas) {
-        for (int64_t i = 0; i < data->get_num_rows(); ++i) {
-            if (!data->is_valid(i)) {
+        auto n = data->get_num_rows();
+        for (int64_t i = 0; i < n; i++, row_offset++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
                 continue;
             }
-            const auto* array = static_cast<const Array*>(data->RawValue(i));
-            if (!array->is_element_nullable()) {
-                const auto* values =
-                    reinterpret_cast<const ElementType*>(array->data());
-                if (inverted_index_single_segment_) {
-                    wrapper_->add_data_by_single_segment_writer(
-                        values, array->length());
-                } else {
-                    wrapper_->add_data(values, array->length(), offset);
-                }
-                offset += array->length();
-                continue;
-            }
-            for (size_t j = 0; j < array->length(); ++j, ++offset) {
-                const bool valid = array->is_element_valid(j);
-                ElementType value{};
-                if (valid) {
-                    value = array->get_data_unchecked<T>(j);
-                } else {
-                    null_offset_.push_back(offset);
-                }
-                // NULL members retain their element slot but carry no posting.
-                if (inverted_index_single_segment_) {
-                    wrapper_->add_array_data_by_single_segment_writer(
-                        &value, valid ? 1 : 0);
-                } else {
-                    wrapper_->add_array_data(&value, valid ? 1 : 0, offset);
-                }
-            }
+            // RawValue maps logical->physical so compact nullable array
+            // FieldData is read correctly (Data()[i] would overrun).
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            auto length = array->length();
+            wrapper_->template add_data<ElementType>(
+                reinterpret_cast<const ElementType*>(array->data()),
+                length,
+                offset);
+            offset += length;
         }
     }
 }
@@ -1082,42 +1035,30 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
-    std::vector<std::string> values;
+    int64_t row_offset = 0;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
-        for (int64_t i = 0; i < data->get_num_rows(); ++i) {
-            if (!data->is_valid(i)) {
+        auto n = data->get_num_rows();
+        for (int64_t i = 0; i < n; i++, row_offset++) {
+            if (schema_.nullable() && !data->is_valid(i)) {
+                // Record null row offset, no elements to add
+                null_offset_.push_back(row_offset);
                 continue;
             }
-            const auto* array = static_cast<const Array*>(data->RawValue(i));
-            if (!array->is_element_nullable()) {
-                values.clear();
-                for (size_t j = 0; j < array->length(); ++j) {
-                    values.push_back(array->get_data_unchecked<std::string>(j));
-                }
-                if (inverted_index_single_segment_) {
-                    wrapper_->add_data_by_single_segment_writer(values.data(),
-                                                                values.size());
-                } else {
-                    wrapper_->add_data(values.data(), values.size(), offset);
-                }
-                offset += values.size();
-                continue;
+            // RawValue maps logical->physical so compact nullable array
+            // FieldData is read correctly (Data()[i] would overrun).
+            auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
+            Assert(IsStringDataType(array->get_element_type()));
+            Assert(IsStringDataType(
+                static_cast<DataType>(schema_.element_type())));
+
+            output.clear();
+            auto length = array->length();
+            for (int64_t j = 0; j < length; j++) {
+                output.push_back(array->get_data_unchecked<std::string>(j));
             }
-            for (size_t j = 0; j < array->length(); ++j, ++offset) {
-                const bool valid = array->is_element_valid(j);
-                std::string value;
-                if (valid) {
-                    value = array->get_data_unchecked<std::string>(j);
-                } else {
-                    null_offset_.push_back(offset);
-                }
-                if (inverted_index_single_segment_) {
-                    wrapper_->add_array_data_by_single_segment_writer(
-                        &value, valid ? 1 : 0);
-                } else {
-                    wrapper_->add_array_data(&value, valid ? 1 : 0, offset);
-                }
-            }
+            wrapper_->add_data(output.data(), length, offset);
+            offset += length;
         }
     }
 }
@@ -1126,9 +1067,7 @@ template <typename T>
 nlohmann::json
 InvertedIndexTantivy<T>::BuildTantivyMeta(
     const std::vector<std::string>& file_names, bool has_null) {
-    return {{"file_names", file_names},
-            {"has_null", has_null},
-            {"null_offsets_are_elements", null_offsets_are_elements_}};
+    return {{"file_names", file_names}, {"has_null", has_null}};
 }
 
 template <typename T>
@@ -1158,7 +1097,6 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("file_names", file_names);
     writer->PutMeta("has_null", has_null);
-    writer->PutMeta("null_offsets_are_elements", null_offsets_are_elements_);
 
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
@@ -1189,8 +1127,6 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
     auto file_names = ReadRequiredIndexMeta<std::vector<std::string>>(
         reader.IndexMeta(), "file_names");
     bool has_null = ReadRequiredIndexMeta<bool>(reader.IndexMeta(), "has_null");
-    null_offsets_are_elements_ =
-        reader.IndexMeta().value("null_offsets_are_elements", false);
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
@@ -1241,8 +1177,6 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
                                   const Config& config) {
     auto context = std::make_shared<TantivyLoadContext>();
     context->has_null = ReadRequiredIndexMeta<bool>(metadata, "has_null");
-    context->null_offsets_are_elements =
-        metadata.value("null_offsets_are_elements", false);
     context->load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     IndexLoadPlan plan;
@@ -1303,7 +1237,6 @@ InvertedIndexTantivy<T>::FinishLoadAsync(IndexLoadPlan& plan,
 
     wrapper_ = std::move(new_wrapper);
     null_offset_ = std::move(new_null_offsets);
-    null_offsets_are_elements_ = context->null_offsets_are_elements;
     path_ = context->directory->path;
     FinalizeSealed(/*release_null_offsets=*/true);
 

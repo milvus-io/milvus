@@ -108,18 +108,6 @@ CreateVersionedHybrid(uint32_t tantivy_version,
     return index;
 }
 
-template <typename T>
-std::unique_ptr<InvertedIndexTantivy<T>>
-CreateVersionedNestedInverted(uint32_t tantivy_version,
-                              const storage::FileManagerContext& context,
-                              int32_t scalar_version) {
-    auto index = std::make_unique<InvertedIndexTantivy<T>>(
-        tantivy_version, context, false, true, true);
-    index->SetSupportsNestedElementNulls(scalar_version >=
-                                         kArrayHybridStlSortMinVersion);
-    return index;
-}
-
 // Bounds for the synchronous encrypted entry-stream implementation.
 struct EntryStreamLoadInfo {
     bool encrypted{false};
@@ -1409,8 +1397,8 @@ IndexFactory::CreateNestedIndex(
     const storage::FileManagerContext& file_manager_context,
     int32_t scalar_index_version) {
     if (index_type == INVERTED_INDEX_TYPE) {
-        return CreateNestedIndexInverted(
-            tantivy_index_version, file_manager_context, scalar_index_version);
+        return CreateNestedIndexInverted(tantivy_index_version,
+                                         file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return CreateNestedIndexBitmap(file_manager_context);
@@ -1427,45 +1415,39 @@ IndexFactory::CreateNestedIndex(
 IndexBasePtr
 IndexFactory::CreateNestedIndexInverted(
     int32_t tantivy_index_version,
-    const storage::FileManagerContext& file_manager_context,
-    int32_t scalar_index_version) {
+    const storage::FileManagerContext& file_manager_context) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
         case DataType::BOOL:
-            return CreateVersionedNestedInverted<bool>(tantivy_index_version,
-                                                       file_manager_context,
-                                                       scalar_index_version);
-        case DataType::INT8:
-            return CreateVersionedNestedInverted<int8_t>(tantivy_index_version,
-                                                         file_manager_context,
-                                                         scalar_index_version);
-        case DataType::INT16:
-            return CreateVersionedNestedInverted<int16_t>(tantivy_index_version,
-                                                          file_manager_context,
-                                                          scalar_index_version);
-        case DataType::INT32:
-            return CreateVersionedNestedInverted<int32_t>(tantivy_index_version,
-                                                          file_manager_context,
-                                                          scalar_index_version);
-        case DataType::INT64:
-            return CreateVersionedNestedInverted<int64_t>(tantivy_index_version,
-                                                          file_manager_context,
-                                                          scalar_index_version);
-        case DataType::FLOAT:
-            return CreateVersionedNestedInverted<float>(tantivy_index_version,
-                                                        file_manager_context,
-                                                        scalar_index_version);
-        case DataType::DOUBLE:
-            return CreateVersionedNestedInverted<double>(tantivy_index_version,
-                                                         file_manager_context,
-                                                         scalar_index_version);
-        case DataType::STRING:
-        case DataType::VARCHAR:
-            return CreateVersionedNestedInverted<std::string>(
+            return std::make_unique<InvertedIndexTantivy<bool>>(
                 tantivy_index_version,
                 file_manager_context,
-                scalar_index_version);
+                false,  // inverted_index_single_segment
+                true,   // user_specified_doc_id
+                true);  // is_nested_index
+        case DataType::INT8:
+            return std::make_unique<InvertedIndexTantivy<int8_t>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::INT16:
+            return std::make_unique<InvertedIndexTantivy<int16_t>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::INT32:
+            return std::make_unique<InvertedIndexTantivy<int32_t>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::INT64:
+            return std::make_unique<InvertedIndexTantivy<int64_t>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::FLOAT:
+            return std::make_unique<InvertedIndexTantivy<float>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::DOUBLE:
+            return std::make_unique<InvertedIndexTantivy<double>>(
+                tantivy_index_version, file_manager_context, false, true, true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<InvertedIndexTantivy<std::string>>(
+                tantivy_index_version, file_manager_context, false, true, true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

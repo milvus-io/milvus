@@ -483,8 +483,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
  public:
     bool is_built_{false};
-    // All build paths populate data_ with roaring postings; loads select their mode.
-    BitmapIndexBuildMode build_mode_{BitmapIndexBuildMode::ROARING};
+    BitmapIndexBuildMode build_mode_;
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     bool is_mmap_{false};

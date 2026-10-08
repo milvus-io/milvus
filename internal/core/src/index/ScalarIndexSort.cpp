@@ -384,8 +384,8 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     }
 
     data_.reserve(total_num_rows_);
-    // Slots retain their flattened offsets, including nullable Struct members.
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    // Preserve the existing validity of finite payloads; handle NaN slots below.
+    valid_bitset_ = TargetBitmap(total_num_rows_, true);
     int64_t offset = 0;
     for (const auto& data : datas) {
         auto n = data->get_num_rows();
@@ -396,13 +396,14 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                if (!array->is_element_valid(j)) {
-                    ++offset;
-                    continue;
-                }
-                valid_bitset_.set(offset);
                 auto value = array->get_data_unchecked<T>(j);
                 if (IsScalarSortNaN(value)) {
+                    // An ignored NaN payload must not enter ordered entries or
+                    // be restored as a source-valid NaN by the sidecar.
+                    if (!array->is_element_valid(j)) {
+                        valid_bitset_.reset(offset++);
+                        continue;
+                    }
                     if (!supports_unindexed_nan_) {
                         ThrowInfo(Unsupported,
                                   "STL_SORT cannot preserve NaN source rows "

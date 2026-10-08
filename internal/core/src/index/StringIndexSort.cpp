@@ -1150,12 +1150,9 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
             auto* array =
                 reinterpret_cast<const Array*>(field_data->RawValue(i));
             for (int64_t j = 0; j < array->length(); j++) {
-                if (array->is_element_valid(j)) {
-                    auto value = array->get_data_unchecked<std::string>(j);
-                    map[value].push_back(static_cast<int32_t>(element_id));
-                    valid_bitset.set(element_id);
-                }
-                // Null members still occupy a flattened element offset.
+                auto value = array->get_data_unchecked<std::string>(j);
+                map[value].push_back(static_cast<int32_t>(element_id));
+                valid_bitset.set(element_id);
                 element_id++;
             }
         }

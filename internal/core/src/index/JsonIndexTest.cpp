@@ -44,7 +44,6 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/JsonScalarIndexWrapper.h"
-#include "index/JsonFlatIndex.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "pb/plan.pb.h"
@@ -618,129 +617,7 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
     EXPECT_EQ(stats.null_count, 20);
 }
 
-TEST(JsonIndexTest, TypedStringArrayContainsAllAnyAndExistsAfterReload) {
-    const std::vector<std::string> rows{R"({"a":["apple","banana","apple"]})",
-                                        R"({"a":["apple"]})",
-                                        R"({"a":[]})",
-                                        R"({"a":null})",
-                                        R"({"a":"apple"})",
-                                        R"({"a":[1,"banana",null]})",
-                                        R"({"b":[]})",
-                                        R"(null)",
-                                        R"({})"};
-    auto schema = std::make_shared<Schema>();
-    auto fid = schema->AddDebugField("json", DataType::JSON, true);
-    const auto root_path =
-        (boost::filesystem::path(TestLocalPath) /
-         boost::filesystem::unique_path("json-array-routing-%%%%-%%%%"))
-            .string();
-    auto config = gen_local_storage_config(root_path);
-    auto cm = storage::CreateChunkManager(config);
-    auto fs = storage::InitArrowFileSystem(config);
-    ChunkManagerWrapper cm_guard(cm);
-    auto field_meta =
-        segcore::gen_field_meta(1, 2, 3, fid.get(), DataType::JSON);
-    field_meta.field_schema.set_nullable(true);
-    auto index_meta = gen_index_meta(3, fid.get(), 4100, 4100);
-    storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
-    CreateIndexInfo info;
-    info.index_type = INVERTED_INDEX_TYPE;
-    info.json_cast_type = JsonCastType::FromString("ARRAY_VARCHAR");
-    info.json_path = "/a";
-    info.tantivy_index_version = 7;
-
-    arrow::BinaryBuilder builder;
-    for (size_t i = 0; i < rows.size(); ++i) {
-        if (i == 8) {
-            ASSERT_TRUE(builder.AppendNull().ok());
-        } else {
-            ASSERT_TRUE(builder.Append(rows[i].data(), rows[i].size()).ok());
-        }
-    }
-    std::shared_ptr<arrow::Array> arrow_rows;
-    ASSERT_TRUE(builder.Finish(&arrow_rows).ok());
-    auto json_field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
-    json_field->FillFieldData(arrow_rows);
-    auto built = IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
-    auto* built_scalar = dynamic_cast<ScalarIndex<std::string>*>(built.get());
-    ASSERT_NE(built_scalar, nullptr);
-    built_scalar->BuildWithFieldData({json_field});
-    auto stats = built->Upload();
-    ctx.set_for_loading_index(true);
-    auto loaded = IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
-    Config load_config;
-    load_config[INDEX_FILES] = stats->GetIndexFiles();
-    loaded->Load(tracer::TraceContext{}, load_config);
-    auto* scalar = dynamic_cast<ScalarIndex<std::string>*>(loaded.get());
-    ASSERT_NE(scalar, nullptr);
-    ASSERT_EQ(scalar->Count(), rows.size());
-    const auto exists = scalar->Exists();
-    ASSERT_EQ(exists.size(), rows.size());
-    // Milvus JSON EXISTS excludes JSON null and empty arrays. A non-empty
-    // scalar value still exists when the requested ARRAY cast fails.
-    const std::vector<bool> expected_exists{
-        true, true, false, false, true, true, false, false, false};
-    for (size_t i = 0; i < rows.size(); ++i) {
-        EXPECT_EQ(exists[i], expected_exists[i]) << "row " << i;
-    }
-    const auto known = scalar->IsNotNull();
-    const std::vector<bool> expected_known{
-        true, true, true, false, false, true, false, false, false};
-    for (size_t i = 0; i < rows.size(); ++i) {
-        EXPECT_EQ(known[i], expected_known[i]) << "row " << i;
-    }
-    const std::string apple = "apple";
-    const auto apple_hits = scalar->In(1, &apple);
-    EXPECT_EQ(apple_hits.count(), 2);
-    EXPECT_TRUE(apple_hits[0]);
-    EXPECT_TRUE(apple_hits[1]);
-
-    auto segment = segcore::CreateSealedSegment(schema);
-    segcore::LoadIndexInfo load_info;
-    load_info.field_id = fid.get();
-    load_info.field_type = DataType::JSON;
-    load_info.index_params = {{JSON_PATH, "/a"},
-                              {JSON_CAST_TYPE, "ARRAY_VARCHAR"}};
-    load_info.cache_index =
-        CreateTestCacheIndex("json_array_string_reload", std::move(loaded));
-    segment->LoadIndex(load_info);
-    auto binlogs =
-        PrepareSingleFieldInsertBinlog(1, 2, 3, fid.get(), {json_field}, cm);
-    segment->LoadFieldData(binlogs);
-    for (const auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
-                          proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
-        for (const auto& targets : std::vector<std::vector<std::string>>{
-                 {"apple"}, {"apple", "banana", "apple"}, {"missing"}}) {
-            std::vector<proto::plan::GenericValue> values;
-            for (const auto& target : targets) {
-                proto::plan::GenericValue value;
-                value.set_string_val(target);
-                values.push_back(std::move(value));
-            }
-            auto expr = std::make_shared<expr::JsonContainsExpr>(
-                expr::ColumnInfo(fid, DataType::JSON, {"a"}, true),
-                op,
-                true,
-                values);
-            auto plan = std::make_shared<plan::FilterBitsNode>(
-                DEFAULT_PLANNODE_ID, expr);
-            auto result = query::ExecuteQueryExpr(
-                plan, segment.get(), rows.size(), MAX_TIMESTAMP);
-            const bool missing = targets[0] == "missing";
-            const bool multi = targets.size() > 1;
-            for (size_t i = 0; i < rows.size(); ++i) {
-                bool expected = !missing && (i == 0 || (!multi && i == 1));
-                if (!missing && multi &&
-                    op == proto::plan::JSONContainsExpr_JSONOp_ContainsAny) {
-                    expected = i == 0 || i == 1 || i == 5;
-                }
-                EXPECT_EQ(result[i], expected) << "row " << i;
-            }
-        }
-    }
-}
-
-TEST(JsonIndexTest, ArrayContainsContainerValidityMatchesRawForNaNNegatives) {
+TEST(JsonIndexTest, JsonContainsNaNTargetsMatchRawAcrossProjections) {
     using Value = proto::plan::GenericValue;
     auto number = [](double v) {
         Value value;
@@ -873,15 +750,6 @@ TEST(JsonIndexTest, ArrayContainsContainerValidityMatchesRawForNaNNegatives) {
         indexed_segment->LoadIndex(index_info);
         std::vector<std::vector<Value>> queries{
             {number(nan)}, {number(nan), number(1)}, {number(1), number(nan)}};
-        if (!flat) {
-            if (strings) {
-                queries.push_back({text("apple")});
-                queries.push_back({text("apple"), text("NaN")});
-            } else {
-                queries.push_back({number(1)});
-                queries.push_back({number(1), number(2)});
-            }
-        }
         for (const auto& targets : queries) {
             for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
                             proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {

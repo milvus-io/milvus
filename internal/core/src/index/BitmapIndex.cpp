@@ -276,10 +276,13 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
-                    if (!array->is_element_valid(j)) {
-                        continue;
-                    }
                     auto val = array->get_data_unchecked<T>(j);
+                    if constexpr (std::is_floating_point_v<T>) {
+                        // A hidden NaN payload must not enter the ordered map.
+                        if (!array->is_element_valid(j) && std::isnan(val)) {
+                            continue;
+                        }
+                    }
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -294,7 +297,6 @@ void
 BitmapIndex<T>::BuildArrayFieldNested(
     const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
-    std::vector<int64_t> null_elements;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
@@ -309,11 +311,13 @@ BitmapIndex<T>::BuildArrayFieldNested(
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
-                if (!array->is_element_valid(j)) {
-                    null_elements.push_back(offset++);
-                    continue;
-                }
                 auto val = array->get_data_unchecked<T>(j);
+                if constexpr (std::is_floating_point_v<T>) {
+                    if (!array->is_element_valid(j) && std::isnan(val)) {
+                        ++offset;
+                        continue;
+                    }
+                }
                 data_[val].add(offset++);
             }
         }
@@ -325,9 +329,6 @@ BitmapIndex<T>::BuildArrayFieldNested(
     }
     total_num_rows_ = offset;
     valid_bitset_ = TargetBitmap(total_num_rows_, true);
-    for (const auto null_element : null_elements) {
-        valid_bitset_.reset(null_element);
-    }
 }
 
 template <typename T>
@@ -445,7 +446,7 @@ BitmapIndex<T>::Serialize(const Config& config) {
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
-    if (schema_.nullable() || is_nested_index_) {
+    if (schema_.nullable()) {
         auto valid_bitset = SerializeValidBitsetData();
         ret_set.Append(
             BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
@@ -1624,7 +1625,7 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     uint8_t* data_ptr = index_data.get();
     SerializeIndexData(data_ptr);
     writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
-    if (schema_.nullable() || is_nested_index_) {
+    if (schema_.nullable()) {
         auto valid_bitset = SerializeValidBitsetData();
         writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
                            valid_bitset.first.get(),

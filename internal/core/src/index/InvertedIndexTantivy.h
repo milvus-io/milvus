@@ -47,8 +47,6 @@
 namespace milvus::index {
 
 const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
-const std::string INDEX_NULL_ELEMENT_OFFSET_FILE_NAME =
-    "index_null_offset_elements";
 
 inline TantivyDataType
 get_tantivy_data_type(proto::schema::DataType data_type) {
@@ -139,11 +137,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     ScalarIndexType
     GetIndexType() const override {
         return ScalarIndexType::INVERTED;
-    }
-
-    void
-    SetSupportsNestedElementNulls(bool supported) {
-        supports_nested_element_nulls_ = supported;
     }
 
     void
@@ -468,9 +461,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     // `is_nested_index_` can only be true for array data type. When it's true,
     // every element in the array is treated as a separate document in the index.
-    // New nested builds persist element NULL offsets; legacy files use parent offsets.
-    bool null_offsets_are_elements_{false};
-    bool supports_nested_element_nulls_{true};
     bool is_nested_index_{false};
 };
 

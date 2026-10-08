@@ -369,15 +369,12 @@ HybridScalarIndex<T>::GetInternalIndex() {
                                        kMinScalarIndexVersionForNaNRows);
         internal_index_ = std::move(index);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        auto index = std::make_shared<InvertedIndexTantivy<T>>(
+        internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_,
             this->file_manager_context_,
             false,
             true,
             is_nested_index_);
-        index->SetSupportsNestedElementNulls(scalar_index_version_ >=
-                                             kArrayHybridStlSortMinVersion);
-        internal_index_ = std::move(index);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
@@ -402,15 +399,12 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
         internal_index_ = std::make_shared<StringIndexSort>(
             this->file_manager_context_, is_nested_index_);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        auto index = std::make_shared<InvertedIndexTantivy<std::string>>(
+        internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
             tantivy_index_version_,
             this->file_manager_context_,
             false,
             true,
             is_nested_index_);
-        index->SetSupportsNestedElementNulls(scalar_index_version_ >=
-                                             kArrayHybridStlSortMinVersion);
-        internal_index_ = std::move(index);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");

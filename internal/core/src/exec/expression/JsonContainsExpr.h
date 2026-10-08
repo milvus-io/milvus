@@ -549,15 +549,15 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         SegmentExpr::DetermineExecPath();
         if (exec_path_ == ExprExecPath::ScalarIndex &&
             expr_->column_.data_type_ == DataType::JSON &&
-            PinnedJsonIndexIsFlat() &&
             std::any_of(expr_->vals_.begin(),
                         expr_->vals_.end(),
                         [](const auto& value) {
                             return value.has_float_val() &&
                                    std::isnan(value.float_val());
                         })) {
-            // Flat term presence cannot distinguish [] from a non-array path.
-            // NaN negative predicates need the actual array-container validity.
+            // Evaluate NaN targets against the source array container. This
+            // keeps NaN comparisons and negation consistent across JSON backends
+            // without introducing a new container-validity index format.
             exec_path_ = ExprExecPath::RawData;
             return;
         }

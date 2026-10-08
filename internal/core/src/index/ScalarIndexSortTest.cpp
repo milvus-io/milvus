@@ -1244,9 +1244,9 @@ TYPED_TEST(ScalarIndexSortNaNTest, OrdinaryArrayNaNRowsRetainParentValidity) {
     }
 }
 
-TYPED_TEST(ScalarIndexSortNaNTest, NullableNestedMembersIgnoreHiddenNaN) {
+TYPED_TEST(ScalarIndexSortNaNTest, NestedIgnoresInvalidNaNPayload) {
     using T = TypeParam;
-    ScalarSortAsyncLoadFixture fixture("nested_nullable_member_nan");
+    ScalarSortAsyncLoadFixture fixture("nested_invalid_nan_payload");
     const T nan = std::numeric_limits<T>::quiet_NaN();
     ScalarFieldProto members;
     for (T value : {nan, nan, T(3), T(9)}) {
@@ -1256,7 +1256,7 @@ TYPED_TEST(ScalarIndexSortNaNTest, NullableNestedMembersIgnoreHiddenNaN) {
             members.mutable_double_data()->add_data(value);
         }
     }
-    for (bool valid : {false, true, true, false}) {
+    for (bool valid : {false, true, true, true}) {
         members.add_valid_data(valid);
     }
     ScalarFieldProto empty;
@@ -1268,29 +1268,30 @@ TYPED_TEST(ScalarIndexSortNaNTest, NullableNestedMembersIgnoreHiddenNaN) {
     built.BuildWithFieldData({field});
     auto check = [&](ScalarIndexSort<T>& index) {
         ASSERT_EQ(index.Count(), 4);
-        ASSERT_EQ(index.Size(), 1);
+        ASSERT_EQ(index.Size(), 2);
         auto valid = index.IsNotNull();
         EXPECT_FALSE(valid[0]);
         EXPECT_TRUE(valid[1]);
         EXPECT_TRUE(valid[2]);
-        EXPECT_FALSE(valid[3]);
+        EXPECT_TRUE(valid[3]);
         EXPECT_EQ(index.Reverse_Lookup(0), std::nullopt);
         auto lookup = index.Reverse_Lookup(1);
         ASSERT_TRUE(lookup.has_value());
         EXPECT_TRUE(std::isnan(*lookup));
         EXPECT_EQ(index.Reverse_Lookup(2), T(3));
-        EXPECT_EQ(index.Reverse_Lookup(3), std::nullopt);
+        EXPECT_EQ(index.Reverse_Lookup(3), T(9));
         EXPECT_EQ(index.In(1, &nan).count(), 0);
-        EXPECT_EQ(index.NotIn(1, &nan).count(), 2);
+        EXPECT_EQ(index.NotIn(1, &nan).count(), 3);
         EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 0);
         const T three = T(3), nine = T(9);
         auto matches = index.In(1, &three);
         EXPECT_EQ(matches.count(), 1);
         EXPECT_TRUE(matches[2]);
-        EXPECT_EQ(index.In(1, &nine).count(), 0);
+        EXPECT_EQ(index.In(1, &nine).count(), 1);
         auto misses = index.NotIn(1, &three);
-        EXPECT_EQ(misses.count(), 1);
+        EXPECT_EQ(misses.count(), 2);
         EXPECT_TRUE(misses[1]);
+        EXPECT_TRUE(misses[3]);
         auto range = index.Range(three, OpType::LessEqual);
         EXPECT_EQ(range.count(), 1);
         EXPECT_TRUE(range[2]);

@@ -47,16 +47,6 @@
 namespace milvus {
 namespace exec {
 
-template <typename ArrayType>
-bool
-ArrayElementValid(const ArrayType& array, size_t index) {
-    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
-        return array.child().isValid(static_cast<int>(array.begin() + index));
-    } else {
-        return array.is_element_valid(index);
-    }
-}
-
 // Replaces per-row std::set copy with a value->bit-index map built once.
 // For <= 64 targets uses uint64_t bitmask (zero heap alloc per row).
 // For > 64 targets uses vector<uint64_t> dynamic bitset.
@@ -432,9 +422,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             const auto& array = data[i];
             const auto array_size = GetArrayRowSize(array);
             for (size_t j = 0; j < array_size; ++j) {
-                if (!ArrayElementValid(array, j)) {
-                    continue;
-                }
                 if (elements.find(array.template get_data_unchecked<GetType>(
                         j)) != elements.end()) {
                     return true;
@@ -1072,9 +1059,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             if (matcher.use_small()) {
                 uint64_t found = 0;
                 for (size_t j = 0; j < array_size; ++j) {
-                    if (!ArrayElementValid(data[i], j)) {
-                        continue;
-                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found)) {
@@ -1086,9 +1070,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (size_t j = 0; j < array_size; ++j) {
-                    if (!ArrayElementValid(data[i], j)) {
-                        continue;
-                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found_large,
