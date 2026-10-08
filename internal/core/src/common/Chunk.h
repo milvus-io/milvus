@@ -570,13 +570,32 @@ class ArrayChunk : public Chunk {
 // Offsets() count physical vectors, not logical elements.
 // offsets_ and logical_offsets_ are prefix sums computed on the heap when the
 // chunk is constructed; neither vector is stored in the mmap file.
+// Stored byte offsets and counts are uint32_t; byte offsets are from the chunk
+// start. Bitmaps are LSB-first (1 = valid). No alignment padding is inserted.
+// One zero byte (MMAP_ARRAY_PADDING) follows the payload, outside final_offset.
 //
-// Example:
-// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
-// create a VectorArrayChunk for these arrays. The data block might look like this:
+// Legacy example (FloatVector, dim=3, nullable=false, element_nullable=false):
+// Rows: [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]],
+//       [[13, 14, 15], [16, 17, 18]].
+// [offsets_lens][all_vector_data_concatenated][padding]
+// [28, 3, 64, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] [0x00]
+// Header=28 bytes, each vector=12 bytes, payload=72 bytes, total size=101 bytes.
+// Offsets() = [0, 3, 4, 6].
 //
-// [offsets_lens][all_vector_data_concatenated]
-// [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+// Element-nullable example (FloatVector, dim=2, nullable=true, element_nullable=true):
+// Rows: [[1, 2], null, [3, 4]], null, [], [null], [[5, 6]].
+// [row_bitmap][offsets_lens][logical_count][element_bitmap][compact_vector_data][padding]
+// [0xFD] [66, 2, 82, 0, 82, 0, 82, 0, 82, 1, 90] [3, 0, 0, 1, 1] [0x15] [1, 2, 3, 4, 5, 6] [0x00]
+// Row bits 0..4: [1, 0, 1, 1, 1]; unused high bits remain 1 in the row bitmap.
+// Element bits 0..4: [1, 0, 1, 0, 1]; unused high bits are 0 in the element bitmap.
+// Byte starts: row_bitmap=0, offsets_lens=1, logical_count=45,
+// element_bitmap=65, payload=66, padding=90; total size=91 bytes.
+// Sizes: 1 + 44 + 20 + 1 + (3 vectors * 8 bytes) + 1 bytes, respectively.
+// Offsets() = [0, 2, 2, 2, 2, 3]; logical_offsets_ = [0, 3, 3, 3, 4, 5].
+// Row 1 (null) and row 2 (empty) differ only in the row bitmap.
+// Row 3 has logical_count=1, physical_count=0, and one invalid element bit.
+// Row 4 starts at byte 82, right after row 0's two vectors: rows 1-3 own no
+// payload, so their byte offsets repeat 82 and Offsets() stays at 2 until row 4.
 class VectorArrayChunk : public Chunk {
  public:
     VectorArrayChunk(int64_t dim,
