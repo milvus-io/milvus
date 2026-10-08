@@ -221,10 +221,20 @@ func TestCancelCountsOnlyWhatItActuallyCanceled(t *testing.T) {
 	assert.Equal(t, []int64{99}, notFound)
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
 
-	// canceling the same requests again reports and counts nothing
-	canceled, _ = node.cancelRequests(context.Background(), []int64{11, 12}, "", "root", "test")
-	assert.Empty(t, canceled)
+	// canceling the same requests again, before they have left, still
+	// returns them, now in state Canceling, but counts nothing
+	canceled, notFound = node.cancelRequests(context.Background(), []int64{11, 12}, "", "root", "test")
+	require.Len(t, canceled, 2)
+	assert.Empty(t, notFound)
+	for _, info := range canceled {
+		assert.Equal(t, reqregistry.StateCanceling, info.State)
+	}
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
+
+	// and the list shows them as canceling until they leave
+	for _, info := range node.listRunningRequests(reqregistry.Filter{}) {
+		assert.Equal(t, reqregistry.StateCanceling, info.State)
+	}
 }
 
 func TestListLocalRunningRequests(t *testing.T) {
