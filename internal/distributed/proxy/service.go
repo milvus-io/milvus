@@ -126,94 +126,22 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
-// metricsPortAuthMiddleware is the authentication rule for everything the
-// proxy serves on the metrics port under /api/v1.
-//
-// It is installed once, on the parent group, rather than per route class.
-// RouterGroup.Group snapshots the parent's handler slice, so a second stacked
-// check either runs ahead of this one and answers the console's 401 without
-// the WWW-Authenticate a browser needs, or is skipped entirely, depending on
-// where the Use() sits relative to the Group() — and neither failure shows up
-// in a test that exercises a middleware on its own.
-//
-// The port carries two different things once the gate is on: the web console
-// API (/api/v1/_*) is operator surface and requires root, while the legacy REST
-// data plane follows authorizationEnabled where that is set and requires root
-// where it is not. Every gated branch runs the cross-site check first, because
-// the browser replays root's cached credential at the data-plane routes on this
-// origin just as readily as at the console ones.
-//
-// While the gate is off, behavior is exactly what it was before it existed:
-// the legacy rule, applied only when authorizationEnabled is set.
+// metricsPortAuthMiddleware protects the console API on the metrics port.
+// The retired non-underscore REST API is no longer mounted on this router.
 func metricsPortAuthMiddleware() gin.HandlerFunc {
 	consoleAuth := mhttp.GinAdminAuthMiddleware(true)
-	dataPlaneAuth := mhttp.GinAdminAuthMiddleware(false)
 	legacyEnabled := proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool()
 	return func(c *gin.Context) {
-		gateOn := mhttp.AdminAuthEnabled()
-		if isOpenMetricsPortPath(c) {
-			// /api/v1/health is a liveness probe that predates /healthz and is
-			// still wired into load balancers. Turning a flag named after the
-			// management plane into a health-check outage is not a trade
-			// anyone opted into. The exemption is from the new gate only:
-			// authorizationEnabled's existing coverage of this path stays,
-			// because a hardening flag must never loosen an existing check.
-			if legacyEnabled {
-				authenticate(c)
-			}
-			return
-		}
-		switch {
-		case gateOn && isConsoleAPIPath(c):
+		if mhttp.AdminAuthEnabled() {
 			consoleAuth(c)
-		case legacyEnabled:
-			// The data plane's own rule. It still has to refuse a cross-site
-			// request, because the console's challenge teaches the browser to
-			// replay a credential at this origin; consoleAuth and dataPlaneAuth
-			// get that from CheckAdminRequest, this branch does not.
-			if gateOn {
-				if !mhttp.ApplyGinAuthDecision(c,
-					mhttp.CheckCrossSite(c.Request, c.FullPath(), false), false) {
-					return
-				}
-			}
-			// Suppress the legacy Basic challenge only for secured metrics
-			// data routes. The main port and flag-off behavior retain it.
-			authenticateWithChallenge(c, !gateOn)
-		case gateOn:
-			dataPlaneAuth(c)
+		} else if legacyEnabled {
+			authenticate(c)
 		}
 	}
 }
 
-// openMetricsPortPaths stay reachable without credentials while the gate is on.
-var openMetricsPortPaths = map[string]struct{}{
-	apiPathPrefix + "/health": {},
-}
-
-// consoleAPIPrefix is what every web console route under /api/v1 starts with:
-// /_cluster, /_db, /_collection, /_index, /_qc, /_dc, /_qn, /_dn, /_hook and
-// /_telemetry. Nothing on the legacy data plane uses a leading underscore.
-const consoleAPIPrefix = apiPathPrefix + "/_"
-
-// isConsoleAPIPath and isOpenMetricsPortPath both read FullPath, the matched
-// route template, so neither can be steered by a crafted URL the way the raw
-// path can.
-func isConsoleAPIPath(c *gin.Context) bool {
-	return strings.HasPrefix(c.FullPath(), consoleAPIPrefix)
-}
-
-func isOpenMetricsPortPath(c *gin.Context) bool {
-	_, ok := openMetricsPortPaths[c.FullPath()]
-	return ok
-}
-
 func authenticate(c *gin.Context) {
-	authenticateWithChallenge(c, true)
-}
-
-func authenticateWithChallenge(c *gin.Context, challenge bool) {
-	username, password, ok := httpserver.ParseUsernamePasswordWithChallenge(c, challenge)
+	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
 			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
@@ -266,9 +194,11 @@ func (s *Server) registerHTTPServer() {
 // reassembles the tree by hand cannot notice the assembly changing under it —
 // and the assembly is exactly what makes the gate apply.
 func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	if !proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		return engine
+	}
 	apiv1 := engine.Group(apiPathPrefix,
 		httpserver.RequestHandlerFunc, metricsPortAuthMiddleware())
-	httpserver.NewHandlers(proxyComponent).RegisterRoutesTo(apiv1)
 	if p, ok := proxyComponent.(consoleRouterRegistrar); ok {
 		// The web console API — cluster info and configs, database and
 		// collection listings, slow queries, coordinator and node distribution,
@@ -323,8 +253,10 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
-	app := ginHandler.Group("/v1")
-	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	if proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		app := ginHandler.Group("/v1")
+		httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	}
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}

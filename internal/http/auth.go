@@ -130,7 +130,7 @@ const missingRequestContextRejection = "request origin cannot be verified; use H
 // the browser to hold root's credential for this origin, so any page the
 // operator later visits can fire a request here and have it attached.
 // Management handlers read their parameters from the query string and do not
-// check the method, and a cross-site form post to /api/v1/collection is a
+// check the method, and a cross-site form post to a management endpoint is a
 // top-level navigation, which carries cached credentials and needs no
 // preflight. same-site is refused as well: it is a different origin under the
 // same registrable domain, so trusting it would extend the management plane to
@@ -242,8 +242,7 @@ func checkAdminRequest(req *http.Request, route string, allowTopLevelNavigation,
 	return allowedAuthDecision(util.UserRoot)
 }
 
-// ApplyGinAuthDecision is the single Gin projection for both the management
-// gate and its cross-site-only data-plane branch.
+// ApplyGinAuthDecision applies a management authentication decision to Gin.
 func ApplyGinAuthDecision(c *gin.Context, decision AuthDecision, challenge bool) bool {
 	if decision.Allowed() {
 		c.Request = decision.AuthenticatedRequest(c.Request)
