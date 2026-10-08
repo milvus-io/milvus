@@ -203,7 +203,7 @@ func TestFailedSegmentUnregistersBeforeLastHandleRelease(t *testing.T) {
 	}).Build())
 	state := &transformSegmentState{state: transformSegmentLoaded, segment: segment, queryRefs: 1, reg: &lifetimeRegistration{}}
 	manager := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state}}
-	handle := &sealedSegmentHandle{manager: manager, segmentID: 1000, segment: segment, state: state}
+	handle := &sealedSegmentHandle{view: &transformViewRef{queryRefs: 1}, manager: manager, segmentID: 1000, segment: segment, state: state}
 	go func() {
 		manager.failSegment(1000, state, assert.AnError)
 		close(failed)

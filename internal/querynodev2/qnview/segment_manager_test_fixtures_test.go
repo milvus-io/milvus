@@ -473,6 +473,9 @@ func (s *fakeSegmentLoadInfoStream) Subscribe(option SegmentLoadInfoSubscription
 func (s *fakeSegmentLoadInfoStream) Emit(snapshot SegmentLoadInfoSnapshot) error {
 	for _, sub := range s.subscriptions {
 		if !sub.closed && sub.option.CollectionID == snapshot.CollectionID && sub.option.SegmentID == snapshot.SegmentID {
+			if snapshot.DataVersion == (qviews.DataVersion{}) {
+				snapshot.DataVersion = sub.option.DataVersion
+			}
 			return sub.option.Handler.Handle(snapshot)
 		}
 	}

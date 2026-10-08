@@ -4,6 +4,7 @@ package qvresource
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -174,4 +176,40 @@ func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesPinnedCollection(t *
 	assert.Equal(t, "vec_idx", updatedMeta.GetIndexMetas()[0].GetIndexName())
 	assert.Zero(t, collection.putCount)
 	assert.Zero(t, collection.unrefCount)
+}
+
+func TestCollectionRuntimePinsExactImmutableLoadInfo(t *testing.T) {
+	for _, mismatch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mismatch=%t", mismatch), func(t *testing.T) {
+			collection := &fakeQVCollectionManager{}
+			provider := &fakeQVLoadMetadataProvider{collection: &milvuspb.DescribeCollectionResponse{CollectionID: 1, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}}}}}
+			info := qnview.QueryViewLoadInfo{CollectionID: 1, Version: 7}
+			if mismatch {
+				info.Version = 8
+			}
+			patch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).To(func(_ *fakeQVLoadMetadataProvider, _ context.Context, id int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
+				require.EqualValues(t, 1, id)
+				require.EqualValues(t, 7, version)
+				return info, nil
+			}).Build()
+			defer patch.UnPatch()
+			manager := newQueryViewCollectionRuntimeManager(provider, collection)
+			view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7}, &viewpb.QueryViewOfQueryNode{}).(*qviews.QueryViewAtQueryNode)
+			guard, retryable, err := manager.Acquire(context.Background(), view)
+			if mismatch {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.False(t, retryable)
+				require.Nil(t, guard)
+				require.Zero(t, collection.putCollectionID)
+				return
+			}
+			require.NoError(t, err)
+			defer guard.Release()
+			pinned := guard.(qnview.QueryViewLoadInfoProvider)
+			first := pinned.LoadInfo()
+			require.Len(t, first.LoadFields, 2, "empty load fields resolve to the full schema before union")
+			first.LoadFields[0].FieldId = 999
+			require.EqualValues(t, 100, pinned.LoadInfo().LoadFields[0].GetFieldId())
+		})
+	}
 }

@@ -2,7 +2,6 @@ package qvresource
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -195,17 +195,17 @@ func (s *queryViewTransformSegment) removeTransformWaiter(timetick uint64, waite
 
 func parseTransformDeletePrimaryKeys(ids *schemapb.IDs) (pks storage.PrimaryKeys, err error) {
 	if ids == nil || ids.IdField == nil {
-		return nil, fmt.Errorf("transform delete primary keys are empty")
+		return nil, merr.WrapErrServiceInternalMsg("transform delete primary keys are empty")
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			pks = nil
-			err = fmt.Errorf("failed to parse transform delete primary keys: %v", recovered)
+			err = merr.WrapErrServiceInternalMsg("failed to parse transform delete primary keys: %v", recovered)
 		}
 	}()
 	pks = storage.ParseIDs2PrimaryKeysBatch(ids)
 	if pks == nil {
-		return nil, fmt.Errorf("failed to parse transform delete primary keys")
+		return nil, merr.WrapErrServiceInternalMsg("failed to parse transform delete primary keys")
 	}
 	return pks, nil
 }

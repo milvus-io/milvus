@@ -27,7 +27,8 @@ The workflow includes:
 For this workflow, local QueryNode `Ready` means:
 
 1. the collection runtime required by the QueryView is pinned locally;
-2. every assigned sealed segment is physically loaded;
+2. every assigned sealed segment has reached the view's minimum `DataVersion`
+   and satisfies its pinned `load_info_version` resource requirements;
 3. every loaded segment is registered with TransformLog;
 4. every registered segment has caught up to the QueryView transform frontier.
 
@@ -79,9 +80,8 @@ Incoming QueryView(Preparing)
                       -> QueryViewLoadMetadataProvider.DescribeCollection
                       -> collectionManager.PutOrRef
                  -> record transform refs and waiters
-                 -> report already transform-ready segments, if any
                  -> report empty OnReady if this QN has no assigned segments
-                 -> ViewScopedPhysicalSegmentManager.Acquire for missing segments
+                 -> ViewScopedPhysicalSegmentManager.Acquire for every assigned segment
                       -> record physical refs
                       -> subscribe the shared SegmentLoadInfoStream for each referenced segment
                       -> if segment is missing:
@@ -91,7 +91,8 @@ Incoming QueryView(Preparing)
                                 -> SegmentResourceEstimator.Reserve
                                 -> PhysicalSegmentLoader.Load
                       -> if segment is already physically loaded:
-                           -> reuse loaded segment
+                           -> reuse only after its applied version/configuration satisfies this view
+                           -> otherwise prepare the union and Reopen through resource admission
                       -> physical OnLoaded callback
                  -> TransformLogBuffer.RegisterSegment
                  -> TransformRegistration.WaitCatchup
@@ -155,8 +156,8 @@ type QueryViewLoadMetadataProvider interface {
 }
 ```
 
-Collection runtime acquisition resolves the QueryView's load-info version, then
-pins the local collection runtime through `collectionManager.PutOrRef` before
+Collection runtime acquisition resolves and validates the QueryView's exact load-info
+version and collection ID, retains an immutable LoadInfo on its guard, then pins the local collection runtime through `collectionManager.PutOrRef` before
 any segment load task is submitted.
 
 Segment metadata has a separate streaming boundary. QueryNode owns one shared
@@ -168,7 +169,12 @@ successfully delivered revision; the physical manager never writes that
 revision back into the stream.
 
 QueryCoord sends complete `SegmentLoadInfoSnapshot` values containing packed
-`SegmentLoadInfo`, index definitions, and a revision. The stream dispatches a
+`SegmentLoadInfo`, index definitions, a content revision, and a certified
+`DataVersion`. The subscription carries the minimum DataVersion and the union
+of the live views' LoadInfo requirements. Changes to either target replace
+the subscription; its epoch rejects callbacks from the retired subscription.
+Even an unchanged content revision must carry an updated DataVersion proof
+when requested. This is part of the metadata provider interface contract. The stream dispatches a
 snapshot to the matching subscription handler. After the handler accepts the
 snapshot, the subscription advances its own delivered revision. The handler
 synchronously records the snapshot in the physical manager and triggers the
@@ -212,8 +218,8 @@ Acquire behavior:
    new physical segment state;
 4. create load state only for segments that are missing or reset;
 5. submit load tasks only for segments that are not already loading or loaded;
-6. if all requested segments are already physically loaded, call `OnLoaded`
-   with those segments.
+6. notify each view incrementally only when a segment satisfies that view's
+   minimum DataVersion and pinned LoadInfo requirements.
 
 Load task behavior:
 
@@ -229,15 +235,19 @@ Update task behavior:
 
 1. classify the revision change into the required physical update actions;
 2. refresh collection index meta from the new snapshot;
-3. call `PhysicalSegmentLoader.Update`;
-4. return `nodescheduler.ErrDelay` for non-cancellation failures so the same
-   task is retried;
-5. update only the physical segment state's applied revision after success.
+3. reserve resources, then call `PhysicalSegmentLoader.Update` with Reopen once;
+4. use the same resource estimation and reservation as first load; return
+   `nodescheduler.ErrDelay` only when resource admission fails;
+5. fast-fail an actual physical Reopen error, notifying affected waiting views;
+6. publish the applied revision, DataVersion and captured load requirements only
+   after success. An older Ready view keeps the previously loaded instance when
+   Reopen fails.
 
 The subscription's delivered revision is independent from the physical applied
 revision. It advances when the handler has accepted the complete snapshot,
-because any subsequently submitted load/update failure remains owned by the
-NodeScheduler retry lifecycle. No task completion path sends a subscribe or
+because subsequent preparation is owned by the physical manager: resource
+admission retries through NodeScheduler, while native load/Reopen errors end
+the attempted preparation. No task completion path sends a subscribe or
 revision update back to `SegmentLoadInfoStream`.
 
 `SegmentLoadInfoRevision` is a deterministic content hash and is only an
@@ -248,8 +258,9 @@ task may first move the physical segment to a different revision, after which
 the retained snapshot must move it back to the latest metadata state.
 
 Every physical load attempt captures a manager-wide monotonically increasing
-load generation. A retry receives a new generation, and removing/recreating a
-SegmentID never resets the counter. This generation is independent of the
+load generation. Resource-admission retries retain that attempt and generation;
+a later reload receives a new generation. Removing/recreating a SegmentID never
+resets the counter. This generation is independent of the
 metadata content-hash revision.
 
 On physical load completion or failure, the physical manager validates both
@@ -286,8 +297,9 @@ modify a replacement with the same SegmentID. Query handles pin that concrete
 state, rather than looking up the latest state by SegmentID when releasing.
 
 If another QueryView references a segment that is already transform-loaded, the
-transform manager reports it ready immediately without reloading or
-re-registering the segment.
+transform manager still waits for the physical manager to confirm this view's
+DataVersion and LoadInfo. Only then can it report Ready without re-registering
+the segment.
 
 If registration or catch-up fails:
 
@@ -342,19 +354,20 @@ When a view is applied as `Dropped`, QueryNode enters local `Dropping` and calls
 
 Release order:
 
-1. `QueryViewSegmentReadinessManager` detaches the view from transform refs.
-2. For each segment whose last transform ref is removed, it cancels catch-up,
-   unregisters TransformLog, and releases the loaded segment.
-3. It calls `ViewScopedPhysicalSegmentManager.Release` to remove physical refs.
-4. The physical manager cancels still-loading segments only when the released
-   view was the last physical ref.
-5. The physical manager closes the segment's SegmentLoadInfo subscription when
-   the final physical ref is removed.
-6. The physical manager waits for the view's in-flight load callbacks.
-7. The transform manager releases the view-level TransformLog guard and
-   collection runtime guard.
-8. `OnDropped` drives the local state machine to `Dropped`.
-9. QueryNode reports `Dropped` and removes the local view entry.
+1. The view leaves routing. If query handles still pin it, `OnDropped` may
+   acknowledge logical removal while its resource requirements and guards remain
+   retained; the final handle resumes resource teardown below.
+2. `QueryViewSegmentReadinessManager` detaches transform refs and, for the last
+   reference, cancels catch-up and unregisters TransformLog.
+3. `ViewScopedPhysicalSegmentManager.Release` removes physical refs, cancels
+   preparation when the last physical ref is gone, and closes its subscription.
+4. It waits for all load/Reopen attempts borrowing the released view's runtime,
+   including canceled tasks that have not started.
+5. The readiness manager releases detached physical segments and the collection
+   runtime guard. Query handles and native tasks must both be finished before
+   their retained resources can be destroyed.
+6. `OnDropped` acknowledges completion if it was not already acknowledged at
+   logical removal.
 
 Task cancellation is asynchronous. Load release correctness depends on context
 cancellation, ref validation, and waiting for in-flight callbacks rather than
@@ -370,7 +383,7 @@ removed or the segment is reset, preventing stale `ErrDelay` retries.
 | Collection runtime acquire fails | The view is reported `Unrecoverable`; the TransformLog guard is released. |
 | A watched snapshot is missing packed load info | The segment load is treated as unrecoverable for waiting views. |
 | Collection index meta update fails | The segment load is treated as unrecoverable. |
-| Resource reservation fails | The segment load is treated as unrecoverable. |
+| Resource estimation/reservation fails | Retry admission with scheduler backoff; the view remains Preparing. |
 | Physical loader fails | The segment load is treated as unrecoverable. |
 | Segment LoadInfo gRPC stream breaks | The shared stream reconnects and re-subscribes all live segments from their internally maintained delivered revisions. |
 | Transform registration fails | The loaded segment is released, physical state is reset, and waiting views are reported `Unrecoverable`. |
@@ -412,3 +425,35 @@ replacement view.
     metadata, parameters, field binlogs, child fields, resource file paths,
     compaction sources, and child manifests do not change the revision, and
     revision calculation never mutates metadata owned by the caller.
+
+## 12. Per-view LoadInfo and shared segment preparation
+
+Each QueryView pins its exact collection LoadInfo. For every physical Segment,
+its referenced views determine an immutable preparation plan:
+
+- Fields are the union of all referenced LoadInfos.
+- A field mentioned by several versions uses the newest LoadInfo's index and
+  loading parameters. An older view may share that newer configuration; an
+  incoming older view must not overwrite a newer live view's requirements.
+- DataVersion is a lexicographically ordered minimum, independently of the
+  content-hash revision and the load-configuration version.
+- A change to the union can require Reopen even if the metadata revision and
+  DataVersion are unchanged. Missing requested index metadata waits for the
+  subscription to deliver it.
+- An in-flight attempt retains its captured plan. New references update the
+  pending plan; the old attempt cannot certify the newly requested resources.
+- Metadata snapshots are filtered into the union's binlogs and indexes before
+  reservation and native work. Packed column groups remain whole. Manifest
+  resolution and native lazy-loading policy remain the physical loader's
+  responsibility.
+
+Per-view physical readiness is combined with shared Transform catch-up readiness.
+A native Reopen failure fails only the waiting views covered by that attempted
+plan; it does not reset a previously usable shared Segment. A queued newer plan
+can still proceed. Resource admission failures retry for both Load and Reopen.
+
+Queries holding Segment handles also pin their originating view's resource
+requirements. Routing may drop the view, but its physical references and LoadInfo
+remain until those handles are released, preventing a later plan from removing
+fields still needed by those queries. Task completion additionally retains its
+original view-reference identity across removal and recreation.

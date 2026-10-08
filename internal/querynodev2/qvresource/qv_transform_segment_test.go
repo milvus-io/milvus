@@ -35,6 +35,7 @@ func TestQueryViewTransformSegment_ReleaseIsIdempotent(t *testing.T) {
 	require.NoError(t, wrapped.Release(context.Background()))
 	assert.Equal(t, 1, segment.releaseCount)
 }
+
 func TestQueryViewTransformSegment_AppliesDeleteForMatchingPartition(t *testing.T) {
 	segment := &fakeQVSegment{id: 10, partitionID: 100}
 	wrapped := newQueryViewTransformSegment(segment, nil, "v1", 50)

@@ -88,6 +88,7 @@ func TestSharedSegmentRetainsPhysicalSubscription(t *testing.T) {
 			view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 			acquire := func(version int64) (qviews.QueryViewKey, chan struct{}) {
 				meta := buildHandlerTestMeta(version)
+				meta.Version.DataVersion = &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}
 				key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 				ready := make(chan struct{}, 1)
 				mgr.Acquire(AcquireSegments{Key: key, Meta: meta, View: view, OnReady: func(map[int64][]int64) { ready <- struct{}{} }})
@@ -95,7 +96,7 @@ func TestSharedSegmentRetainsPhysicalSubscription(t *testing.T) {
 			}
 			first, readyFirst := acquire(1)
 			opt := <-subscription
-			snapshot := SegmentLoadInfoSnapshot{CollectionID: testCollectionID, SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000}}
+			snapshot := SegmentLoadInfoSnapshot{DataVersion: opt.DataVersion, CollectionID: testCollectionID, SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000}}
 			require.NoError(t, opt.Handler.Handle(snapshot))
 			<-registered
 			if !catchingUp {

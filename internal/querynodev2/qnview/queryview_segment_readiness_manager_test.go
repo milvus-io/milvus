@@ -30,6 +30,7 @@ func TestQueryViewSegmentReadinessManager_AcquireUsesNodeScheduler(t *testing.T)
 	<-blockStarted
 
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	collections := &fakeQueryViewCollectionRuntimeManager{}
@@ -62,6 +63,7 @@ func TestQueryViewSegmentReadinessManager_AcquireUsesNodeScheduler(t *testing.T)
 
 func TestQueryViewSegmentReadinessManager_WaitsForCatchupBeforeReady(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	meta.TransformStartAfterTimetick = 100
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
@@ -132,6 +134,7 @@ func mergeReadyByPartition(dst map[int64][]int64, src map[int64][]int64) {
 
 func TestQueryViewSegmentReadinessManager_AcquiresTransformGuardBeforePhysicalAcquire(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 
@@ -164,6 +167,7 @@ func TestQueryViewSegmentReadinessManager_AcquiresTransformGuardBeforePhysicalAc
 
 func TestQueryViewSegmentReadinessManager_WaitTransformVisibleUsesTransformGuard(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	meta.TransformStartAfterTimetick = 100
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
@@ -212,6 +216,7 @@ func TestQueryViewSegmentReadinessManager_WaitTransformVisibleUsesTransformGuard
 
 func TestQueryViewSegmentReadinessManager_AcquiresCollectionGuardBeforePhysicalAcquire(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 
@@ -246,6 +251,7 @@ func TestQueryViewSegmentReadinessManager_AcquiresCollectionGuardBeforePhysicalA
 
 func TestQueryViewSegmentReadinessManager_CollectionGuardFailureStopsPhysicalAcquire(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 
@@ -296,6 +302,7 @@ func TestQueryViewSegmentReadinessManager_RetriesRetryableCollectionAcquireInNod
 	t.Cleanup(nodeScheduler.Close)
 
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	collections := &fakeQueryViewCollectionRuntimeManager{
@@ -333,6 +340,7 @@ func TestQueryViewSegmentReadinessManager_RetriesRetryableCollectionAcquireInNod
 
 func TestQueryViewSegmentReadinessManager_ReleaseCancelsPendingCollectionAcquire(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 
@@ -394,6 +402,7 @@ func TestQueryViewSegmentReadinessManager_ReleaseCancelsPendingCollectionAcquire
 
 func TestQueryViewSegmentReadinessManager_ReleasesLoadedSegmentAfterLastView(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -437,6 +446,7 @@ func TestQueryViewSegmentReadinessManager_ReleasesLoadedSegmentAfterLastView(t *
 
 func TestQueryViewSegmentReadinessManager_QueryHandleDefersSegmentRelease(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -486,6 +496,7 @@ func TestQueryViewSegmentReadinessManager_QueryHandleDefersSegmentRelease(t *tes
 
 func TestQueryViewSegmentReadinessManager_ReleasesLateLoadedSegmentAfterViewRelease(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
@@ -528,6 +539,7 @@ func TestQueryViewSegmentReadinessManager_ReleasesLateLoadedSegmentAfterViewRele
 
 func TestQueryViewSegmentReadinessManager_ReportsReadyIncrementallyPerSegment(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 
@@ -588,12 +600,14 @@ func TestQueryViewSegmentReadinessManager_ReportsReadyIncrementallyPerSegment(t 
 
 func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseSharedSegment(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
 
@@ -645,12 +659,14 @@ func TestQueryViewSegmentReadinessManager_LoadedSegmentAcquireDoesNotReleaseShar
 
 func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailure(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeNodeScheduler{}
@@ -705,12 +721,14 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterRegisterFailur
 
 func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailure(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeNodeScheduler{}
@@ -760,12 +778,14 @@ func TestQueryViewSegmentReadinessManager_RetriesPhysicalLoadAfterSchedulerFailu
 
 func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
 		Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}},
 	}
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view).QueryViewKey()
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	key2 := qviews.NewQueryViewAtQueryNode(meta2, view).QueryViewKey()
 
 	scheduler := &fakeNodeScheduler{}
@@ -823,6 +843,7 @@ func TestQueryViewSegmentReadinessManager_SegmentFailureDetachesFailedViewRef(t 
 
 func TestQueryViewSegmentReadinessManager_KeepsEnsureRegisterVChannelTogether(t *testing.T) {
 	meta1 := buildHandlerTestMeta(1)
+	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	meta1.Vchannel = "vchannel-1"
 	view1 := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
@@ -831,6 +852,7 @@ func TestQueryViewSegmentReadinessManager_KeepsEnsureRegisterVChannelTogether(t 
 	key1 := qviews.NewQueryViewAtQueryNode(meta1, view1).QueryViewKey()
 
 	meta2 := buildHandlerTestMeta(2)
+	meta2.Version.DataVersion = &viewpb.DataVersion{}
 	meta2.Vchannel = "vchannel-2"
 	view2 := &viewpb.QueryViewOfQueryNode{
 		NodeId:     1,
@@ -865,8 +887,10 @@ func TestQueryViewSegmentReadinessManager_KeepsEnsureRegisterVChannelTogether(t 
 	assert.Equal(t, "vchannel-1", buffer.registeredChannel[1000])
 	assert.Equal(t, "vchannel-2", buffer.registeredChannel[2000])
 }
+
 func TestQueryViewSegmentReadinessManager_FailureReportsUnrecoverable(t *testing.T) {
 	meta := buildHandlerTestMeta(1)
+	meta.Version.DataVersion = &viewpb.DataVersion{}
 	view := buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	physicalCalled := make(chan struct{}, 1)
