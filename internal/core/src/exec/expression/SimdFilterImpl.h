@@ -27,7 +27,6 @@
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstring>
-#include <type_traits>
 #include <vector>
 #include <xsimd/xsimd.hpp>
 #include "common/SimdUtil.h"

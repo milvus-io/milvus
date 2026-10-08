@@ -63,7 +63,11 @@ func TestQueryNaNRejected(t *testing.T) {
 			parsed, err := ParseExpr(helper, tc.expression, values)
 			require.Nil(t, parsed)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.Equal(t, int32(1100), merr.Code(err))
+			code := int32(1100)
+			if tc.value == nil {
+				code = 2201
+			}
+			require.Equal(t, code, merr.Code(err))
 			require.Contains(t, err.Error(), "NaN")
 			require.False(t, merr.IsRetryableErr(err))
 			require.Equal(t, "true", merr.Status(err).GetExtraInfo()[merr.InputErrorFlagKey])

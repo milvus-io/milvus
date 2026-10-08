@@ -3,18 +3,12 @@ package planparserv2
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// errNaNQuery marks a constant-folding failure so the parser can translate it
-// to an input error instead of wrapping it as a query-plan error.
-var errNaNQuery = errors.New("NaN is not supported in query expressions")
-
 func newNaNQueryError() error {
-	return merr.WrapErrParameterInvalidMsg(errNaNQuery.Error())
+	return merr.WrapErrParameterInvalidMsg("NaN is not supported in query expressions")
 }
 
 func queryValueHasNaN(value *planpb.GenericValue) bool {
@@ -70,7 +64,7 @@ func validateQueryValues(expr *planpb.Expr) error {
 // Reject before comparison or logical constant folding can discard the NaN.
 func validateFoldedConstant(expr *ExprWithType) interface{} {
 	if queryValueHasNaN(getGenericValue(expr)) {
-		return errNaNQuery
+		return newNaNQueryError()
 	}
 	return expr
 }

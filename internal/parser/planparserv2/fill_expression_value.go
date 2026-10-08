@@ -103,10 +103,7 @@ func fillExpressionValueWithBudgetAndSchema(
 		return err
 	}
 	ctx.schema = schema
-	if err := fillExpressionValue(expr, templateValues, ctx); err != nil {
-		return err
-	}
-	return validateQueryValues(expr)
+	return fillExpressionValue(expr, templateValues, ctx)
 }
 
 type fillExpressionContext struct {
