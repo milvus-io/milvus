@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -121,6 +122,7 @@ func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
+				featureusage.Hit(featureusage.FeatureAuthAPIKey)
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeparator, util.PasswordHolder)
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
 				md[util.HeaderToken] = []string{rawToken}
@@ -134,6 +136,7 @@ func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(username).Inc()
+				featureusage.Hit(featureusage.FeatureAuthPassword)
 			}
 		}
 		return ctx, nil

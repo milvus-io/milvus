@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
@@ -287,10 +288,13 @@ func repackDeleteMsgByHash(
 }
 
 type DeleteRunner struct {
-	req       *milvuspb.DeleteRequest
-	result    *milvuspb.MutationResult
-	node      taskmodel.TaskNode
-	metaCache Cache
+	req    *milvuspb.DeleteRequest
+	result *milvuspb.MutationResult
+	// userPlanIsSimple: the user's filter, before any row-level-security
+	// predicate, names primary keys only (delete by ids).
+	userPlanIsSimple bool
+	node             taskmodel.TaskNode
+	metaCache        Cache
 
 	// channel
 	chMgr     channelmgr.ChannelsMgr
@@ -425,7 +429,10 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
+	// The user's own filter is counted: the parser reports it before the
+	// rewriter, and the row-level-security predicate is merged in afterwards.
+	var exprFeatures featureusage.FeatureSet
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
 	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
 		start := time.Now()
@@ -442,10 +449,15 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	dql.RecordExprTemplateFeatures(&exprFeatures, dr.req.GetExprTemplateValues())
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
+	// The mode is the shape of the user's request. With row-level security
+	// the predicate merged below turns every delete into a filter delete,
+	// which is how the server runs it but not what the client asked for.
+	dr.userPlanIsSimple, _, _ = getPrimaryKeysFromPlan(dr.schema.CollectionSchema, userPlan)
 
 	if enforceRLS {
 		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
@@ -531,6 +543,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 
 func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
+	recordDeleteMode(dr.userPlanIsSimple)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)

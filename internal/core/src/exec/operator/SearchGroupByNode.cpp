@@ -106,6 +106,11 @@ PhySearchGroupByNode::GetOutput() {
                                         : nullptr,
                                     &search_result,
                                     query_context_->get_read_snapshot().get());
+        if (search_result.strict_group_phase2_used_) {
+            MarkFeature(
+                query_context_->get_plan_options().feature_recorder.get(),
+                FeatureBit::StrictGroupSizeEffective);
+        }
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;

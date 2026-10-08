@@ -221,12 +221,20 @@ func (t *SearchTask) Execute() error {
 		relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
 			return acc + segments.GetSegmentRelatedDataSize(seg)
 		}, 0)
+		// Features the filter stage used travel with its statistics: stage 2
+		// may serve the same filter from the cache, so what ran here is the
+		// only record of, say, the NGRAM index or of a cold read.
+		scannedRemoteBytes := lo.Reduce(results, func(acc int64, r *segments.SearchResult, _ int) int64 {
+			return acc + r.GetMetadata().StorageCost.ScannedRemoteBytes
+		}, 0)
+		featureBits := searchReq.FeatureBits() | segments.ColdReadFeatureBit(scannedRemoteBytes)
 		for i := range t.originNqs {
 			task := t.subTaskAt(i)
 			task.result = &internalpb.SearchResults{
 				Status:                   merr.Success(),
 				SealedSegmentIDsSearched: segmentIDs,
 				FilterValidCounts:        validCounts,
+				FeatureBits:              featureBits,
 				CostAggregation: &internalpb.CostAggregation{
 					ServiceTime:          tr.ElapseSpan().Milliseconds(),
 					TotalRelatedDataSize: relatedDataSize,
@@ -386,7 +394,7 @@ func (t *SearchTask) Execute() error {
 			}
 		}
 	}
-	t.attributeStorageCost(results)
+	t.attributeStorageCost(results, searchReq.FeatureBits())
 
 	// Reduce metric covers the full Go-reduce pipeline (Arrow export +
 	// heap merge + Late Materialization + proto marshal), aligned with the

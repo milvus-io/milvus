@@ -337,7 +337,12 @@ func resolveGroupSizeFromMetadata(metadata []segcore.SearchResultMetadata) int64
 // proportionally to NQ. Must run AFTER every slice's Late Mat finishes —
 // FillOutputFieldsOrdered accumulates bytes on the C++ SearchResult, so
 // GetMetadata().StorageCost is only final after late mat completes.
-func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
+//
+// Every sub-task also gets the execution feature bits of the shared plan,
+// whole rather than split: a feature one merged request used is reported to
+// each. A cold read is added from the total before the split, since the
+// split rounds a small byte count down to zero.
+func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult, featureBits uint64) {
 	var totalNq int64
 	for _, n := range t.originNqs {
 		totalNq += n
@@ -351,11 +356,13 @@ func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
 		totalCost.ScannedRemoteBytes += c.ScannedRemoteBytes
 		totalCost.ScannedTotalBytes += c.ScannedTotalBytes
 	}
+	featureBits |= segments.ColdReadFeatureBit(totalCost.ScannedRemoteBytes)
 	for i, sliceNq := range t.originNqs {
 		task := t.subTaskAt(i)
 		ratio := float64(sliceNq) / float64(totalNq)
 		task.result.ScannedRemoteBytes = int64(float64(totalCost.ScannedRemoteBytes) * ratio)
 		task.result.ScannedTotalBytes = int64(float64(totalCost.ScannedTotalBytes) * ratio)
+		task.result.FeatureBits = featureBits
 	}
 }
 

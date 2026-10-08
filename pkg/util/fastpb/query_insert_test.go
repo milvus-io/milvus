@@ -25,6 +25,7 @@ func TestEquiv_RetrieveResults(t *testing.T) {
 		HasMoreResult:             true,
 		ScannedTotalBytes:         4096,
 		MvccTimestamp:             1<<48 + 123,
+		FeatureBits:               1<<63 | 0b1011,
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},

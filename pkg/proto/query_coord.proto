@@ -161,6 +161,9 @@ service QueryNode {
     rpc GetMetrics(milvus.GetMetricsRequest)
         returns (milvus.GetMetricsResponse) {
     }
+    rpc GetFeatureUsage(internal.GetFeatureUsageRequest)
+        returns (internal.GetFeatureUsageResponse) {
+    }
 
     rpc GetDataDistribution(GetDataDistributionRequest)
         returns (GetDataDistributionResponse) {
