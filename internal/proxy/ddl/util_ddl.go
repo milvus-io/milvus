@@ -618,8 +618,11 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		return err
 	}
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		leafSchema := field.GetTypeSchema().GetArrayElement().GetArrayElement()
-		if _, ok := leafSchema.GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+		_, _, depth, err := typeutil.GetArrayLeaf(field.GetTypeSchema())
+		if err != nil {
+			return err
+		}
+		if depth != 2 {
 			return merr.WrapErrParameterInvalidMsg(
 				"nested array field %s supports exactly one nested array level",
 				field.GetName())

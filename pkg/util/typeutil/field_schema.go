@@ -178,22 +178,63 @@ func IsNestedArrayTypeSchema(typeSchema *schemapb.TypeSchema) bool {
 	return ok
 }
 
-// GetNestedArrayLeafType returns the scalar leaf type of a nested Array field.
-// The caller must validate the field schema before using the result.
-func GetNestedArrayLeafType(field *schemapb.FieldSchema) schemapb.DataType {
-	if !IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return schemapb.DataType_None
+// GetArrayLeaf walks the type chain of one Array column: from typeSchema down,
+// every node is an array_element until a leaf_type node. It returns the leaf
+// type, whether the leaf (the innermost element) is nullable, and the number
+// of Array levels above the leaf: 1 for Array<T>, 2 for Array<Array<T>>.
+//
+// It is defined on a single column only. Any other node kind, such as a
+// future struct node, is rejected: a type that describes several columns has
+// to be projected into its columns first.
+func GetArrayLeaf(typeSchema *schemapb.TypeSchema) (schemapb.DataType, bool, int, error) {
+	if typeSchema == nil {
+		return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg("array type_schema is nil")
 	}
-	return field.GetTypeSchema().GetArrayElement().GetArrayElement().GetLeafType()
+	depth := 0
+	node := typeSchema
+	for {
+		switch kind := node.GetKind().(type) {
+		case *schemapb.TypeSchema_ArrayElement:
+			if kind.ArrayElement == nil {
+				return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+					"array type_schema has a nil array_element at level %d", depth+1)
+			}
+			depth++
+			node = kind.ArrayElement
+		case *schemapb.TypeSchema_LeafType:
+			if depth == 0 {
+				return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+					"type_schema with leaf type %s is not an Array", kind.LeafType)
+			}
+			return kind.LeafType, node.GetNullable(), depth, nil
+		default:
+			return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+				"array type_schema has unsupported kind %T at level %d", node.GetKind(), depth)
+		}
+	}
 }
 
-// GetNestedArrayLeafNullable returns the leaf nullability of a nested Array field.
-// The caller must validate the field schema before using the result.
-func GetNestedArrayLeafNullable(field *schemapb.FieldSchema) bool {
-	if !IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return false
+// GetFieldArrayLeaf returns GetArrayLeaf for an Array or ArrayOfVector column.
+// A nested Array carries its chain in FieldSchema.type_schema. A single-level
+// Array carries none on the wire; its chain is Array -> leaf(element_type,
+// element_nullable), the same one segcore FieldMeta synthesizes, and it is
+// evaluated here without being materialized because storage calls this per
+// row. This fallback goes away once every Array carries a type_schema.
+func GetFieldArrayLeaf(field *schemapb.FieldSchema) (schemapb.DataType, bool, int, error) {
+	if typeSchema := field.GetTypeSchema(); typeSchema != nil {
+		return GetArrayLeaf(typeSchema)
 	}
-	return field.GetTypeSchema().GetArrayElement().GetArrayElement().GetNullable()
+	switch field.GetDataType() {
+	case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
+		if field.GetElementType() == schemapb.DataType_Array {
+			return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+				"nested array field %s must specify type_schema", field.GetName())
+		}
+		return field.GetElementType(), field.GetElementNullable(), 1, nil
+	default:
+		return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+			"field %s of type %s is not an Array", field.GetName(), field.GetDataType())
+	}
 }
 
 // IsNativeListArrayField reports whether an Array / ArrayOfVector field is
