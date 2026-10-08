@@ -108,6 +108,7 @@ func Test_getPrimaryKeysFromPlan(t *testing.T) {
 		assert.False(t, isSimple)
 	})
 }
+
 func TestDeleteTask_GetChannels(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionName := "col-0"

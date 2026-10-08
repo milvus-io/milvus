@@ -126,6 +126,7 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 		assert.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, shanghai).UnixMicro(), rangeExpr.GetValue().GetInt64Val())
 	})
 }
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 
