@@ -33,8 +33,10 @@ type TransformLogStream interface {
 }
 
 type TransformLogSubscriptionOption struct {
-	SubscriptionID     int64
-	VChannel           string
+	SubscriptionID int64
+	VChannel       string
+	// StartAfterTimeTick is exclusive. Summary-backed streams advance older
+	// cursors to their retained lower bound; skipped history is not replayed.
 	StartAfterTimeTick uint64
 	EndTimeTick        uint64
 	Handler            TransformLogEventHandler

@@ -214,7 +214,7 @@ writers to share an assignment term; the fresh-term rule in §2.3 still applies.
 
 ```text
 ObserveMessage(immutable), in WAL TimeTick order
-  -> copy keyed insert and delete transform records
+  -> copy all committed insert facts and delete transform records
   -> seal ordered spans and assign chunk sequences before upload
   -> upload chunks concurrently; completion may be out of order
   -> extend the continuous durable prefix only across completed uploads
@@ -476,11 +476,26 @@ cursor. It does keep runtime consumer frontiers where retention safety requires
 them, as for L0Materializer. DDL does not invalidate executed-request history;
 replicated writes do not contribute foreign keys to the local dedup view.
 
-The current observer stages insert/idempotency pairs for keyed writes. A
-keyless insert does not by itself populate a general primary-key history; a
-future insert-only consumer would need to provide that observation policy.
-A primary-key index requiring full history would also need a retention contract
-beyond the bounded idempotency tail.
+The observer stages every committed Insert, including keyless and replicated
+writes. A transaction contributes one insert fact at its commit TimeTick when
+it contains Insert bodies; a Delete-only transaction contributes only Transform
+records. Missing client keys are represented by empty strings and never create
+local dedup identities. The codec may omit an all-empty idempotency section;
+mixed keyed/keyless sections retain positional alignment.
+
+Insert facts contain WAL positions and TimeTicks, plus primary keys and row
+offsets when an existing local header result supplies them. Observation does not
+decode Insert bodies to extract keys or store vector payloads. Replicated writes
+retain local positions with an empty key and no source-cluster result. If a
+transaction result cannot be reconstructed, keep the insert fact without a dedup
+identity rather than restoring an incomplete duplicate response.
+
+Every staged insert participates in Summary confirmation: the global checkpoint
+cannot pass it until its Summary record is recoverable. This prevents an
+insert-only workload from indefinitely advancing the checkpoint without creating
+Summary coverage. It adds per-write metadata staging/persistence and recovery
+work; header results add their existing per-row cost. A full primary-key history
+and its retention contract are not introduced by this change.
 
 ### 5.2 Summary L0 Consumer (Future Runtime Wiring)
 
@@ -506,11 +521,10 @@ This release position is only one input to shared-store retention.
 
 ### 5.3 Consumer Lifecycle
 
-WALSummary is a permanent PChannel component. It records Delete transforms
-regardless of request-level idempotency, and records local keyed writes when
-an explicit IK is present. There are no global, collection or transform enable
-switches. Keyless inserts do not create idempotency records or clear existing
-request history.
+WALSummary is a permanent PChannel component. It records Delete transforms and
+all committed Insert facts regardless of request-level idempotency. There are
+no global, collection or transform enable switches. Keyless inserts carry an
+empty idempotency annotation and do not clear existing request history.
 
 The standalone `RemoveAllObjects` helper is destructive maintenance, not a
 feature-toggle or corruption-recovery workflow. Repair must preserve the
@@ -554,8 +568,9 @@ The contract is:
    skip, not proof that retired history was empty. Persist the per-VChannel
    `transform_fast_forward_time_tick` with reference removal, even when the
    last chunk is removed. L0 rejects any fast-forward beyond its materialized
-   cursor. The SN adaptor rejects a skip with `ErrTransformLogStartPointTruncated`;
-   future remote consumers must explicitly reconcile or reject it.
+   cursor. The TransformLog adaptor accepts the lower bound and delivers the
+   retained suffix. This does not prove the skipped history was empty; reliable
+   query retention remains a TODO in §9.
 6. Missing or corrupt referenced objects fail the read; an absent VChannel
    section means an empty interval only within known complete retained coverage.
 7. Pin a read's required objects against local deletion. Pins have bounded read
@@ -703,9 +718,10 @@ equivalent write retries, GC during loading and restart without payload preload.
 [TransformLog](transform_log.md) wraps §5.4 without ObserveMessage, independent
 storage, or L0 execution. The local `walsummary.Stream` is wired into SN growing
 resource preparation. It reads bounded batches, waits for coverage through the
-captured end TimeTick and reports SyncUp only after that complete interval has
-been delivered. The GrowingRuntime caller rejects truncated history and applies
-the returned Delete entries before readiness. Later events use the VChannel
+captured end TimeTick after clamping an older start to Summary's lower bound.
+It reports SyncUp after delivering the retained interval; an interval wholly
+before that bound completes without entries and without exceeding its requested
+end. GrowingRuntime applies the returned Delete entries before readiness. Later events use the VChannel
 live event path.
 
 SyncUp has two consumer-facing roles: extending Transform MVCC through intervals
@@ -1008,6 +1024,30 @@ depend on their data sizes; the prefix discovery strategy alone does not make
 all of those operations constant-time.
 
 ## 9. GC Design: Cross-Owner Coordination (TODO)
+
+### TODO: Reliable Retention For Query Recovery
+
+Complete the retention protocol before claiming complete historical replay for
+every SN/QN consumer. TransformLog subscriptions currently accept Summary's
+lower bound when their requested start is older; this compatibility behavior
+does not reconstruct skipped Deletes or prove that the skipped interval was empty.
+
+The follow-up must distinguish an initial interval with no Summary history from
+history retired by GC, preserve the required coverage evidence across restart,
+and protect the minimum replay start of retained QueryViews/DataViews, future
+loads, reconnects and local recovery. Requirements must be restored before GC
+starts and released only after the associated view/base state is durably safe.
+Delivery cursors and L0 materialization alone do not prove a query no longer
+needs a Delete. Existing SN retained-segment pins remain active; QN/remote
+consumer retention and cross-owner deletion coordination remain unfinished.
+
+Validate empty-history restart, upgrade from a version without Summary,
+slow/disconnected consumers, old views, and crashes or term handoff during GC.
+Recording all committed Inserts prevents keyless data from bypassing Summary
+confirmation, but neither restores older missing history nor replaces this
+retention protocol. This TODO does not change GC behavior in this PR.
+
+### Cross-Owner Coordination
 
 **TODO:** Define the GC protocol across term handoff. The retention rules in §4
 do not by themselves prevent an old owner from deleting objects referenced by

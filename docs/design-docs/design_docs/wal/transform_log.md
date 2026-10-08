@@ -51,7 +51,7 @@ The qv interface shape is retained:
 ```text
 AcquireStream(PChannel)
   -> Subscribe(VChannel, StartAfterTimeTick, optional EndTimeTick, Handler)
-       -> DeleteEntry / SyncUp / FastForward / Error
+       -> DeleteEntry / SyncUp / Error
 ```
 
 One stream may carry several VChannel subscriptions. A subscription reads
@@ -63,9 +63,12 @@ The planned QueryNode integration uses continuous subscriptions to catch loaded
 sealed Segments up and then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
 growing resources from a captured WAL view; subsequent resource events arrive
 through the VChannel's ordered live event path. Both consumers are specified to use the same Summary-backed read semantics.
-The current SN adaptor rejects a skipped historical interval with
-`ErrTransformLogStartPointTruncated`; it does not expose successful fast-forward
-to GrowingRuntime.
+The current adaptor clamps an older start to Summary's lower bound and delivers
+the retained suffix. It does not emit a separate FastForward event or a truncated
+start error. A bounded interval wholly at or below the lower bound completes
+with SyncUp at its requested end and no entries. This is an explicit compatibility
+policy, not proof that skipped Deletes were applied; reliable retention remains
+[TODO](summary.md#todo-reliable-retention-for-query-recovery).
 
 ## 3. Entry And SyncUp Semantics
 
@@ -74,8 +77,9 @@ uses its outer TimeTick and delivers its Delete children as one ordered entry.
 Pure Inserts do not produce transform entries. Other ordered messages may
 establish progress without producing payload records.
 
-`SyncUp(T)` means every Delete in the subscription's requested interval through
-T has been delivered successfully. It has two responsibilities:
+`SyncUp(T)` means every retained Delete after the adjusted start through T has
+been delivered successfully. It makes no claim about history below Summary's
+lower bound. It has two responsibilities:
 
 1. **Advance through intervals without Deletes.** Relevant DDL/publication
    events, insert-only transaction commits and WAL recovery barriers can advance
@@ -147,9 +151,10 @@ MVCC waiting. Catch-up avoids exposing historical replay backlog, not every
 possible future wait.
 
 A bounded subscription completes only after coverage reaches its EndTimeTick.
-If Summary has not reached that position, the subscription waits or reports an
-explicit failure; an empty read is not successful completion. In particular,
-StreamingNode preparation must not complete with an incomplete Delete replay.
+If the end is beyond Summary's lower bound and readable coverage has not reached
+it, the subscription waits or reports an explicit failure; an empty retained read
+is not successful completion. The lower-bound compatibility rule only skips the
+unavailable prefix, never the retained interval still required through the end.
 
 ### Unbounded subscriptions for QueryNode
 
@@ -176,8 +181,9 @@ implemented by the local adaptor.
 Notifications cover payload-free changes too: insert-only transaction commits,
 flush/import publication, relevant DDL and schema changes. Their classification
 is shared with query-plan MVCC advancement. PChannel-wide FlushAll/AlterWAL and
-recovery baselines remain broadcasts. GC truncation and terminal failures wake
-readers to fail explicitly rather than leave them waiting indefinitely.
+recovery baselines remain broadcasts. GC truncation wakes readers to advance
+to the retained boundary; terminal failures wake them to fail explicitly rather
+than wait indefinitely.
 
 An unbounded subscription acquires one scoped-notifier reference and releases
 it on cancellation, closure or failure. Multiple subscribers share notification
@@ -197,8 +203,9 @@ subscriptions to the same VChannel avoids decoding the same records repeatedly.
 
 Local and remote transports expose the same contract. After transport failure,
 the client reacquires the PChannel stream and resubscribes exclusively after the
-last position its handler successfully accepted. Entry, SyncUp and an explicitly accepted FastForward advance
-that cursor; failed handler calls do not.
+last position its handler successfully accepted. Entry and SyncUp advance that
+cursor; failed handler calls do not. The server applies its lower-bound policy
+again on reconnect.
 
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
 A caller recovering its own state must select a cursor consistent with that
@@ -206,12 +213,13 @@ state. If the recovered server has not yet reconstructed a previously delivered
 position, it must not manufacture coverage from the resume request.
 
 Invalid options and an unavailable VChannel are explicit semantic errors.
-When Summary returns `FastForwardTimeTick`, the adaptor must expose the skipped
-interval before delivering later entries. The caller must reconcile that skip
-with its own base state; it is not SyncUp or proof that retired Deletes were
-delivered. A consumer requiring complete replay rejects the skip. Missing or
-corrupt retained objects fail the read; they are never converted into empty
-history, fast-forward, or SyncUp.
+When Summary returns `FastForwardTimeTick`, the adaptor accepts that boundary
+and delivers the returned suffix without rereading it. Cursor advancement is
+capped by EndTimeTick for bounded subscriptions, including an entirely skipped
+interval. The same policy applies when GC overtakes a live cursor. Missing or
+corrupt retained objects still fail the read; they are never converted into empty
+history, fast-forward, or SyncUp. Correct replay of all query-required effects
+depends on the reliable-retention TODO, not on accepting an older cursor.
 
 ## 6. Retention Prerequisite
 
@@ -235,8 +243,9 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 1. TransformLog has no WAL observation or storage-write path.
 2. Every subscription reads the same WALSummary record store.
 3. Payload delivery is ordered by source WAL TimeTick with an exclusive cursor.
-4. SyncUp claims only complete, successfully delivered coverage.
-5. Historical/live handoff and storage transitions lose no records.
+4. SyncUp claims complete delivery only after the adjusted start; it does not
+   certify history skipped below the retained lower bound.
+5. Historical/live handoff and storage transitions lose no retained records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.
 8. Applied MVCC and view readiness require ordered consumer application;
