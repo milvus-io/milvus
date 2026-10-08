@@ -183,15 +183,15 @@ Key observations:
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected (a projection reporting zero preserves the stored version).
-- TODO: DataCoord will produce the shard `transform_start_after_timetick` as
+- DataCoord dynamically produces the shard `transform_start_after_timetick` as
   `min(K, S, G)`: the reported channel checkpoint, published Segment coverage,
   and unpublished Segment constraints across all partitions. Growing data
   constrains the cursor without entering DataView membership; independent
   Flush ordering is preserved. See
   [Transform Start-After TimeTick](transform_start_after_timetick.md) for the
-  completeness proof and TransformLog-only recovery contract. The field is
-  already present on the wire (`DataViewOfShard`, `QueryViewMeta`), but the
-  current branch does not produce a meaningful frontier.
+  completeness proof and TransformLog-only recovery contract. The derived field
+  is carried on the wire (`DataViewOfShard`, `QueryViewMeta`) but omitted from
+  DataView persistence; recovery regenerates it from its inputs.
 
 ### 5.4 Constraints
 

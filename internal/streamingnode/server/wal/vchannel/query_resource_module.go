@@ -2,7 +2,6 @@ package vchannel
 
 import (
 	"context"
-	"math"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -156,13 +155,14 @@ func deleteReplayStartAfter(snapshot walview.VisibleSegmentSnapshot) uint64 {
 	return minCreateTimeTick - 1
 }
 
-// refreshQueryRetentionLocked pins deletes needed to rebuild every retained
-// segment, including old-view segments already committed to DataCoord.
+// refreshQueryRetentionLocked protects both local recovery and QueryView
+// replay. Until distributed View retention is recovered, retain the complete
+// Transform suffix from collection creation even after all local Segments go.
 func (m *VChannelRecoveryModule) refreshQueryRetentionLocked() {
 	if m.summaryManager == nil {
 		return
 	}
-	floor := uint64(math.MaxUint64)
+	floor := m.vchannelView.AssignmentMeta().GetCreateCollectionTimeTick()
 	for _, segment := range m.segments {
 		created := segment.CreateTimeTick()
 		if created == 0 {

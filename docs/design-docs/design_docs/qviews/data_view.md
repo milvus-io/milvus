@@ -68,8 +68,8 @@ version is kept) rather than regressed: after an L0 compaction advanced the
 Manifest, a replay that has not yet observed the new manifest must not roll the
 snapshot back.
 
-TODO: The current branch does not produce a meaningful
-`transform_start_after_timetick`. The planned DataCoord producer initializes it
+The DataCoord producer dynamically calculates
+`transform_start_after_timetick`. It initializes the runtime snapshot
 from each VChannel's CreateCollection TimeTick, then calculates `F = min(K, S, G)`:
 the accepted channel checkpoint, coverage of the new snapshot's Segment data
 versions, and the earliest safe start of registered but unpublished data across
@@ -87,7 +87,7 @@ F unchanged. Existing checkpoint reporting and Growing registration supply the
 initial completeness contract; a shard-wide Flush order or new watermark RPC
 is not required. See [Transform Start-After TimeTick](transform_start_after_timetick.md)
 for the proof, atomic publication requirements, Import constraints, and
-TransformLog retention obligations. This producer remains unimplemented.
+TransformLog retention obligations. The catalog omits the derived shard field on both standalone and atomic Flush writes.
 
 ## Lifecycle
 

@@ -836,6 +836,9 @@ message VChannelMeta {
     // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
     view.DataVersion segment_data_version_summary = 6;
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
+    // Immutable per-VChannel CreateCollection TimeTick. Protects TransformLog
+    // history independently of materialization and local Segment lifetime.
+    uint64 create_collection_time_tick = 7;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

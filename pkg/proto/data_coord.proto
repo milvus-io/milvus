@@ -492,6 +492,9 @@ message SegmentInfo {
   // First growing-to-sealed DataView publication. Written with the flush snapshot
   // and retained across compaction/drop so a retried commit returns the same version.
   view.DataVersion sealed_at_data_version = 41;
+  // Exclusive TransformLog replay start for this exact data/manifest revision.
+  // Persisted with the base; compaction inherits its actual input coverage.
+  uint64 transform_start_after_timetick = 42;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1502,6 +1505,9 @@ message ImportJob {
   bool            auto_commit         = 20;
   bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
   plan.Expr rls_check_predicate = 22;
+  // Per-vchannel CommitImport fences registered before SN releases the WAL
+  // message. These constrain unpublished data until Segment coverage is visible.
+  map<string, uint64> transform_commit_timeticks = 23;
 }
 
 enum ImportTaskStateV2 {

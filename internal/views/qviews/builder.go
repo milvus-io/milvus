@@ -16,6 +16,7 @@ type QueryViewAtCoordBuilder struct {
 	transformStartAfterTimetick uint64
 	loadInfoVersion             uint64
 	assignments                 map[int64]map[int64][]int64
+	segmentTransformStarts      map[int64]uint64
 }
 
 func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfCollection, vchannel string) *QueryViewAtCoordBuilder {
@@ -29,6 +30,14 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	if shardView == nil {
 		panic("vchannel " + vchannel + " not found in DataViewOfCollection")
 	}
+	starts := make(map[int64]uint64)
+	for _, partition := range shardView.GetPartitions() {
+		for idx, segmentID := range partition.GetSegmentIds() {
+			if idx < len(partition.GetSegmentTransformStartAfterTimeticks()) {
+				starts[segmentID] = partition.GetSegmentTransformStartAfterTimeticks()[idx]
+			}
+		}
+	}
 	return &QueryViewAtCoordBuilder{
 		collectionID:                dataView.CollectionId,
 		replicaID:                   replicaID,
@@ -37,6 +46,7 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		transformStartAfterTimetick: shardView.TransformStartAfterTimetick,
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
+		segmentTransformStarts:      starts,
 	}
 }
 
@@ -90,10 +100,16 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 
 		partitions := make([]*viewpb.QueryViewOfPartition, 0, len(partitionIDs))
 		for _, partitionID := range partitionIDs {
-			partitions = append(partitions, &viewpb.QueryViewOfPartition{
+			partition := &viewpb.QueryViewOfPartition{
 				PartitionId: partitionID,
 				SegmentIds:  partitionsByID[partitionID],
-			})
+			}
+			if len(b.segmentTransformStarts) != 0 {
+				for _, segmentID := range partition.SegmentIds {
+					partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, b.segmentTransformStarts[segmentID])
+				}
+			}
+			partitions = append(partitions, partition)
 		}
 		queryNodes = append(queryNodes, &viewpb.QueryViewOfQueryNode{NodeId: nodeID, Partitions: partitions})
 	}

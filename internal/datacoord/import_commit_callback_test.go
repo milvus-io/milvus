@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -270,4 +271,24 @@ func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
 		checker.checkCommittingJob(restored.GetJob(ctx, 1))
 		require.Equal(t, state, restored.GetJob(ctx, 1).GetState())
 	}
+}
+
+func TestImportCommitTransformFenceSurvivesRecovery(t *testing.T) {
+	callbacks, catalog, _ := newImportCommitCallbackTest(t)
+	ctx := context.Background()
+	raw := message.NewCommitImportMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: 100, JobId: 1, CommitByCoordinator: true}).
+		WithBody(&message.CommitImportMessageBody{}).MustBuildMutable().WithTimeTick(200).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	result := message.AckResultCommitImportMessageV2{Message: message.MustAsImmutableCommitImportMessageV2(raw)}
+	failure := mockey.Mock((*datacoordkv.Catalog).SaveImportJob).Return(context.DeadlineExceeded).Build()
+	require.ErrorIs(t, callbacks.commitImportV2AckOnceCallback(ctx, result), context.DeadlineExceeded)
+	failure.UnPatch()
+	require.Empty(t, callbacks.importMeta.GetJob(ctx, 1).(*importJob).GetTransformCommitTimeticks())
+	require.NoError(t, callbacks.commitImportV2AckOnceCallback(ctx, result))
+	require.NoError(t, callbacks.commitImportV2AckOnceCallback(ctx, result), "ack retry is idempotent")
+	recovered, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 200}, recovered.GetJob(ctx, 1).(*importJob).GetTransformCommitTimeticks())
+	require.Equal(t, internalpb.ImportJobState_Uncommitted, recovered.GetJob(ctx, 1).GetState(), "registration alone must not publish imported rows")
 }
