@@ -2056,7 +2056,9 @@ func (suite *ServiceSuite) loadAll() {
 			}
 			resp, err := suite.server.LoadCollection(ctx, req)
 			suite.Require().NoError(merr.CheckRPCCall(resp, err))
-			suite.assertQViewsLoadConfigured(collection, suite.replicaNumber[collection], suite.partitions[collection], true)
+			// The load RPC commits desired state. Shards are created later by the
+			// balancer, which is not running in this service fixture.
+			suite.assertQViewsLoadConfigured(collection, suite.replicaNumber[collection], suite.partitions[collection], false)
 		} else {
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID:  collection,
