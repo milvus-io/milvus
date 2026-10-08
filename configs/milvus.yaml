@@ -1172,7 +1172,6 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
-  enableFastPB: true # Enable fast protobuf decoding for RPC and internal search results. Set false to use the official protobuf decoder.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
@@ -1299,6 +1298,7 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  enableFastPB: true # Enable fast protobuf decoding for RPC and internal search results. Set false to use the official protobuf decoder.
   # Prefer IPv6 addresses when automatically selecting the local IP.
   # If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.
   preferIPv6: false

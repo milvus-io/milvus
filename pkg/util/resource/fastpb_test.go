@@ -37,7 +37,7 @@ import (
 
 func TestFastPBDefaultBeforeParamtableInit(t *testing.T) {
 	if os.Getenv("MILVUS_TEST_FASTPB_PREINIT") != "1" {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBDefaultBeforeParamtableInit$")
+		cmd := exec.Command(os.Args[0], "-test.run=^TestFastPBDefaultBeforeParamtableInit$") // #nosec G204 G702 -- re-executes this test binary with fixed arguments.
 		cmd.Env = append(os.Environ(), "MILVUS_TEST_FASTPB_PREINIT=1")
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "%s", out)
