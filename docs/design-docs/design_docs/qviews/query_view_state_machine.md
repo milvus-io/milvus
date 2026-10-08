@@ -33,7 +33,8 @@ DataVersion so the old Manifest revision can be released. The TransformLog
 start frontier remains a TODO pending the checkpoint-bounded DataCoord
 producer described in
 [Transform Start-After TimeTick](transform_start_after_timetick.md). It will
-persist `min(K, S, G)` with each DataView; a Manifest update need not advance
+calculate `min(K, S, G)` dynamically for each runtime DataView; this field
+is not persisted in DataView metadata. A Manifest update need not advance
 the frontier. The scheduling policy is not implemented by the current
 DataView-only PR.
 

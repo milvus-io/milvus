@@ -77,8 +77,11 @@ all partitions. Growing/Flushing data constrains F without becoming DataView
 members. The producer must supply these inputs consistently; the Manager must
 not infer completeness from an unsynchronized SegmentMeta scan.
 
-F is nondecreasing and persisted with each immutable snapshot. Old versions
-restore their stored F rather than recomputing it from newer SegmentMeta. An
+F is nondecreasing and generated dynamically for runtime snapshots; it is not
+persisted in DataView metadata. Recovery rebuilds it from checkpoint and
+publication constraints plus each View's version-bound Segment coverage,
+preserving the ordering of retained versions. Published runtime snapshots stay
+immutable. An
 F-only change advances compact_version; Manifest or membership updates may keep
 F unchanged. Existing checkpoint reporting and Growing registration supply the
 initial completeness contract; a shard-wide Flush order or new watermark RPC
