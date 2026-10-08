@@ -489,6 +489,11 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 		}, nil
 	}
 
+	if s.qviewsRuntime != nil {
+		infos, err := s.queryViewSegmentInfo(ctx, req)
+		return &querypb.GetSegmentInfoResponse{Status: merr.Status(err), Infos: infos}, nil
+	}
+
 	infos := make([]*querypb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	if len(req.GetSegmentIDs()) == 0 {
 		infos = s.getCollectionSegmentInfo(ctx, req.GetCollectionID())
