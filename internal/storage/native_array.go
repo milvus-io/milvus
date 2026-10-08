@@ -11,12 +11,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func nativeArrayLeaf(field *schemapb.FieldSchema) (schemapb.DataType, bool, bool) {
-	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return field.GetTypeSchema().GetArrayElement().GetArrayElement().GetLeafType(),
-			field.GetTypeSchema().GetArrayElement().GetArrayElement().GetNullable(), true
+// nativeArrayLeaf returns the leaf type and leaf nullability of a native-list
+// scalar Array column and whether it has two list levels. Storage writes at
+// most two levels. The schema was validated at DDL time, so a chain that does
+// not resolve is a Milvus bug and is relabeled as an internal error.
+func nativeArrayLeaf(field *schemapb.FieldSchema) (schemapb.DataType, bool, bool, error) {
+	leaf, leafNullable, depth, err := typeutil.GetFieldArrayLeaf(field)
+	if err != nil {
+		return schemapb.DataType_None, false, false, merr.WrapErrServiceInternalErr(err, "resolve Array leaf of field %s", field.GetName())
 	}
-	return field.GetElementType(), field.GetElementNullable(), false
+	if depth > 2 {
+		return schemapb.DataType_None, false, false, merr.WrapErrServiceInternalMsg(
+			"nested Array field %s supports exactly two list levels, got %d", field.GetName(), depth)
+	}
+	return leaf, leafNullable, depth == 2, nil
 }
 
 func nativeArrayLeafArrowType(dt schemapb.DataType) (arrow.DataType, error) {
@@ -57,13 +65,13 @@ func ArrowTypeForField(field *schemapb.FieldSchema) (arrow.DataType, error) {
 // arrowType selects the physical type with all schema levels available.
 func (entry serdeEntry) arrowType(field *schemapb.FieldSchema) (arrow.DataType, error) {
 	if field.GetDataType() == schemapb.DataType_Array && typeutil.IsNativeListArrayField(field) {
-		leaf, nullable, nested := nativeArrayLeaf(field)
+		leaf, nullable, nested, err := nativeArrayLeaf(field)
+		if err != nil {
+			return nil, err
+		}
 		if nested && (field.GetTypeSchema().GetNullable() != field.GetNullable() ||
 			field.GetTypeSchema().GetArrayElement().GetNullable() != field.GetElementNullable()) {
 			return nil, merr.WrapErrServiceInternalMsg("nested Array TypeSchema nullable flags differ from FieldSchema")
-		}
-		if nested && leaf == schemapb.DataType_None {
-			return nil, merr.WrapErrServiceInternalMsg("nested Array supports exactly two list levels")
 		}
 		leafType, err := nativeArrayLeafArrowType(leaf)
 		if err != nil {
@@ -182,7 +190,10 @@ func SerializeNativeArrayRow(b array.Builder, value any, field *schemapb.FieldSc
 		list.AppendNull()
 		return nil
 	}
-	leaf, leafNullable, nested := nativeArrayLeaf(field)
+	leaf, leafNullable, nested, err := nativeArrayLeaf(field)
+	if err != nil {
+		return err
+	}
 	if !nested {
 		if _, err := nativeArrayLength(row, leaf); err != nil {
 			return err
@@ -326,7 +337,10 @@ func DeserializeNativeArrayRow(a arrow.Array, i int, field *schemapb.FieldSchema
 		}
 		return nil, nil
 	}
-	leaf, leafNullable, nested := nativeArrayLeaf(field)
+	leaf, leafNullable, nested, err := nativeArrayLeaf(field)
+	if err != nil {
+		return nil, err
+	}
 	start, end := list.ValueOffsets(i)
 	if !nested {
 		return readNativeLeaf(list.ListValues(), start, end, leaf, leafNullable)
