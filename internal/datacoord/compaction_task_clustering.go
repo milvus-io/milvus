@@ -389,7 +389,13 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
-	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
+	var compactionParams string
+	if typeutil.IsDenseFloatVectorType(taskProto.GetClusteringKeyField().GetDataType()) {
+		compactionParams, err = compaction.GenerateClusteringJSONParams(
+			taskProto.GetSchema(), Params.KnowhereConfig.GetCompactionPlanParams())
+	} else {
+		compactionParams, err = compaction.GenerateJSONParams(taskProto.GetSchema())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +472,11 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 }
 
 func (t *clusteringCompactionTask) processStats() error {
+	for _, id := range t.GetTaskProto().GetTmpSegments() {
+		if segment := t.meta.GetSegment(context.TODO(), id); segment != nil && segment.GetClusterStats() != nil {
+			return t.processClusterSort()
+		}
+	}
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
 	resultSegments := make([]int64, 0, len(t.GetTaskProto().GetTmpSegments()))
 	if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {

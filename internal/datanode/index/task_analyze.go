@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -165,6 +166,8 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		InsertFiles:     segmentInsertFilesMap,
 		FieldSchema:     field,
 		ManifestPaths:   manifestPathsMap,
+		ClusterType:     paramtable.Get().KnowhereConfig.ClusterType.GetValue(),
+		ClusterParams:   paramtable.Get().KnowhereConfig.GetAnalyzeParams(),
 	}
 }
 

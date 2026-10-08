@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/distance"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -227,18 +226,13 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 						neededSegments[segId] = struct{}{}
 						break
 					}
-					var dis []float32
-					var disErr error
-					switch keyField.GetDataType() {
-					case schemapb.DataType_FloatVector:
-						dis, disErr = clustering.CalcVectorDistance(dim, keyField.GetDataType(),
-							vecBytes, fieldStat.Centroids[0].GetValue().([]float32), searchReq.GetMetricType())
-					default:
-						neededSegments[segId] = struct{}{}
-						disErr = merr.WrapErrParameterInvalid(schemapb.DataType_FloatVector, keyField.GetDataType(),
-							"Currently, pruning by cluster only support float_vector type")
-					}
-					// currently, we only support float vector and only one center one segment
+					dis, disErr := clustering.CalcVectorDistance(
+						dim,
+						keyField.GetDataType(),
+						vecBytes,
+						fieldStat.Centroids[0].GetValue(),
+						searchReq.GetMetricType())
+					// currently, we only support one center per segment
 					if disErr != nil {
 						mlog.Error(context.TODO(), "calculate distance error", mlog.Err(disErr))
 						neededSegments[segId] = struct{}{}
