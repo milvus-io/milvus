@@ -68,7 +68,8 @@ func TestCancel(t *testing.T) {
 	e.MarkRunning(30 * time.Millisecond)
 
 	now := time.Now()
-	canceled, notFound := r.Cancel([]int64{7, 8}, "", "root", "too heavy", now)
+	canceled, repeated, notFound := r.Cancel([]int64{7, 8}, "", "root", "too heavy", now)
+	assert.Empty(t, repeated)
 	require.Len(t, canceled, 1)
 	assert.Equal(t, []int64{8}, notFound)
 	assert.Equal(t, int64(7), canceled[0].RequestID)
@@ -88,10 +89,21 @@ func TestCancel(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, now, at)
 
-	// a second cancel of the same request is not reported again
-	canceled, notFound = r.Cancel([]int64{7}, "", "root", "again", now)
+	// a second cancel of the same request, before it has left, reports it as
+	// repeated, in state Canceling, so the id does not vanish from the answer
+	canceled, repeated, notFound = r.Cancel([]int64{7}, "", "root", "again", now)
 	assert.Empty(t, canceled)
 	assert.Empty(t, notFound)
+	require.Len(t, repeated, 1)
+	assert.Equal(t, int64(7), repeated[0].RequestID)
+	assert.Equal(t, StateCanceling, repeated[0].State)
+	// and the cause stays the first operator's
+	assert.Contains(t, CancelCause(ctx).Error(), "too heavy")
+
+	// until it leaves, the list shows it as canceling
+	listed := r.List(Filter{}, now)
+	require.Len(t, listed, 1)
+	assert.Equal(t, StateCanceling, listed[0].State)
 
 	// Unregister after cancel keeps the operator cause on the ctx
 	r.Unregister(e)
@@ -182,7 +194,7 @@ func TestConcurrentUse(t *testing.T) {
 			e.AddTask(id * 10)
 			e.MarkRunning(time.Millisecond)
 			if id%2 == 0 {
-				canceled, _ := r.Cancel([]int64{id}, "", "op", "", time.Now())
+				canceled, _, _ := r.Cancel([]int64{id}, "", "op", "", time.Now())
 				assert.Len(t, canceled, 1)
 				assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 			}
@@ -201,7 +213,7 @@ func TestCancelHeldToOwner(t *testing.T) {
 
 	// alice names both ids: hers is canceled, bob's is reported exactly like
 	// an id that does not exist, and is left running.
-	canceled, notFound := r.Cancel([]int64{1, 2, 3}, "alice", "alice", "", time.Now())
+	canceled, _, notFound := r.Cancel([]int64{1, 2, 3}, "alice", "alice", "", time.Now())
 	require.Len(t, canceled, 1)
 	assert.Equal(t, int64(1), canceled[0].RequestID)
 	assert.Equal(t, []int64{2, 3}, notFound)

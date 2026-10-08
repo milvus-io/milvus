@@ -100,13 +100,15 @@ func (node *Proxy) listRunningRequests(filter reqregistry.Filter) []reqregistry.
 }
 
 // cancelRequests cancels the given requests on this proxy on behalf of
-// operator, writes one audit line per canceled request and counts it. A
-// non-empty owner limits it to requests that user issued.
+// operator, writes one audit line per request this call stopped and counts
+// it. A request an earlier call already stopped is returned too, in state
+// Canceling, but is neither logged nor counted again. A non-empty owner
+// limits the call to requests that user issued.
 func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, owner, operator, reason string) (canceled []reqregistry.Info, notFound []int64) {
 	if node.requests == nil {
 		return nil, requestIDs
 	}
-	canceled, notFound = node.requests.Cancel(requestIDs, owner, operator, reason, time.Now())
+	canceled, repeated, notFound := node.requests.Cancel(requestIDs, owner, operator, reason, time.Now())
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	for _, info := range canceled {
 		mlog.Info(ctx, "request canceled by operator",
@@ -125,7 +127,7 @@ func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, owner
 			mlog.String("traceID", info.TraceID))
 		metrics.ProxyRequestCanceledTotal.WithLabelValues(nodeID, info.Type).Inc()
 	}
-	return canceled, notFound
+	return append(canceled, repeated...), notFound
 }
 
 func clientAddrFromContext(ctx context.Context) string {
