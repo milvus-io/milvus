@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
@@ -813,7 +815,13 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		actions = append(actions, action)
 	}
 
-	if err := m.catalog.Update(ctx, actions...); err != nil {
+	// Retry the same idempotent catalog actions until they are durably applied
+	// or the caller cancels. An explicit predicate also retries InputError-typed
+	// failures, matching the atomic publication contract on master.
+	if err := retry.Do(ctx, func() error {
+		return m.catalog.Update(ctx, actions...)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+		retry.RetryErr(func(error) bool { return true })); err != nil {
 		mlog.Error(ctx, "meta update: update segments info and segment change groups failed",
 			mlog.Int("segments", len(updatePack.segments)),
 			mlog.Int("groupActions", len(groupActions)),
