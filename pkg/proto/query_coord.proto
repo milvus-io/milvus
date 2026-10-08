@@ -40,7 +40,7 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
-    
+
     rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
         returns (stream WatchQueryViewSegmentLoadInfoResponse) {
     }
