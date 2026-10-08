@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -81,6 +82,31 @@ func TestQueryRetentionBeforeCreateCollection(t *testing.T) {
 		IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	module.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(raw))
 	require.Equal(t, []uint64{0, 100}, retained)
+}
+
+func TestQueryRetentionIncludesLegacySegmentCoverage(t *testing.T) {
+	var retained uint64
+	patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, _ string, start uint64) {
+		retained = start
+	}).Build()
+	defer patch.UnPatch()
+	module := &VChannelRecoveryModule{
+		vchannel: "v1", summaryManager: &walsummary.Manager{},
+		vchannelView: NewVChannelViewFromMeta(&streamingpb.VChannelMeta{CreateCollectionTimeTick: 50}),
+		segments: map[int64]*segment.SegmentView{
+			1: segment.NewSegmentViewFromMetaWithConfig(&streamingpb.SegmentAssignmentMeta{
+				SegmentId: 1, Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 100},
+			}, nil, segment.ViewConfig{}),
+		},
+	}
+	module.refreshQueryRetentionLocked()
+	require.Equal(t, uint64(50), retained, "local Segments cannot release history required for other nodes and reload")
+	module.segments[2] = segment.NewSegmentViewFromMetaWithConfig(&streamingpb.SegmentAssignmentMeta{SegmentId: 2}, nil, segment.ViewConfig{})
+	module.refreshQueryRetentionLocked()
+	require.Zero(t, retained, "unknown legacy coverage must not be skipped")
+	delete(module.segments, 2)
+	module.refreshQueryRetentionLocked()
+	require.Equal(t, uint64(50), retained)
 }
 
 func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.T) {
