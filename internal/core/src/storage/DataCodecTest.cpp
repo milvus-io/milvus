@@ -16,6 +16,9 @@
 
 #include <arrow/array.h>
 #include <arrow/builder.h>
+#include <arrow/io/memory.h>
+#include <parquet/arrow/reader.h>
+#include <parquet/arrow/writer.h>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <simdjson.h>
@@ -25,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -32,6 +36,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
@@ -61,6 +66,63 @@
 using namespace milvus;
 
 namespace {
+
+using ExternalSparseTestRow = std::optional<
+    std::vector<std::pair<std::optional<int64_t>, std::optional<double>>>>;
+
+template <typename IndexBuilder = arrow::Int64Builder,
+          typename ValueBuilder = arrow::DoubleBuilder>
+std::shared_ptr<arrow::Array>
+MakeExternalSparseArray(bool as_map,
+                        const std::vector<ExternalSparseTestRow>& rows) {
+    auto indices = std::make_shared<IndexBuilder>();
+    auto values = std::make_shared<ValueBuilder>();
+    auto index_lists = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), indices);
+    auto value_lists = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), values);
+    arrow::MapBuilder map(arrow::default_memory_pool(), indices, values);
+    for (const auto& row : rows) {
+        if (!row) {
+            if (as_map) {
+                EXPECT_TRUE(map.AppendNull().ok());
+            } else {
+                EXPECT_TRUE(index_lists->AppendNull().ok());
+                EXPECT_TRUE(value_lists->AppendNull().ok());
+            }
+            continue;
+        }
+        if (as_map) {
+            EXPECT_TRUE(map.Append().ok());
+        } else {
+            EXPECT_TRUE(index_lists->Append().ok());
+            EXPECT_TRUE(value_lists->Append().ok());
+        }
+        for (const auto& [index, value] : *row) {
+            EXPECT_TRUE(index ? indices->Append(*index).ok()
+                              : indices->AppendNull().ok());
+            EXPECT_TRUE(value ? values->Append(*value).ok()
+                              : values->AppendNull().ok());
+        }
+    }
+    std::shared_ptr<arrow::Array> result;
+    if (as_map) {
+        EXPECT_TRUE(map.Finish(&result).ok());
+    } else {
+        std::shared_ptr<arrow::Array> a, b;
+        EXPECT_TRUE(index_lists->Finish(&a).ok());
+        EXPECT_TRUE(value_lists->Finish(&b).ok());
+        // Reverse the fields to verify name-based resolution.
+        result = std::make_shared<arrow::StructArray>(
+            arrow::struct_({arrow::field("values", b->type()),
+                            arrow::field("indices", a->type())}),
+            rows.size(),
+            arrow::ArrayVector{b, a},
+            a->null_bitmap(),
+            a->null_count());
+    }
+    return result;
+}
 
 FieldMeta
 MakeExternalFieldMetaForTest(DataType data_type,
@@ -166,6 +228,268 @@ TEST(storage, ExternalVarCharBinaryFillSucceeds) {
                                                normalized->length());
     auto chunked_array = std::make_shared<arrow::ChunkedArray>(normalized);
     EXPECT_NO_THROW(field_data->FillFieldData(chunked_array));
+}
+
+TEST(storage, ExternalSparseMapAndStructNormalize) {
+    auto meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true);
+    const std::vector<ExternalSparseTestRow> rows = {
+        {{{100, 2.0}}},
+        {{{17, 1.25}, {3, 0.5}, {0, 0.0}}},
+        std::nullopt,
+        {std::vector<
+            std::pair<std::optional<int64_t>, std::optional<double>>>{}},
+        {{{4294967294LL, 1.0}}}};
+    for (bool as_map : {false, true}) {
+        for (auto source :
+             {MakeExternalSparseArray<arrow::Int32Builder, arrow::FloatBuilder>(
+                  as_map, {rows[0], rows[1], rows[2], rows[3]}),
+              MakeExternalSparseArray<arrow::UInt32Builder,
+                                      arrow::FloatBuilder>(as_map, rows),
+              MakeExternalSparseArray<arrow::Int64Builder,
+                                      arrow::DoubleBuilder>(as_map, rows),
+              MakeExternalSparseArray<arrow::UInt64Builder,
+                                      arrow::DoubleBuilder>(as_map, rows)}) {
+            // Nonzero parent offsets and multiple chunks must preserve row IDs.
+            auto arrays = storage::NormalizeArrowForChunkWriter(
+                {source->Slice(1, 2), source->Slice(3, 1)}, meta);
+            ASSERT_EQ(arrays.size(), 2);
+            auto binary =
+                std::static_pointer_cast<arrow::BinaryArray>(arrays[0]);
+            ASSERT_EQ(binary->length(), 2);
+            ASSERT_FALSE(binary->IsNull(0));
+            ASSERT_TRUE(binary->IsNull(1));
+            auto view = binary->GetView(0);
+            auto sparse = CopyAndWrapSparseRow(view.data(), view.size());
+            ASSERT_EQ(sparse.size(), 3);
+            EXPECT_EQ(sparse[0].id, 0);
+            EXPECT_EQ(sparse[0].val, 0.0f);
+            EXPECT_EQ(sparse[1].id, 3);
+            EXPECT_EQ(sparse[1].val, 0.5f);
+            EXPECT_EQ(sparse[2].id, 17);
+            EXPECT_EQ(sparse[2].val, 1.25f);
+            auto empty =
+                std::static_pointer_cast<arrow::BinaryArray>(arrays[1]);
+            EXPECT_FALSE(empty->IsNull(0));
+            EXPECT_EQ(empty->value_length(0), 0);
+            // Exercise the actual index-build consumer, including nullable rows.
+            auto data = storage::CreateFieldData(
+                DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true, 1, 3);
+            data->FillFieldData(std::make_shared<arrow::ChunkedArray>(arrays));
+            EXPECT_EQ(data->get_num_rows(), 3);
+            // Existing encoded sparse columns remain a zero-copy pass-through.
+            EXPECT_EQ(storage::NormalizeExternalArrow(binary, meta), binary);
+        }
+        auto boundary = std::static_pointer_cast<arrow::BinaryArray>(
+            storage::NormalizeExternalArrow(
+                MakeExternalSparseArray(as_map, {rows.back()}), meta));
+        auto view = boundary->GetView(0);
+        auto sparse = CopyAndWrapSparseRow(view.data(), view.size());
+        EXPECT_EQ(sparse.dim(), 4294967295LL);
+    }
+}
+
+TEST(storage, ExternalSparseInvalidRows) {
+    auto meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true);
+    const std::vector<std::pair<ExternalSparseTestRow, std::string>> cases = {
+        {{{{2, 1.0}, {2, 2.0}}}, "duplicate index"},
+        {{{{-1, 1.0}}}, "index must be"},
+        {{{{4294967295LL, 1.0}}}, "index must be"},
+        {{{{4294967296LL, 1.0}}}, "index must be"},
+        {{{{1, -0.5}}}, "weight must be"},
+        {{{{1, std::numeric_limits<double>::infinity()}}}, "weight must be"},
+        {{{{1, std::numeric_limits<double>::quiet_NaN()}}}, "weight must be"},
+        {{{{1, std::numeric_limits<double>::max()}}}, "weight must be"},
+        {{{{1, std::nullopt}}}, "null index or weight"}};
+    for (bool as_map : {false, true}) {
+        for (const auto& [row, reason] : cases) {
+            auto source = MakeExternalSparseArray(as_map, {row});
+            try {
+                storage::NormalizeExternalArrow(source, meta);
+                FAIL() << "expected rejection: " << reason;
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), DataFormatBroken);
+                auto message = std::string(e.what());
+                EXPECT_NE(message.find(reason), std::string::npos);
+                EXPECT_NE(message.find("field 'field'"), std::string::npos);
+                EXPECT_NE(message.find("batch row 0"), std::string::npos);
+            }
+        }
+        auto non_nullable =
+            MakeExternalFieldMetaForTest(DataType::VECTOR_SPARSE_U32_F32);
+        EXPECT_THROW(
+            storage::NormalizeExternalArrow(
+                MakeExternalSparseArray(as_map, {std::nullopt}), non_nullable),
+            SegcoreError);
+        // Validate the physical child types even for an empty dataset.
+        EXPECT_THROW(
+            storage::NormalizeExternalArrow(
+                MakeExternalSparseArray<arrow::FloatBuilder>(as_map, {}), meta),
+            SegcoreError);
+        EXPECT_THROW(
+            storage::NormalizeExternalArrow(
+                (MakeExternalSparseArray<arrow::Int64Builder,
+                                         arrow::Int64Builder>(as_map, {})),
+                meta),
+            SegcoreError);
+    }
+    EXPECT_THROW(
+        storage::NormalizeExternalArrow(
+            MakeExternalSparseArray(false, {{{{std::nullopt, 1.0}}}}), meta),
+        SegcoreError);
+}
+
+TEST(storage, ExternalSparseParquetRoundTrip) {
+    auto meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true);
+    for (bool as_map : {false, true}) {
+        auto source =
+            MakeExternalSparseArray(as_map,
+                                    {{{{9, 0.5}, {2, 1.5}}},
+                                     std::nullopt,
+                                     ExternalSparseTestRow{std::in_place}});
+        auto table = arrow::Table::Make(
+            arrow::schema({arrow::field("sparse", source->type())}), {source});
+        auto output = arrow::io::BufferOutputStream::Create().ValueOrDie();
+        ASSERT_TRUE(parquet::arrow::WriteTable(
+                        *table, arrow::default_memory_pool(), output, 2)
+                        .ok());
+        auto input = std::make_shared<arrow::io::BufferReader>(
+            output->Finish().ValueOrDie());
+        parquet::arrow::FileReaderBuilder reader_builder;
+        ASSERT_TRUE(reader_builder.Open(input).ok());
+        std::unique_ptr<parquet::arrow::FileReader> reader;
+        ASSERT_TRUE(reader_builder.Build(&reader).ok());
+        std::shared_ptr<arrow::Table> restored;
+        ASSERT_TRUE(reader->ReadTable(&restored).ok());
+        auto arrays = storage::NormalizeArrowForChunkWriter(
+            restored->column(0)->chunks(), meta);
+        auto chunk = create_chunk(meta, arrays);
+        auto* sparse_chunk = static_cast<SparseFloatVectorChunk*>(chunk.get());
+        auto rows = sparse_chunk->Vec();
+        ASSERT_EQ(rows[0].size(), 2);
+        EXPECT_EQ(rows[0][0].id, 2);
+        EXPECT_EQ(rows[0][0].val, 1.5f);
+        EXPECT_EQ(rows[0][1].id, 9);
+        EXPECT_EQ(rows[0][1].val, 0.5f);
+    }
+}
+
+TEST(storage, ExternalSparseBinaryValidation) {
+    auto meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true);
+    auto check_invalid = [&](const std::string& bytes) {
+        arrow::BinaryBuilder builder;
+        ASSERT_TRUE(builder.Append(bytes).ok());
+        auto source = builder.Finish().ValueOrDie();
+        try {
+            storage::NormalizeExternalArrow(source, meta);
+            FAIL() << "expected invalid sparse binary to be rejected";
+        } catch (const SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), DataFormatBroken);
+            auto message = std::string(e.what());
+            EXPECT_NE(message.find("field 'field'"), std::string::npos);
+            EXPECT_NE(message.find("batch row 0"), std::string::npos);
+        }
+    };
+    // Reject malformed lengths before the native sparse row copier can run.
+    check_invalid(std::string(1, '\0'));
+    check_invalid(std::string(9, '\0'));
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{2, 1}, {2, 2}},
+          {{3, 1}, {2, 2}},
+          {{std::numeric_limits<uint32_t>::max(), 1}},
+          {{1, -1}},
+          {{1, std::numeric_limits<float>::infinity()}},
+          {{1, std::numeric_limits<float>::quiet_NaN()}}}) {
+        knowhere::sparse::SparseRow<SparseValueType> row(entries);
+        check_invalid(std::string(static_cast<const char*>(row.data()),
+                                  row.data_byte_size()));
+    }
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder.AppendNull().ok());
+    auto nulls = builder.Finish().ValueOrDie();
+    EXPECT_EQ(storage::NormalizeExternalArrow(nulls, meta), nulls);
+    auto non_nullable =
+        MakeExternalFieldMetaForTest(DataType::VECTOR_SPARSE_U32_F32);
+    EXPECT_THROW(storage::NormalizeExternalArrow(nulls, non_nullable),
+                 SegcoreError);
+}
+
+TEST(storage, ExternalSparseStructOffsetsAndValidation) {
+    auto meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, true);
+    auto a = std::static_pointer_cast<arrow::StructArray>(
+        MakeExternalSparseArray(false, {{{{7, 7.0}}}, {{{5, 5.0}, {2, 2.0}}}}));
+    auto b =
+        std::static_pointer_cast<arrow::StructArray>(MakeExternalSparseArray(
+            false, {{{{9, 9.0}, {8, 8.0}}}, {{{1, 0.5}, {3, 1.5}}}}));
+    auto make_struct = [](const arrow::ArrayVector& children,
+                          const std::vector<std::string>& names) {
+        std::vector<std::shared_ptr<arrow::Field>> fields;
+        for (size_t i = 0; i < children.size(); ++i) {
+            fields.push_back(arrow::field(names[i], children[i]->type()));
+        }
+        return std::make_shared<arrow::StructArray>(
+            arrow::struct_(fields), children[0]->length(), children);
+    };
+    auto indices = a->GetFieldByName("indices")->Slice(1, 1);
+    auto values = b->GetFieldByName("values")->Slice(1, 1);
+    auto input = make_struct({indices, values}, {"indices", "values"});
+    auto binary = std::static_pointer_cast<arrow::BinaryArray>(
+        storage::NormalizeExternalArrow(input, meta));
+    auto view = binary->GetView(0);
+    auto sparse = CopyAndWrapSparseRow(view.data(), view.size());
+    ASSERT_EQ(sparse.size(), 2);
+    EXPECT_EQ(sparse[0].id, 2);
+    EXPECT_EQ(sparse[0].val, 1.5f);
+    EXPECT_EQ(sparse[1].id, 5);
+    EXPECT_EQ(sparse[1].val, 0.5f);
+
+    // LargeList children are dispatched inside the struct, not by the
+    // top-level Arrow canonicalizer. Each child retains its own offsets.
+    auto large_list = [](const std::shared_ptr<arrow::Array>& array) {
+        auto list = std::static_pointer_cast<arrow::ListArray>(array);
+        arrow::Int64Builder offsets;
+        EXPECT_TRUE(offsets.Append(list->value_offset(0)).ok());
+        EXPECT_TRUE(
+            offsets.Append(list->value_offset(0) + list->value_length(0)).ok());
+        auto data = offsets.Finish().ValueOrDie();
+        return arrow::LargeListArray::FromArrays(*data, *list->values())
+            .ValueOrDie();
+    };
+    auto large = make_struct({large_list(indices), large_list(values)},
+                             {"indices", "values"});
+    EXPECT_TRUE(storage::NormalizeExternalArrow(large, meta)->Equals(binary));
+    EXPECT_THROW(
+        storage::NormalizeExternalArrow(
+            make_struct({a->GetFieldByName("indices")->Slice(0, 1), values},
+                        {"indices", "values"}),
+            meta),
+        SegcoreError);
+    EXPECT_THROW(storage::NormalizeExternalArrow(
+                     make_struct({indices, values}, {"wrong", "values"}), meta),
+                 SegcoreError);
+    EXPECT_THROW(storage::NormalizeExternalArrow(
+                     make_struct({indices, values, values},
+                                 {"indices", "values", "extra"}),
+                     meta),
+                 SegcoreError);
+    auto null_struct = std::static_pointer_cast<arrow::StructArray>(
+        MakeExternalSparseArray(false, {std::nullopt}));
+    EXPECT_THROW(
+        storage::NormalizeExternalArrow(
+            make_struct({null_struct->GetFieldByName("indices"), values},
+                        {"indices", "values"}),
+            meta),
+        SegcoreError);
+    EXPECT_THROW(
+        storage::NormalizeExternalArrow(
+            make_struct({large_list(indices)->values()->Slice(0, 1), values},
+                        {"indices", "values"}),
+            meta),
+        SegcoreError);
 }
 
 TEST(storage, ExternalVarCharInt64NormalizeFails) {

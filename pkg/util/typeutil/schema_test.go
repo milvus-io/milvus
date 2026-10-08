@@ -5461,8 +5461,9 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			OutputFieldNames: []string{"sparse"},
 		}}
 		err := NormalizeAndValidateExternalCollectionSchema(schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support field type")
+		assert.NoError(t, err)
+		assert.True(t, schema.Fields[len(schema.Fields)-1].GetNullable())
+		assert.False(t, schema.Fields[len(schema.Fields)-1].GetIsFunctionOutput())
 	})
 
 	t.Run("dynamic field disabled", func(t *testing.T) {
@@ -5725,7 +5726,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			Name:          "bad_field",
-			DataType:      schemapb.DataType_SparseFloatVector,
+			DataType:      schemapb.DataType_None,
 			ExternalField: "bad_col",
 		})
 		err := ValidateExternalCollectionResolvedSchema(schema)
@@ -5736,7 +5737,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 
 	t.Run("unsupported field types rejected", func(t *testing.T) {
 		unsupportedTypes := []schemapb.DataType{
-			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_None,
 		}
 		for _, dt := range unsupportedTypes {
 			schema := buildSchema()
@@ -5756,6 +5757,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			dt     schemapb.DataType
 			params []*commonpb.KeyValuePair
 		}{
+			{schemapb.DataType_SparseFloatVector, nil},
 			{schemapb.DataType_Bool, nil},
 			{schemapb.DataType_Int8, nil},
 			{schemapb.DataType_Int16, nil},
@@ -5798,6 +5800,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			}
 			err := NormalizeAndValidateExternalCollectionSchema(schema)
 			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
+			assert.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 			assert.True(t, schema.GetFields()[0].GetNullable(), "base vector field should be nullable")
 			assert.True(t, schema.GetFields()[1].GetNullable(), "field type %s should be nullable", tc.dt.String())
 		}
@@ -5858,7 +5861,7 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			Name:          "bad_field",
-			DataType:      schemapb.DataType_SparseFloatVector,
+			DataType:      schemapb.DataType_None,
 			ExternalField: "bad_col",
 		})
 		for _, f := range schema.GetFields() {
