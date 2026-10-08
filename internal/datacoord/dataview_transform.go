@@ -90,10 +90,19 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 		}
 		start := segmentTransformStart(segment)
 		if start == 0 {
-			// An allocation without any effective Insert is not yet data. Its
-			// first registration remains protected by the captured K.
-			if !segment.GetIsImporting() && segment.GetState() == commonpb.SegmentState_Growing && segment.GetStartPosition() == nil && segment.GetNumOfRows() == 0 && len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "" {
-				continue
+			// Before first-pack registration, K cannot pass the first Insert.
+			// A V3 version-zero manifest is only an allocation placeholder;
+			// row-count reports and sealing do not complete registration either.
+			if !segment.GetIsImporting() &&
+				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) &&
+				segment.GetStartPosition() == nil && len(segment.GetBinlogs()) == 0 {
+				committed, err := hasCommittedManifest(segment)
+				if err != nil {
+					return nil, err
+				}
+				if !committed {
+					continue
+				}
 			}
 			return nil, merr.WrapErrServiceNotReadyMsg("Segment %d Transform coverage is not ready", segment.GetID())
 		}
