@@ -549,8 +549,13 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
     for (const auto& column : invalid_field_id_columns) {
         EXPECT_FALSE(ParseFieldIdColumnName(column).has_value())
             << "column=" << column;
-        EXPECT_THROW(schema->ResolveColumnFieldId(column), std::exception)
-            << "column=" << column;
+        try {
+            schema->ResolveColumnFieldId(column);
+            FAIL() << "expected InvalidParameter for column=" << column;
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter)
+                << "column=" << column;
+        }
     }
 
     auto columns = schema->GetExternalColumnNames();

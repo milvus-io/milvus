@@ -263,7 +263,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	schema := newTestSchema()
 
 	channel := "ch1"
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:         1,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -364,7 +364,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:         0,
 		Partitions: []int64{0, 1},
 		Schema:     schema,
@@ -375,7 +375,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -530,7 +530,7 @@ func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 	partitionID := int64(1)
 	vchannel := "test_vchannel"
 	version := int64(100)
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     collectionID,
 		Schema: schema,
 	})
@@ -565,7 +565,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -634,7 +634,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -719,7 +719,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -828,7 +828,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -1208,7 +1208,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -1411,7 +1411,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:         0,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -1599,7 +1599,7 @@ func TestShouldDropChannel(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1609,7 +1609,7 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1635,7 +1635,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1645,7 +1645,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{

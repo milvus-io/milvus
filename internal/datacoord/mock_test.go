@@ -162,8 +162,9 @@ func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
 
 type mockMixCoord struct {
 	rootcoordpb.UnimplementedRootCoordServer
-	state commonpb.StateCode
-	cnt   atomic.Int64
+	state       commonpb.StateCode
+	cnt         atomic.Int64
+	collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo]
 }
 
 func (m *mockMixCoord) GetGcStatus(context.Context) (*datapb.GetGcStatusResponse, error) {
@@ -274,7 +275,14 @@ func (m *mockMixCoord) ListRefreshExternalCollectionJobs(ctx context.Context, re
 }
 
 func newMockMixCoord() *mockMixCoord {
-	return &mockMixCoord{state: commonpb.StateCode_Healthy}
+	return &mockMixCoord{
+		state:       commonpb.StateCode_Healthy,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+}
+
+func (m *mockMixCoord) addCollection(collection *collectionInfo) {
+	m.collections.Insert(collection.ID, collection)
 }
 
 func (m *mockMixCoord) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
@@ -334,6 +342,23 @@ func (m *mockMixCoord) DescribeCollection(ctx context.Context, req *milvuspb.Des
 		err := merr.WrapErrCollectionNotFound(req.GetCollectionID())
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(err),
+		}, nil
+	}
+	if collection, ok := m.collections.Get(req.GetCollectionID()); ok {
+		properties := make([]*commonpb.KeyValuePair, 0, len(collection.Properties))
+		for key, value := range collection.Properties {
+			properties = append(properties, &commonpb.KeyValuePair{Key: key, Value: value})
+		}
+		return &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			Schema:              collection.Schema,
+			CollectionID:        collection.ID,
+			VirtualChannelNames: collection.VChannelNames,
+			StartPositions:      collection.StartPositions,
+			Properties:          properties,
+			CreatedTimestamp:    collection.CreatedAt,
+			DbName:              collection.DatabaseName,
+			DbId:                collection.DatabaseID,
 		}, nil
 	}
 	return &milvuspb.DescribeCollectionResponse{
@@ -422,6 +447,12 @@ func (m *mockMixCoord) HasPartition(ctx context.Context, req *milvuspb.HasPartit
 }
 
 func (m *mockMixCoord) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	if collection, ok := m.collections.Get(req.GetCollectionID()); ok {
+		return &milvuspb.ShowPartitionsResponse{
+			Status:       merr.Success(),
+			PartitionIDs: collection.Partitions,
+		}, nil
+	}
 	return &milvuspb.ShowPartitionsResponse{
 		Status:         merr.Success(),
 		PartitionNames: []string{"_default"},
@@ -1130,7 +1161,7 @@ func (s *mockMixCoord) HandleCommitVchannel(ctx context.Context, req *datapb.Han
 }
 
 type mockHandler struct {
-	meta *meta
+	collectionGetter func(context.Context, UniqueID) (*collectionInfo, error)
 }
 
 func newMockHandler() *mockHandler {
@@ -1159,12 +1190,11 @@ func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) erro
 	return nil
 }
 
-func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
-	// empty schema
-	if h.meta != nil {
-		return h.meta.GetCollection(collectionID), nil
+func (h *mockHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
+	if h.collectionGetter != nil {
+		return h.collectionGetter(ctx, collectionID)
 	}
-	return &collectionInfo{ID: collectionID}, nil
+	return &collectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil
 }
 
 func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
@@ -1188,8 +1218,9 @@ func (h *mockHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID Un
 	return nil, nil
 }
 
-func newMockHandlerWithMeta(meta *meta) *mockHandler {
-	return &mockHandler{
-		meta: meta,
-	}
+func newMockRootCoordCollectionHandler(collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo]) *mockHandler {
+	return &mockHandler{collectionGetter: func(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
+		collection, _ := collections.Get(collectionID)
+		return collection, nil
+	}}
 }

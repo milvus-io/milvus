@@ -52,6 +52,11 @@ per-channel RPC or L0 materialization is required for these jobs. Absent/false
 flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel
 before Ack on each business VChannel, and the checker completes the job after
 all channel commits. The RPC is a no-op for new jobs when sent by old nodes.
+Local commit entry points persist Committing before broadcasting. The checker
+replays that intent after an interrupted broadcast for both protocols; it never
+completes coordinator-owned jobs itself. The replay holds no ImportMeta lock
+while waiting on the collection resource lock or the callback. Secondary
+clusters recover the replicated broadcast rather than originate a new one.
 See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
 
 ## Resource Key Locking

@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -293,6 +294,23 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 	}
 }
 
+func TestStatsTaskNameIncludesAttemptVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statsV1 := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:   "cluster",
+		TaskID:      3,
+		TaskVersion: 1,
+	}, nil, nil, nil)
+	statsV2 := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:   "cluster",
+		TaskID:      3,
+		TaskVersion: 2,
+	}, nil, nil, nil)
+	assert.NotEqual(t, statsV1.Name(), statsV2.Name())
+}
+
 func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
 
@@ -362,6 +380,56 @@ func newSchedulerIndexBuildTask(t *testing.T, manager *TaskManager, buildID int6
 		State: commonpb.IndexState_InProgress,
 	})
 	return NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+}
+
+func TestIndexTaskSchedulerClassifiesBuildErrors(t *testing.T) {
+	paramtable.Init()
+
+	cases := []struct {
+		name  string
+		err   error
+		state commonpb.IndexState
+	}{
+		{"external vector dimension mismatch", merr.SegcoreError(2032, "vector list length mismatch"), commonpb.IndexState_Failed},
+		{"invalid external field mapping", merr.SegcoreError(2042, "column not found in schema"), commonpb.IndexState_Failed},
+		{"invalid index parameters", merr.WrapErrParameterInvalidMsg("invalid index parameters"), commonpb.IndexState_Failed},
+		{"unsupported data", merr.SegcoreError(2003, "unsupported data"), commonpb.IndexState_Failed},
+		{"broken data", merr.SegcoreError(2024, "malformed vector data"), commonpb.IndexState_Failed},
+		{"pretend finished", merr.SegcoreError(2033, "skip clustering"), commonpb.IndexState_Finished},
+		{"task canceled", errCancel, commonpb.IndexState_Retry},
+		{"segcore canceled", merr.SegcoreError(2038, "future canceled"), commonpb.IndexState_Retry},
+		{"object storage unavailable", merr.SegcoreError(2018, "S3 request failed"), commonpb.IndexState_Retry},
+		{"transient storage failure", merr.SegcoreError(2045, "transient storage error"), commonpb.IndexState_Retry},
+		{"out of memory", merr.SegcoreError(2034, "allocation failed"), commonpb.IndexState_Retry},
+		{"schema version not ready", merr.SegcoreError(2046, "schema version not ready"), commonpb.IndexState_Retry},
+		{"generic system failure", merr.SegcoreError(2001, "unexpected error"), commonpb.IndexState_Retry},
+		// DataTypeInvalid(2007) is system-classified in merr/segcore.go: most of its
+		// producers are internal guards, so the worker reports it as retriable.
+		{"data type invalid stays system-classified", merr.SegcoreError(2007, "unsupported arrow type for vector normalization"), commonpb.IndexState_Retry},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewTaskManager(context.Background())
+			task := newSchedulerIndexBuildTask(t, manager, 1001)
+			// Supply field metadata so the real PreExecute and Execute reach the
+			// Cgo build boundary without legacy binlog reconstruction.
+			task.req.CollectionID = 1
+			buildErr := merr.Wrap(tc.err, "create index")
+			buildMock := mockey.Mock(indexcgowrapper.CreateIndex).Return(nil, buildErr).Build()
+			defer buildMock.UnPatch()
+
+			scheduler := NewTaskScheduler(context.Background())
+			scheduler.processTask(task)
+
+			info := manager.GetIndexTaskInfo("test-cluster", 1001)
+			if assert.NotNil(t, info) {
+				assert.Equal(t, tc.state, info.State)
+				assert.Equal(t, buildErr.Error(), info.FailReason)
+				assert.Empty(t, info.FileKeys)
+			}
+			assert.Equal(t, 1, buildMock.Times())
+		})
+	}
 }
 
 func TestIndexTaskSchedulerRecordsIndexTaskCost(t *testing.T) {

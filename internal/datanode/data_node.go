@@ -252,6 +252,7 @@ func (node *DataNode) Start() error {
 		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
+		go node.taskSweepLoop()
 
 		err := node.taskScheduler.Start()
 		if err != nil {

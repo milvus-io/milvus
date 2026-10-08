@@ -118,7 +118,7 @@ func TestLegacyManifestWorkerResultAdoption(t *testing.T) {
 		State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
 		ManifestPath: source.GetManifest(), SchemaVersion: 1, NumOfRows: 3,
 	})))
-	task := newBumpSchemaVersionTask(&datapb.CompactionTask{
+	task := newBumpSchemaVersionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID: plan.GetPlanID(), Type: plan.GetType(), CollectionID: 1, PartitionID: 10,
 		Schema: targetSchema, InputSegments: []int64{source.GetSegmentID()},
 	}, nil, mt, nil)

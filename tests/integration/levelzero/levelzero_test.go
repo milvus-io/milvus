@@ -40,7 +40,6 @@ type LevelZeroSuite struct {
 }
 
 func (s *LevelZeroSuite) SetupSuite() {
-	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
 	s.dim = 768
 }
 
@@ -60,7 +59,7 @@ func (s *LevelZeroSuite) TearDownTest() {
 }
 
 func (s *LevelZeroSuite) TearDownSuite() {
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
+	// Each test owns its cluster through BeforeTest and TearDownTest.
 }
 
 func TestLevelZero(t *testing.T) {

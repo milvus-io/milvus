@@ -179,17 +179,6 @@ func UpdateSegmentResult(result *datapb.CopySegmentResult) UpdateAction {
 	}
 }
 
-// UpdateCopiedFiles records target objects created by a CopySegmentTask so a
-// failed task can remove them. TaskManager serializes updates and Clone keeps
-// each published task snapshot immutable.
-func UpdateCopiedFiles(files []string) UpdateAction {
-	return func(task Task) {
-		if it, ok := task.(*CopySegmentTask); ok {
-			it.copiedFiles = append(it.copiedFiles, files...)
-		}
-	}
-}
-
 type Task interface {
 	Execute() []*conc.Future[any]
 	GetJobID() int64

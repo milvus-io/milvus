@@ -88,9 +88,11 @@ func (s *scheduler) scheduleTasks() {
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
 	futures := make(map[int64][]*conc.Future[any])
+	owners := make(map[int64]Task)
 	for _, task := range tasks {
 		fs := task.Execute()
 		futures[task.GetTaskID()] = fs
+		owners[task.GetTaskID()] = task
 	}
 
 	for taskID, fs := range futures {
@@ -98,11 +100,11 @@ func (s *scheduler) scheduleTasks() {
 		if err != nil {
 			continue
 		}
-		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
-		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
+		if s.manager.UpdateIfState(owners[taskID], datapb.ImportTaskStateV2_InProgress,
+			UpdateState(datapb.ImportTaskStateV2_Completed)) {
+			mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
+		}
 	}
-
-	mlog.Info(context.TODO(), "all tasks completed", mlog.Int64s("taskIDs", taskIDs))
 }
 
 // Slots returns the used slots for import

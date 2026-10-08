@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -45,7 +46,7 @@ import (
 // the collection's index definition, and the task record the worker result was
 // already projected onto. Nothing here needs the worker to have touched the
 // manifest, which is what keeps manifest publication a DataCoord-only step.
-func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.SegmentIndex) (packed.ManifestIndexInfo, error) {
+func buildManifestIndexInfo(m *meta, schema *schemapb.CollectionSchema, segment *SegmentInfo, segIdx *model.SegmentIndex) (packed.ManifestIndexInfo, error) {
 	basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
 	if err != nil {
 		return packed.ManifestIndexInfo{}, merr.Wrap(err, "parse segment manifest path for index publication")
@@ -84,7 +85,7 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 
 	fieldID := m.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
-		ColumnName:                collectionFieldName(m, segIdx.CollectionID, fieldID),
+		ColumnName:                schemaFieldName(schema, fieldID),
 		IndexName:                 m.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 		IndexType:                 indexType,
 		Path:                      relativePath,
@@ -103,12 +104,14 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 	}, nil
 }
 
-func collectionFieldName(m *meta, collectionID, fieldID int64) string {
-	collection := m.GetCollection(collectionID)
-	if collection == nil || collection.Schema == nil {
+// schemaFieldName resolves a field name from the collection schema the
+// caller fetched from its authoritative owner (RootCoord via the handler, or
+// the snapshot being restored); DataCoord keeps no local collection cache.
+func schemaFieldName(schema *schemapb.CollectionSchema, fieldID int64) string {
+	if schema == nil {
 		return ""
 	}
-	for _, field := range collection.Schema.GetFields() {
+	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == fieldID {
 			return field.GetName()
 		}

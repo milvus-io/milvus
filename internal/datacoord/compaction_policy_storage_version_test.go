@@ -59,8 +59,7 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
@@ -79,12 +78,8 @@ func (s *StorageVersionUpgradePolicySuite) setPolicyMeta(collID int64, coll *col
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 }
 
@@ -231,12 +226,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithSegments() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -520,12 +511,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -573,12 +560,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithImportingSegment() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -635,12 +618,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerRateLimiting() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	// Should only trigger 2 segments due to rate limiting
@@ -677,20 +656,11 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerCollectionNotFound() {
 	ctx := context.Background()
 	collID := int64(100)
 
-	coll := &collectionInfo{
-		ID:     collID,
-		Schema: newTestSchema(),
-	}
-
 	// Handler returns nil collection
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, nil)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments: NewSegmentsInfo(),
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -702,20 +672,11 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerGetCollectionError() {
 	ctx := context.Background()
 	collID := int64(100)
 
-	coll := &collectionInfo{
-		ID:     collID,
-		Schema: newTestSchema(),
-	}
-
 	// Handler returns error
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments: NewSegmentsInfo(),
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -734,12 +695,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerAllocIDError() {
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), context.DeadlineExceeded)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments: NewSegmentsInfo(),
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -815,13 +772,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(100, coll1)
-	collections.Insert(200, coll2)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	events, err := s.policy.Trigger(ctx)
@@ -870,12 +822,8 @@ func (s *StorageVersionUpgradePolicySuite) TestViewContent() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -932,12 +880,8 @@ func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -984,12 +928,8 @@ func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -1018,11 +958,6 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequire
 	// Mock version manager to return a lower version than requirement
 	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.0"))
 
-	coll := &collectionInfo{
-		ID:     collID,
-		Schema: newTestSchema(),
-	}
-
 	// Create a segment that would normally be upgraded
 	segments := make(map[UniqueID]*SegmentInfo)
 	segments[101] = &SegmentInfo{
@@ -1047,12 +982,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequire
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	// Should return empty views because version requirement is not met
@@ -1115,12 +1046,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfie
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	// Should trigger because version requirement is met
@@ -1195,12 +1122,8 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments: segmentsInfo,
 	}
 
 	// Should trigger because minVersion equals requirement (not less than)

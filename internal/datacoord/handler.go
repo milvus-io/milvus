@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -723,16 +724,14 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 
 // GetCollection returns collection info with specified collection id
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
-	coll := h.s.meta.GetCollection(collectionID)
-	if coll != nil {
-		return coll, nil
-	}
 	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
+	var coll *collectionInfo
 	if err := retry.Do(ctx2, func() error {
-		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
+		var err error
+		coll, err = h.s.getCollectionFromRootCoord(ctx2, collectionID)
 		if err != nil {
-			mlog.Warn(ctx, "failed to load collection from rootcoord", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			mlog.Warn(ctx, "failed to get collection from rootcoord", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			return err
 		}
 		return nil
@@ -742,9 +741,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 			mlog.Err(err))
 		return nil, err
 	}
-
-	// TODO: the cache should be removed in next step.
-	return h.s.meta.GetCollection(collectionID), nil
+	return coll, nil
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
@@ -762,9 +759,8 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	}
 	mlog.Info(context.TODO(), "DropChannel succeeded", mlog.String("channel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
-
-	// clean collection info cache when meet drop collection info
-	h.s.meta.DropCollection(collectionID)
+	// Metric cleanup is independent of collection metadata ownership.
+	metrics.CleanupDataCoordWithCollectionID(collectionID)
 
 	// tedxu: drop this collection's segment change group records together with
 	// its other metadata. Without this they would leak in etcd forever (and a

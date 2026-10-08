@@ -45,6 +45,8 @@ type rootCoordAllocator struct {
 	mixCoord types.MixCoord
 }
 
+const allocatorRPCTimeout = 5 * time.Second
+
 // NewRootCoordAllocator gets an allocator from RootCoord
 func NewRootCoordAllocator(mixCoord types.MixCoord) Allocator {
 	return &rootCoordAllocator{
@@ -55,6 +57,11 @@ func NewRootCoordAllocator(mixCoord types.MixCoord) Allocator {
 // AllocTimestamp allocates a Timestamp
 // invoking RootCoord `AllocTimestamp`
 func (alloc *rootCoordAllocator) AllocTimestamp(ctx context.Context) (typeutil.Timestamp, error) {
+	// Several background callers pass a process-lifetime context. Bound the RPC
+	// here so a hung coordinator cannot pin their scheduler or cleanup loop.
+	// Deriving from ctx preserves an earlier caller cancellation or deadline.
+	ctx, cancel := context.WithTimeout(ctx, allocatorRPCTimeout)
+	defer cancel()
 	resp, err := alloc.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
@@ -70,6 +77,8 @@ func (alloc *rootCoordAllocator) AllocTimestamp(ctx context.Context) (typeutil.T
 
 // AllocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) AllocID(ctx context.Context) (typeutil.UniqueID, error) {
+	ctx, cancel := context.WithTimeout(ctx, allocatorRPCTimeout)
+	defer cancel()
 	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
@@ -98,7 +107,7 @@ func (alloc *rootCoordAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.Un
 		)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), allocatorRPCTimeout)
 	defer cancel()
 	resp, err := alloc.mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(

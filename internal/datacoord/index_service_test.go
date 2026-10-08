@@ -160,21 +160,11 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
-		ID:             collID,
-		Partitions:     nil,
-		StartPositions: nil,
-		Properties:     nil,
-		CreatedAt:      0,
-	})
-
 	indexMeta := newSegmentIndexMeta(catalog)
 	s := &Server{
 		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
+			catalog:   catalog,
+			indexMeta: indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2870,7 +2860,6 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 func TestJsonIndex(t *testing.T) {
 	initStreamingSystem(t)
 
-	collID := UniqueID(1)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mock0Allocator := newMockAllocator(t)
@@ -2904,16 +2893,10 @@ func TestJsonIndex(t *testing.T) {
 		},
 	}, nil)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
-		ID: collID,
-	})
-
 	s := &Server{
 		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
+			catalog:   catalog,
+			indexMeta: indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),

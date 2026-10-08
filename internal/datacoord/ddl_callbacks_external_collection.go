@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -39,7 +40,7 @@ func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Contex
 		mlog.FieldCollectionID(header.CollectionId),
 		mlog.FieldCollectionName(header.CollectionName),
 		mlog.FieldJobID(header.JobId),
-		mlog.String("externalSource", header.ExternalSource),
+		mlog.String("externalSource", externalspec.RedactExternalSource(header.ExternalSource)),
 	)
 	log.Info(ctx, "refreshExternalCollectionV2AckCallback received")
 

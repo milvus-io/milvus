@@ -187,8 +187,12 @@ func (t *clusteringCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *clusteringCompactionTask) Stop() {
+func (t *clusteringCompactionTask) Cancel() {
 	t.cancel()
+}
+
+func (t *clusteringCompactionTask) Stop() {
+	t.Cancel()
 	<-t.done
 }
 
