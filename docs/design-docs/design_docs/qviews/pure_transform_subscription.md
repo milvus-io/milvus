@@ -35,6 +35,15 @@ The protocol contains transforms and progress, not WAL message IDs or scanner
 internals. QN keeps one shared transform buffer per VChannel; individual sealed
 segments register with that buffer rather than opening their own subscriptions.
 
+The remote client serializes request sends and `CloseSend` with one send lock.
+Only the explicit close path half-closes the transport; receive completion
+cancels the RPC's own context without taking that lock, so a flow-controlled
+send can exit. Requests recheck termination after acquiring the send lock.
+Explicit close retains the `CloseStream` handshake, with a five-second deadline
+covering both the closing send and response. Expiry terminates the stream with
+`context.DeadlineExceeded`. RPC cancellation does not cancel the parent
+resumable stream, and subscription cleanup still runs once.
+
 ## Cursor and visibility contracts
 
 - `StartAfterTimeTick` is exclusive. A nonzero `EndTimeTick` bounds replay;
