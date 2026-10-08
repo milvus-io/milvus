@@ -250,9 +250,9 @@ func TestNotPreservesUnknownForNull(t *testing.T) {
 	require.NoError(t, err)
 	fields := []*schemapb.FieldData{{
 		FieldId: 100, FieldName: "age", Type: schemapb.DataType_Int64,
+		ValidData: []bool{false},
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-			ValidData: []bool{false},
-			Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}},
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}},
 		}},
 	}}
 	for _, optimize := range []bool{false, true} {
