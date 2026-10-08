@@ -245,10 +245,30 @@ Load task behavior:
 1. require a complete watched `SegmentLoadInfoSnapshot`;
 2. update local collection index meta with the snapshot's index definitions;
 3. reserve resources through the optional estimator;
-4. call `PhysicalSegmentLoader.Load` with the snapshot's packed load info;
-5. wrap the segment with `TransformStartAfterTimeTick` if the QueryView meta has
-   a delete-apply start timetick;
+4. call `PlannedPhysicalSegmentLoader.LoadWithPlan` with the snapshot's packed
+   load info, selected collection runtime, and explicit Transform replay floor;
+5. initialize both the segment's replay floor and applied progress from that
+   floor, including zero; do not substitute DeltaPosition or override only a getter;
 6. report the loaded segment back to the physical manager.
+
+Shared preparation selects the collection runtime deterministically: greatest
+logical SchemaVersion, then greatest LoadInfoVersion, then the lexicographically
+smallest QueryViewKey string. Fields and index/load configuration still come
+from the union of all referenced views. The initial Transform replay floor is
+the minimum frontier of those views, independently of the selected collection.
+This relies on the upstream contract that each view's frontier is safe for its
+compatible loading snapshot; it adds no new snapshot-coverage protocol or
+CSegment schema-compatibility behavior.
+
+The plan is fixed for an attempt, including admission retries. Pending-attempt
+references retain its collection owner even if that view drops. The readiness
+manager additionally retains the earliest required buffer guard until a
+registration takes over retention, or preparation is abandoned. This closes the
+gap between view release, physical load completion and Transform registration.
+Reopen preserves existing Transform progress and does not reset this baseline.
+The legacy loader entry point remains available, but a scheduler using it
+rejects a returned segment whose initial replay/applied progress differs from
+the plan instead of masking the mismatch with a decorator.
 
 Update task behavior:
 
@@ -322,7 +342,9 @@ the segment.
 
 The TransformLogBuffer retains entries strictly after the minimum
 `TransformStartAfterTimeTick` of its live view guards and pending segment
-registrations. Releasing a view guard, completing catch-up, or removing a
+registrations. A preparation may retain its originating guard after that view
+drops, until registration protects the in-flight attempt's replay range.
+Releasing a view guard, completing catch-up, or removing a
 registration immediately re-evaluates this boundary. A caught-up segment no
 longer pins its original replay range: it receives subsequent entries through
 live delivery. Trimming clears discarded entry pointers in the backing array

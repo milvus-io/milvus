@@ -783,13 +783,46 @@ func (m *ViewScopedPhysicalSegmentManager) submitCallback(callback func()) {
 }
 
 func (s *physicalSegmentState) loadRequest() (segmentLoadRequest, bool) {
+	var selected segmentLoadRequest
+	var selectedKey qviews.QueryViewKey
+	var startAfter uint64
+	found := false
 	for key := range s.refs {
 		request, ok := s.requests[key]
-		if ok {
-			return request, true
+		if !ok {
+			continue
 		}
+		if !found || request.transformStartAfterTimeTick < startAfter {
+			startAfter = request.transformStartAfterTimeTick
+		}
+		if !found || preferSegmentLoadRequest(key, request, selectedKey, selected) {
+			selected, selectedKey = request, key
+		}
+		found = true
 	}
-	return segmentLoadRequest{}, false
+	// The collection and replay floor have independent selection rules. Every
+	// live view certifies its frontier against the compatible load snapshot;
+	// the earliest one preserves the entire range required by those views.
+	selected.transformStartAfterTimeTick = startAfter
+	selected.loadInfo = s.resources
+	return selected, found
+}
+
+func preferSegmentLoadRequest(key qviews.QueryViewKey, request segmentLoadRequest, currentKey qviews.QueryViewKey, current segmentLoadRequest) bool {
+	var schema, currentSchema int64
+	if request.collection != nil {
+		schema = request.collection.SchemaVersion()
+	}
+	if current.collection != nil {
+		currentSchema = current.collection.SchemaVersion()
+	}
+	if schema != currentSchema {
+		return schema > currentSchema
+	}
+	if request.meta.GetLoadInfoVersion() != current.meta.GetLoadInfoVersion() {
+		return request.meta.GetLoadInfoVersion() > current.meta.GetLoadInfoVersion()
+	}
+	return key.String() < currentKey.String()
 }
 
 func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoadSubmissions(submissions []segmentLoadSubmission) {
