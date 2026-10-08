@@ -223,8 +223,8 @@ class ArrayBitmapIndexTest : public testing::Test {
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    TestLocalPath,
+        auto log_path = fmt::format("{}/{}/{}/{}/{}/{}",
+                                    root_path_,
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -301,7 +301,12 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = TestLocalPath;
+        auto root_path =
+            TestLocalPath +
+            boost::filesystem::unique_path("array_bitmap-%%%%-%%%%-%%%%-%%%%")
+                .string();
+        ASSERT_TRUE(boost::filesystem::create_directory(root_path));
+        root_path_ = root_path;
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";
@@ -317,8 +322,15 @@ class ArrayBitmapIndexTest : public testing::Test {
              index_version_);
     }
 
-    virtual ~ArrayBitmapIndexTest() override {
-        boost::filesystem::remove_all(chunk_manager_->GetRootPath());
+    void
+    TearDown() override {
+        // Release the loaded index and its reader before deleting fixture files.
+        index_.reset();
+        fs_.reset();
+        chunk_manager_.reset();
+        if (!root_path_.empty()) {
+            boost::filesystem::remove_all(root_path_);
+        }
     }
 
  public:
@@ -408,6 +420,7 @@ class ArrayBitmapIndexTest : public testing::Test {
     }
 
  private:
+    std::string root_path_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
 
