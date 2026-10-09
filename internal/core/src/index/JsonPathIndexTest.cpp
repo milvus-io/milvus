@@ -193,6 +193,20 @@ TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
     EXPECT_TRUE(result.non_exist_offsets.empty());
 }
 
+namespace {
+CreateIndexInfo
+NaNProjectionIndexInfo(const std::string& index_type = ASCENDING_SORT) {
+    CreateIndexInfo info;
+    info.index_type = index_type;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("DOUBLE");
+    info.json_path = "/a";
+    info.json_cast_function = "STRING_TO_DOUBLE";
+    info.scalar_index_engine_version = 6;
+    return info;
+}
+}  // namespace
+
 TEST(JsonPathIndexTest, StringToDoubleNaNIsValidNumericProjection) {
     auto json_fd = MakeJsonFieldData({
         R"({"a":"NaN"})",
@@ -225,13 +239,7 @@ TEST(JsonPathIndexTest, StringToDoubleNaNIsValidNumericProjection) {
     EXPECT_TRUE(std::signbit(
         *static_cast<const double*>(converted.field_data->RawValue(7))));
 
-    CreateIndexInfo info;
-    info.index_type = ASCENDING_SORT;
-    info.field_type = DataType::JSON;
-    info.json_cast_type = cast_type;
-    info.json_path = "/a";
-    info.json_cast_function = "STRING_TO_DOUBLE";
-    info.scalar_index_engine_version = 6;
+    auto info = NaNProjectionIndexInfo();
     auto index =
         IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
     auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
@@ -288,13 +296,7 @@ TEST(JsonPathIndexTest, StringToDoubleAllNaNStillBuilds) {
     auto json_fd = MakeJsonFieldData({R"({"a":"NaN"})",
                                       R"({"a":"-nan"})",
                                       R"json({"a":"nan(payload)"})json"});
-    CreateIndexInfo info;
-    info.index_type = ASCENDING_SORT;
-    info.field_type = DataType::JSON;
-    info.json_cast_type = JsonCastType::FromString("DOUBLE");
-    info.json_path = "/a";
-    info.json_cast_function = "STRING_TO_DOUBLE";
-    info.scalar_index_engine_version = 6;
+    auto info = NaNProjectionIndexInfo();
     auto index =
         IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
     auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
@@ -988,13 +990,7 @@ TEST(JsonPathIndexTest,
                                        R"({"a":null})",
                                        R"({"a":"invalid-number"})",
                                        R"({"b":0})"});
-        CreateIndexInfo info;
-        info.index_type = type;
-        info.field_type = DataType::JSON;
-        info.json_cast_type = JsonCastType::FromString("DOUBLE");
-        info.json_path = "/a";
-        info.json_cast_function = "STRING_TO_DOUBLE";
-        info.scalar_index_engine_version = 6;
+        auto info = NaNProjectionIndexInfo(type);
         info.tantivy_index_version = 7;
         auto built =
             IndexFactory::GetInstance().CreateJsonIndex(info, fixture.ctx);

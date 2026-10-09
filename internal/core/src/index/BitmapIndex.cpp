@@ -16,7 +16,6 @@
 
 #include "index/IndexLoadUtils.h"
 #include <algorithm>
-#include <cmath>
 #include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
 #include <bit>
@@ -57,6 +56,22 @@ constexpr const char* BITMAP_INDEX_IS_NESTED = "is_nested_index";
 constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 
 namespace {
+
+template <typename Map, typename Fill>
+void
+BuildVersionedPostings(Map& postings, bool total_order, Fill&& fill) {
+    if constexpr (std::is_floating_point_v<typename Map::key_type>) {
+        if (!total_order) {
+            // Accumulate with the old comparator first: converting from the
+            // canonical map would already have separated legacy NaN postings.
+            std::map<typename Map::key_type, roaring::Roaring> legacy;
+            fill(legacy);
+            postings.merge(legacy);
+            return;
+        }
+    }
+    fill(postings);
+}
 
 // Validate serialized bounds before allocating; CRoaring's safe decoder returns
 // null for both truncated input and allocation failure. After these checks its
@@ -191,13 +206,15 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     T* p = const_cast<T*>(data);
-    for (int i = 0; i < n; ++i, ++p) {
-        if (valid_data == nullptr || valid_data[i]) {
-            CheckNaNCompatibility(*p);
-            data_[*p].add(i);
-            valid_bitset_.set(i);
-        }
-    }
+    BuildVersionedPostings(
+        data_, supports_nan_total_order_, [&](auto& postings) {
+            for (int i = 0; i < n; ++i, ++p) {
+                if (valid_data == nullptr || valid_data[i]) {
+                    postings[*p].add(i);
+                    valid_bitset_.set(i);
+                }
+            }
+        });
 
     if (data_.size() < DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND) {
         for (auto it = data_.begin(); it != data_.end(); ++it) {
@@ -217,18 +234,21 @@ void
 BitmapIndex<T>::BuildPrimitiveField(
     const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            if (data->is_valid(i)) {
-                auto val = reinterpret_cast<const T*>(data->RawValue(i));
-                CheckNaNCompatibility(*val);
-                data_[*val].add(offset);
-                valid_bitset_.set(offset);
+    BuildVersionedPostings(
+        data_, supports_nan_total_order_, [&](auto& postings) {
+            for (const auto& data : field_datas) {
+                auto slice_row_num = data->get_num_rows();
+                for (size_t i = 0; i < slice_row_num; ++i) {
+                    if (data->is_valid(i)) {
+                        auto val =
+                            reinterpret_cast<const T*>(data->RawValue(i));
+                        postings[*val].add(offset);
+                        valid_bitset_.set(offset);
+                    }
+                    offset++;
+                }
             }
-            offset++;
-        }
-    }
+        });
 }
 
 template <typename T>
@@ -282,25 +302,27 @@ template <typename T>
 void
 BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            if (data->is_valid(i)) {
-                auto array =
-                    reinterpret_cast<const milvus::Array*>(data->RawValue(i));
-                for (size_t j = 0; j < array->length(); ++j) {
-                    auto val = array->get_data_unchecked<T>(j);
-                    if (!array->is_element_valid(j)) {
-                        continue;
+    BuildVersionedPostings(
+        data_, supports_nan_total_order_, [&](auto& postings) {
+            for (const auto& data : field_datas) {
+                auto slice_row_num = data->get_num_rows();
+                for (size_t i = 0; i < slice_row_num; ++i) {
+                    if (data->is_valid(i)) {
+                        auto array = reinterpret_cast<const milvus::Array*>(
+                            data->RawValue(i));
+                        for (size_t j = 0; j < array->length(); ++j) {
+                            auto val = array->get_data_unchecked<T>(j);
+                            if (!array->is_element_valid(j)) {
+                                continue;
+                            }
+                            postings[val].add(offset);
+                        }
+                        valid_bitset_.set(offset);
                     }
-                    CheckNaNCompatibility(val);
-                    data_[val].add(offset);
+                    offset++;
                 }
-                valid_bitset_.set(offset);
             }
-            offset++;
-        }
-    }
+        });
 }
 
 template <typename T>
@@ -308,30 +330,31 @@ void
 BitmapIndex<T>::BuildArrayFieldNested(
     const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            if (!data->is_valid(i)) {
-                continue;
-            }
-            // Use RawValue(i), not Data()[i]: nullable array FieldData is stored
-            // compactly (NULL rows occupy no slot), so a logical row index into
-            // Data() runs past the buffer. RawValue() maps logical->physical and
-            // works for both dense and compact data (same as BuildArrayField).
-            auto* array =
-                reinterpret_cast<const milvus::Array*>(data->RawValue(i));
-            auto length = array->length();
-            for (size_t j = 0; j < length; ++j) {
-                auto val = array->get_data_unchecked<T>(j);
-                if (!array->is_element_valid(j)) {
-                    ++offset;
+    BuildVersionedPostings(data_, supports_nan_total_order_, [&](auto& postings) {
+        for (const auto& data : field_datas) {
+            auto slice_row_num = data->get_num_rows();
+            for (size_t i = 0; i < slice_row_num; ++i) {
+                if (!data->is_valid(i)) {
                     continue;
                 }
-                CheckNaNCompatibility(val);
-                data_[val].add(offset++);
+                // Use RawValue(i), not Data()[i]: nullable array FieldData is stored
+                // compactly (NULL rows occupy no slot), so a logical row index into
+                // Data() runs past the buffer. RawValue() maps logical->physical and
+                // works for both dense and compact data (same as BuildArrayField).
+                auto* array =
+                    reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+                auto length = array->length();
+                for (size_t j = 0; j < length; ++j) {
+                    auto val = array->get_data_unchecked<T>(j);
+                    if (!array->is_element_valid(j)) {
+                        ++offset;
+                        continue;
+                    }
+                    postings[val].add(offset++);
+                }
             }
         }
-    }
+    });
 
     if (offset == 0) {
         ThrowInfo(DataIsEmpty,

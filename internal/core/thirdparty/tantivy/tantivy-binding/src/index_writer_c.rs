@@ -77,6 +77,12 @@ pub extern "C" fn tantivy_create_index_with_single_segment(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_set_writer_nan_total_order(ptr: *mut c_void, enabled: bool) {
+    let writer = ptr as *mut IndexWriterWrapper;
+    unsafe { (*writer).set_nan_total_order(enabled) };
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_free_index_writer(ptr: *mut c_void) {
     free_binding::<IndexWriterWrapper>(ptr);
 }

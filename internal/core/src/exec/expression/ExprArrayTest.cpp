@@ -3746,6 +3746,50 @@ TEST(Expr, TestArrayContainsForStruct) {
     }
 }
 
+namespace {
+// Build the same source field twice so physical scans and sorted-index dispatch
+// can share data while their query oracles remain local to each test.
+template <typename Index>
+std::pair<SegmentSealedUPtr, SegmentSealedUPtr>
+MakeSortedScanSegments(const SchemaPtr& schema,
+                       FieldId fid,
+                       const FieldDataPtr& field,
+                       int64_t index_id,
+                       const std::string& cache_key,
+                       bool nested = false) {
+    const auto field_schema = (*schema)[fid].ToProto();
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw = CreateSealedSegment(schema);
+    auto indexed = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field}, cm);
+    raw->LoadFieldData(field_info);
+    indexed->LoadFieldData(field_info);
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, fid.get(), index_id, index_id};
+    auto sorted = std::make_unique<Index>(ctx, nested);
+    if (!nested && field_schema.data_type() == proto::schema::DataType::Array) {
+        EXPECT_FALSE(sorted->HasRawData());
+    } else if (field_schema.data_type() != proto::schema::DataType::Array) {
+        EXPECT_TRUE(sorted->HasRawData());
+    }
+    sorted->BuildWithFieldData({field});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = static_cast<DataType>(field_schema.data_type());
+    info.element_type = static_cast<DataType>(field_schema.element_type());
+    info.num_rows = field->get_num_rows();
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index = CreateTestCacheIndex(cache_key, std::move(sorted));
+    indexed->LoadIndex(info);
+    return {std::move(raw), std::move(indexed)};
+}
+}  // namespace
+
 TEST(Expr, OrdinaryArraySortedIndexContainsMatchesRaw) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("id", DataType::INT64);
@@ -3774,37 +3818,9 @@ TEST(Expr, OrdinaryArraySortedIndexContainsMatchesRaw) {
     auto field_data =
         storage::CreateFieldData(DataType::ARRAY, DataType::VARCHAR, true);
     field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto raw_segment = CreateSealedSegment(schema);
-    auto index_segment = CreateSealedSegment(schema);
-    auto field_info = PrepareSingleFieldInsertBinlog(
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
-    raw_segment->LoadFieldData(field_info);
-    index_segment->LoadFieldData(field_info);
-
-    proto::schema::FieldSchema field_schema;
-    field_schema.set_name("tags");
-    field_schema.set_fieldid(fid.get());
-    field_schema.set_data_type(proto::schema::DataType::Array);
-    field_schema.set_element_type(proto::schema::DataType::VarChar);
-    field_schema.set_nullable(true);
-    storage::FileManagerContext ctx(cm);
-    ctx.fieldDataMeta = storage::FieldDataMeta{
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
-    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4010, 4010};
-    auto sorted = std::make_unique<index::StringIndexSort>(ctx);
-    EXPECT_FALSE(sorted->HasRawData());
-    sorted->BuildWithFieldData({field_data});
-    LoadIndexInfo info;
-    info.field_id = fid.get();
-    info.field_type = DataType::ARRAY;
-    info.element_type = DataType::VARCHAR;
-    info.num_rows = n;
-    info.index_params = GenIndexParams(sorted.get());
-    info.cache_index =
-        CreateTestCacheIndex("array_sorted_contains", std::move(sorted));
-    index_segment->LoadIndex(info);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::StringIndexSort>(
+            schema, fid, field_data, 4010, "array_sorted_contains", false);
     ASSERT_TRUE(index_segment->HasIndex(fid));
     ASSERT_FALSE(raw_segment->HasIndex(fid));
 
@@ -3866,6 +3882,28 @@ SqlFloatComparison(T left, T right) {
 
 template <typename T>
 bool
+SqlFloatMatches(T source, T target, proto::plan::OpType op) {
+    const int order = SqlFloatComparison(source, target);
+    switch (op) {
+        case proto::plan::Equal:
+            return order == 0;
+        case proto::plan::NotEqual:
+            return order != 0;
+        case proto::plan::LessThan:
+            return order < 0;
+        case proto::plan::LessEqual:
+            return order <= 0;
+        case proto::plan::GreaterThan:
+            return order > 0;
+        case proto::plan::GreaterEqual:
+            return order >= 0;
+        default:
+            return false;
+    }
+}
+
+template <typename T>
+bool
 SqlFloatContains(const std::vector<T>& values, T value) {
     return std::any_of(values.begin(), values.end(), [&](T candidate) {
         return SqlFloatComparison(candidate, value) == 0;
@@ -3909,39 +3947,14 @@ CheckOrdinaryArraySortedNaNContainsMatchesRaw() {
     const uint8_t valid_bitmap = 0xbf;
     auto field_data = storage::CreateFieldData(DataType::ARRAY, type, true);
     field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto raw_segment = CreateSealedSegment(schema);
-    auto index_segment = CreateSealedSegment(schema);
-    auto field_info = PrepareSingleFieldInsertBinlog(
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
-    raw_segment->LoadFieldData(field_info);
-    index_segment->LoadFieldData(field_info);
-
-    proto::schema::FieldSchema field_schema;
-    field_schema.set_name("tags");
-    field_schema.set_fieldid(fid.get());
-    field_schema.set_data_type(proto::schema::DataType::Array);
-    field_schema.set_element_type(static_cast<proto::schema::DataType>(type));
-    field_schema.set_nullable(true);
-    field_schema.set_element_nullable(false);
-    storage::FileManagerContext ctx(cm);
-    ctx.fieldDataMeta = storage::FieldDataMeta{
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
-    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4010, 4010};
-    auto sorted = std::make_unique<index::ScalarIndexSort<T>>(ctx);
-    EXPECT_FALSE(sorted->HasRawData());
-    sorted->BuildWithFieldData({field_data});
-    LoadIndexInfo info;
-    info.field_id = fid.get();
-    info.field_type = DataType::ARRAY;
-    info.element_type = type;
-    info.num_rows = n;
-    info.index_params = GenIndexParams(sorted.get());
-    info.cache_index = CreateTestCacheIndex(
-        "array_sorted_nan_contains_" + std::to_string(sizeof(T)),
-        std::move(sorted));
-    index_segment->LoadIndex(info);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4010,
+            "array_sorted_nan_contains_" + std::to_string(sizeof(T)),
+            false);
     ASSERT_TRUE(index_segment->HasIndex(fid));
     ASSERT_FALSE(raw_segment->HasIndex(fid));
 
@@ -4018,24 +4031,7 @@ CheckOrdinaryArraySortedNaNContainsMatchesRaw() {
     three.set_float_val(3);
     nine.set_float_val(9);
     two.set_float_val(2);
-    auto compare = [](T value, T target, proto::plan::OpType op) {
-        switch (op) {
-            case proto::plan::Equal:
-                return SqlFloatComparison(value, target) == 0;
-            case proto::plan::NotEqual:
-                return SqlFloatComparison(value, target) != 0;
-            case proto::plan::LessThan:
-                return SqlFloatComparison(value, target) < 0;
-            case proto::plan::LessEqual:
-                return SqlFloatComparison(value, target) <= 0;
-            case proto::plan::GreaterThan:
-                return SqlFloatComparison(value, target) > 0;
-            case proto::plan::GreaterEqual:
-                return SqlFloatComparison(value, target) >= 0;
-            default:
-                return false;
-        }
-    };
+
     for (T query_target : {T(3), nan}) {
         proto::plan::GenericValue literal;
         literal.set_float_val(query_target);
@@ -4049,7 +4045,7 @@ CheckOrdinaryArraySortedNaNContainsMatchesRaw() {
                 std::make_shared<expr::UnaryRangeFilterExpr>(
                     first_element, op, literal),
                 [=](const std::vector<T>& row, bool) {
-                    return compare(row[0], query_target, op);
+                    return SqlFloatMatches(row[0], query_target, op);
                 },
                 true);
         }
@@ -4080,7 +4076,7 @@ CheckOrdinaryArraySortedNaNContainsMatchesRaw() {
             std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
                 first_element, op, proto::plan::Add, three, two),
             [=](const std::vector<T>& row, bool) {
-                return compare(row[0] + T(2), T(3), op);
+                return SqlFloatMatches(row[0] + T(2), T(3), op);
             },
             true);
     }
@@ -4196,33 +4192,14 @@ CheckScalarSortedNaNOperatorsMatchRawSQL() {
     }
     auto field_data = storage::CreateFieldData(type, DataType::NONE, true);
     field_data->FillFieldData(rows.data(), validity.data(), n, 0);
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto raw_segment = CreateSealedSegment(schema);
-    auto index_segment = CreateSealedSegment(schema);
-    auto field_info = PrepareSingleFieldInsertBinlog(
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
-    raw_segment->LoadFieldData(field_info);
-    index_segment->LoadFieldData(field_info);
-    proto::schema::FieldSchema field_schema;
-    field_schema.set_fieldid(fid.get());
-    field_schema.set_data_type(static_cast<proto::schema::DataType>(type));
-    field_schema.set_nullable(true);
-    storage::FileManagerContext ctx(cm);
-    ctx.fieldDataMeta = storage::FieldDataMeta{
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
-    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4011, 4011};
-    auto sorted = std::make_unique<index::ScalarIndexSort<T>>(ctx);
-    sorted->BuildWithFieldData({field_data});
-    LoadIndexInfo info;
-    info.field_id = fid.get();
-    info.field_type = type;
-    info.num_rows = n;
-    info.index_params = GenIndexParams(sorted.get());
-    info.cache_index = CreateTestCacheIndex(
-        "scalar_sorted_nan_syntax_" + std::to_string(sizeof(T)),
-        std::move(sorted));
-    index_segment->LoadIndex(info);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4011,
+            "scalar_sorted_nan_syntax_" + std::to_string(sizeof(T)),
+            false);
     const expr::ColumnInfo column(fid, type, {}, true);
     auto check = [&](const expr::TypedExprPtr& expression,
                      auto predicate,
@@ -4292,24 +4269,7 @@ CheckScalarSortedNaNOperatorsMatchRawSQL() {
             }
         }
     };
-    auto compare = [](T source, T target, proto::plan::OpType op) {
-        switch (op) {
-            case proto::plan::Equal:
-                return SqlFloatComparison(source, target) == 0;
-            case proto::plan::NotEqual:
-                return SqlFloatComparison(source, target) != 0;
-            case proto::plan::LessThan:
-                return SqlFloatComparison(source, target) < 0;
-            case proto::plan::LessEqual:
-                return SqlFloatComparison(source, target) <= 0;
-            case proto::plan::GreaterThan:
-                return SqlFloatComparison(source, target) > 0;
-            case proto::plan::GreaterEqual:
-                return SqlFloatComparison(source, target) >= 0;
-            default:
-                return false;
-        }
-    };
+
     for (T target : {T(3),
                      T(9),
                      nan,
@@ -4327,42 +4287,12 @@ CheckScalarSortedNaNOperatorsMatchRawSQL() {
             auto unary =
                 std::make_shared<expr::UnaryRangeFilterExpr>(column, op, value);
             check(unary, [op, target](T source, bool) {
-                switch (op) {
-                    case proto::plan::Equal:
-                        return SqlFloatComparison(source, target) == 0;
-                    case proto::plan::NotEqual:
-                        return SqlFloatComparison(source, target) != 0;
-                    case proto::plan::LessThan:
-                        return SqlFloatComparison(source, target) < 0;
-                    case proto::plan::LessEqual:
-                        return SqlFloatComparison(source, target) <= 0;
-                    case proto::plan::GreaterThan:
-                        return SqlFloatComparison(source, target) > 0;
-                    case proto::plan::GreaterEqual:
-                        return SqlFloatComparison(source, target) >= 0;
-                    default:
-                        return false;
-                }
+                return SqlFloatMatches(source, target, op);
             });
             check(std::make_shared<expr::LogicalUnaryExpr>(
                       expr::LogicalUnaryExpr::OpType::LogicalNot, unary),
                   [op, target](T source, bool) {
-                      switch (op) {
-                          case proto::plan::Equal:
-                              return !(SqlFloatComparison(source, target) == 0);
-                          case proto::plan::NotEqual:
-                              return !(SqlFloatComparison(source, target) != 0);
-                          case proto::plan::LessThan:
-                              return !(SqlFloatComparison(source, target) < 0);
-                          case proto::plan::LessEqual:
-                              return !(SqlFloatComparison(source, target) <= 0);
-                          case proto::plan::GreaterThan:
-                              return !(SqlFloatComparison(source, target) > 0);
-                          case proto::plan::GreaterEqual:
-                              return !(SqlFloatComparison(source, target) >= 0);
-                          default:
-                              return false;
-                      }
+                      return !SqlFloatMatches(source, target, op);
                   });
         }
         auto terms = std::make_shared<expr::TermFilterExpr>(
@@ -4412,31 +4342,28 @@ CheckScalarSortedNaNOperatorsMatchRawSQL() {
                                         proto::plan::Sub,
                                         proto::plan::Mul,
                                         proto::plan::Div}) {
-                    check(
-                        std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
-                            column, op, arithmetic, target, operand),
-                        [=](T source, bool) {
-                            T result = source;
-                            switch (arithmetic) {
-                                case proto::plan::Add:
-                                    result += right_value;
-                                    break;
-                                case proto::plan::Sub:
-                                    result -= right_value;
-                                    break;
-                                case proto::plan::Mul:
-                                    result *= right_value;
-                                    break;
-                                case proto::plan::Div:
-                                    result /= right_value;
-                                    break;
-                                default:
-                                    break;
-                            }
-                            return compare(result, query_value, op);
-                        },
-                        false,
-                        true);
+                    check(std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                              column, op, arithmetic, target, operand),
+                          [=](T source, bool) {
+                              T result = source;
+                              switch (arithmetic) {
+                                  case proto::plan::Add:
+                                      result += right_value;
+                                      break;
+                                  case proto::plan::Sub:
+                                      result -= right_value;
+                                      break;
+                                  case proto::plan::Mul:
+                                      result *= right_value;
+                                      break;
+                                  case proto::plan::Div:
+                                      result /= right_value;
+                                      break;
+                                  default:
+                                      break;
+                              }
+                              return SqlFloatMatches(result, query_value, op);
+                          });
                 }
             }
         }
@@ -4444,7 +4371,7 @@ CheckScalarSortedNaNOperatorsMatchRawSQL() {
         // simplification and exercises NaN on both operands.
         check(
             std::make_shared<expr::CompareExpr>(fid, fid, type, type, op),
-            [=](T source, bool) { return compare(source, source, op); },
+            [=](T source, bool) { return SqlFloatMatches(source, source, op); },
             false,
             true);
     }
@@ -4501,34 +4428,14 @@ CheckStructSortedSourceNaNIn() {
     }
     auto field_data = storage::CreateFieldData(DataType::ARRAY, type, false);
     field_data->FillFieldData(arrays.data(), rows.size());
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto raw_segment = CreateSealedSegment(schema);
-    auto index_segment = CreateSealedSegment(schema);
-    auto field_info = PrepareSingleFieldInsertBinlog(
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field_data}, cm);
-    raw_segment->LoadFieldData(field_info);
-    index_segment->LoadFieldData(field_info);
-    proto::schema::FieldSchema field_schema;
-    field_schema.set_name("objects[score]");
-    field_schema.set_fieldid(fid.get());
-    field_schema.set_data_type(proto::schema::DataType::Array);
-    field_schema.set_element_type(static_cast<proto::schema::DataType>(type));
-    storage::FileManagerContext ctx(cm);
-    ctx.fieldDataMeta = storage::FieldDataMeta{
-        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
-    ctx.indexMeta = storage::IndexMeta{kSegmentID, fid.get(), 4012, 4012};
-    auto sorted = std::make_unique<index::ScalarIndexSort<T>>(ctx, true);
-    sorted->BuildWithFieldData({field_data});
-    LoadIndexInfo info;
-    info.field_id = fid.get();
-    info.field_type = DataType::ARRAY;
-    info.element_type = type;
-    info.num_rows = rows.size();
-    info.index_params = GenIndexParams(sorted.get());
-    info.cache_index = CreateTestCacheIndex(
-        "struct_sorted_nan_in_" + std::to_string(sizeof(T)), std::move(sorted));
-    index_segment->LoadIndex(info);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4012,
+            "struct_sorted_nan_in_" + std::to_string(sizeof(T)),
+            true);
     ASSERT_TRUE(index_segment->HasIndex(fid));
     ASSERT_FALSE(raw_segment->HasIndex(fid));
     ASSERT_NE(raw_segment->GetArrayOffsets(fid), nullptr);

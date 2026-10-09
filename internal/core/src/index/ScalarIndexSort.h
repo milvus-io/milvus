@@ -261,7 +261,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
     void
-    CheckNaNCompatibility(T value) const;
+    SortData();
 
     int64_t field_id_ = 0;
 

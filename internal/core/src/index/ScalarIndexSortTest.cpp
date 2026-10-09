@@ -97,6 +97,35 @@ struct ScalarSortAsyncLoadFixture {
     storage::FileManagerContext ctx;
 };
 
+// The array cases exercise the same legacy and direct packed readers in both
+// memory and mmap mode; each callback retains its own row-domain assertions.
+template <typename T, typename Check>
+void
+CheckArrayReloads(const storage::FileManagerContext& ctx,
+                  const BinarySet& binary,
+                  const std::vector<std::string>& files,
+                  bool nested,
+                  Check check) {
+    for (bool mmap : {false, true}) {
+        Config config;
+        config[ENABLE_MMAP] = mmap;
+        ScalarIndexSort<T> legacy(ctx, nested);
+        legacy.Load(binary, config);
+        check(legacy);
+        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+        auto reader = milvus::test::OpenDirectIndexEntryReader(
+            milvus::test::ReadPackedIndexBytes(ctx, files), &remote_file);
+        ScalarIndexSort<T> packed(ctx, nested);
+        auto plan =
+            packed.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
+        folly::coro::blockingWait(reader->ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        folly::coro::blockingWait(packed.FinishLoadAsync(plan, config));
+        plan.Commit();
+        check(packed);
+    }
+}
+
 }  // namespace
 
 namespace {
@@ -229,6 +258,26 @@ CheckIndexedNaN(ScalarIndexSort<T>& index,
     }
 }
 
+// Compare legacy physical entries with the pre-v6 native comparator. Query
+// predicates on these entries deliberately are not a canonical-order oracle.
+template <typename T>
+void
+CheckLegacySortedEntries(ScalarIndexSort<T>& index,
+                         const std::vector<T>& rows) {
+    std::vector<IndexStructure<T>> expected;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        expected.emplace_back(rows[i], i);
+    }
+    std::sort(expected.begin(),
+              expected.end(),
+              [](const auto& a, const auto& b) { return a.a_ < b.a_; });
+    ASSERT_EQ(index.Size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(index[i].idx_, expected[i].idx_);
+        EXPECT_EQ(std::memcmp(&index[i].a_, &expected[i].a_, sizeof(T)), 0);
+    }
+}
+
 TYPED_TEST(ScalarIndexSortNaNTest, IndexesNaNInEveryBuildRoute) {
     using T = TypeParam;
     const T nan = std::numeric_limits<T>::quiet_NaN();
@@ -357,11 +406,6 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNTotalOrderByEngineVersion) {
                 hybrid->bitmap_index_cardinality_limit_ = 0;
                 hybrid->high_cardinality_index_type_ = ScalarIndexType::STLSORT;
             }
-            if (version < kMinScalarIndexVersionForNaNTotalOrder) {
-                EXPECT_THROW(scalar->Build(rows.size(), rows.data()),
-                             SegcoreError);
-                continue;
-            }
             ASSERT_NO_THROW(scalar->Build(rows.size(), rows.data()));
             ScalarIndexSort<T>* sorted = nullptr;
             if (hybrid != nullptr) {
@@ -379,6 +423,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNTotalOrderByEngineVersion) {
             EXPECT_FALSE(sorted->Serialize({}).Contains("valid_bitset"));
             if (version >= 6) {
                 CheckIndexedNaN(*sorted, rows);
+            } else {
+                CheckLegacySortedEntries(*sorted, rows);
             }
         }
 
@@ -393,12 +439,6 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNTotalOrderByEngineVersion) {
         auto base = IndexFactory::GetInstance().CreateIndex(info, ctx);
         auto* sorted = dynamic_cast<ScalarIndexSort<T>*>(base.get());
         ASSERT_NE(sorted, nullptr);
-        if (version < kMinScalarIndexVersionForNaNTotalOrder) {
-            EXPECT_THROW(sorted->BuildWithFieldData({NaNArrayFieldData<T>(
-                             {{rows[0], rows[1]}, {rows[2]}}, 0x03)}),
-                         SegcoreError);
-            continue;
-        }
         ASSERT_NO_THROW(sorted->BuildWithFieldData(
             {NaNArrayFieldData<T>({{rows[0], rows[1]}, {rows[2]}}, 0x03)}));
         EXPECT_EQ(sorted->Count(), rows.size());
@@ -407,6 +447,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNTotalOrderByEngineVersion) {
         EXPECT_TRUE(sorted->Serialize({}).Contains("valid_bitset"));
         if (version >= 6) {
             CheckIndexedNaN(*sorted, rows);
+        } else {
+            CheckLegacySortedEntries(*sorted, rows);
         }
     }
 }
@@ -1131,22 +1173,11 @@ TEST(ScalarIndexSortArrayTest, RowPostingsLegacyAndV3Reload) {
     CheckOrdinaryNumericArray(index);
     auto binary = index.Serialize({});
     auto stats = index.UploadUnified({});
-    for (bool mmap : {false, true}) {
-        Config config;
-        config[milvus::index::ENABLE_MMAP] = mmap;
-        ExposedScalarIndexSort legacy(fixture.ctx);
-        legacy.Load(binary, config);
-        CheckOrdinaryNumericArray(legacy);
-        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
-        auto reader = milvus::test::OpenDirectIndexEntryReader(
-            milvus::test::ReadPackedIndexBytes(fixture.ctx,
-                                               stats->GetIndexFiles()),
-            &remote_file);
-        ExposedScalarIndexSort packed(fixture.ctx);
-        packed.LoadDirectForTest(
-            *reader, config, proto::common::LoadPriority::HIGH);
-        CheckOrdinaryNumericArray(packed);
-    }
+    CheckArrayReloads<int64_t>(fixture.ctx,
+                               binary,
+                               stats->GetIndexFiles(),
+                               false,
+                               CheckOrdinaryNumericArray);
 }
 
 TEST(ScalarIndexSortArrayTest, NaNMatchesAndEmptyRowsRemainValid) {
@@ -1199,22 +1230,8 @@ TEST(ScalarIndexSortArrayTest, EmptyArraysHaveNoPostingsAcrossReloads) {
     check(built);
     auto binary = built.Serialize({});
     auto stats = built.UploadUnified({});
-    for (bool mmap : {false, true}) {
-        Config config;
-        config[milvus::index::ENABLE_MMAP] = mmap;
-        ExposedScalarIndexSort legacy(fixture.ctx);
-        legacy.Load(binary, config);
-        check(legacy);
-        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
-        auto reader = milvus::test::OpenDirectIndexEntryReader(
-            milvus::test::ReadPackedIndexBytes(fixture.ctx,
-                                               stats->GetIndexFiles()),
-            &remote_file);
-        ExposedScalarIndexSort packed(fixture.ctx);
-        packed.LoadDirectForTest(
-            *reader, config, proto::common::LoadPriority::HIGH);
-        check(packed);
-    }
+    CheckArrayReloads<int64_t>(
+        fixture.ctx, binary, stats->GetIndexFiles(), false, check);
 }
 
 TYPED_TEST(ScalarIndexSortNaNTest, OrdinaryArrayNaNRowsRetainParentValidity) {
@@ -1252,26 +1269,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, OrdinaryArrayNaNRowsRetainParentValidity) {
     auto stats = built.UploadUnified({});
     // Ordinary arrays retain raw data and need no scalar NaN reverse lookup.
     EXPECT_FALSE(binary.Contains("nan_rows"));
-    for (bool mmap : {false, true}) {
-        Config config;
-        config[milvus::index::ENABLE_MMAP] = mmap;
-        ScalarIndexSort<T> reloaded(fixture.ctx);
-        reloaded.Load(binary, config);
-        check(reloaded);
-        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
-        auto reader = milvus::test::OpenDirectIndexEntryReader(
-            milvus::test::ReadPackedIndexBytes(fixture.ctx,
-                                               stats->GetIndexFiles()),
-            &remote_file);
-        ScalarIndexSort<T> packed(fixture.ctx);
-        auto plan =
-            packed.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
-            plan.entries, proto::common::LoadPriority::HIGH));
-        folly::coro::blockingWait(packed.FinishLoadAsync(plan, config));
-        plan.Commit();
-        check(packed);
-    }
+    CheckArrayReloads<T>(
+        fixture.ctx, binary, stats->GetIndexFiles(), false, check);
 }
 
 TYPED_TEST(ScalarIndexSortNaNTest, NestedIgnoresInvalidNaNPayload) {
@@ -1326,60 +1325,28 @@ TYPED_TEST(ScalarIndexSortNaNTest, NestedIgnoresInvalidNaNPayload) {
     check(built);
     auto binary = built.Serialize({});
     auto stats = built.UploadUnified({});
-    for (bool mmap : {false, true}) {
-        Config config;
-        config[milvus::index::ENABLE_MMAP] = mmap;
-        ScalarIndexSort<T> legacy(fixture.ctx, true);
-        legacy.Load(binary, config);
-        check(legacy);
-        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
-        auto reader = milvus::test::OpenDirectIndexEntryReader(
-            milvus::test::ReadPackedIndexBytes(fixture.ctx,
-                                               stats->GetIndexFiles()),
-            &remote_file);
-        ScalarIndexSort<T> packed(fixture.ctx, true);
-        auto plan =
-            packed.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
-            plan.entries, proto::common::LoadPriority::HIGH));
-        folly::coro::blockingWait(packed.FinishLoadAsync(plan, config));
-        plan.Commit();
-        check(packed);
-    }
+    CheckArrayReloads<T>(
+        fixture.ctx, binary, stats->GetIndexFiles(), true, check);
 }
 
-TYPED_TEST(ScalarIndexSortNaNTest,
-           UnsupportedVersionRejectsValidNaNInEveryBuildRoute) {
+TYPED_TEST(ScalarIndexSortNaNTest, LegacyVersionWritesNaNInEveryBuildRoute) {
     using T = TypeParam;
     const T nan = std::numeric_limits<T>::quiet_NaN();
     const std::vector<T> rows{nan, T(3)};
-    auto expect_unsupported = [](auto build) {
-        try {
-            build();
-            FAIL() << "An older version must never store NaN in sorted entries";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
-        }
-    };
     ScalarIndexSort<T> raw;
     raw.SetSupportsNaNTotalOrder(false);
-    expect_unsupported([&] { raw.Build(rows.size(), rows.data()); });
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data()));
+    CheckLegacySortedEntries(raw, rows);
     ScalarIndexSort<T> scalar;
     scalar.SetSupportsNaNTotalOrder(false);
-    expect_unsupported(
-        [&] { scalar.BuildWithFieldData({NaNScalarFieldData(rows, 0x03)}); });
+    ASSERT_NO_THROW(
+        scalar.BuildWithFieldData({NaNScalarFieldData(rows, 0x03)}));
+    CheckLegacySortedEntries(scalar, rows);
     ScalarIndexSort<T> nested({}, true);
     nested.SetSupportsNaNTotalOrder(false);
-    expect_unsupported([&] {
-        nested.BuildWithFieldData({NaNArrayFieldData<T>({rows}, 0x01)});
-    });
-    ScalarSortAsyncLoadFixture fixture("ordinary_array_reject_unsupported_nan",
-                                       proto::schema::DataType::Array);
-    ScalarIndexSort<T> ordinary(fixture.ctx);
-    ordinary.SetSupportsNaNTotalOrder(false);
-    expect_unsupported([&] {
-        ordinary.BuildWithFieldData({NaNArrayFieldData<T>({rows}, 0x01)});
-    });
+    ASSERT_NO_THROW(
+        nested.BuildWithFieldData({NaNArrayFieldData<T>({rows}, 0x01)}));
+    CheckLegacySortedEntries(nested, rows);
 }
 
 TYPED_TEST(ScalarIndexSortNaNTest, UnsupportedVersionIgnoresNullPayloadNaN) {
@@ -1424,7 +1391,8 @@ TYPED_TEST(ScalarIndexSortNaNTest, UnsupportedVersionIgnoresNullPayloadNaN) {
     ScalarSortAsyncLoadFixture fixture("ordinary_array_null_payload_nan",
                                        proto::schema::DataType::Array);
     ScalarIndexSort<T> ordinary(fixture.ctx);
-    ordinary.SetSupportsNaNTotalOrder(false);
+    // Parent-row ARRAY SORT is a v6 capability; this remains a canonical
+    // writer test of invalid-member payloads, not a legacy-format claim.
     ASSERT_NO_THROW(ordinary.BuildWithFieldData({field}));
     check(ordinary);
     EXPECT_EQ(ordinary.Count(), 1);

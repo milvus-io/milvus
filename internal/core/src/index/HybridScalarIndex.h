@@ -20,14 +20,18 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <set>
+#include <type_traits>
 #include <string>
 #include <vector>
 
 #include "common/FieldData.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/ScalarComparison.h"
 #include "common/protobuf_utils.h"
 #include "index/IndexStats.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -212,6 +216,20 @@ class HybridScalarIndex : public ScalarIndex<T> {
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  protected:
+    template <typename Select>
+    decltype(auto)
+    WithWriterValueSet(Select&& select) {
+        if constexpr (std::is_floating_point_v<T>) {
+            if (scalar_index_version_ <
+                kMinScalarIndexVersionForNaNTotalOrder) {
+                std::set<T> values;
+                return select(values);
+            }
+        }
+        std::set<T, ScalarLessThan<T>> values;
+        return select(values);
+    }
+
     ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 

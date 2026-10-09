@@ -123,6 +123,13 @@ struct TantivyIndexWrapper {
         writer_ = res.result_->value.ptr._0;
     }
 
+    void
+    SetSupportsNaNTotalOrder(bool enabled) {
+        if (writer_ != nullptr) {
+            tantivy_set_writer_nan_total_order(writer_, enabled);
+        }
+    }
+
     // load index. create index reader.
     explicit TantivyIndexWrapper(const char* path,
                                  bool load_in_mmap,

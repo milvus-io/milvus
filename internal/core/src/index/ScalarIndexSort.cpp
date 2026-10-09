@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -145,12 +144,18 @@ ScalarIndexSort<T>::ScalarIndexSort(
 
 template <typename T>
 void
-ScalarIndexSort<T>::CheckNaNCompatibility(T value) const {
-    if (ScalarIsNaN(value) && !supports_nan_total_order_) {
-        ThrowInfo(
-            Unsupported,
-            "STL_SORT requires scalar index version 6 for NaN total order");
+ScalarIndexSort<T>::SortData() {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!supports_nan_total_order_) {
+            std::sort(data_.begin(),
+                      data_.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return lhs.a_ < rhs.a_;
+                      });
+            return;
+        }
     }
+    std::sort(data_.begin(), data_.end());
 }
 
 template <typename T>
@@ -186,12 +191,11 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     for (size_t i = 0; i < n; ++i, ++p) {
         if (!valid_data || valid_data[i]) {
             valid_bitset_.set(i);
-            CheckNaNCompatibility(*p);
             data_.emplace_back(IndexStructure(*p, i));
         }
     }
 
-    std::sort(data_.begin(), data_.end());
+    SortData();
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
@@ -237,13 +241,12 @@ ScalarIndexSort<T>::BuildWithFieldData(
             if (data->is_valid(i)) {
                 auto value = reinterpret_cast<const T*>(data->RawValue(i));
                 valid_bitset_.set(offset);
-                CheckNaNCompatibility(*value);
                 data_.emplace_back(IndexStructure(*value, offset));
             }
             offset++;
         }
     }
-    std::sort(data_.begin(), data_.end());
+    SortData();
     idx_to_offsets_.assign(total_num_rows_, -1);
     for (size_t i = 0; i < data_.size(); ++i) {
         if (data_[i].idx_ < 0 || data_[i].idx_ >= total_num_rows_) {
@@ -286,12 +289,11 @@ ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
                     continue;
                 }
                 auto value = array->get_data_unchecked<T>(j);
-                CheckNaNCompatibility(value);
                 data_.emplace_back(IndexStructure(value, row));
             }
         }
     }
-    std::sort(data_.begin(), data_.end());
+    SortData();
     // Ordinary arrays cannot be reconstructed with scalar Reverse_Lookup.
     idx_to_offsets_.assign(total_num_rows_, -1);
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
@@ -339,13 +341,12 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
                     valid_bitset_.reset(offset++);
                     continue;
                 }
-                CheckNaNCompatibility(value);
                 data_.emplace_back(IndexStructure(value, offset));
                 offset++;
             }
         }
     }
-    std::sort(data_.begin(), data_.end());
+    SortData();
     idx_to_offsets_.assign(total_num_rows_, -1);
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;

@@ -70,6 +70,7 @@ fn test_nan_writer_and_queries_version7() {
         false,
     )
     .unwrap();
+    writer.set_nan_total_order(true);
     for (row, value) in float_values().into_iter().enumerate() {
         writer.add(value, Some(row as i64)).unwrap();
     }
@@ -175,6 +176,7 @@ fn test_nan_writer_version5_and_single_segment() {
             )
             .unwrap()
         };
+        writer.set_nan_total_order(true);
         for (row, value) in float_values().into_iter().enumerate() {
             writer
                 .add(
@@ -365,5 +367,130 @@ fn check_json_nan_query_boundaries(fast: bool) {
 fn test_json_nan_query_boundaries() {
     for fast in [false, true] {
         check_json_nan_query_boundaries(fast);
+    }
+}
+
+#[test]
+fn test_float_writer_capability_preserves_legacy_keys() {
+    use std::collections::BTreeSet;
+
+    use crate::index_writer_c::{
+        tantivy_index_add_array_f64s, tantivy_index_add_array_f64s_by_single_segment_writer,
+        tantivy_index_add_f64s, tantivy_index_add_f64s_by_single_segment_writer,
+        tantivy_set_writer_nan_total_order,
+    };
+
+    macro_rules! stored_keys {
+        ($index:expr) => {{
+            let index = $index;
+            let field = index.schema().get_field("value").unwrap();
+            let reader = index.reader().unwrap();
+            let searcher = reader.searcher();
+            let mut keys = BTreeSet::new();
+            for segment in searcher.segment_readers() {
+                let inverted = segment.inverted_index(field).unwrap();
+                let mut terms = inverted.terms().stream().unwrap();
+                while terms.advance() {
+                    keys.insert(terms.key().to_vec());
+                }
+            }
+            keys
+        }};
+    }
+
+    for version in [TantivyIndexVersion::V5, TantivyIndexVersion::V7] {
+        for single_segment in [false, true] {
+            if single_segment && version == TantivyIndexVersion::V7 {
+                continue;
+            }
+            for canonical in [false, true] {
+                let dir = tempdir().unwrap();
+                let path = dir.path().to_str().unwrap().to_string();
+                let mut writer = if single_segment {
+                    IndexWriterWrapper::new_with_single_segment("value", TantivyDataType::F64, path)
+                } else {
+                    IndexWriterWrapper::new(
+                        "value",
+                        TantivyDataType::F64,
+                        path,
+                        1,
+                        50_000_000,
+                        version,
+                        false,
+                        false,
+                    )
+                }
+                .unwrap();
+                let ptr = &mut writer as *mut _ as *mut c_void;
+                // An unconfigured writer must retain the dependency's old keys.
+                if canonical {
+                    tantivy_set_writer_nan_total_order(ptr, true);
+                }
+                let values = float_values();
+                let batch = if single_segment {
+                    tantivy_index_add_f64s_by_single_segment_writer(
+                        ptr,
+                        values.as_ptr(),
+                        values.len(),
+                    )
+                } else {
+                    tantivy_index_add_f64s(ptr, values.as_ptr(), values.len(), 0)
+                };
+                assert!(batch.success);
+                let array = if single_segment {
+                    tantivy_index_add_array_f64s_by_single_segment_writer(
+                        ptr,
+                        values.as_ptr(),
+                        values.len(),
+                    )
+                } else {
+                    tantivy_index_add_array_f64s(
+                        ptr,
+                        values.as_ptr(),
+                        values.len(),
+                        values.len() as i64,
+                    )
+                };
+                assert!(array.success);
+                writer.finish().unwrap();
+                let expected: BTreeSet<_> = values
+                    .iter()
+                    .map(|&value| {
+                        let key = if canonical && value.is_nan() {
+                            u64::MAX
+                        } else {
+                            // The existing V7 dependency already unifies signed zeros;
+                            // the V5 dependency preserves their distinct encodings.
+                            let value = if value == 0.0
+                                && (canonical || version == TantivyIndexVersion::V7)
+                            {
+                                0.0
+                            } else {
+                                value
+                            };
+                            let bits = value.to_bits();
+                            if bits >> 63 == 0 {
+                                bits ^ (1 << 63)
+                            } else {
+                                !bits
+                            }
+                        };
+                        key.to_be_bytes().to_vec()
+                    })
+                    .collect();
+                let actual = match version {
+                    TantivyIndexVersion::V5 => {
+                        stored_keys!(tantivy_5::Index::open_in_dir(dir.path()).unwrap())
+                    }
+                    TantivyIndexVersion::V7 => {
+                        stored_keys!(tantivy::Index::open_in_dir(dir.path()).unwrap())
+                    }
+                };
+                assert_eq!(
+                    actual, expected,
+                    "{version:?}, single={single_segment}, canonical={canonical}"
+                );
+            }
+        }
     }
 }

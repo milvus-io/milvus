@@ -21,7 +21,6 @@
 #include <exception>
 #include <filesystem>
 #include <list>
-#include <limits>
 #include <map>
 #include <optional>
 #include <unordered_set>
@@ -69,20 +68,6 @@
 namespace milvus::index {
 namespace {
 
-// Keep all term-query surfaces (IN, NOT IN, callbacks and filtered IN) on
-// SQL floating equality semantics; the binding canonicalizes NaN and zero.
-template <typename T>
-void
-QueryTerms(const std::shared_ptr<TantivyIndexWrapper>& wrapper,
-           const T* values,
-           size_t n,
-           TargetBitmap* result) {
-    if (n == 0) {
-        return;
-    }
-    wrapper->terms_query(values, n, result);
-}
-
 struct TantivyLoadContext {
     std::shared_ptr<IndexDirectoryLoadContext> directory;
     std::shared_ptr<std::vector<size_t>> null_offsets;
@@ -122,6 +107,7 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                                               tantivy_index_version_,
                                               inverted_index_single_segment_,
                                               user_specified_doc_id_);
+    wrapper_->SetSupportsNaNTotalOrder(supports_nan_total_order_);
 }
 
 template <typename T>
@@ -379,7 +365,7 @@ const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
     tracer::AutoSpan span("InvertedIndexTantivy::In", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    QueryTerms(wrapper_, values, n, &bitset);
+    wrapper_->terms_query(values, n, &bitset);
     return bitset;
 }
 
@@ -552,7 +538,7 @@ InvertedIndexTantivy<T>::InApplyFilter(
     tracer::AutoSpan span("InvertedIndexTantivy::InApplyFilter",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    QueryTerms(wrapper_, values, n, &bitset);
+    wrapper_->terms_query(values, n, &bitset);
     // todo(SpadeA): could push-down the filter to tantivy query
     apply_hits_with_filter(bitset, filter);
     return bitset;
@@ -565,7 +551,7 @@ InvertedIndexTantivy<T>::InApplyCallback(
     tracer::AutoSpan span("InvertedIndexTantivy::InApplyCallback",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    QueryTerms(wrapper_, values, n, &bitset);
+    wrapper_->terms_query(values, n, &bitset);
     // todo(SpadeA): could push-down the callback to tantivy query
     apply_hits_with_callback(bitset, callback);
 }
@@ -576,7 +562,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     tracer::AutoSpan span("InvertedIndexTantivy::NotIn", tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count);
-    QueryTerms(wrapper_, values, n, &bitset);
+    wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
     ApplyValidityMask(bitset);
@@ -725,6 +711,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             tantivy_index_version_,
             inverted_index_single_segment_);
     }
+    wrapper_->SetSupportsNaNTotalOrder(supports_nan_total_order_);
     bool is_nested_index = config.find("is_nested_index") != config.end();
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {
@@ -770,39 +757,6 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    if constexpr (std::is_floating_point_v<T>) {
-        if (!supports_nan_total_order_) {
-            const auto needs_canonical_encoding = [](T value) {
-                return ScalarIsNaN(value) ||
-                       (value == T(0) && std::signbit(value));
-            };
-            for (const auto& data : field_datas) {
-                for (size_t row = 0; row < data->get_num_rows(); ++row) {
-                    if (!data->is_valid(row)) {
-                        continue;
-                    }
-                    if (data->get_data_type() == DataType::ARRAY) {
-                        const auto* array =
-                            static_cast<const Array*>(data->RawValue(row));
-                        for (size_t i = 0; i < array->length(); ++i) {
-                            if (array->is_element_valid(i) &&
-                                needs_canonical_encoding(
-                                    array->get_data_unchecked<T>(i))) {
-                                ThrowInfo(Unsupported,
-                                          "INVERTED requires scalar index "
-                                          "version 6 for NaN total order");
-                            }
-                        }
-                    } else if (needs_canonical_encoding(*static_cast<const T*>(
-                                   data->RawValue(row)))) {
-                        ThrowInfo(Unsupported,
-                                  "INVERTED requires scalar index version 6 "
-                                  "for NaN total order");
-                    }
-                }
-            }
-        }
-    }
     if (schema_.nullable()) {
         int64_t total = 0;
         for (const auto& data : field_datas) {

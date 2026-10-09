@@ -742,12 +742,6 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     }
 
     void
-    SetSupportsNaNTotalOrder(bool enabled) {
-        InvertedIndexTantivy<std::string>::SetSupportsNaNTotalOrder(enabled);
-        supports_nan_total_order_ = enabled;
-    }
-
-    void
     build_index_for_json(const std::vector<std::shared_ptr<FieldDataBase>>&
                              field_datas) override;
 
@@ -788,7 +782,6 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
  private:
     std::string nested_path_;
-    bool supports_nan_total_order_{true};
 };
 
 template <typename T>

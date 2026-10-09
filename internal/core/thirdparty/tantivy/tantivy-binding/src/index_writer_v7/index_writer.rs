@@ -67,7 +67,15 @@ impl TantivyValue<TantivyDocument> for u64 {
 impl TantivyValue<TantivyDocument> for f64 {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_f64(Field::from_field_id(field), canonical_f64(*self));
+        document.add_f64(Field::from_field_id(field), *self);
+    }
+
+    fn canonicalize(self, enabled: bool) -> Self {
+        if enabled {
+            canonical_f64(self)
+        } else {
+            self
+        }
     }
 }
 
@@ -98,6 +106,7 @@ pub struct IndexWriterWrapperImpl {
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
     pub(crate) enable_user_specified_doc_id: bool,
+    pub(crate) supports_nan_total_order: bool,
 }
 
 impl IndexWriterWrapperImpl {
@@ -138,6 +147,7 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field,
             enable_user_specified_doc_id,
+            supports_nan_total_order: false,
         })
     }
 
@@ -159,7 +169,8 @@ impl IndexWriterWrapperImpl {
 
     pub fn add<T: TantivyValue<TantivyDocument>>(&mut self, data: T, offset: u32) -> Result<()> {
         let mut document = TantivyDocument::default();
-        data.add_to_document(self.field.field_id(), &mut document);
+        data.canonicalize(self.supports_nan_total_order)
+            .add_to_document(self.field.field_id(), &mut document);
 
         self.add_document(document, offset)
     }
@@ -173,8 +184,10 @@ impl IndexWriterWrapperImpl {
         I: IntoIterator<Item = T>,
     {
         let mut document = TantivyDocument::default();
-        data.into_iter()
-            .for_each(|d| d.add_to_document(self.field.field_id(), &mut document));
+        data.into_iter().for_each(|d| {
+            d.canonicalize(self.supports_nan_total_order)
+                .add_to_document(self.field.field_id(), &mut document)
+        });
 
         self.add_document(document, offset)
     }

@@ -19,6 +19,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cmath>
+#include <cstring>
+#include <map>
 #include <iosfwd>
 #include <memory>
 #include <limits>
@@ -2019,6 +2021,13 @@ void
 CheckFloatingQueries(index::ScalarIndex<T>& index) {
     const T inf = std::numeric_limits<T>::infinity();
     ASSERT_EQ(index.Count(), 6);
+    EXPECT_EQ(index.In(0, nullptr).count(), 0);
+    const auto empty_not_in = index.NotIn(0, nullptr);
+    const auto non_null = index.IsNotNull();
+    ASSERT_EQ(empty_not_in.size(), non_null.size());
+    for (size_t row = 0; row < non_null.size(); ++row) {
+        EXPECT_EQ(empty_not_in[row], non_null[row]);
+    }
     const T one = T(1);
     auto hit = index.In(1, &one);
     EXPECT_EQ(hit.count(), 1);
@@ -2185,11 +2194,10 @@ TEST(BitmapIndexArrayNestedTest,
     CheckFloatingQueries(loaded);
 }
 
-TYPED_TEST(FloatingIndexQueryTest,
-           InvertedNumericRangesOrderEveryNaNAfterInfinity) {
-    using T = TypeParam;
-    auto [ctx, ignored] =
-        MakeFloatingQueryFixture<T>("inverted_nan_range_domain", 3193);
+namespace {
+template <typename T>
+FieldDataPtr
+FloatingNaNDomainField() {
     const T nan = std::numeric_limits<T>::quiet_NaN();
     const T inf = std::numeric_limits<T>::infinity();
     const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
@@ -2198,6 +2206,54 @@ TYPED_TEST(FloatingIndexQueryTest,
         std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
     auto field = std::make_shared<FieldData<T>>(dtype, true);
     field->FillFieldData(values, &validity, std::size(values), 0);
+    return field;
+}
+
+// Both backends index the same eight scalar rows. Counts are an independent
+// expected-value matrix, not calls back into the production comparator.
+template <typename T>
+void
+CheckFloatingNaNDomain(index::ScalarIndex<T>& index) {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    const T zero = 0;
+    ASSERT_EQ(index.Count(), 8);
+    EXPECT_EQ(index.IsNotNull().count(), 7);
+    EXPECT_EQ(index.IsNull().count(), 1);
+    const auto not_zero = index.NotIn(1, &zero);
+    EXPECT_EQ(not_zero.count(), 5);
+    EXPECT_TRUE(not_zero[0]);
+    EXPECT_TRUE(not_zero[6]);
+    EXPECT_FALSE(not_zero[7]);
+    EXPECT_EQ(index.Range(zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(index.Range(zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(index.Range(zero, OpType::GreaterThan).count(), 4);
+    EXPECT_EQ(index.Range(zero, OpType::GreaterEqual).count(), 6);
+    EXPECT_EQ(index.Range(-inf, OpType::LessEqual).count(), 1);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterEqual).count(), 3);
+    EXPECT_EQ(index.In(1, &nan).count(), 2);
+    EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 5);
+    EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 7);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
+    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 7);
+    EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
+    auto numeric = index.Range(-inf, true, inf, true);
+    EXPECT_EQ(numeric.count(), 5);
+    EXPECT_FALSE(numeric[0]);
+    EXPECT_FALSE(numeric[6]);
+    EXPECT_FALSE(numeric[7]);
+}
+}  // namespace
+
+TYPED_TEST(FloatingIndexQueryTest,
+           InvertedNumericRangesOrderEveryNaNAfterInfinity) {
+    using T = TypeParam;
+    auto [ctx, ignored] =
+        MakeFloatingQueryFixture<T>("inverted_nan_range_domain", 3193);
+    auto field = FloatingNaNDomainField<T>();
     index::InvertedIndexTantivy<T> built(7, ctx);
     built.BuildWithFieldData({field});
     auto stats = built.UploadUnified({});
@@ -2207,62 +2263,19 @@ TYPED_TEST(FloatingIndexQueryTest,
     config[ENABLE_MMAP] = false;
     index::InvertedIndexTantivy<T> loaded(7, ctx);
     loaded.LoadUnified(config);
-    ASSERT_EQ(loaded.Count(), 8);
-    const T zero = 0;
-    const auto not_zero = loaded.NotIn(1, &zero);
-    EXPECT_EQ(not_zero.count(), 5);
-    EXPECT_TRUE(not_zero[0]);
-    EXPECT_TRUE(not_zero[6]);
-    EXPECT_FALSE(not_zero[7]);
-    EXPECT_EQ(loaded.Range(zero, OpType::LessThan).count(), 1);
-    EXPECT_EQ(loaded.Range(zero, OpType::LessEqual).count(), 3);
-    EXPECT_EQ(loaded.Range(zero, OpType::GreaterThan).count(), 4);
-    EXPECT_EQ(loaded.Range(zero, OpType::GreaterEqual).count(), 6);
-    EXPECT_EQ(loaded.Range(-inf, OpType::LessEqual).count(), 1);
-    EXPECT_EQ(loaded.Range(inf, OpType::GreaterEqual).count(), 3);
-    EXPECT_EQ(loaded.In(1, &nan).count(), 2);
-    EXPECT_EQ(loaded.Range(nan, OpType::LessThan).count(), 5);
-    EXPECT_EQ(loaded.Range(nan, OpType::LessEqual).count(), 7);
-    EXPECT_EQ(loaded.Range(nan, OpType::GreaterThan).count(), 0);
-    EXPECT_EQ(loaded.Range(nan, OpType::GreaterEqual).count(), 2);
-    EXPECT_EQ(loaded.Range(-inf, true, nan, true).count(), 7);
-    EXPECT_EQ(loaded.Range(nan, true, nan, true).count(), 2);
-    auto all_numeric = loaded.Range(-inf, true, inf, true);
-    EXPECT_EQ(all_numeric.count(), 5);
-    EXPECT_FALSE(all_numeric[0]);
-    EXPECT_FALSE(all_numeric[6]);
-    EXPECT_FALSE(all_numeric[7]);
+    CheckFloatingNaNDomain<T>(loaded);
 }
 
 TYPED_TEST(FloatingIndexQueryTest, BitmapNaNHasDistinctPostingAndTotalOrder) {
     using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
     auto [ctx, ignored] =
         MakeFloatingQueryFixture<T>("bitmap_nan_total_order", 3198);
-    const T nan = std::numeric_limits<T>::quiet_NaN();
-    const T inf = std::numeric_limits<T>::infinity();
-    const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
-    const uint8_t validity = 0x7f;
-    constexpr auto dtype =
-        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
-    auto field = std::make_shared<FieldData<T>>(dtype, true);
-    field->FillFieldData(values, &validity, std::size(values), 0);
+    auto field = FloatingNaNDomainField<T>();
     index::BitmapIndex<T> built(ctx);
     built.BuildWithFieldData({field});
     auto check = [&](index::BitmapIndex<T>& index) {
-        EXPECT_EQ(index.Count(), 8);
-        EXPECT_EQ(index.IsNotNull().count(), 7);
-        EXPECT_EQ(index.IsNull().count(), 1);
-        EXPECT_EQ(index.In(1, &nan).count(), 2);
-        EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
-        EXPECT_EQ(index.Range(T(0), OpType::GreaterThan).count(), 4);
-        EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
-        EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 5);
-        EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 7);
-        EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
-        EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
-        EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
-        EXPECT_EQ(index.Range(-inf, true, inf, true).count(), 5);
-        EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 7);
+        CheckFloatingNaNDomain<T>(index);
         EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(0)));
         EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(6)));
         EXPECT_EQ(index.Reverse_Lookup(7), std::nullopt);
@@ -2279,16 +2292,56 @@ TYPED_TEST(FloatingIndexQueryTest, BitmapNaNHasDistinctPostingAndTotalOrder) {
     index::BitmapIndex<T> packed(ctx);
     packed.LoadUnified(config);
     check(packed);
-    index::BitmapIndex<T> unsupported(ctx);
-    unsupported.SetSupportsNaNTotalOrder(false);
-    EXPECT_THROW(unsupported.BuildWithFieldData({field}), SegcoreError);
+    // Legacy writers retain native std::map accumulation, including its
+    // order-dependent NaN equivalence. Only v6 uses independent NaN postings.
+    for (const auto& legacy_rows :
+         {std::vector<T>{nan, T(1), T(2)}, std::vector<T>{T(1), T(2), nan}}) {
+        auto legacy_field = std::make_shared<FieldData<T>>(
+            std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE,
+            false);
+        legacy_field->FillFieldData(legacy_rows.data(), legacy_rows.size());
+        index::BitmapIndex<T> legacy(ctx);
+        legacy.SetSupportsNaNTotalOrder(false);
+        ASSERT_NO_THROW(legacy.BuildWithFieldData({legacy_field}));
+        std::map<T, roaring::Roaring> expected;
+        for (size_t row = 0; row < legacy_rows.size(); ++row) {
+            expected[legacy_rows[row]].add(row);
+        }
+        ASSERT_EQ(legacy.data_.size(), expected.size());
+        auto actual = legacy.data_.begin();
+        for (const auto& [key, postings] : expected) {
+            EXPECT_EQ(std::memcmp(&actual->first, &key, sizeof(T)), 0);
+            EXPECT_EQ(actual->second.cardinality(), postings.cardinality());
+            for (size_t row = 0; row < legacy_rows.size(); ++row) {
+                EXPECT_EQ(actual->second.contains(row), postings.contains(row));
+            }
+            ++actual;
+        }
+    }
+    index::BitmapIndex<T> legacy_reader(ctx);
+    legacy_reader.SetSupportsNaNTotalOrder(false);
+    try {
+        legacy_reader.Load(binary, {});
+        FAIL() << "Legacy bitmap reader must reject canonical NaN keys";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+    }
 }
 
-TYPED_TEST(FloatingIndexQueryTest, InvertedLegacyWriterRejectsNegativeZero) {
+TYPED_TEST(FloatingIndexQueryTest, InvertedLegacyWriterPreservesNegativeZero) {
     using T = TypeParam;
     auto [ctx, field] =
         MakeFloatingQueryFixture<T>("inverted_legacy_negative_zero", 3200);
-    index::InvertedIndexTantivy<T> unsupported(7, ctx);
-    unsupported.SetSupportsNaNTotalOrder(false);
-    EXPECT_THROW(unsupported.BuildWithFieldData({field}), SegcoreError);
+    index::InvertedIndexTantivy<T> legacy(7, ctx);
+    legacy.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(legacy.BuildWithFieldData({field}));
+    auto stats = legacy.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(loaded.LoadUnified(config));
+    EXPECT_EQ(loaded.Count(), 6);
+    EXPECT_EQ(loaded.IsNotNull().count(), 5);
 }

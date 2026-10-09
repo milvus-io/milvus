@@ -13,10 +13,10 @@
 Use one scalar floating-point comparison contract across raw scans, query constant
 folding, arrays, every numeric scalar index, JSON stats and skip-index pruning:
 all NaNs compare equal and sort after every non-NaN number, including positive
-infinity. Keep NaN distinct
-from NULL. Normalize NaN only at numeric index-key boundaries; retain original
+infinity. Keep NaN distinct from NULL. Normalize NaN only at numeric index-key boundaries; retain original
 source values and array positions. Ordinary Array HYBRID indexes may select
-STL_SORT at high cardinality on scalar engine version 6.
+STL_SORT at high cardinality on scalar engine version 6. Writers enable the new
+key contract only when the negotiated scalar engine target is at least 6.
 
 ## Motivation
 
@@ -91,9 +91,12 @@ to UINT64_MAX. Thus every NaN shares one term and sorts after +Inf, without chan
 the dependency revision, field type or posting format. Preserve actual unbounded
 range endpoints; +Inf is a value rather than a synonym for an unbounded endpoint.
 
-Scalar, batch, array and single-segment writers use the same normalization as
-term, term-set and one/two-bound range queries. JSON numeric query terms also use
-this boundary. Current native numeric schemas are indexed without FAST fields;
+For scalar engine targets at least 6, scalar, batch, array and single-segment
+writers use the same normalization as term, term-set and one/two-bound range
+queries. Lower targets retain the dependency encoder used before this change.
+Tantivy format versions V5/V7 are independent of this scalar engine capability;
+V7 already normalized signed zero before this PR. JSON numeric query terms also
+use this boundary. Current native numeric schemas are indexed without FAST fields;
 any future FAST writer must use the same normalization rather than bypass it.
 JSON flat indexes also have FAST columns; strict JSON input cannot represent
 numeric NaN. NaN floating range bounds use typed inverted ranges instead of the
@@ -105,13 +108,17 @@ this change does not increase its key width. DOUBLE remains 64-bit.
 ### SORT and BITMAP
 
 STL_SORT retains floating values and ordinary source offsets, including valid
-NaNs. Its comparator places NaNs at the end; all bound checks and searches use
-that same comparator. There are no unindexed valid NaN holes or NaN-row sidecars.
+NaNs. From scalar engine version 6, its writer comparator places NaNs at the end;
+all bound checks and searches use that same total order. Older build targets keep
+the original writer comparator, and new readers use raw data for those indexes.
+There are no unindexed valid NaN holes or NaN-row sidecars.
 
 BITMAP retains its floating key type. A NaN-aware map comparator groups every
 NaN into one key whose bitmap identifies matching source rows. HYBRID cardinality
 selection uses the same comparator and may choose BITMAP for low-cardinality data
-containing NaN; it does not force STL_SORT merely because NaN occurs.
+containing NaN; it does not force STL_SORT merely because NaN occurs. Older build
+targets retain the original map/cardinality comparisons and postings; legacy
+compatibility does not promise the new NaN query semantics.
 
 ### Ordinary Array postings
 
@@ -132,10 +139,11 @@ older versions retain the existing high-cardinality INVERTED selection.
 ## Compatibility and migration
 
 Scalar engine version 6 advertises the new NaN key/comparison contract. No new
-physical container layout is introduced. New floating index writers reject valid
-NaN when explicitly asked to target an older reader that cannot implement this
-contract. Tantivy also gates negative-zero key normalization for older readers;
-ordinary data remains buildable at older negotiated versions.
+physical container layout is introduced. Before the cluster can negotiate
+version 6, writers keep the legacy comparator/encoder path for the selected
+target. Valid NaN and signed zero do not fail a build merely because the target
+is older. Canonical NaN keys are enabled only for targets at least 6. No new
+retry state or scheduler behavior is introduced.
 
 Old Tantivy indexes may split NaNs across keys and across both ends of the numeric
 order. Old SORT entries may be unordered. Old BITMAP maps may have merged NaN
@@ -171,8 +179,8 @@ with several payloads, infinities, signed zeros, ordinary numbers and NULLs. Cov
 EQ/NE, IN/NOT IN, all ordered comparisons, inclusive/exclusive range bounds,
 negation, array contains-any/all, positional access, whole-array equality,
 arithmetic comparisons and Struct MATCH_ANY/ALL. Verify parent versus element
-posting domains, reloads in memory/mmap paths, old-version writer guards, loader
-raw fallback and existing scalar rebuild negotiation. Test compiler folding and
+posting domains, reloads in memory/mmap paths, legacy writer key/posting
+compatibility, loader raw fallback and existing scalar rebuild negotiation. Test compiler folding and
 query templates. Exercise SIMD scalar/tail/vector boundaries on supported CPU
 architectures, with independent expected results rather than native NaN equality.
 

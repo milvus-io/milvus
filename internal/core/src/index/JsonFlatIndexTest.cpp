@@ -1665,12 +1665,12 @@ TEST(JsonFlatIndexFloatingQueryTest, SignedZerosAreEqual) {
     EXPECT_EQ(executor->NotIn(1, &one).count(), 3);
 }
 
-TEST(JsonFlatIndexFloatingQueryTest, LegacyWriterRejectsIndexedNegativeZero) {
+TEST(JsonFlatIndexFloatingQueryTest, LegacyWriterPreservesIndexedNegativeZero) {
     for (const auto& source :
          {R"({"a": -0.0})", R"({"a": [1, -0.0]})", R"({"a": {"b": -0.0}})"}) {
         SCOPED_TRACE(source);
-        EXPECT_THROW(BuildInMemoryJsonFlatIndex({source}, {}, 5),
-                     std::exception);
+        auto legacy = BuildInMemoryJsonFlatIndex({source}, {}, 5);
+        EXPECT_EQ(legacy->Count(), 1);
         EXPECT_NO_THROW(BuildInMemoryJsonFlatIndex({source}, {}, 6));
     }
     EXPECT_NO_THROW(BuildInMemoryJsonFlatIndex({R"({"a": -0.0})"}, {false}, 5));

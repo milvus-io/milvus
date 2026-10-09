@@ -42,6 +42,7 @@
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
+#include "index/BitmapIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -1555,12 +1556,18 @@ TYPED_TEST(HybridNaNVersionGuardTest,
     const T values[] = {std::numeric_limits<T>::quiet_NaN(), T(3)};
     ExposedHybridNaNSelection<T> legacy(2);
     legacy.scalar_index_version_ = 5;
-    try {
-        legacy.Build(2, values);
-        FAIL() << "NaN must not reach legacy bitmap cardinality selection";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+    ASSERT_NO_THROW(legacy.Build(2, values));
+    EXPECT_EQ(legacy.internal_index_type_, ScalarIndexType::BITMAP);
+    EXPECT_EQ(legacy.Count(), 2);
+    EXPECT_EQ(legacy.IsNotNull().count(), 2);
+    std::map<T, size_t> expected_legacy;
+    for (T value : values) {
+        ++expected_legacy[value];
     }
+    auto* legacy_bitmap =
+        dynamic_cast<BitmapIndex<T>*>(legacy.internal_index_.get());
+    ASSERT_NE(legacy_bitmap, nullptr);
+    EXPECT_EQ(legacy_bitmap->Cardinality(), expected_legacy.size());
     ExposedHybridNaNSelection<T> current(2);
     current.scalar_index_version_ = kMinScalarIndexVersionForNaNTotalOrder;
     ASSERT_NO_THROW(current.Build(2, values));

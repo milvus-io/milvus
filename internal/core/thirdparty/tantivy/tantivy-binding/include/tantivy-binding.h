@@ -448,6 +448,8 @@ RustResult tantivy_create_index_with_single_segment(const char *field_name,
                                                     TantivyDataType data_type,
                                                     const char *path);
 
+void tantivy_set_writer_nan_total_order(void *ptr, bool enabled);
+
 void tantivy_free_index_writer(void *ptr);
 
 RustResult tantivy_finish_index(void *ptr);

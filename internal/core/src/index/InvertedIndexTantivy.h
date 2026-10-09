@@ -142,6 +142,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     SetSupportsNaNTotalOrder(bool enabled) {
         supports_nan_total_order_ = enabled;
+        if (wrapper_ != nullptr) {
+            wrapper_->SetSupportsNaNTotalOrder(enabled);
+        }
     }
 
     void

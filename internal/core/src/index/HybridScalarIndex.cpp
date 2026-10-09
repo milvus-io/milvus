@@ -18,7 +18,6 @@
 #include <string.h>
 #include "common/FastMem.h"
 #include <cstdint>
-#include <cmath>
 #include <exception>
 #include <map>
 #include <optional>
@@ -197,80 +196,84 @@ ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(size_t n,
                                            const T* values,
                                            const bool* valid_data) {
-    std::set<T, ScalarLessThan<T>> distinct_vals;
-    for (size_t i = 0; i < n; i++) {
-        if (valid_data && !valid_data[i]) {
-            continue;
+    return WithWriterValueSet([&](auto& distinct_vals) {
+        for (size_t i = 0; i < n; i++) {
+            if (valid_data && !valid_data[i]) {
+                continue;
+            }
+            distinct_vals.insert(values[i]);
+            if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
+                break;
+            }
         }
-        distinct_vals.insert(values[i]);
-        if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-            break;
-        }
-    }
-    return SelectIndexTypeByCardinality(distinct_vals.size());
+        return SelectIndexTypeByCardinality(distinct_vals.size());
+    });
 }
 
 template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T, ScalarLessThan<T>> distinct_vals;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            if (!data->is_valid(i)) {
-                continue;
-            }
-            auto val = reinterpret_cast<const T*>(data->RawValue(i));
-            distinct_vals.insert(*val);
-            if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-                break;
+    return WithWriterValueSet([&](auto& distinct_vals) {
+        for (const auto& data : field_datas) {
+            auto slice_row_num = data->get_num_rows();
+            for (size_t i = 0; i < slice_row_num; ++i) {
+                if (!data->is_valid(i)) {
+                    continue;
+                }
+                auto val = reinterpret_cast<const T*>(data->RawValue(i));
+                distinct_vals.insert(*val);
+                if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
+                    break;
+                }
             }
         }
-    }
-    return SelectIndexTypeByCardinality(distinct_vals.size());
+        return SelectIndexTypeByCardinality(distinct_vals.size());
+    });
 }
 
 template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T, ScalarLessThan<T>> distinct_vals;
-    for (const auto& data : field_datas) {
-        auto slice_row_num = data->get_num_rows();
-        for (size_t i = 0; i < slice_row_num; ++i) {
-            if (!data->is_valid(i)) {
-                continue;
-            }
-            auto array =
-                reinterpret_cast<const milvus::Array*>(data->RawValue(i));
-            for (size_t j = 0; j < array->length(); ++j) {
-                if (!array->is_element_valid(j)) {
+    return WithWriterValueSet([&](auto& distinct_vals) {
+        for (const auto& data : field_datas) {
+            auto slice_row_num = data->get_num_rows();
+            for (size_t i = 0; i < slice_row_num; ++i) {
+                if (!data->is_valid(i)) {
                     continue;
                 }
-                auto val = array->template get_data_unchecked<T>(j);
-                distinct_vals.insert(val);
+                auto array =
+                    reinterpret_cast<const milvus::Array*>(data->RawValue(i));
+                for (size_t j = 0; j < array->length(); ++j) {
+                    if (!array->is_element_valid(j)) {
+                        continue;
+                    }
+                    auto val = array->template get_data_unchecked<T>(j);
+                    distinct_vals.insert(val);
 
-                // Limit the bitmap index cardinality because of memory usage
-                if (distinct_vals.size() > bitmap_index_cardinality_limit_) {
-                    break;
+                    // Limit the bitmap index cardinality because of memory usage
+                    if (distinct_vals.size() >
+                        bitmap_index_cardinality_limit_) {
+                        break;
+                    }
                 }
             }
         }
-    }
-    // Nested arrays use element offsets; ordinary arrays use parent-row
-    // postings supported from version 6. Older readers retain INVERTED.
-    if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
-        const auto min_sort_version = is_nested_index_
-                                          ? kNestedHybridStlSortMinVersion
-                                          : kArrayHybridStlSortMinVersion;
-        internal_index_type_ = scalar_index_version_ >= min_sort_version
-                                   ? ScalarIndexType::STLSORT
-                                   : ScalarIndexType::INVERTED;
-    } else {
-        internal_index_type_ = ScalarIndexType::BITMAP;
-    }
-    return internal_index_type_;
+        // Nested arrays use element offsets; ordinary arrays use parent-row
+        // postings supported from version 6. Older readers retain INVERTED.
+        if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
+            const auto min_sort_version = is_nested_index_
+                                              ? kNestedHybridStlSortMinVersion
+                                              : kArrayHybridStlSortMinVersion;
+            internal_index_type_ = scalar_index_version_ >= min_sort_version
+                                       ? ScalarIndexType::STLSORT
+                                       : ScalarIndexType::INVERTED;
+        } else {
+            internal_index_type_ = ScalarIndexType::BITMAP;
+        }
+        return internal_index_type_;
+    });
 }
 
 template <typename T>

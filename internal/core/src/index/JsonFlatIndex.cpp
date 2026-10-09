@@ -24,33 +24,6 @@
 #include "simdjson/padded_string.h"
 
 namespace milvus::index {
-namespace {
-
-bool
-ContainsNegativeZero(simdjson::dom::element value) {
-    if (value.is_double()) {
-        const auto number = value.get_double().value();
-        return number == 0.0 && std::signbit(number);
-    }
-    if (value.is_array()) {
-        auto array = value.get_array().value();
-        for (auto element : array) {
-            if (ContainsNegativeZero(element)) {
-                return true;
-            }
-        }
-    } else if (value.is_object()) {
-        auto object = value.get_object().value();
-        for (auto field : object) {
-            if (ContainsNegativeZero(field.value)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-}  // namespace
 
 void
 JsonFlatIndex::build_index_for_json(
@@ -73,16 +46,6 @@ JsonFlatIndex::build_index_for_json(
             if (!exists || !json->exist(nested_path_)) {
                 wrapper_->add_json_array_data(nullptr, 0, offset++);
                 continue;
-            }
-
-            if (!supports_nan_total_order_) {
-                auto indexed_value = json->dom_doc().at_pointer(nested_path_);
-                if (!indexed_value.error() &&
-                    ContainsNegativeZero(indexed_value.value())) {
-                    ThrowInfo(Unsupported,
-                              "JSON flat negative zero requires scalar index "
-                              "version 6 for canonical floating-point keys");
-                }
             }
 
             if (nested_path_ == "") {
