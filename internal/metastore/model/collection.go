@@ -44,8 +44,12 @@ type Collection struct {
 	Functions         []*Function
 	// RLS policies are cached by RootCoord and persisted in their own KV namespace.
 	RLSPolicies map[string]*RLSPolicy
-	// Recovery defers disabled collections; their persisted policies are not an empty set.
-	RLSPoliciesUnloaded  bool
+	// An unloaded snapshot is distinct from a successfully loaded empty policy set.
+	RLSPoliciesUnloaded bool
+	// In-memory cache generations; only persisted policy mutations advance the expectation.
+	RLSPolicyGeneration         uint64
+	RLSPolicyExpectedGeneration uint64
+
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -73,6 +77,10 @@ type ShardInfo struct {
 
 func (c *Collection) Available() bool {
 	return c.State == pb.CollectionState_CollectionCreated
+}
+
+func (c *Collection) RLSPoliciesCurrent() bool {
+	return !c.RLSPoliciesUnloaded && c.RLSPolicyGeneration >= c.RLSPolicyExpectedGeneration
 }
 
 func (c *Collection) ShallowClone() *Collection {
@@ -107,6 +115,9 @@ func (c *Collection) ShallowClone() *Collection {
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
+
+		RLSPolicyGeneration:         c.RLSPolicyGeneration,
+		RLSPolicyExpectedGeneration: c.RLSPolicyExpectedGeneration,
 	}
 }
 
@@ -150,6 +161,9 @@ func (c *Collection) Clone() *Collection {
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
+
+		RLSPolicyGeneration:         c.RLSPolicyGeneration,
+		RLSPolicyExpectedGeneration: c.RLSPolicyExpectedGeneration,
 	}
 }
 

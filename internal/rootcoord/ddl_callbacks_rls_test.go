@@ -119,7 +119,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	// Disabled recovery skips policies; management and enable load them on demand.
 	coll = coll.Clone()
 	coll.RLSPolicies = nil
-	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	require.NoError(t, initRLSPolicyCache([]*model.Collection{coll}))
 	require.Empty(t, coll.RLSPolicies)
 	require.True(t, coll.RLSPoliciesUnloaded)
 	meta.ddLock.Lock()
@@ -146,7 +146,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
-	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	require.NoError(t, initRLSPolicyCache([]*model.Collection{coll}))
 	meta.ddLock.Lock()
 	meta.collID2Meta[id] = coll
 	meta.ddLock.Unlock()

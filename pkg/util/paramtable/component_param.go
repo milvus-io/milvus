@@ -2445,6 +2445,7 @@ type rootCoordConfig struct {
 	GracefulStopTimeout         ParamItem `refreshable:"true"`
 	UseLockScheduler            ParamItem `refreshable:"true"`
 	DefaultDBProperties         ParamItem `refreshable:"false"`
+	RLSPolicyWarmupEnabled      ParamItem `refreshable:"false"`
 
 	// Client telemetry. RootCoord reads these once, when it builds the telemetry manager,
 	// so they are not refreshable: a running manager keeps the values it started with.
@@ -2547,6 +2548,15 @@ Segments with smaller size than this parameter will not be indexed, and will be 
 		Export:       false,
 	}
 	p.DefaultDBProperties.Init(base.mgr)
+
+	p.RLSPolicyWarmupEnabled = ParamItem{
+		Key:          "rootCoord.rls.policyWarmupEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "Warm up policies for RLS-enabled collections in the background at startup. Requests load missing policies on demand; principal tags are not preloaded.",
+		Export:       true,
+	}
+	p.RLSPolicyWarmupEnabled.Init(base.mgr)
 
 	p.ClientTelemetryCleanupInterval = ParamItem{
 		Key:          "rootCoord.clientTelemetry.cleanupInterval",

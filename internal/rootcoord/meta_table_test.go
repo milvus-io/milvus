@@ -20,6 +20,7 @@ import (
 	"context"
 	"math/rand"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -110,6 +111,7 @@ func newRLSMetaTableForTest(t *testing.T) (*MetaTable, *mocks.RootCoordCatalog) 
 	names.insert("db1", "coll1", 20)
 
 	return &MetaTable{
+		ctx:     context.Background(),
 		catalog: catalog,
 		names:   names,
 		aliases: newNameDb(),
@@ -317,7 +319,7 @@ func TestReloadCollectionsRLSMetadataDefersDisabledCollection(t *testing.T) {
 			collection := meta.collID2Meta[20]
 			collection.Properties = tc.properties
 			collection.RLSPolicies = map[string]*model.RLSPolicy{"stale": {PolicyName: "stale"}}
-			require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection}))
+			require.NoError(t, initRLSPolicyCache([]*model.Collection{collection}))
 			require.Nil(t, collection.RLSPolicies)
 			require.True(t, collection.RLSPoliciesUnloaded)
 			catalog.AssertNotCalled(t, "ListRLSPolicies", mock.Anything, mock.Anything)
@@ -332,14 +334,12 @@ func TestReloadCollectionsRLSMetadataDefersDisabledCollection(t *testing.T) {
 			require.Equal(t, int64(100), loaded.RLSPolicies["tenant"].PolicyID)
 			require.ErrorContains(t, validateRLSNoReferencedFieldDropped(loaded, []int64{101}), "tenant")
 			require.NoError(t, validateRLSNoReferencedFieldDropped(loaded, []int64{102}))
-			require.True(t, collection.RLSPoliciesUnloaded)
+			require.True(t, collection.RLSPoliciesCurrent())
 		})
 	}
 }
 
 func TestReloadCollectionsRLSMetadataRejectsInvalidProperty(t *testing.T) {
-	catalog := mocks.NewRootCoordCatalog(t)
-	meta := &MetaTable{catalog: catalog}
 	collection := &model.Collection{
 		CollectionID: 20,
 		Properties: []*commonpb.KeyValuePair{
@@ -347,7 +347,7 @@ func TestReloadCollectionsRLSMetadataRejectsInvalidProperty(t *testing.T) {
 		},
 	}
 
-	err := meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection})
+	err := initRLSPolicyCache([]*model.Collection{collection})
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
@@ -366,7 +366,7 @@ func TestReloadDisabledCollectionRLSMetadataPropagatesCatalogError(t *testing.T)
 	require.Same(t, policy, collection.RLSPolicies["tenant"])
 }
 
-func TestDeferredRLSPoliciesStayUnloadedUntilEnable(t *testing.T) {
+func TestDeferredRLSPoliciesLoadOnDemand(t *testing.T) {
 	ctx := context.Background()
 	meta, catalog := newRLSMetaTableForTest(t)
 	collection := meta.collID2Meta[20]
@@ -395,8 +395,8 @@ func TestDeferredRLSPoliciesStayUnloadedUntilEnable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, metadata.Policies, 1)
 	require.Equal(t, int64(100), metadata.Policies[0].PolicyID)
-	require.True(t, collection.RLSPoliciesUnloaded)
-	require.Empty(t, collection.RLSPolicies)
+	require.True(t, collection.RLSPoliciesCurrent())
+	require.Len(t, collection.RLSPolicies, 1)
 }
 
 func TestAlterCollectionLoadsDeferredRLSPoliciesBeforeEnable(t *testing.T) {
@@ -455,7 +455,7 @@ func TestAlterCollectionLoadsDeferredRLSPoliciesBeforeEnable(t *testing.T) {
 				require.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies["tenant"].PolicyID)
 			} else {
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-				require.True(t, meta.collID2Meta[20].RLSPoliciesUnloaded)
+				require.Equal(t, outcome == "load fails", meta.collID2Meta[20].RLSPoliciesUnloaded)
 				enabled, err := common.IsRLSEnabled(meta.collID2Meta[20].Properties...)
 				require.NoError(t, err)
 				require.False(t, enabled)
@@ -480,9 +480,7 @@ func TestResolveRLSCollectionAllowsDisabledCollection(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
-func TestReloadCollectionsRLSMetadataQueriesOnlyEnabledCollections(t *testing.T) {
-	catalog := mocks.NewRootCoordCatalog(t)
-	meta := &MetaTable{catalog: catalog}
+func TestInitRLSPolicyCacheDefersAllCollections(t *testing.T) {
 	collections := []*model.Collection{
 		nil,
 		{CollectionID: 10},
@@ -499,31 +497,31 @@ func TestReloadCollectionsRLSMetadataQueriesOnlyEnabledCollections(t *testing.T)
 			},
 		},
 	}
-	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return(nil, nil).Once()
-
-	require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), collections))
+	require.NoError(t, initRLSPolicyCache(collections))
 	require.True(t, collections[1].RLSPoliciesUnloaded)
-	require.False(t, collections[2].RLSPoliciesUnloaded)
+	require.True(t, collections[2].RLSPoliciesUnloaded)
 	require.True(t, collections[3].RLSPoliciesUnloaded)
 }
 
-func TestReloadCollectionsRLSMetadataUsesBoundedConcurrency(t *testing.T) {
-	const collectionCount = rlsRecoveryConcurrency * 2
+func TestWarmupRLSPoliciesUsesBoundedConcurrency(t *testing.T) {
+	const collectionCount = rlsPolicyWarmupConcurrency * 2
 	catalog := mocks.NewRootCoordCatalog(t)
-	meta := &MetaTable{catalog: catalog}
-	collections := make([]*model.Collection, 0, collectionCount)
+	meta := &MetaTable{ctx: context.Background(), catalog: catalog, collID2Meta: make(map[int64]*model.Collection)}
 	for id := int64(1); id <= collectionCount; id++ {
-		collections = append(collections, &model.Collection{
-			CollectionID: id,
+		meta.collID2Meta[id] = &model.Collection{
+			CollectionID:        id,
+			State:               pb.CollectionState_CollectionCreated,
+			RLSPoliciesUnloaded: true,
 			Properties: []*commonpb.KeyValuePair{
 				{Key: common.RLSEnabledKey, Value: "true"},
 			},
-		})
+		}
 	}
 
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
 	trackCall := func() {
 		current := inFlight.Add(1)
 		for {
@@ -541,16 +539,21 @@ func TestReloadCollectionsRLSMetadataUsesBoundedConcurrency(t *testing.T) {
 			return nil, nil
 		}).Times(collectionCount)
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- meta.reloadCollectionsRLSMetadata(context.Background(), collections)
+		meta.warmupRLSPolicies(context.Background())
+		close(done)
 	}()
+	t.Cleanup(func() {
+		unblock()
+		<-done
+	})
 	require.Eventually(t, func() bool {
-		return maxInFlight.Load() == rlsRecoveryConcurrency
+		return maxInFlight.Load() == rlsPolicyWarmupConcurrency
 	}, time.Second, time.Millisecond)
-	close(release)
-	require.NoError(t, <-done)
-	assert.LessOrEqual(t, maxInFlight.Load(), int32(rlsRecoveryConcurrency))
+	unblock()
+	<-done
+	assert.LessOrEqual(t, maxInFlight.Load(), int32(rlsPolicyWarmupConcurrency))
 }
 
 func buildAlterUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultAlterUserMessageV2 {

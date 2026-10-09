@@ -405,6 +405,8 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
+  rls:
+    policyWarmupEnabled: true # Warm up policies for RLS-enabled collections in the background at startup. Requests load missing policies on demand; principal tags are not preloaded.
   clientTelemetry:
     cleanupInterval: 60 # seconds. How often to sweep clients that stopped heartbeating and commands that expired.
     inactiveClientThreshold: 600 # seconds. How long a client may go without a heartbeat before it is dropped from memory entirely.

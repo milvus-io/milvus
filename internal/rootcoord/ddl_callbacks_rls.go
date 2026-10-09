@@ -37,7 +37,7 @@ const unallocatedRLSPolicyID int64 = -1
 
 // Schema mutations must check preconfigured policies even after disabled recovery.
 func (c *Core) loadRLSPoliciesForSchema(ctx context.Context, coll *model.Collection) error {
-	if !coll.RLSPoliciesUnloaded {
+	if coll.RLSPoliciesCurrent() {
 		return nil
 	}
 	metadata, err := c.meta.GetRLSMetadata(ctx, coll.CollectionID, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, "")
@@ -49,6 +49,7 @@ func (c *Core) loadRLSPoliciesForSchema(ctx context.Context, coll *model.Collect
 		coll.RLSPolicies[policy.PolicyName] = policy
 	}
 	coll.RLSPoliciesUnloaded = false
+	coll.RLSPolicyGeneration = coll.RLSPolicyExpectedGeneration
 	return nil
 }
 

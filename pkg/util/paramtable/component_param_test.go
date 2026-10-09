@@ -670,6 +670,11 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := &params.RootCoordCfg
 
+		assert.True(t, Params.RLSPolicyWarmupEnabled.GetAsBool())
+		params.Save(Params.RLSPolicyWarmupEnabled.Key, "false")
+		assert.False(t, Params.RLSPolicyWarmupEnabled.GetAsBool())
+		params.Reset(Params.RLSPolicyWarmupEnabled.Key)
+
 		assert.NotEqual(t, Params.MaxPartitionNum.GetAsInt64(), 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum.GetAsInt64())
 		assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex.GetAsInt64(), 0)
