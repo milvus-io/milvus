@@ -20,6 +20,7 @@
 #include "minhash/MinHashComputer.h"
 #include "minhash/MinHashHook.h"
 #include "minhash/fusion_compute/fusion_compute_native.h"
+#include "tantivy/tokenizer.h"
 
 using namespace milvus::minhash;
 
@@ -198,6 +199,71 @@ TEST_F(MinHashTest, HashNGramWindowEmptyTextTest) {
     EXPECT_EQ(hash_counts.size(), num_texts);
     EXPECT_EQ(hash_counts[0], 0);
     EXPECT_EQ(all_base_hashes.size(), 0);
+}
+
+TEST_F(MinHashTest, HashNGramWindowWordLevelTest) {
+    milvus::tantivy::Tokenizer tokenizer(
+        std::string(R"({"tokenizer":"standard","filter":["lowercase"]})"));
+    const char* texts[] = {
+        "Hello, WORLD from Milvus!", "Single", "", "!!!", "Café naïve"};
+    int32_t text_lengths[5];
+    for (int i = 0; i < 5; ++i) {
+        text_lengths[i] = std::strlen(texts[i]);
+    }
+
+    // Hash the concatenated, normalized word shingles: helloworld, worldfrom,
+    // frommilvus, single, cafénaïve. Cover overlapping shingles, a short text,
+    // empty token streams, and multibyte tokens in the same batch.
+    const std::vector<int32_t> expected_counts = {3, 1, 0, 0, 1};
+    // Preserve the existing SHA1 conversion to uint64_t, including sign extension.
+    const std::vector<uint64_t> expected_sha1 = {18446744071624056682ULL,
+                                                 18446744072103284312ULL,
+                                                 18446744073039013375ULL,
+                                                 303434702,
+                                                 18446744073194149969ULL};
+    const std::vector<uint64_t> expected_xxhash = {
+        236944710, 21903620, 2102751251, 3679412312, 1171851021};
+    for (auto hash_type : {HashFunction::SHA1, HashFunction::XXHASH64}) {
+        std::vector<uint64_t> hashes;
+        std::vector<int32_t> counts;
+        HashNGramWindow(
+            texts, text_lengths, 5, &tokenizer, 2, hash_type, hashes, counts);
+        EXPECT_EQ(counts, expected_counts);
+        EXPECT_EQ(
+            hashes,
+            hash_type == HashFunction::SHA1 ? expected_sha1 : expected_xxhash);
+    }
+}
+
+TEST_F(MinHashTest, WordLevelTokenLifetimes) {
+    milvus::tantivy::Tokenizer tokenizer(
+        std::string(R"({"tokenizer":"standard","filter":["lowercase"]})"));
+    // Exceed the initial token vector capacity, then reuse the tokenizer. Leak
+    // sanitizers must see every Rust token string released after each call.
+    std::string text;
+    for (int i = 0; i < 256; ++i) {
+        text += "Milvus ";
+    }
+    const char* texts[] = {text.c_str()};
+    int32_t text_lengths[] = {static_cast<int32_t>(text.size())};
+    for (auto hash_type : {HashFunction::SHA1, HashFunction::XXHASH64}) {
+        for (int iteration = 0; iteration < 10; ++iteration) {
+            std::vector<uint64_t> hashes;
+            std::vector<int32_t> counts;
+            HashNGramWindow(texts,
+                            text_lengths,
+                            1,
+                            &tokenizer,
+                            3,
+                            hash_type,
+                            hashes,
+                            counts);
+            EXPECT_EQ(counts, std::vector<int32_t>({254}));
+            const uint64_t expected =
+                hash_type == HashFunction::SHA1 ? 1419876486 : 3107569035;
+            EXPECT_EQ(hashes, std::vector<uint64_t>(254, expected));
+        }
+    }
 }
 
 // Test ComputeFromTextsDirectly with simple texts

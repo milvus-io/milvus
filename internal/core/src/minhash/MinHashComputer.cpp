@@ -146,10 +146,13 @@ HashNGramWindow(const char** texts,
                 std::string(texts[text_idx], text_lengths[text_idx]));
 
             auto* ts = token_stream.get();
-            std::vector<const char*> tokens;
+            using RustToken =
+                std::unique_ptr<const char, decltype(&free_rust_string)>;
+            std::vector<RustToken> tokens;
             tokens.reserve(128);
             while (ts->advance()) {
-                tokens.push_back(ts->get_token_no_copy());
+                tokens.push_back(
+                    RustToken(ts->get_token_no_copy(), free_rust_string));
             }
 
             int32_t token_count = static_cast<int32_t>(tokens.size());
@@ -162,7 +165,7 @@ HashNGramWindow(const char** texts,
             if (token_count < shingle_size) {
                 shingle_buffer.clear();
                 for (int32_t i = 0; i < token_count; i++) {
-                    const char* token = tokens[i];
+                    const char* token = tokens[i].get();
                     size_t len = std::strlen(token);
                     shingle_buffer.insert(
                         shingle_buffer.end(), token, token + len);
@@ -177,7 +180,7 @@ HashNGramWindow(const char** texts,
                 for (int32_t i = 0; i < num_shingles; i++) {
                     shingle_buffer.clear();
                     for (int32_t j = 0; j < shingle_size; j++) {
-                        const char* token = tokens[i + j];
+                        const char* token = tokens[i + j].get();
                         size_t len = std::strlen(token);
                         shingle_buffer.insert(
                             shingle_buffer.end(), token, token + len);
