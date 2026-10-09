@@ -58,6 +58,12 @@ recorded target DataVersion and materializes the shared aggregate. Concurrent
 queries share one load. Canceling a query only cancels its wait; runtime close or
 a newer target cancels the shared load. Waiters retry against a changed target.
 The same applied-event barrier and final-commit checks protect first publication.
+During Phase 1, typed retryable IDF resource failures and resource RPC Unavailable
+or DeadlineExceeded errors become VIEW_INVALIDATED, allowing the caller to retry
+planning (possibly on the same view). This classification is confined to the IDF
+resource call; tokenization, plan validation and other execution errors retain
+their original classification. A canceled or expired query context takes priority
+and is never turned into a view retry. A failed materialization is not cached.
 Changing the lazy setting affects subsequently created runtimes.
 
 `queryView.idfOracle.sealedStatsLoadConcurrencyRatio` defaults to 4 times CPU cores

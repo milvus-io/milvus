@@ -3,12 +3,15 @@ package queryresource
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -128,6 +131,14 @@ func (o globalOptimizer) optimizeRequests(ctx context.Context, requests []*inter
 	}
 	results, err := o.idf.BuildIDFBatch(ctx, inputs)
 	if err != nil {
+		if ctx.Err() != nil {
+			return merr.Wrap(ctx.Err(), "build BM25 IDF")
+		}
+		// Only resource failures invalidate this planning attempt. Keep unrelated
+		// execution errors and caller cancellation out of the view retry path.
+		if merr.IsRetryableErr(err) || status.Code(err) == codes.Unavailable || status.Code(err) == codes.DeadlineExceeded {
+			err = viewerror.NewViewInvalidated("BM25 IDF resources temporarily unavailable: %s", err)
+		}
 		return merr.Wrap(err, "build BM25 IDF")
 	}
 	for i, req := range bm25Requests {
