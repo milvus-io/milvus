@@ -161,7 +161,10 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 						patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 						patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
 						patch((*metacache.MetaCache).GetPartitionID, int64(1002), nil)
-						patch(common.AllocAutoID, int64(1000), int64(1003), nil)
+						allocation := mockey.Mock(common.AllocAutoID).To(func(_ func(uint32) (int64, int64, error), rowNum uint32, _ uint64) (int64, int64, error) {
+							return 1000, 1000 + int64(rowNum), nil
+						}).Build()
+						t.Cleanup(func() { allocation.UnPatch() })
 						patch(retrieveByPKs, queryResult, segcore.StorageCost{}, nil)
 
 						// Exercise the input boundary, partial merge, and final insert validation.
