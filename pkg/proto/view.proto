@@ -126,16 +126,9 @@ message QueryViewOfQueryNode {
     int64 node_id = 1;
     // Partitions and their segments assigned to this query node.
     repeated QueryViewOfPartition partitions = 2;
-    // Node -> Coord: sticky failures of the concrete segment instances used by
-    // this view. Queries at or beyond failed_timetick must fail on this node.
-    repeated PoisonedSegment poisoned_segments = 3;
-}
-
-message PoisonedSegment {
-    int64 segment_id = 1;
-    // Monotonic within this QueryNode process; scoped by node and view identity.
-    uint64 generation = 2;
-    uint64 failed_timetick = 3;
+    // Retired: Poison is QueryNode-local state, not a Coordinator report.
+    reserved 3;
+    reserved "poisoned_segments";
 }
 
 // QueryViewVersion is the composite version of a query view.

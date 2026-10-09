@@ -78,7 +78,7 @@ type TransformSegment interface {
 }
 
 // TransformFailureObserver publishes the failed MVCC boundary synchronously,
-// before the buffer advances visibility. Reporting must not block consumption.
+// before the buffer advances visibility. Preparation callbacks must not block consumption.
 type TransformFailureObserver interface {
 	OnTransformFailed(timetick uint64, err error)
 }
