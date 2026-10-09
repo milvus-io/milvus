@@ -21,13 +21,16 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,9 +40,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	importRLSContextVersionProperty = "_irv"
+	importRLSContextVersion         = "1"
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
+	options := funcutil.Map2KeyValuePair(body.GetOptions())
+	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
+	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
+	var rlsPrincipal string
+	var skipRLS bool
+	var err error
+	if trustedRLSContext {
+		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
+	}
+	if !trustedRLSContext || err != nil {
+		// Import options predate RLS and were client-controlled. Only a message
+		// marked after DataCoord sanitizes the options may carry authorized RLS
+		// context. Malformed marked context also fails closed without wedging the
+		// indefinitely retried ACK callback.
+		if err != nil {
+			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
+		}
+		rlsPrincipal, skipRLS = "", false
+	}
+	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
+		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
+	})
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.
@@ -75,9 +105,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+		Options:       options,
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
+		RlsPrincipal:  rlsPrincipal,
+		SkipRls:       skipRLS,
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -239,15 +271,15 @@ func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectio
 // broadcastImport broadcasts the import message to all vchannels.
 // This method is called from the new ImportV2 flow where proxy calls DataCoord directly.
 func (s *Server) broadcastImport(ctx context.Context,
-	collectionName string,
 	collectionID int64,
 	partitionIDs []int64,
 	files []*internalpb.ImportFile,
 	options []*commonpb.KeyValuePair,
-	schema *schemapb.CollectionSchema,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
+	rlsPrincipal string,
+	skipRLS bool,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
@@ -262,21 +294,19 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Per-file PK ranges are the default path for every autoID import. The
-	// coordinator allocates each file a range once and ships it on the ImportMsg, so
-	// the datanode derives primary keys from literal values instead of allocating
-	// them locally. On a replicating cluster that is what makes both clusters produce
-	// identical primary keys; elsewhere it costs a little ID space and keeps one
-	// well-exercised code path instead of a rarely-taken special case.
-	//
-	// The local-allocator path in the datanode remains only for compatibility:
-	// backup imports keep their embedded PKs (UnsetAutoID), L0 imports carry no
-	// autoID PKs, non-autoID collections never allocate, and jobs created before
-	// this version carry no range. A schema without a resolvable primary key is
-	// left to normal validation.
-	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(schema); pkErr == nil &&
+	// Size autoID files from a canonical schema snapshot before taking the
+	// collection lock: sizing may perform object-store I/O for every file.
+	preparedColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(preparedColl, err); err != nil {
+		return 0, false, merr.Wrap(err, "failed to get collection metadata before import preparation")
+	}
+	preparedSchema := preparedColl.GetSchema()
+	if preparedSchema == nil || preparedSchema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(preparedSchema); pkErr == nil &&
 		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, schema, files,
+		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, preparedSchema, files,
 			s.allocator.AllocN,
 			Params.CommonCfg.ClusterID.GetAsUint64(),
 		); err != nil {
@@ -289,9 +319,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 		}
 	}
 
-	// Get database name from collection metadata via broker
-	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(preparedColl.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(preparedColl.GetDbName(), preparedColl.GetCollectionName()))
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -300,7 +330,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Re-check the replication state now that the broadcast holds the shared-cluster
 	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
 	// change the replication topology while this lock is held. The pre-lock check in
-	// validateImportRequest can go stale during the sizing I/O above: if CDC was enabled
+	// validateImportRequest can go stale before the lock is acquired: if CDC was enabled
 	// in that window, an auto_commit / non-enableInReplicatingCluster import would
 	// otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
@@ -311,6 +341,30 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
+	schema := coll.GetSchema()
+	if schema == nil || schema.GetName() == "" {
+		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
+	}
+	// The collection changed during the lock-free sizing window. Fail retriably
+	// instead of publishing ranges computed from a different schema snapshot.
+	if preparedColl.GetDbName() != coll.GetDbName() ||
+		preparedColl.GetCollectionName() != coll.GetCollectionName() ||
+		!proto.Equal(preparedSchema, schema) {
+		return 0, false, merr.WrapErrServiceUnavailableMsg(
+			"collection %d changed while preparing import; retry the request", collectionID)
+	}
+	schema.Fields = lo.Filter(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !common.IsSystemField(field.GetFieldID())
+	})
+	msgOptions := funcutil.KeyValuePair2Map(options)
+	delete(msgOptions, importutilv2.RLSPrincipal)
+	delete(msgOptions, importutilv2.SkipRLS)
+	if rlsPrincipal != "" {
+		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
+	}
+	if skipRLS {
+		msgOptions[importutilv2.SkipRLS] = "true"
+	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -320,14 +374,15 @@ func (s *Server) broadcastImport(ctx context.Context,
 				Timestamp: 0,
 			},
 			DbName:         coll.DbName,
-			CollectionName: collectionName,
+			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
+			Options:        msgOptions,
 			Files:          msgFiles,
-			Schema:         schema, // TODO: should we use the schema from the collection?
+			Schema:         schema,
 			JobID:          jobID,
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off
 		// the collection it was bound to: a retry naming the renamed collection still

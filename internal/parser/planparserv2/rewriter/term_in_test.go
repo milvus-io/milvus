@@ -1,6 +1,7 @@
 package rewriter_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -447,6 +448,99 @@ func TestRewrite_And_In_Intersection(t *testing.T) {
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
 	require.Equal(t, 6, len(term.GetValues()))
+	require.Equal(t, []int64{5, 6, 7, 8, 9, 10}, []int64{
+		term.GetValues()[0].GetInt64Val(), term.GetValues()[1].GetInt64Val(), term.GetValues()[2].GetInt64Val(),
+		term.GetValues()[3].GetInt64Val(), term.GetValues()[4].GetInt64Val(), term.GetValues()[5].GetInt64Val(),
+	})
+}
+
+func TestRewrite_And_In_IntersectionScalarKinds(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+
+	stringExpr, err := parser.ParseExpr(helper, `VarCharField in ["c","a","b","b"] and VarCharField in ["d","b","a"]`, nil)
+	require.NoError(t, err)
+	stringTerm := stringExpr.GetTermExpr()
+	require.NotNil(t, stringTerm)
+	require.Equal(t, []string{"a", "b"}, []string{
+		stringTerm.GetValues()[0].GetStringVal(), stringTerm.GetValues()[1].GetStringVal(),
+	})
+
+	floatExpr, err := parser.ParseExpr(helper, `FloatField in [3.5,1.5,2.5,2.5] and FloatField in [4.5,3.5,2.5]`, nil)
+	require.NoError(t, err)
+	floatTerm := floatExpr.GetTermExpr()
+	require.NotNil(t, floatTerm)
+	require.Equal(t, []float64{2.5, 3.5}, []float64{
+		floatTerm.GetValues()[0].GetFloatVal(), floatTerm.GetValues()[1].GetFloatVal(),
+	})
+
+	threeExpr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4] and Int64Field in [2,3,4,5] and Int64Field in [3,4,6]`, nil)
+	require.NoError(t, err)
+	threeTerm := threeExpr.GetTermExpr()
+	require.NotNil(t, threeTerm)
+	require.Equal(t, []int64{3, 4}, []int64{
+		threeTerm.GetValues()[0].GetInt64Val(), threeTerm.GetValues()[1].GetInt64Val(),
+	})
+}
+
+func TestMergeNormalizedAnd_NaNTermFallsBack(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_Double}
+	term := func(values ...float64) *planpb.Expr {
+		genericValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			genericValues = append(genericValues, &planpb.GenericValue{
+				Val: &planpb.GenericValue_FloatVal{FloatVal: value},
+			})
+		}
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+			ColumnInfo: column,
+			Values:     genericValues,
+		}}}
+	}
+
+	left := term(1, math.NaN())
+	right := term(1, math.NaN())
+	merged := rewriter.MergeNormalizedAnd(left, right).GetBinaryExpr()
+	require.NotNil(t, merged)
+	require.Same(t, left, merged.GetLeft())
+	require.Same(t, right, merged.GetRight())
+}
+
+func TestRewrite_NormalizesWrappedPredicates(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64}
+	term := func(values ...int64) *planpb.Expr {
+		genericValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			genericValues = append(genericValues, &planpb.GenericValue{
+				Val: &planpb.GenericValue_Int64Val{Int64Val: value},
+			})
+		}
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+			ColumnInfo: column,
+			Values:     genericValues,
+		}}}
+	}
+	values := func(expr *planpb.Expr) []int64 {
+		result := make([]int64, 0, len(expr.GetTermExpr().GetValues()))
+		for _, value := range expr.GetTermExpr().GetValues() {
+			result = append(result, value.GetInt64Val())
+		}
+		return result
+	}
+
+	randomSample := &planpb.Expr{Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
+		SampleFactor: 0.5,
+		Predicate:    term(3, 1, 2, 2),
+	}}}
+	randomSample = rewriter.RewriteExpr(randomSample)
+	require.Equal(t, []int64{1, 2, 3}, values(randomSample.GetRandomSampleExpr().GetPredicate()))
+
+	elementFilter := &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+		ElementExpr: term(6, 4, 5),
+		Predicate:   term(9, 7, 8),
+	}}}
+	elementFilter = rewriter.RewriteExpr(elementFilter)
+	require.Equal(t, []int64{4, 5, 6}, values(elementFilter.GetElementFilterExpr().GetElementExpr()))
+	require.Equal(t, []int64{7, 8, 9}, values(elementFilter.GetElementFilterExpr().GetPredicate()))
 }
 
 func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {

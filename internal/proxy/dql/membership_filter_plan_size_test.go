@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/membership/sbbf"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -303,6 +304,37 @@ func TestSearchTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		assert.Equal(t, int32(1102), merr.Code(err))
 	})
 
+	t.Run("hybrid RLS plans share the serialized plan budget", func(t *testing.T) {
+		predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, "pk == 1", nil)
+		require.NoError(t, err)
+		task := &SearchTask{
+			ctx:            ctx,
+			collectionName: schema.GetName(),
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID: 1,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: schema.GetName(),
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: LimitKey, Value: "10"},
+				},
+				SubReqs: []*milvuspb.SubSearchRequest{{
+					Nq:           1,
+					SearchParams: bloomPlanSizeSearchParams(),
+				}},
+			},
+			schema:       schema,
+			tr:           timerecord.NewTimeRecorder("rls-plan-size-hybrid-search"),
+			rlsPredicate: predicate,
+			rlsResolved:  true,
+		}
+
+		err = task.initAdvancedSearchRequest(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		assert.Equal(t, int32(1102), merr.Code(err))
+	})
+
 	t.Run("hybrid sub-requests share parser preflight budget", func(t *testing.T) {
 		// Make the body large enough that one serialized plan (body plus proto
 		// overhead) fits below two body lengths. The first sub-request must pass;
@@ -363,7 +395,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	schema, templateValues := bloomPlanSizeIntegrationFixture(t)
 	cache := newTestCache()
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1), nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 	task := &QueryTask{
 		baseTask: baseTask{

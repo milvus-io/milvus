@@ -59,12 +59,12 @@ const (
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
-	// DefaultMaxMembershipFilterPlanSize is the request-wide membership resource
-	// budget. It independently bounds aggregate serialized membership-plan bytes
-	// and aggregate estimated decoded bytes in one Search, HybridSearch, Query, or
-	// complex Delete request. It is deliberately below the default 256 MiB proxy
-	// gRPC client send limit so placeholders and the rest of the internal request
-	// retain ample headroom.
+	// DefaultMaxMembershipFilterPlanSize is the request-wide budget for the
+	// aggregate serialized size of membership-filter-bearing plans and
+	// RLS-bearing HybridSearch plans, and for the aggregate estimated decoded
+	// size of Roaring filters. The serialized and decoded totals are checked
+	// independently. It is deliberately below the default 256 MiB proxy gRPC
+	// client send limit so the rest of the internal request retains headroom.
 	DefaultMaxMembershipFilterPlanSize = 128 * 1024 * 1024
 
 	DefaultMaxDegree                     = 56
@@ -202,6 +202,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.ProxyCfg.RLSImportEnforcementEnabled,
 	}
 }
 
@@ -2428,6 +2429,20 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
+	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
+	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
+	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
+	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
+	RLSMaxPolicyNameLength            ParamItem `refreshable:"true"`
+	RLSMaxPolicyDescriptionLength     ParamItem `refreshable:"true"`
+	RLSMaxPrincipalNameLength         ParamItem `refreshable:"true"`
+	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
+	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
+	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
+	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
+	RLSImportEnforcementEnabled       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2442,6 +2457,15 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+}
+
+func positiveProxyLimitFormatter(defaultValue string) func(string) string {
+	return func(v string) string {
+		if getAsInt64(v) <= 0 {
+			return defaultValue
+		}
+		return v
+	}
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2613,10 +2637,11 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: strconv.Itoa(DefaultMaxMembershipFilterPlanSize),
 		FallbackKeys: []string{"proxy.maxBloomFilterPlanSize"},
 		Version:      "3.0.0",
-		Doc: "The request-wide membership-filter resource budget in one Search, HybridSearch, Query, or " +
-			"complex Delete request. The proxy independently checks aggregate serialized membership-plan bytes " +
-			"and aggregate estimated decoded bytes against this value; hybrid sub-searches and scorer filters " +
-			"share the configured budget. Must be positive; invalid values fall back to 128 MiB.",
+		Doc: "The request-wide large-filter budget in bytes. It independently limits the aggregate " +
+			"serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, " +
+			"and the aggregate estimated decoded size of Roaring filters. The proxy " +
+			"checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer " +
+			"filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.",
 		Export:       true,
 		PanicIfEmpty: true,
 		Formatter: func(v string) string {
@@ -3026,6 +3051,169 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxSearchAggregationResultEntries.Init(base.mgr)
+
+	p.RLSMaxPoliciesPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPoliciesPerCollection",
+		Version:      "3.0.0",
+		DefaultValue: "100",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of row policies allowed on one collection.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("100"),
+	}
+	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
+
+	p.RLSMaxTagsPerPrincipal = ParamItem{
+		Key:          "proxy.rls.maxTagsPerPrincipal",
+		Version:      "3.0.0",
+		DefaultValue: "50",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of tags allowed on one collection-scoped RLS principal.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("50"),
+	}
+	p.RLSMaxTagsPerPrincipal.Init(base.mgr)
+
+	p.RLSMaxExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "4096",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of one RLS using_expr or check_expr in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("4096"),
+	}
+	p.RLSMaxExpressionLength.Init(base.mgr)
+
+	p.RLSMaxCombinedExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxCombinedExpressionLength",
+		Version:      "3.0.0",
+		DefaultValue: "16384",
+		PanicIfEmpty: true,
+		Doc:          "Maximum length of the final combined RLS expression in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("16384"),
+	}
+	p.RLSMaxCombinedExpressionLength.Init(base.mgr)
+
+	p.RLSMaxPolicyNameLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPolicyNameLength.Init(base.mgr)
+
+	p.RLSMaxPolicyDescriptionLength = ParamItem{
+		Key:          "proxy.rls.maxPolicyDescriptionLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS policy description length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxPolicyDescriptionLength.Init(base.mgr)
+
+	p.RLSMaxPrincipalNameLength = ParamItem{
+		Key:          "proxy.rls.maxPrincipalNameLength",
+		Version:      "3.0.0",
+		DefaultValue: "255",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal name length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("255"),
+	}
+	p.RLSMaxPrincipalNameLength.Init(base.mgr)
+
+	p.RLSMaxTagKeyLength = ParamItem{
+		Key:          "proxy.rls.maxTagKeyLength",
+		Version:      "3.0.0",
+		DefaultValue: "128",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal tag key length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("128"),
+	}
+	p.RLSMaxTagKeyLength.Init(base.mgr)
+
+	p.RLSMaxTagValueLength = ParamItem{
+		Key:          "proxy.rls.maxTagValueLength",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum RLS principal string tag value or array string element length in bytes.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxTagValueLength.Init(base.mgr)
+
+	p.RLSMaxArrayLiteralElements = ParamItem{
+		Key:          "proxy.rls.maxArrayLiteralElements",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		PanicIfEmpty: true,
+		Doc:          "Maximum elements for RLS array tags and in or array_contains* predicates.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("1024"),
+	}
+	p.RLSMaxArrayLiteralElements.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheEntries = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheEntries",
+		Version:      "3.0.0",
+		DefaultValue: "65536",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("65536"),
+	}
+	p.RLSMaxPrincipalCacheEntries.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheBytes = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheBytes",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		PanicIfEmpty: true,
+		Doc:          "Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.RLSMaxPrincipalCacheBytes.Init(base.mgr)
+
+	p.RLSMetaRefreshInterval = ParamItem{
+		Key:          "proxy.rls.metaRefreshInterval",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		PanicIfEmpty: true,
+		Doc:          "Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("3600"),
+	}
+	p.RLSMetaRefreshInterval.Init(base.mgr)
+
+	// Import RLS spans Proxy, DataCoord, and DataNode. Keep it fail-closed until
+	// every live component is new enough to preserve and enforce the predicate.
+	p.RLSImportEnforcementEnabled = ParamItem{
+		Key:          "proxy.rls.importEnforcementEnabled",
+		Version:      "3.0.3",
+		DefaultValue: "auto",
+		Export:       false,
+		Doc: "Whether RLS enforcement is available for bulk import. auto: enable after every live " +
+			"cluster component reaches the gate version; false: reject RLS-enforced imports; true: " +
+			"force enable and bypass the mixed-version safety gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.3",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.RLSImportEnforcementEnabled.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
