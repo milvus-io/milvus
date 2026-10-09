@@ -25,9 +25,6 @@ from pymilvus.function_chain.chain import FunctionChainExpr
 from pymilvus.grpc_gen import common_pb2, milvus_pb2, schema_pb2
 
 prefix = "function_chain"
-HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON = (
-    "temporarily skipped because CI PyMilvus does not yet include Hybrid Search Function Chain support"
-)
 
 
 class TestFunctionChain(TestMilvusClientV2Base):
@@ -2979,7 +2976,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_chain_server_validation(self):
-        """Exercise server contracts currently hidden by SDK-specific skipped tests."""
+        """Exercise server contracts directly, bypassing SDK validation."""
         client = self._client()
         name = self._create_hybrid_edge_collection(client, self._hybrid_edge_rows())
         for case, message in [
@@ -3032,7 +3029,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_dynamic_merge_strategies(self):
-        """Run the server part of the skipped SDK merge-strategy coverage."""
+        """Verify merge strategies through direct protobuf requests."""
         client = self._client()
         rows = self._hybrid_edge_rows()
         name = self._create_hybrid_edge_collection(client, rows)
@@ -3244,7 +3241,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert "requires an explicit data_type" in error.value.message
             op.params["$input_data_types"].CopyFrom(hint)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_function_chain_sdk_owns_final_output(self):
         """
@@ -3292,7 +3288,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         scores = [hit["distance"] for hit in res[0]]
         assert scores == sorted(scores, reverse=True)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_with_l0_l1_l2_function_chains_execute_in_stage_order(self):
         """
@@ -3385,7 +3380,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert self._hit_field(hit, "category") == entity_id
             assert self._hit_field(hit, "payload") == entity_id * 101
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_l0_then_l1_isolated_from_sibling_and_l2_owns_final_limit(
         self,
@@ -3439,7 +3433,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert res[0][0]["distance"] == pytest.approx(63.4, rel=1e-5, abs=1e-5)
         assert res[0][1]["distance"] == pytest.approx(55.0, rel=1e-5, abs=1e-5)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_same_anns_field_keeps_nested_chains_by_request_index(self):
         """
@@ -3483,7 +3476,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         for hit, expected_score in zip(res[0], expected_scores):
             assert hit["distance"] == pytest.approx(expected_score, rel=1e-5, abs=1e-5)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "top_source",
@@ -3544,7 +3536,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert len(res[0]) == 3
         assert len({hit["id"] for hit in res[0]}) == 3
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     def test_hybrid_search_nested_and_top_chain_inputs_do_not_leak_into_response(self):
         """
@@ -3594,33 +3585,38 @@ class TestFunctionChain(TestMilvusClientV2Base):
             assert self._hit_field(hit, "category") is None
             assert self._hit_field(hit, "payload") is None
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
-        "case_name, expected_error",
+        "case_name, expected_code, expected_error",
         [
             (
                 "invalid_l0_sub_chain",
+                1100,
                 'system output "$id" is not writable by L0 rerank function chain',
             ),
             (
                 "invalid_l1_sub_chain",
+                1100,
                 'system output "$id" is not writable by L1 rerank function chain',
             ),
             (
                 "invalid_l2_top_chain",
+                2201,
                 "field missing_field not exist",
             ),
             (
                 "l2_chain_in_sub_request",
-                "stage FunctionChainStageL2Rerank is not supported",
+                1100,
+                "function chains only support L0 and L1 stages",
             ),
             (
                 "l0_chain_at_hybrid_top",
+                1100,
                 "stage FunctionChainStageL0Rerank is not supported in search request",
             ),
             (
                 "l1_chain_at_hybrid_top",
+                1100,
                 "stage FunctionChainStageL1Rerank is not supported in search request",
             ),
         ],
@@ -3636,13 +3632,14 @@ class TestFunctionChain(TestMilvusClientV2Base):
     def test_hybrid_search_with_l0_l1_l2_rejects_invalid_chain_placement_or_execution(
         self,
         case_name,
+        expected_code,
         expected_error,
     ):
         """
         target: test errors from every Hybrid Search function-chain stage fail the whole request
         method: combine nested L0/L1 chains with a top-level L2 chain, then make one stage
                 invalid or place a chain at the wrong level
-        expected: HybridSearch raises parameter error and never returns partial sub-search results
+        expected: HybridSearch raises the specific parameter or query-plan error without partial results
         """
         client = self._client()
         collection_name = self._create_function_chain_collection(client)
@@ -3727,10 +3724,9 @@ class TestFunctionChain(TestMilvusClientV2Base):
         with pytest.raises(MilvusException) as exc_info:
             client._get_connection()._execute_hybrid_search(request, timeout=120)
 
-        assert exc_info.value.code == 1100
+        assert exc_info.value.code == expected_code
         assert expected_error in str(exc_info.value)
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "strategy, merge_params",
@@ -3781,7 +3777,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         assert [hit["id"] for hit in res[0]] == [1, 2]
         assert len(res[0]) == 2
 
-    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
         "chain_factory, ranker_factory, expected_error",
@@ -3823,7 +3818,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
                     FunctionChain(FunctionChainStage.L2_RERANK, name="second").merge(strategy="rrf"),
                 ],
                 lambda: None,
-                "requires exactly one function chain",
+                "requires exactly one L2_RERANK function chain",
             ),
             (
                 lambda: FunctionChain(FunctionChainStage.L2_RERANK, name="bad_weight_count").merge(
@@ -3852,9 +3847,9 @@ class TestFunctionChain(TestMilvusClientV2Base):
         expected_error,
     ):
         """
-        target: test PyMilvus validates invalid Hybrid Function Chain requests before RPC
+        target: test SDK and server validation reject invalid Hybrid Function Chain requests
         method: build conflicting or structurally invalid chains and submit two ANN requests
-        expected: PyMilvus raises a parameter error describing the invalid request
+        expected: SDK or server raises a parameter error describing the invalid request
         """
         client = self._client()
         collection_name = self._create_function_chain_collection(client)
