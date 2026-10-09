@@ -346,6 +346,19 @@ manager still checks physical preparation against this view's
 DataVersion and LoadInfo. Only then can it report Ready without re-registering
 the segment.
 
+Continuous TransformLog subscriptions resume across SN owner migration. The
+client uses a separate context for each connection attempt. A subscription
+event indicating cancellation, shutdown, fencing, or stale ownership cancels
+that attempt even if the transport is still alive. The resume loop closes the
+old connection outside the delivery callback and resubscribes all live channels
+from their last successfully accepted Entry/SyncUp cursors. These migration
+events do not reach the QN buffer's terminal error state. Exact legacy UNKNOWN
+causes `context canceled` and `context deadline exceeded` receive the same
+treatment; other UNKNOWN and semantic/data failures remain terminal. Consumer
+callback failures still terminate the logical subscription, even when the
+returned error is cancellation. Bounded completion, parent cancellation and
+explicit Close retain their existing termination semantics.
+
 The TransformLogBuffer retains entries strictly after the minimum
 `TransformStartAfterTimeTick` of its live view guards and pending segment
 registrations. A preparation may retain its originating guard after that view
