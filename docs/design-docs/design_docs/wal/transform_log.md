@@ -114,6 +114,10 @@ the client reacquires the PChannel stream and resubscribes exclusively after the
 last position its handler successfully accepted. Entry, SyncUp and an explicitly accepted FastForward advance
 that cursor; failed handler calls do not.
 
+Reconnect backoff accumulates only across consecutive connection or subscription
+restoration failures. Successful restoration resets it before live delivery, so
+a later independent disconnect starts at the initial retry interval again.
+
 For remote streams, the server owns the boundary between provider lifetime and
 subscription lifetime. An unavailable PChannel owner ends the physical RPC;
 normal CloseSubscription closes only the selected reader after disabling its
