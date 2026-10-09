@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -319,10 +320,9 @@ func (s *MixCompactionTaskStorageV1Suite) setupTestWithTextField() {
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
-// V1 binlogs deserialize TEXT as arrow String while the retained-row rebuilder
-// allocates a Binary builder for TEXT, so with any filtered row rb.Append fails
-// deterministically: the task must fail instead of silently dropping the
-// retained rows of that batch.
+// Feed an Int64 column where the plan declares TEXT so rb.Append fails on a
+// real type mismatch. UTF8 TEXT is valid input for RecordBuilder. The task must
+// propagate the append error instead of silently dropping retained rows.
 func TestMixCompactionPropagatesRecordBuilderAppendError(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -341,11 +341,13 @@ func TestMixCompactionPropagatesRecordBuilderAppendError(t *testing.T) {
 
 			segmentID := int64(700)
 			alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
-			segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
+			sourceSchema := proto.Clone(s.meta.GetSchema()).(*schemapb.CollectionSchema)
+			typeutil.GetField(sourceSchema, textFieldForAppendErrorTest).DataType = schemapb.DataType_Int64
+			segWriter, err := NewSegmentWriter(sourceSchema, 65535, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
 			s.Require().NoError(err)
 			for i := int64(0); i < 2; i++ {
 				row := getRow(segmentID+i, 0)
-				row[textFieldForAppendErrorTest] = "text-payload"
+				row[textFieldForAppendErrorTest] = int64(42)
 				err = segWriter.Write(&storage.Value{
 					PK:        storage.NewInt64PrimaryKey(segmentID + i),
 					Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
