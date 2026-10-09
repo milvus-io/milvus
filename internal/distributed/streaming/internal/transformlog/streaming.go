@@ -153,6 +153,8 @@ func (s *resumableStream) resumeLoop() {
 			s.setUnderlying(underlying)
 			err = s.subscribePending(ctx, underlying)
 			if err == nil {
+				// Successful restoration ends this run of consecutive failures.
+				retryBackoff.Reset()
 				err = s.waitUntilUnavailable(ctx, underlying)
 			}
 		}
