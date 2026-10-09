@@ -299,7 +299,7 @@ func TestReloadRLSMetadataRejectsDuplicatePolicyNames(t *testing.T) {
 	require.Same(t, existing, collection.RLSPolicies["existing"])
 }
 
-func TestReloadCollectionsRLSMetadataRestoresDisabledCollection(t *testing.T) {
+func TestReloadCollectionsRLSMetadataDefersDisabledCollection(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		properties []*commonpb.KeyValuePair
@@ -317,15 +317,22 @@ func TestReloadCollectionsRLSMetadataRestoresDisabledCollection(t *testing.T) {
 			collection := meta.collID2Meta[20]
 			collection.Properties = tc.properties
 			collection.RLSPolicies = map[string]*model.RLSPolicy{"stale": {PolicyName: "stale"}}
+			require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection}))
+			require.Nil(t, collection.RLSPolicies)
+			require.True(t, collection.RLSPoliciesUnloaded)
+			catalog.AssertNotCalled(t, "ListRLSPolicies", mock.Anything, mock.Anything)
+
 			catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{{
 				CollectionID: 20, PolicyID: 100, PolicyName: "tenant", UsingExpr: `dept == "sales"`,
 			}}, nil).Once()
 
-			require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection}))
-			require.Len(t, collection.RLSPolicies, 1)
-			require.Equal(t, int64(100), collection.RLSPolicies["tenant"].PolicyID)
-			require.ErrorContains(t, validateRLSNoReferencedFieldDropped(collection, []int64{101}), "tenant")
-			require.NoError(t, validateRLSNoReferencedFieldDropped(collection, []int64{102}))
+			loaded, err := meta.resolveRLSPolicyCollection(context.Background(), "db1", "coll1")
+			require.NoError(t, err)
+			require.Len(t, loaded.RLSPolicies, 1)
+			require.Equal(t, int64(100), loaded.RLSPolicies["tenant"].PolicyID)
+			require.ErrorContains(t, validateRLSNoReferencedFieldDropped(loaded, []int64{101}), "tenant")
+			require.NoError(t, validateRLSNoReferencedFieldDropped(loaded, []int64{102}))
+			require.True(t, collection.RLSPoliciesUnloaded)
 		})
 	}
 }
@@ -348,14 +355,113 @@ func TestReloadDisabledCollectionRLSMetadataPropagatesCatalogError(t *testing.T)
 	meta, catalog := newRLSMetaTableForTest(t)
 	collection := meta.collID2Meta[20]
 	collection.Properties = nil
+	collection.RLSPoliciesUnloaded = true
 	policy := &model.RLSPolicy{PolicyName: "tenant", PolicyID: 100}
 	collection.RLSPolicies = map[string]*model.RLSPolicy{"tenant": policy}
 	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return(
 		nil, merr.WrapErrServiceUnavailableMsg("catalog unavailable")).Once()
 
-	err := meta.reloadCollectionsRLSMetadata(context.Background(), []*model.Collection{collection})
+	_, err := meta.resolveRLSPolicyCollection(context.Background(), "db1", "coll1")
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.Same(t, policy, collection.RLSPolicies["tenant"])
+}
+
+func TestDeferredRLSPoliciesStayUnloadedUntilEnable(t *testing.T) {
+	ctx := context.Background()
+	meta, catalog := newRLSMetaTableForTest(t)
+	collection := meta.collID2Meta[20]
+	collection.Properties = nil
+	collection.RLSPoliciesUnloaded = true
+
+	policy := &model.RLSPolicy{DBID: 10, CollectionID: 20, PolicyID: 100, PolicyName: "tenant"}
+	catalog.EXPECT().SaveRLSPolicy(mock.Anything, policy).Return(nil).Once()
+	require.NoError(t, meta.ApplyAlterRLSPolicy(ctx, policy))
+	require.True(t, collection.RLSPoliciesUnloaded)
+	require.Empty(t, collection.RLSPolicies, "one policy update must not become a partial cache")
+
+	catalog.EXPECT().GetRLSPrincipal(mock.Anything, int64(20), "alice").Return(nil, merr.ErrIoKeyNotFound).Once()
+	metadata, err := meta.GetRLSMetadata(ctx, 20, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS, "alice")
+	require.NoError(t, err)
+	require.Empty(t, metadata.Principals)
+	catalog.AssertNotCalled(t, "ListRLSPolicies", mock.Anything, mock.Anything)
+
+	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).RunAndReturn(
+		func(context.Context, int64) ([]*model.RLSPolicy, error) {
+			require.True(t, meta.ddLock.TryLock())
+			meta.ddLock.Unlock()
+			return []*model.RLSPolicy{policy}, nil
+		}).Once()
+	metadata, err = meta.GetRLSMetadata(ctx, 20, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, "")
+	require.NoError(t, err)
+	require.Len(t, metadata.Policies, 1)
+	require.Equal(t, int64(100), metadata.Policies[0].PolicyID)
+	require.True(t, collection.RLSPoliciesUnloaded)
+	require.Empty(t, collection.RLSPolicies)
+}
+
+func TestAlterCollectionLoadsDeferredRLSPoliciesBeforeEnable(t *testing.T) {
+	for _, outcome := range []string{"success", "load fails", "persist fails", "collection changes"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx := context.Background()
+			meta, catalog := newRLSMetaTableForTest(t)
+			collection := meta.collID2Meta[20]
+			collection.Properties = nil
+			collection.RLSPoliciesUnloaded = true
+			policy := &model.RLSPolicy{CollectionID: 20, PolicyID: 100, PolicyName: "tenant"}
+			catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).RunAndReturn(
+				func(context.Context, int64) ([]*model.RLSPolicy, error) {
+					require.True(t, meta.ddLock.TryLock(), "policy I/O must not hold the metadata lock")
+					if outcome == "collection changes" {
+						meta.collID2Meta[20] = collection.Clone()
+					}
+					meta.ddLock.Unlock()
+					if outcome == "load fails" {
+						return nil, merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+					}
+					return []*model.RLSPolicy{policy}, nil
+				}).Once()
+			if outcome == "success" || outcome == "persist fails" {
+				var persistErr error
+				if outcome == "persist fails" {
+					persistErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+				}
+				calls := 1
+				if outcome == "success" {
+					calls = 2 // Callback replay must not reload the policies.
+				}
+				catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.MatchedBy(func(coll *model.Collection) bool {
+					return !coll.RLSPoliciesUnloaded && coll.RLSPolicies["tenant"].PolicyID == 100
+				}), metastore.MODIFY, uint64(2), false).Return(persistErr).Times(calls)
+			}
+			raw := message.NewAlterCollectionMessageBuilderV2().
+				WithHeader(&message.AlterCollectionMessageHeader{
+					CollectionId: 20,
+					UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionProperties}},
+				}).
+				WithBody(&message.AlterCollectionMessageBody{
+					Updates: &message.AlterCollectionMessageUpdates{
+						Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+					},
+				}).WithBroadcast([]string{"control"}).MustBuildBroadcast()
+			result := message.BroadcastResultAlterCollectionMessageV2{
+				Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+				Results: map[string]*message.AppendResult{"control": {TimeTick: 2}},
+			}
+			err := meta.AlterCollection(ctx, result)
+			if outcome == "success" {
+				require.NoError(t, err)
+				require.NoError(t, meta.AlterCollection(ctx, result))
+				require.False(t, meta.collID2Meta[20].RLSPoliciesUnloaded)
+				require.Equal(t, int64(100), meta.collID2Meta[20].RLSPolicies["tenant"].PolicyID)
+			} else {
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.True(t, meta.collID2Meta[20].RLSPoliciesUnloaded)
+				enabled, err := common.IsRLSEnabled(meta.collID2Meta[20].Properties...)
+				require.NoError(t, err)
+				require.False(t, enabled)
+			}
+		})
+	}
 }
 
 func TestResolveRLSCollectionAllowsDisabledCollection(t *testing.T) {
@@ -374,7 +480,7 @@ func TestResolveRLSCollectionAllowsDisabledCollection(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
-func TestReloadCollectionsRLSMetadataQueriesAllCollections(t *testing.T) {
+func TestReloadCollectionsRLSMetadataQueriesOnlyEnabledCollections(t *testing.T) {
 	catalog := mocks.NewRootCoordCatalog(t)
 	meta := &MetaTable{catalog: catalog}
 	collections := []*model.Collection{
@@ -393,11 +499,12 @@ func TestReloadCollectionsRLSMetadataQueriesAllCollections(t *testing.T) {
 			},
 		},
 	}
-	for _, id := range []int64{10, 20, 30} {
-		catalog.EXPECT().ListRLSPolicies(mock.Anything, id).Return(nil, nil).Once()
-	}
+	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return(nil, nil).Once()
 
 	require.NoError(t, meta.reloadCollectionsRLSMetadata(context.Background(), collections))
+	require.True(t, collections[1].RLSPoliciesUnloaded)
+	require.False(t, collections[2].RLSPoliciesUnloaded)
+	require.True(t, collections[3].RLSPoliciesUnloaded)
 }
 
 func TestReloadCollectionsRLSMetadataUsesBoundedConcurrency(t *testing.T) {

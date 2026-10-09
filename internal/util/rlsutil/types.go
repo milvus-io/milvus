@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -375,60 +376,26 @@ func tagValueToJSON(value TagValue) (any, bool) {
 	}
 }
 
-type PolicyType int32
+type PolicyType = milvuspb.RowPolicyType
 
 const (
-	PolicyTypeUnknown     PolicyType = 0
-	PolicyTypePermissive  PolicyType = 1
-	PolicyTypeRestrictive PolicyType = 2
+	PolicyTypeUnknown     = milvuspb.RowPolicyType_RowPolicyTypeUnknown
+	PolicyTypePermissive  = milvuspb.RowPolicyType_RowPolicyTypePermissive
+	PolicyTypeRestrictive = milvuspb.RowPolicyType_RowPolicyTypeRestrictive
 )
 
-func (policyType PolicyType) String() string {
-	switch policyType {
-	case PolicyTypePermissive:
-		return "RowPolicyTypePermissive"
-	case PolicyTypeRestrictive:
-		return "RowPolicyTypeRestrictive"
-	default:
-		return "RowPolicyTypeUnknown"
-	}
-}
-
-type PolicyAction int32
+type PolicyAction = milvuspb.RowPolicyAction
 
 const (
-	PolicyActionQuery          PolicyAction = 0
-	PolicyActionSearch         PolicyAction = 1
-	PolicyActionInsert         PolicyAction = 2
-	PolicyActionDelete         PolicyAction = 3
-	PolicyActionUpsert         PolicyAction = 4
-	PolicyActionQueryIterator  PolicyAction = 5
-	PolicyActionSearchIterator PolicyAction = 6
-	PolicyActionHybridSearch   PolicyAction = 7
+	PolicyActionQuery          = milvuspb.RowPolicyAction_Query
+	PolicyActionSearch         = milvuspb.RowPolicyAction_Search
+	PolicyActionInsert         = milvuspb.RowPolicyAction_Insert
+	PolicyActionDelete         = milvuspb.RowPolicyAction_Delete
+	PolicyActionUpsert         = milvuspb.RowPolicyAction_Upsert
+	PolicyActionQueryIterator  = milvuspb.RowPolicyAction_QueryIterator
+	PolicyActionSearchIterator = milvuspb.RowPolicyAction_SearchIterator
+	PolicyActionHybridSearch   = milvuspb.RowPolicyAction_HybridSearch
 )
-
-func (action PolicyAction) String() string {
-	switch action {
-	case PolicyActionQuery:
-		return "Query"
-	case PolicyActionSearch:
-		return "Search"
-	case PolicyActionInsert:
-		return "Insert"
-	case PolicyActionDelete:
-		return "Delete"
-	case PolicyActionUpsert:
-		return "Upsert"
-	case PolicyActionQueryIterator:
-		return "QueryIterator"
-	case PolicyActionSearchIterator:
-		return "SearchIterator"
-	case PolicyActionHybridSearch:
-		return "HybridSearch"
-	default:
-		return "Unknown"
-	}
-}
 
 func PolicyActionOperation(action PolicyAction) string {
 	switch action {
@@ -522,51 +489,9 @@ func (request *CreateRowPolicyRequest) GetDescription() string {
 
 type UpdateRowPolicyRequest = CreateRowPolicyRequest
 
-type DropRowPolicyRequest struct {
-	DbName         string
-	CollectionName string
-	PolicyName     string
-}
+type DropRowPolicyRequest = milvuspb.DropRowPolicyRequest
 
-func (request *DropRowPolicyRequest) GetDbName() string {
-	if request == nil {
-		return ""
-	}
-	return request.DbName
-}
-
-func (request *DropRowPolicyRequest) GetCollectionName() string {
-	if request == nil {
-		return ""
-	}
-	return request.CollectionName
-}
-
-func (request *DropRowPolicyRequest) GetPolicyName() string {
-	if request == nil {
-		return ""
-	}
-	return request.PolicyName
-}
-
-type ListRowPoliciesRequest struct {
-	DbName         string
-	CollectionName string
-}
-
-func (request *ListRowPoliciesRequest) GetDbName() string {
-	if request == nil {
-		return ""
-	}
-	return request.DbName
-}
-
-func (request *ListRowPoliciesRequest) GetCollectionName() string {
-	if request == nil {
-		return ""
-	}
-	return request.CollectionName
-}
+type ListRowPoliciesRequest = milvuspb.ListRowPoliciesRequest
 
 type RowPolicy struct {
 	PolicyName  string
@@ -655,32 +580,7 @@ func (request *SetRLSPrincipalTagsRequest) GetTags() map[string]TagValue {
 	return request.Tags
 }
 
-type GetRLSPrincipalTagsRequest struct {
-	DbName         string
-	CollectionName string
-	PrincipalName  string
-}
-
-func (request *GetRLSPrincipalTagsRequest) GetDbName() string {
-	if request == nil {
-		return ""
-	}
-	return request.DbName
-}
-
-func (request *GetRLSPrincipalTagsRequest) GetCollectionName() string {
-	if request == nil {
-		return ""
-	}
-	return request.CollectionName
-}
-
-func (request *GetRLSPrincipalTagsRequest) GetPrincipalName() string {
-	if request == nil {
-		return ""
-	}
-	return request.PrincipalName
-}
+type GetRLSPrincipalTagsRequest = milvuspb.GetRLSPrincipalTagsRequest
 
 type GetRLSPrincipalTagsResponse struct {
 	Status         *commonpb.Status
@@ -690,63 +590,8 @@ type GetRLSPrincipalTagsResponse struct {
 	PrincipalName  string
 }
 
-type ListRLSPrincipalsRequest struct {
-	DbName         string
-	CollectionName string
-}
+type ListRLSPrincipalsRequest = milvuspb.ListRLSPrincipalsRequest
 
-func (request *ListRLSPrincipalsRequest) GetDbName() string {
-	if request == nil {
-		return ""
-	}
-	return request.DbName
-}
+type ListRLSPrincipalsResponse = milvuspb.ListRLSPrincipalsResponse
 
-func (request *ListRLSPrincipalsRequest) GetCollectionName() string {
-	if request == nil {
-		return ""
-	}
-	return request.CollectionName
-}
-
-type ListRLSPrincipalsResponse struct {
-	Status         *commonpb.Status
-	PrincipalNames []string
-	DbName         string
-	CollectionName string
-}
-
-type DeleteRLSPrincipalTagsRequest struct {
-	DbName         string
-	CollectionName string
-	PrincipalName  string
-	TagKeys        []string
-}
-
-func (request *DeleteRLSPrincipalTagsRequest) GetDbName() string {
-	if request == nil {
-		return ""
-	}
-	return request.DbName
-}
-
-func (request *DeleteRLSPrincipalTagsRequest) GetCollectionName() string {
-	if request == nil {
-		return ""
-	}
-	return request.CollectionName
-}
-
-func (request *DeleteRLSPrincipalTagsRequest) GetPrincipalName() string {
-	if request == nil {
-		return ""
-	}
-	return request.PrincipalName
-}
-
-func (request *DeleteRLSPrincipalTagsRequest) GetTagKeys() []string {
-	if request == nil {
-		return nil
-	}
-	return request.TagKeys
-}
+type DeleteRLSPrincipalTagsRequest = milvuspb.DeleteRLSPrincipalTagsRequest

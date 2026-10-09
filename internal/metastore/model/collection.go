@@ -43,7 +43,9 @@ type Collection struct {
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
 	// RLS policies are cached by RootCoord and persisted in their own KV namespace.
-	RLSPolicies          map[string]*RLSPolicy
+	RLSPolicies map[string]*RLSPolicy
+	// Recovery defers disabled collections; their persisted policies are not an empty set.
+	RLSPoliciesUnloaded  bool
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -98,6 +100,7 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		RLSPolicies:          maps.Clone(c.RLSPolicies),
+		RLSPoliciesUnloaded:  c.RLSPoliciesUnloaded,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
@@ -140,6 +143,7 @@ func (c *Collection) Clone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
+		RLSPoliciesUnloaded:  c.RLSPoliciesUnloaded,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,

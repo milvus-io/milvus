@@ -215,11 +215,13 @@ functions such as `now()`.
 
 RootCoord owns policies and principal tag bindings. Records use globally unique
 collection IDs as identity; database and collection names are descriptive.
-RootCoord recovers and keeps complete policies in a name-keyed collection map,
-including their internal IDs, even when enforcement is disabled. Policy schema
-dependencies remain protected while disabled. Principal tag bindings remain
-in the catalog and are read by `(collectionID, principalName)` instead of being
-loaded during recovery.
+RootCoord recovers policies only for enabled collections at startup, in a
+name-keyed map including their internal IDs. Disabled collections retain their
+stored metadata without startup reads; enabling loads deferred policies before
+publishing the switch. Management, schema-dependency checks, and collection
+drop read deferred policies on demand, so their guarantees also hold while
+disabled. Principal tag bindings remain in the catalog and are read by
+`(collectionID, principalName)` instead of being loaded during recovery.
 
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same

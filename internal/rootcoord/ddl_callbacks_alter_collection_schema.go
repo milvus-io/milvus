@@ -414,6 +414,9 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
+	if err := c.loadRLSPoliciesForSchema(ctx, coll); err != nil {
+		return err
+	}
 	if err := validateRLSNoReferencedFieldDropped(coll, droppedFieldIds); err != nil {
 		return err
 	}

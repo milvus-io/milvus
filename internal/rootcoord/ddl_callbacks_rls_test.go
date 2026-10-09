@@ -116,12 +116,40 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, enabled)
 
-	// Recovery must restore disabled policies from the catalog, not the old map.
+	// Disabled recovery skips policies; management and enable load them on demand.
 	coll = coll.Clone()
 	coll.RLSPolicies = nil
 	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	require.Empty(t, coll.RLSPolicies)
+	require.True(t, coll.RLSPoliciesUnloaded)
+	meta.ddLock.Lock()
+	meta.collID2Meta[id] = coll.Clone()
+	meta.ddLock.Unlock()
+	require.ErrorContains(t, core.broadcastCreateRLSPolicy(ctx, createPolicy), "already exists")
+	require.NoError(t, core.loadRLSPoliciesForSchema(ctx, coll))
+	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
+
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.False(t, coll.RLSPoliciesUnloaded)
 	require.Len(t, coll.RLSPolicies, 1)
 	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
+	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: db, CollectionName: name,
+		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "false"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	meta.ddLock.Lock()
+	meta.collID2Meta[id] = coll
+	meta.ddLock.Unlock()
 
 	require.NoError(t, core.broadcastDeleteRLSPrincipalTags(ctx, &rlsutil.DeleteRLSPrincipalTagsRequest{
 		DbName: db, CollectionName: name, PrincipalName: "alice", TagKeys: []string{"tenant"},

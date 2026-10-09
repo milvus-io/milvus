@@ -18,6 +18,7 @@ package rlsutil
 
 import (
 	"context"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
@@ -51,14 +52,10 @@ func RowPoliciesFromInfo(collectionID int64, policies []*rootcoordpb.RLSPolicyIn
 		if policy == nil {
 			return nil, merr.WrapErrDataIntegrityMsg("RLS policy metadata at index %d is nil", i)
 		}
-		actions := make([]PolicyAction, len(policy.GetActions()))
-		for i, action := range policy.GetActions() {
-			actions[i] = PolicyAction(action)
-		}
 		convertedPolicy := &RowPolicy{
 			PolicyName:  policy.GetPolicyName(),
-			PolicyType:  PolicyType(policy.GetPolicyType()),
-			Actions:     actions,
+			PolicyType:  policy.GetPolicyType(),
+			Actions:     slices.Clone(policy.GetActions()),
 			UsingExpr:   policy.GetUsingExpr(),
 			CheckExpr:   policy.GetCheckExpr(),
 			Description: policy.GetDescription(),

@@ -139,6 +139,9 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 			return err
 		}
 	}
+	if err := c.loadRLSPoliciesForSchema(ctx, coll); err != nil {
+		return err
+	}
 	if err := validateRLSPoliciesWithSchema(coll.RLSPolicies, schema); err != nil {
 		return err
 	}

@@ -198,6 +198,9 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 		return err
 	}
 	newFn := findRLSFunctionByName(newColl, req.GetFunctionSchema().GetName())
+	if err := c.loadRLSPoliciesForSchema(ctx, oldColl); err != nil {
+		return err
+	}
 	if !rlsFunctionKeepsOutputShape(oldFn, newFn) {
 		if err := validateRLSFunctionOutputNotReferenced(oldColl, oldFn, "altered"); err != nil {
 			return err
