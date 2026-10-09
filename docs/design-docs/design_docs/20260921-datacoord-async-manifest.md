@@ -120,9 +120,12 @@ revision instead of opening a second transaction. A stale build ID still fails;
 an already-absent index still avoids writing an empty revision.
 
 The segment lock remains held through terminal callback and catalog publication.
-Batch workers use a bounded errgroup and drain all accepted operations before
-releasing locks. Failure cancels work that has not started. No catalog pointer is
-published when manifest generation fails.
+The batch caller submits through `SubmitManifestUpdates`; native open, in-memory
+mutation and native commit are chained on the same executor. Executor admission
+is the only commit concurrency limit, with no additional batch worker pool or
+per-segment waiting goroutines. After generation, the caller submits any required
+index-marker reads on that executor. Each phase drains all accepted callbacks
+before releasing locks. Failure cancels peers and prevents catalog publication.
 
 Cancellation requests native cancellation and waits for the terminal result.
 The native timeout is a queue deadline: it prevents work from starting after

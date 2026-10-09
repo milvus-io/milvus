@@ -49,6 +49,7 @@ func TestL0CompactionTaskSuite(t *testing.T) {
 }
 
 func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -85,6 +86,7 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 }
 
 func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/201"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -280,6 +282,7 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 // via the timeout error instead of hanging. This drives the real primitive end to
 // end — atomic multi-lock acquisition, then the parallel per-target manifest I/O.
 func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	const targets = 3
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)

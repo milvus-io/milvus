@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,11 @@ func TestAsyncManifestAdmissionRejection(t *testing.T) {
 		func([]ManifestIndexInfo, error) { called = true })
 	require.ErrorIs(t, err, ErrLoonTransient)
 	require.False(t, called, "rejected submissions must not deliver a callback")
+	err = SubmitManifestUpdates(context.Background(), io, path.Join(cfg.RootPath, "rejected"), 0, cfg,
+		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
+		func(string, error) { called = true })
+	require.ErrorIs(t, err, ErrLoonTransient)
+	require.False(t, called, "rejected commits must not deliver a callback")
 	require.Empty(t, io.slots, "rejected submission must release admission")
 }
 
@@ -336,38 +342,84 @@ func TestAsyncManifestSingleExecutorSubmissions(t *testing.T) {
 }
 
 func TestAsyncManifestSubmissionCancellationDrains(t *testing.T) {
+	for _, operation := range []string{"read", "commit"} {
+		t.Run(operation, func(t *testing.T) {
+			cfg := manifestTestStorageConfig(t)
+			io := NewManifestIOContext(1)
+			defer io.Close()
+			release := make(chan struct{})
+			var unblock sync.Once
+			defer unblock.Do(func() { close(release) })
+			entered, err := testQueueManifestBlock(io, release)
+			require.NoError(t, err)
+			<-entered
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			completed := make(chan error, 1)
+			if operation == "read" {
+				require.NoError(t, SubmitManifestIndexInfos(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, "cancel"), 0), cfg,
+					func(_ []ManifestIndexInfo, err error) { completed <- err }))
+			} else {
+				require.NoError(t, SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, "cancel"), 0, cfg,
+					&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
+					func(_ string, err error) { completed <- err }))
+			}
+			cancel()
+			closed := make(chan struct{})
+			go func() { io.Close(); close(closed) }()
+			select {
+			case <-closed:
+				t.Fatal("Close returned before accepted operation's callback")
+			case <-time.After(20 * time.Millisecond):
+			}
+			unblock.Do(func() { close(release) })
+			select {
+			case err := <-completed:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(5 * time.Second):
+				t.Fatal("canceled operation never completed")
+			}
+			select {
+			case <-closed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Close did not drain the canceled operation")
+			}
+		})
+	}
+}
+
+func TestAsyncManifestCommitSubmissionsSingleWorker(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	io := NewManifestIOContext(1)
 	defer io.Close()
-	release := make(chan struct{})
-	var unblock sync.Once
-	defer unblock.Do(func() { close(release) })
-	entered, err := testQueueManifestBlock(io, release)
-	require.NoError(t, err)
-	<-entered
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	completed := make(chan error, 1)
-	require.NoError(t, SubmitManifestIndexInfos(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, "cancel"), 0), cfg,
-		func(_ []ManifestIndexInfo, err error) { completed <- err }))
-	cancel()
-	closed := make(chan struct{})
-	go func() { io.Close(); close(closed) }()
-	select {
-	case <-closed:
-		t.Fatal("Close returned before accepted read's callback")
-	case <-time.After(20 * time.Millisecond):
+	const count = 16
+	type result struct {
+		path string
+		err  error
 	}
-	unblock.Do(func() { close(release) })
-	select {
-	case err := <-completed:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(5 * time.Second):
-		t.Fatal("canceled read never completed")
+	completed := make(chan result, count)
+	for i := range count {
+		require.NoError(t, SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, strconv.Itoa(i)), 0, cfg,
+			&ManifestUpdates{Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}}},
+			func(path string, err error) { completed <- result{path, err} }))
 	}
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not drain the canceled read")
+	// Close drains the open -> commit chain and every terminal callback.
+	io.Close()
+	require.Len(t, completed, count)
+	for range count {
+		result := <-completed
+		require.NoError(t, result.err)
+		entries, err := GetManifestIndexInfos(result.path, cfg)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		require.Equal(t, int64(2), entries[0].BuildID)
 	}
+	called := false
+	err := SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, "closed"), 0, cfg,
+		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
+		func(string, error) { called = true })
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.False(t, called)
 }

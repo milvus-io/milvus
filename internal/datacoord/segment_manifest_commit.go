@@ -20,10 +20,10 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -551,9 +551,7 @@ func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, io *packed.
 		value := true
 		return &value, nil
 	}
-	updates := commit.Mutation.Updates
-	if !segment.GetManifestHasIndex() || updates == nil ||
-		(len(updates.DropIndexes) == 0 && len(updates.ColumnGroups) == 0 && updates.NewFiles == nil) {
+	if !manifestMutationNeedsIndexRead(segment, commit.Mutation) {
 		return nil, nil
 	}
 	entries, err := m.readManifestIndexesWithIO(ctx, io, manifestPath, commit.StorageConfig)
@@ -564,18 +562,52 @@ func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, io *packed.
 	return &value, nil
 }
 
+func manifestMutationNeedsIndexRead(segment *SegmentInfo, mutation ManifestMutation) bool {
+	updates := mutation.Updates
+	return segment.GetManifestHasIndex() && updates != nil &&
+		(len(updates.DropIndexes) > 0 || len(updates.ColumnGroups) > 0 || updates.NewFiles != nil)
+}
+
+func manifestUpdateBase(baseManifest string, commit SegmentManifestCommit) (string, int64, error) {
+	if baseManifest == "" {
+		return "", 0, merr.WrapErrServiceInternalMsg("cannot update an empty manifest for segmentID=%d", commit.SegmentID)
+	}
+	if commit.Mutation.Updates == nil {
+		return "", 0, merr.WrapErrServiceInternalMsg("manifest updates are nil for segmentID=%d", commit.SegmentID)
+	}
+	base, version, err := packed.UnmarshalManifestPath(baseManifest)
+	if err != nil {
+		return "", 0, merr.Wrap(err, "parse expected manifest")
+	}
+	return base, version, nil
+}
+
+func (m *meta) submitManifestMutation(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, commit SegmentManifestCommit, complete func(string, error)) error {
+	if commit.Mutation.Type != ManifestMutationCommitUpdates {
+		// Noop validation and unsupported mutations do not perform I/O.
+		manifestPath, err := m.commitManifestMutation(ctx, io, baseManifest, commit)
+		if err != nil {
+			return err
+		}
+		complete(manifestPath, nil)
+		return nil
+	}
+	base, version, err := manifestUpdateBase(baseManifest, commit)
+	if err != nil {
+		return err
+	}
+	err = packed.SubmitManifestUpdates(ctx, io, base, version, commit.StorageConfig, commit.Mutation.Updates, func(manifestPath string, err error) {
+		complete(manifestPath, merr.Wrap(err, "commit segment manifest"))
+	})
+	return merr.Wrap(err, "commit segment manifest")
+}
+
 func (m *meta) commitManifestMutation(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, commit SegmentManifestCommit) (string, error) {
 	switch commit.Mutation.Type {
 	case ManifestMutationCommitUpdates:
-		if baseManifest == "" {
-			return "", merr.WrapErrServiceInternalMsg("cannot update an empty manifest for segmentID=%d", commit.SegmentID)
-		}
-		if commit.Mutation.Updates == nil {
-			return "", merr.WrapErrServiceInternalMsg("manifest updates are nil for segmentID=%d", commit.SegmentID)
-		}
-		basePath, version, err := packed.UnmarshalManifestPath(baseManifest)
+		basePath, version, err := manifestUpdateBase(baseManifest, commit)
 		if err != nil {
-			return "", merr.Wrap(err, "parse expected manifest")
+			return "", err
 		}
 		manifestPath, err := packed.CommitManifestUpdatesAsync(ctx, io, basePath, version, commit.StorageConfig, commit.Mutation.Updates)
 		if err != nil {
@@ -960,35 +992,36 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 	}
 	m.segMu.RUnlock()
 
-	poolSize := min(m.manifestCommitExecutor.concurrency, len(commits))
 	io, releaseIO, err := m.manifestCommitExecutor.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseIO()
-	group, workCtx := errgroup.WithContext(ctx)
-	group.SetLimit(poolSize)
 	results := make([]*preparedSegmentManifest, len(commits))
-	for i := range commits {
-		if workCtx.Err() != nil {
-			break
-		}
-		i := i
-		group.Go(func() error {
-			if err := workCtx.Err(); err != nil {
-				return err
-			}
-			result, err := m.prepareSegmentManifest(workCtx, io, commits[i], snapshots[commits[i].SegmentID])
+	if err := runManifestBatch(ctx, len(commits), func(ctx context.Context, i int, complete func(error)) error {
+		return m.submitSegmentManifest(ctx, io, commits[i], snapshots[commits[i].SegmentID], func(result *preparedSegmentManifest, err error) {
 			results[i] = result
-			return err
+			complete(err)
 		})
-	}
-	// Wait for every accepted callback before releasing any segment lock.
-	if err := group.Wait(); err != nil {
+	}); err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+
+	// Read markers from the final revisions after generation. Submit from the
+	// caller, never from an executor callback that could block on admission.
+	if err := runManifestBatch(ctx, len(results), func(ctx context.Context, i int, complete func(error)) error {
+		result := results[i]
+		if result == nil || !manifestMutationNeedsIndexRead(snapshots[result.commit.SegmentID], result.commit.Mutation) {
+			complete(nil)
+			return nil
+		}
+		return m.submitManifestIndexRead(ctx, io, result.manifestPath, result.commit.StorageConfig, func(entries []packed.ManifestIndexInfo, err error) {
+			value := len(entries) > 0
+			result.commit.CatalogMutation.manifestHasIndex = &value
+			complete(err)
+		})
+	}); err != nil {
+		return nil, merr.Wrap(err, "verify manifest index marker before publication")
 	}
 	prepared := make([]preparedSegmentManifest, 0, len(results))
 	for _, result := range results {
@@ -996,39 +1029,65 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 			prepared = append(prepared, *result)
 		}
 	}
-
 	return prepared, nil
 }
 
-// prepareSegmentManifest is the per-segment stage-2 worker: validate the snapshot and
-// run the manifest mutation to produce the prepared revision. A dropped/unhealthy
-// segment returns (nil, nil) to be skipped; a stale CAS or I/O error returns a real
-// error to abort the batch.
-func (m *meta) prepareSegmentManifest(ctx context.Context, io *packed.ManifestIOContext, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
+// runManifestBatch submits from the caller and waits for terminal callbacks.
+// Admission belongs to the IO executor; there are no per-item waiting goroutines.
+// submit must either accept and call complete once, or return an error without
+// calling complete. The first failure cancels peers, but every accepted operation
+// must finish before the caller can release segment locks or the executor lease.
+func runManifestBatch(ctx context.Context, count int, submit func(context.Context, int, func(error)) error) error {
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var pending sync.WaitGroup
+	var failed sync.Once
+	var firstErr error
+	complete := func(err error) {
+		if err != nil {
+			failed.Do(func() {
+				firstErr = err
+				cancel()
+			})
+		}
+		pending.Done()
+	}
+	for i := 0; i < count && workCtx.Err() == nil; i++ {
+		pending.Add(1)
+		if err := submit(workCtx, i, complete); err != nil {
+			complete(err)
+			break
+		}
+	}
+	pending.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
+}
+
+// submitSegmentManifest validates the snapshot before submitting its mutation.
+// A dropped/unhealthy segment completes with nil and is skipped by the batch.
+func (m *meta) submitSegmentManifest(ctx context.Context, io *packed.ManifestIOContext, commit SegmentManifestCommit, snapshot *SegmentInfo, complete func(*preparedSegmentManifest, error)) error {
 	if snapshot == nil || !isSegmentHealthy(snapshot) {
 		mlog.Warn(ctx, "segment dropped or unhealthy before batch manifest generation; skipping",
 			mlog.Int64("segmentID", commit.SegmentID))
-		return nil, nil
+		complete(nil, nil)
+		return nil
 	}
 	if snapshot.GetStorageVersion() != storage.StorageV3 {
-		return nil, merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
+		return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 	}
 	if !matchesExpectedManifest(commit.ExpectedManifest, snapshot.GetManifestPath()) {
-		return nil, staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
+		return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
 	}
-	manifestPath, err := m.commitManifestMutation(ctx, io, snapshot.GetManifestPath(), commit)
-	if err != nil {
-		return nil, err
-	}
-	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, io, snapshot, manifestPath, commit)
-	if err != nil {
-		return nil, err
-	}
-	return &preparedSegmentManifest{
-		commit:       commit,
-		manifestPath: manifestPath,
-		baseManifest: snapshot.GetManifestPath(),
-	}, nil
+	return m.submitManifestMutation(ctx, io, snapshot.GetManifestPath(), commit, func(manifestPath string, err error) {
+		complete(&preparedSegmentManifest{
+			commit:       commit,
+			manifestPath: manifestPath,
+			baseManifest: snapshot.GetManifestPath(),
+		}, err)
+	})
 }
 
 // publishSegmentManifestOperator produces the stage-3 operator that publishes one

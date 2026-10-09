@@ -568,8 +568,23 @@ func mockManifestIndexSubmissions(t *testing.T) {
 	t.Cleanup(func() { mock.UnPatch() })
 }
 
+// Adapt a mocked blocking commit to callback delivery. Install only alongside a
+// CommitManifestUpdatesAsync mock, since the real wrapper calls the submit API.
+func mockManifestUpdateSubmissions(t *testing.T) {
+	t.Helper()
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(string, error)) error {
+		go func() {
+			manifestPath, err := packed.CommitManifestUpdatesAsync(ctx, io, base, version, config, updates)
+			complete(manifestPath, err)
+		}()
+		return nil
+	}).Build()
+	t.Cleanup(func() { mock.UnPatch() })
+}
+
 func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	t.Helper()
+	mockManifestUpdateSubmissions(t)
 	mockManifestIndexSubmissions(t)
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 

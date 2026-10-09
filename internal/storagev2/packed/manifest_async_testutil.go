@@ -54,10 +54,17 @@ func testOpenManifestCommit(io *ManifestIOContext, base string, config *indexpb.
 		io.release()
 		return nil, nil, err
 	}
-	return func(ctx context.Context) (int64, error) { return io.commit(ctx, txn) }, func() {
-		C.loon_transaction_destroy(txn)
-		io.release()
-	}, nil
+	return func(ctx context.Context) (int64, error) {
+			done := make(chan manifestCommitResult, 1)
+			if err := io.submitCommit(ctx, txn, func(result manifestCommitResult) { done <- result }); err != nil {
+				return -1, err
+			}
+			result := <-done
+			return result.finish(ctx)
+		}, func() {
+			C.loon_transaction_destroy(txn)
+			io.release()
+		}, nil
 }
 
 //export milvusTestManifestBlock

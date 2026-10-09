@@ -216,10 +216,10 @@ type manifestCommitResult struct {
 //export milvusManifestCommitDone
 func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t) {
 	h := cgo.Handle(token)
-	done := h.Value().(chan manifestCommitResult)
+	complete := h.Value().(func(manifestCommitResult))
 	value := manifestCommitResult{ManifestCommitOutcome(outcome), int64(version), handleManifestAsyncResult(result)}
 	h.Delete()
-	done <- value
+	complete(value)
 }
 
 // Async queue exhaustion and deadline codes are outside the native ExtendStatus
@@ -329,30 +329,38 @@ func SubmitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manife
 	return err
 }
 
-func (io *ManifestIOContext) commit(ctx context.Context, txn C.LoonTransactionHandle) (int64, error) {
+// submitCommit transfers completion to the executor without waiting for the
+// native callback. Like submitOpen, it serializes access to the caller-owned
+// handle even when completion races the return from submission.
+func (io *ManifestIOContext) submitCommit(ctx context.Context, txn C.LoonTransactionHandle, complete func(manifestCommitResult)) error {
 	if err := ctx.Err(); err != nil {
-		return -1, &ManifestCommitError{ManifestNotCommitted, err}
+		return &ManifestCommitError{ManifestNotCommitted, err}
 	}
-	done := make(chan manifestCommitResult, 1)
-	token := cgo.NewHandle(done)
-	// The native API copies timeout and only accesses this caller-owned handle
-	// during submission/cancel/release, serialized here by the waiting goroutine.
+	var mu sync.Mutex
 	operation := manifestAsyncHandle(ctx)
+	var stopCancel func() bool
+	token := cgo.NewHandle(func(result manifestCommitResult) {
+		mu.Lock()
+		stopCancel()
+		C.loon_async_release(&operation)
+		mu.Unlock()
+		complete(result)
+	})
+	mu.Lock()
 	res := C.loon_transaction_commit_async(io.native, txn,
 		(C.LoonTransactionCommitCallback)(C.milvusManifestCommitDone), C.uintptr_t(token), &operation)
 	if err := handleManifestAsyncResult(res); err != nil {
+		mu.Unlock()
 		token.Delete()
-		return -1, &ManifestCommitError{ManifestNotCommitted, merr.WrapErrStorage(err, "submit manifest commit")}
+		return &ManifestCommitError{ManifestNotCommitted, merr.WrapErrStorage(err, "submit manifest commit")}
 	}
-	defer C.loon_async_release(&operation)
-	var result manifestCommitResult
-	select {
-	case result = <-done:
-	case <-ctx.Done():
+	stopCancel = context.AfterFunc(ctx, func() {
+		mu.Lock()
 		C.loon_async_cancel(&operation)
-		result = <-done // Cancellation cannot erase COMMITTED or UNKNOWN.
-	}
-	return result.finish(ctx)
+		mu.Unlock()
+	})
+	mu.Unlock()
+	return nil
 }
 
 func (result manifestCommitResult) finish(ctx context.Context) (int64, error) {
@@ -418,49 +426,98 @@ func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]
 	return manifestIndexInfos(manifest, manifestPath)
 }
 
-// CommitManifestUpdatesAsync uses the same mutation/projection code as the
-// synchronous API. Drop validation reuses the opened transaction's manifest;
-// it does not perform a second manifest read.
-func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+// SubmitManifestUpdates waits only for admission, then chains native open and
+// commit on io's executor. An accepted submission calls complete exactly once,
+// possibly before returning; rejection returns an error without a callback.
+// Updates must remain immutable until completion. The callback must not block,
+// submit more work, or close its own IO context. Close drains accepted work.
+func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(string, error)) error {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return err
 	}
 	if updates.isEmpty() {
-		return MarshalManifestPath(base, version), nil
+		complete(MarshalManifestPath(base, version), nil)
+		return nil
 	}
 	if err := io.acquire(ctx); err != nil {
-		return "", err
+		return err
 	}
-	defer io.release()
-	txn, err := io.open(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE)
+	err := io.submitOpen(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, func(result manifestOpenResult) {
+		finish := func(manifestPath string, err error) {
+			defer io.release()
+			if result.transaction != 0 {
+				defer C.loon_transaction_destroy(result.transaction)
+			}
+			complete(manifestPath, err)
+		}
+		if result.err != nil {
+			finish("", result.err)
+			return
+		}
+		manifestPath := MarshalManifestPath(base, version)
+		changed, err := applyAsyncManifestUpdates(result.transaction, manifestPath, updates)
+		if err != nil {
+			finish("", err)
+			return
+		}
+		if !changed {
+			finish(manifestPath, nil)
+			return
+		}
+		// Keep the original admission slot and transaction until commit completes.
+		// Submitting directly avoids re-entering admission from an executor worker.
+		err = io.submitCommit(ctx, result.transaction, func(result manifestCommitResult) {
+			committed, err := result.finish(ctx)
+			if err != nil {
+				finish("", err)
+				return
+			}
+			finish(MarshalManifestPath(base, committed), nil)
+		})
+		if err != nil {
+			finish("", err)
+		}
+	})
 	if err != nil {
-		return "", err
+		io.release()
 	}
-	defer C.loon_transaction_destroy(txn)
+	return err
+}
+
+// Drop validation uses the already loaded transaction instead of another read.
+func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string, updates *ManifestUpdates) (bool, error) {
 	var drops []int64
 	if len(updates.DropIndexes) > 0 {
-		manifestPath := MarshalManifestPath(base, version)
 		indexes, err := transactionIndexInfos(txn, manifestPath)
 		if err != nil {
-			return "", err
+			return false, err
 		}
 		drops, err = resolveManifestIndexDrops(manifestPath, indexes, updates.DropIndexes)
 		if err != nil {
-			return "", err
+			return false, err
 		}
 		if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
 			len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
-			return manifestPath, nil
+			return false, nil
 		}
 	}
-	if err := applyManifestUpdates(txn, updates, drops); err != nil {
+	return true, applyManifestUpdates(txn, updates, drops)
+}
+
+// CommitManifestUpdatesAsync waits for the terminal callback, including on cancellation.
+func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+	type commitResult struct {
+		path string
+		err  error
+	}
+	done := make(chan commitResult, 1)
+	if err := SubmitManifestUpdates(ctx, io, base, version, config, updates, func(path string, err error) {
+		done <- commitResult{path, err}
+	}); err != nil {
 		return "", err
 	}
-	committed, err := io.commit(ctx, txn)
-	if err != nil {
-		return "", err
-	}
-	return MarshalManifestPath(base, committed), nil
+	result := <-done
+	return result.path, result.err
 }
 
 // AddDeltaLogsToManifestOverwriteAsync serves the legacy L0 publication path.
