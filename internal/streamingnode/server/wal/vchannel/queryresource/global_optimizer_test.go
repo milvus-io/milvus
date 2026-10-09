@@ -3,9 +3,12 @@ package queryresource
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -13,9 +16,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -281,4 +286,73 @@ func TestGlobalOptimizerBM25InvalidRequests(t *testing.T) {
 	defer patch.UnPatch()
 	_, err = opt.OptimizeSearch(context.Background(), req)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestGlobalOptimizerIDFResourceErrors(t *testing.T) {
+	const key = "retryable-bm25-idf"
+	const collection = int64(502)
+	require.NoError(t, function.GetManager().Alloc(collection, key, testBM25Schema(101, 102)))
+	defer function.GetManager().Release(collection, key)
+	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+
+	for _, tc := range []struct {
+		name      string
+		err       error
+		retryable bool
+		callerErr error
+	}{
+		{name: "coord not ready", err: merr.CheckRPCCall(merr.Status(merr.WrapErrServiceNotReadyMsg("coord restarting")), nil), retryable: true},
+		{name: "coord unavailable", err: status.Error(codes.Unavailable, "coord connection lost"), retryable: true},
+		{name: "resource rpc timeout", err: status.Error(codes.DeadlineExceeded, "resource rpc timed out"), retryable: true},
+		{name: "internal error", err: merr.WrapErrServiceInternalMsg("invalid resource response")},
+		{name: "corrupt resources", err: merr.WrapErrDataIntegrityMsg("duplicate segment")},
+		{name: "collection released", err: merr.WrapErrCollectionNotLoaded(collection)},
+		{name: "resource exhausted", err: status.Error(codes.ResourceExhausted, "cannot load resources")},
+		{name: "cancellation", err: context.Canceled},
+		{name: "deadline", err: context.DeadlineExceeded},
+		{name: "caller cancellation wins", err: status.Error(codes.Unavailable, "coord connection lost"), callerErr: context.Canceled},
+		{name: "caller deadline wins", err: status.Error(codes.DeadlineExceeded, "resource rpc timed out"), callerErr: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			switch tc.callerErr {
+			case context.Canceled:
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			case context.DeadlineExceeded:
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+			}
+			calls := 0
+			patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).To(func(_ fakeIDFModule, _ context.Context, requests []IDFRequest) ([]IDFResult, error) {
+				calls++
+				if calls == 1 {
+					return nil, merr.Wrap(tc.err, "fetch sealed BM25 resources")
+				}
+				return []IDFResult{{Avgdl: 3}}, nil
+			}).Build()
+			defer patch.UnPatch()
+
+			_, err := opt.OptimizeSearch(ctx, testBM25SearchRequest(t, collection, 101, 102))
+			require.Error(t, err)
+			if tc.callerErr != nil {
+				require.ErrorIs(t, err, tc.callerErr)
+			} else if !tc.retryable {
+				require.ErrorIs(t, err, tc.err)
+				require.False(t, viewerror.AsViewError(err).IsRetryable())
+			} else {
+				viewErr := viewerror.AsViewError(err)
+				require.True(t, viewErr.IsViewInvalidated())
+				rpcErr := viewerror.NewGRPCStatusFromViewError(viewErr).Err()
+				decoded := viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", rpcErr))
+				require.True(t, decoded.IsRetryable())
+				require.Contains(t, decoded.Cause, "fetch sealed BM25 resources")
+				_, err = opt.OptimizeSearch(ctx, testBM25SearchRequest(t, collection, 101, 102))
+				require.NoError(t, err)
+				require.Equal(t, 2, calls)
+			}
+		})
+	}
 }
