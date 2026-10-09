@@ -56,6 +56,15 @@ CreateArrayValueStorageFromProto(
 // the immutable heap buffer and its child Chunk tree. Unlike a sealed
 // ColumnarArrayChunk, the single root value stores length directly and does not
 // materialize the redundant root offsets [0, length].
+//
+// Segments do not keep ArrayValues: growing chunks hold one ArrayValueView per
+// row into per-batch ColumnarArrayChunks and sealed segments hold
+// ColumnarArrayChunks, so stored rows are read as ArrayValueView. An ArrayValue
+// exists only as an element of FieldData<ArrayValue> while binlogs are read or
+// written or a growing segment is loaded, and as an owned sealed Take result
+// (RawTakeResult::GetOwn); growing inserts build blocks from the protobuf rows
+// directly. ConcurrentVector<ArrayValue> and
+// VariableLengthChunk<ArrayValue> use the type only as a tag.
 class ArrayValue {
     friend class ArrayValueView;
     friend std::vector<ArrayValue>
