@@ -39,6 +39,9 @@ func idempotencyScope(msgType message.MessageType, key message.IdempotencyKey) s
 // and task creation (which runs after) had to derive it from two different places
 // and agree.
 func idempotencyScopeOfMessage(msg message.BroadcastMutableMessage) string {
+	if key := message.BroadcastAdmissionKeyOf(msg); key != "" {
+		return txnAdmissionScope(key)
+	}
 	return idempotencyScope(msg.MessageType(), message.IdempotencyKeyOf(msg))
 }
 

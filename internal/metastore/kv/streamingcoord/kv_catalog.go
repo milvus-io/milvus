@@ -191,16 +191,24 @@ func (c *catalog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.Broadca
 	return infos, nil
 }
 
-func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error {
-	key := buildBroadcastTaskPath(broadcastID)
-	if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
-		return c.metaKV.Remove(ctx, key)
+// SaveBroadcastTasks is deliberately one KV transaction. In particular, splitting
+// a terminal update or GC batch could leave a Begin owning resources after Commit.
+func (c *catalog) SaveBroadcastTasks(ctx context.Context, tasks map[uint64]*streamingpb.BroadcastTask) error {
+	saves := make(map[string]string, len(tasks))
+	removals := make([]string, 0, len(tasks))
+	for id, task := range tasks {
+		key := buildBroadcastTaskPath(id)
+		if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+			removals = append(removals, key)
+			continue
+		}
+		value, err := proto.Marshal(task)
+		if err != nil {
+			return merr.Wrap(err, "marshal broadcast task")
+		}
+		saves[key] = string(value)
 	}
-	v, err := proto.Marshal(task)
-	if err != nil {
-		return errors.Wrapf(err, "marshal broadcast task failed")
-	}
-	return c.metaKV.Save(ctx, key, string(v))
+	return c.metaKV.MultiSaveAndRemove(ctx, saves, removals)
 }
 
 // buildPChannelInfoPath builds the path for pchannel info.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -288,7 +289,9 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
 	}
-	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
+	if bt.txn == nil || bt.Header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
+		s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
+	}
 	return nil
 }
 

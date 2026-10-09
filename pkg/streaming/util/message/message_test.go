@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/github.com/milvus-io/milvus-proto/go-api/v3/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMessageType(t *testing.T) {
@@ -155,7 +156,10 @@ func TestBroadcast(t *testing.T) {
 		BuildBroadcast()
 	assert.NoError(t, err)
 	assert.NotNil(t, msg)
-	msg.OverwriteBroadcastHeader(1, NewSharedDBNameResourceKey("1"), NewExclusiveCollectionNameResourceKey("1", "2"))
+	header := msg.BroadcastHeader()
+	header.BroadcastID = 1
+	header.ResourceKeys = typeutil.NewSet(NewSharedDBNameResourceKey("1"), NewExclusiveCollectionNameResourceKey("1", "2"))
+	msg.OverwriteBroadcastHeader(header)
 	msgs := msg.SplitIntoMutableMessage()
 	assert.NotNil(t, msgs)
 	assert.Len(t, msgs, 2)
@@ -293,7 +297,11 @@ func TestWithBroadcastControlChannel(t *testing.T) {
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 
 	// Missing: appended at the end, the other header fields survive.
-	msg := WithBroadcastControlChannel(build([]string{"v1", "v2"}).OverwriteBroadcastHeader(7, NewExclusiveClusterResourceKey()), cchannel)
+	msg := build([]string{"v1", "v2"})
+	header := msg.BroadcastHeader()
+	header.BroadcastID = 7
+	header.ResourceKeys = typeutil.NewSet(NewExclusiveClusterResourceKey())
+	msg = WithBroadcastControlChannel(msg.OverwriteBroadcastHeader(header), cchannel)
 	assert.Equal(t, []string{"v1", "v2", cchannel}, sortedExceptLast(msg.BroadcastHeader().VChannels))
 	assert.Equal(t, uint64(7), msg.BroadcastHeader().BroadcastID)
 	assert.True(t, msg.BroadcastHeader().AckSyncUp)

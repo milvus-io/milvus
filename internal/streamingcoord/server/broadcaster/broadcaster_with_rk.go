@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type broadcasterWithRK struct {
@@ -19,6 +20,9 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	if msg.BroadcastHeader().Txn != nil || message.BroadcastAdmissionKeyOf(msg) != "" {
+		return nil, merr.WrapErrParameterInvalidMsg("transaction messages require the transaction broadcast API")
+	}
 	if b.unreplicable && !msg.IsUnreplicable() {
 		// The guards are still the caller's here, so its Close() releases them.
 		return nil, merr.WrapErrServiceInternalMsg("a broadcast started without the primary check must carry an unreplicable message, got %s", msg.MessageType())
@@ -42,7 +46,10 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// ack callback scheduler, and its time tick orders the ack callbacks.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
-	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
+	header := msg.BroadcastHeader()
+	header.BroadcastID = b.broadcastID
+	header.ResourceKeys = typeutil.NewSet(guards.ResourceKeys()...)
+	msg.OverwriteBroadcastHeader(header)
 	msg = message.WithBroadcastControlChannel(msg, b.controlChannel)
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
 	defer span.End()

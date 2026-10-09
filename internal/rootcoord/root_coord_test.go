@@ -206,7 +206,10 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		// Stamp the header the way the real broadcaster does, control channel included.
-		msg = msg.OverwriteBroadcastHeader(1)
+		header := msg.BroadcastHeader()
+		header.BroadcastID = 1
+		header.ResourceKeys = nil
+		msg.OverwriteBroadcastHeader(header)
 		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {

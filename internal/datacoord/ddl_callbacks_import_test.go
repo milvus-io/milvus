@@ -1814,7 +1814,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		WithBroadcast([]string{"vchannel1"}).
 		MustBuildBroadcast().
-		OverwriteBroadcastHeader(1)
+		WithBroadcastID(1)
 	broadcastMsg = message.WithBroadcastControlChannel(broadcastMsg, cchannel)
 	result := message.BroadcastResultImportMessageV1{
 		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),

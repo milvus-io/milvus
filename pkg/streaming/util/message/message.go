@@ -150,8 +150,11 @@ type BroadcastMutableMessage interface {
 	// WithBroadcastID sets the broadcast id of the message.
 	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage
 
-	// OverwriteBroadcastHeader overwrites the broadcast header of the message.
-	OverwriteBroadcastHeader(broadcastID uint64, rks ...ResourceKey) BroadcastMutableMessage
+	// OverwriteBroadcastHeader replaces all known broadcast header fields in place.
+	OverwriteBroadcastHeader(header *BroadcastHeader) BroadcastMutableMessage
+
+	// OverwriteBroadcastAdmissionKey overwrites the admission identity in place; empty clears it.
+	OverwriteBroadcastAdmissionKey(key string) BroadcastMutableMessage
 
 	// SplitIntoMutableMessage splits the broadcast message into multiple mutable messages.
 	// The broadcast id will be set into the properties of each message.

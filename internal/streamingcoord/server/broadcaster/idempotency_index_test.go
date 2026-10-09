@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestIdempotencyIndex(t *testing.T) {
@@ -108,7 +109,11 @@ func createImportBroadcastTaskProto(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	msg := newImportMsgWithKey(key).OverwriteBroadcastHeader(broadcastID, rks...)
+	msg := newImportMsgWithKey(key)
+	header := msg.BroadcastHeader()
+	header.BroadcastID = broadcastID
+	header.ResourceKeys = typeutil.NewSet(rks...)
+	msg.OverwriteBroadcastHeader(header)
 	return createNewWaitAckBroadcastTaskFromMessage(msg, state, bitmap)
 }
 
@@ -148,7 +153,7 @@ func TestIdempotencyIndexRecovery(t *testing.T) {
 	}()
 
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	// The recovered PENDING task is re-appended by the broadcast scheduler; serve it a
@@ -232,7 +237,7 @@ func newBroadcastTaskManagerForTest(t *testing.T, protos ...*streamingpb.Broadca
 	})
 
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	operator := mock_streaming.NewMockWALAccesser(t)
@@ -384,12 +389,13 @@ func TestIdempotencyScopeIgnoresResourceKeys(t *testing.T) {
 	bare := idempotencyScopeOfMessage(msg)
 	require.NotEmpty(t, bare)
 
-	beforeRename := msg.OverwriteBroadcastHeader(100,
-		message.NewSharedDBNameResourceKey("db1"),
-		message.NewExclusiveCollectionNameResourceKey("db1", "coll1"))
-	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101,
-		message.NewSharedDBNameResourceKey("db1"),
-		message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed"))
+	header := msg.BroadcastHeader()
+	header.BroadcastID = 100
+	header.ResourceKeys = typeutil.NewSet(message.NewSharedDBNameResourceKey("db1"), message.NewExclusiveCollectionNameResourceKey("db1", "coll1"))
+	beforeRename := msg.OverwriteBroadcastHeader(header)
+	header.BroadcastID = 101
+	header.ResourceKeys = typeutil.NewSet(message.NewSharedDBNameResourceKey("db1"), message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed"))
+	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(header)
 
 	require.Equal(t, bare, idempotencyScopeOfMessage(beforeRename))
 	require.Equal(t, bare, idempotencyScopeOfMessage(afterRename))
@@ -639,7 +645,10 @@ func createBroadcastTaskProtoFromMessage(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, rks...), state, bitmap)
+	header := msg.BroadcastHeader()
+	header.BroadcastID = broadcastID
+	header.ResourceKeys = typeutil.NewSet(rks...)
+	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(header), state, bitmap)
 }
 
 // TestNonImportBroadcastIsDeduplicated is the acceptance test for this mechanism
@@ -709,7 +718,7 @@ func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*strea
 	t.Cleanup(func() { roleCheck.UnPatch() })
 
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	rc := idalloc.NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(rc)

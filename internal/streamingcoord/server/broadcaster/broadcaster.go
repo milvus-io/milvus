@@ -22,6 +22,13 @@ func IsBroadcastTaskNotCreated(err error) bool {
 }
 
 type Broadcaster interface {
+	// StartTxnBroadcastWithResourceKey acquires admission X before business locks.
+	// A duplicate returns only its original Begin result; otherwise Close the returned handle.
+	StartTxnBroadcastWithResourceKey(ctx context.Context, keys ...message.ResourceKey) (TxnBroadcaster, *TxnBroadcastResult, error)
+
+	// RecoverTxnBroadcast returns a handle to an existing group without reacquiring resources.
+	RecoverTxnBroadcast(ctx context.Context, txnID uint64) (TxnBroadcaster, error)
+
 	// WithResourceKeys sets the resource keys of the broadcast operation.
 	// It will acquire locks of the resource keys and return the broadcast api.
 	// Once the broadcast api is returned, the Close() method of the broadcast api should be called to release the resource safely.
@@ -66,3 +73,25 @@ type BroadcastAPI interface {
 type AppendOperator interface {
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses
 }
+
+// TxnBroadcaster owns no business commit/abort policy. Both terminal choices use BroadcastCommit.
+// Methods serialize across recovered handles. Close before Begin releases admission/resources;
+// after admission it closes only this handle. Request cancellation never aborts an admitted member.
+type TxnBroadcaster interface {
+	BroadcastBegin(context.Context, message.BroadcastMutableMessage) (*TxnBroadcastResult, error)
+	BroadcastBody(context.Context, message.BroadcastMutableMessage) (*TxnBroadcastResult, error)
+	BroadcastCommit(context.Context, message.BroadcastMutableMessage, ...TxnCommitOption) (*TxnBroadcastResult, error)
+	Close()
+}
+
+type TxnBroadcastResult struct {
+	TxnID           uint64
+	BroadcastResult *types.BroadcastAppendResult
+}
+
+// TxnCommitOption changes waiting policy, never the selected terminal message.
+type TxnCommitOption int
+
+// EnsureTxnCompleted waits for an already selected terminal, regardless of its content.
+// Without it, conflicting terminal requests are rejected until group GC.
+const EnsureTxnCompleted TxnCommitOption = 1
