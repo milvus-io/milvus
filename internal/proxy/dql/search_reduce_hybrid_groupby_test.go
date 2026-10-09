@@ -140,14 +140,27 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 					data := proto.Clone(shard).(*schemapb.SearchResultData)
 					if shardIdx > 0 {
 						ids := data.GetIds().GetIntId().GetData()
+						if reqIdx == 1 {
+							for i := range ids {
+								ids[i] += 100
+							}
+							groups := data.GroupByFieldValues[0].GetScalars().GetStringData().GetData()
+							for i := range groups {
+								groups[i] += "_other"
+							}
+						}
 						value := multiGroupByTestLongField(103, append([]int64(nil), ids...))
 						valid := []bool{true, false, true}
-						vectors := []float32{20, 20, 30, 30}
 						vectorValid := []bool{false, true, true}
 						if shardIdx == 2 {
 							valid = []bool{true, true, false}
-							vectors = []float32{40, 40, 60, 60}
 							vectorValid = []bool{true, false, true}
+						}
+						var vectors []float32
+						for i, id := range ids {
+							if vectorValid[i] {
+								vectors = append(vectors, float32(id), float32(id))
+							}
 						}
 						typeutil.SetFieldDataValidData(value, valid)
 						fields := map[int64]*schemapb.FieldData{
@@ -176,12 +189,22 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			reduced, err := reducer.run(ctx, span, wireResults)
 			require.NoError(t, err)
 			results := reduced[0].([]*milvuspb.SearchResults)
-			for _, result := range results {
+			for reqIdx, result := range results {
 				require.Equal(t, []int64{3, 3}, result.Results.Topks)
-				require.Equal(t, []int64{10, 20, 40, 30, 50, 60}, result.Results.Ids.GetIntId().GetData())
+				expectedIDs := []int64{10, 20, 40, 30, 50, 60}
+				expectedGroups := []string{"A", "", "C", "B", "D", ""}
+				if reqIdx == 1 {
+					for i := range expectedIDs {
+						expectedIDs[i] += 100
+						if expectedGroups[i] != "" {
+							expectedGroups[i] += "_other"
+						}
+					}
+				}
+				require.Equal(t, expectedIDs, result.Results.Ids.GetIntId().GetData())
 				group := result.Results.GetGroupByFieldValues()[0]
 				require.Equal(t, []bool{true, false, true, true, true, false}, typeutil.GetFieldDataValidData(group))
-				require.Equal(t, []string{"A", "", "C", "B", "D", ""}, group.GetScalars().GetStringData().GetData())
+				require.Equal(t, expectedGroups, group.GetScalars().GetStringData().GetData())
 			}
 			ranker, err := newRerankOperator(task, nil)
 			require.NoError(t, err)
@@ -197,6 +220,12 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			result := assembled[0].(*milvuspb.SearchResults).GetResults()
 			require.Equal(t, []int64{3, 3}, result.GetTopks())
 			ids := result.GetIds().GetIntId().GetData()
+			var fromFirst, fromSecond bool
+			for _, id := range ids {
+				fromFirst = fromFirst || id < 100
+				fromSecond = fromSecond || id > 100
+			}
+			require.True(t, fromFirst && fromSecond, "assembly must read field rows from both ANN subrequests")
 			require.Equal(t, ids, reduce.FindFieldDataByID(result.FieldsData, 100).GetScalars().GetLongData().GetData())
 			if tc.namespace {
 				value := reduce.FindFieldDataByID(result.FieldsData, 103)
@@ -205,8 +234,8 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				var expectedValueValid, expectedVectorValid []bool
 				var expectedVectors []float32
 				for _, id := range ids {
-					expectedValueValid = append(expectedValueValid, id != 20 && id != 60)
-					valid := id != 10 && id != 50
+					expectedValueValid = append(expectedValueValid, id%100 != 20 && id%100 != 60)
+					valid := id%100 != 10 && id%100 != 50
 					expectedVectorValid = append(expectedVectorValid, valid)
 					if valid {
 						expectedVectors = append(expectedVectors, float32(id), float32(id))
