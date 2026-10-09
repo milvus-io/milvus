@@ -1,10 +1,15 @@
 package transformlog
 
 import (
+	"context"
 	"io"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type resumableSubscription struct {
@@ -159,9 +164,18 @@ func (h *checkpointEventHandler) Close() {
 // Underlying streams close their handlers on disconnection as well as normal
 // completion. Only a proven bounded end or a terminal subscription error ends
 // the logical subscription; transport failures are resumed from accepted data.
-type resumeHandler struct{ sub *resumableSubscription }
+type resumeHandler struct {
+	sub    *resumableSubscription
+	cancel context.CancelFunc
+}
 
 func (h resumeHandler) Handle(event wal.TransformLogStreamEvent) error {
+	if isRetryableSubscriptionError(event.Err) {
+		// Closing the underlying stream here may wait on this callback. Let the
+		// resume loop close it and resubscribe without failing the QN buffer.
+		h.cancel()
+		return nil
+	}
 	if event.Err != nil {
 		h.sub.setError(event.Err)
 	}
@@ -175,6 +189,23 @@ func (h resumeHandler) Handle(event wal.TransformLogStreamEvent) error {
 		go h.sub.stream.removeSubscription(h.sub, err)
 	}
 	return err
+}
+
+func isRetryableSubscriptionError(err error) bool {
+	if status.IsCanceled(err) {
+		return true
+	}
+	var se *status.StreamingError
+	if !errors.As(err, &se) {
+		return false
+	}
+	if se.IsOnShutdown() || se.IsWrongStreamingNode() || se.IsFenced() {
+		return true
+	}
+	// Older SNs encode context errors as UNKNOWN. Recognize only the exact
+	// legacy causes, not arbitrary UNKNOWN or semantic/data failures.
+	return se.Code == streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN &&
+		(se.Cause == context.Canceled.Error() || se.Cause == context.DeadlineExceeded.Error())
 }
 
 func (h resumeHandler) Close() {
