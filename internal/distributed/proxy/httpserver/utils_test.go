@@ -4221,6 +4221,9 @@ func TestSchemaForPathReplaceOperandsRejectsScalarArrayNull(t *testing.T) {
 		Path:      "[1]",
 	}}
 	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
 
 	for _, operand := range []string{`[null]`, `"[null]"`} {
 		body := []byte(fmt.Sprintf(`{"data":[{"id":1,"scores":%s}]}`, operand))
@@ -4231,7 +4234,7 @@ func TestSchemaForPathReplaceOperandsRejectsScalarArrayNull(t *testing.T) {
 	}
 
 	// The strict raw-token check belongs only to the new PATH_REPLACE
-	// operation. It must not change legacy null handling for an
+	// operation. It must not change compatibility-mode handling for an
 	// ordinary whole-field replacement.
 	body := []byte(`{"data":[{"id":1,"scores":[null]}]}`)
 	requestSchema, err := schemaForPathReplaceOperands(body, schema, []*schemapb.FieldPartialUpdateOp{{
@@ -6933,6 +6936,11 @@ func rawIDs(raws ...string) []json.RawMessage {
 // integer or string element; a boolean or float element silently became false
 // or 0.
 func TestCheckAndSetDataRejectsNullArrayElements(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+
 	elementTypes := map[string]schemapb.DataType{
 		"bool":    schemapb.DataType_Bool,
 		"int32":   schemapb.DataType_Int32,

@@ -89,6 +89,23 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		assert.Equal(t, []string{"a", ""}, result.GetScalars().GetStringData().GetData())
 		assert.Equal(t, []bool{true, false, true}, result.GetValidData())
 	})
+	t.Run("text_all_null", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:      schemapb.DataType_Text,
+			FieldName: "nullable_text",
+			Field:     []byte(`[null, null]`),
+		}
+		raw, err := json.Marshal(fieldData)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(raw, &fieldData))
+
+		result, err := fieldData.AsSchemapb()
+		require.NoError(t, err)
+		assert.Equal(t, schemapb.DataType_Text, result.GetType())
+		require.NotNil(t, result.GetScalars().GetStringData())
+		assert.Empty(t, result.GetScalars().GetStringData().GetData())
+		assert.Equal(t, []bool{false, false}, result.GetValidData())
+	})
 	t.Run("bool_ok", func(t *testing.T) {
 		fieldData := FieldData{
 			Type:  schemapb.DataType_Bool,

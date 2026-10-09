@@ -124,14 +124,17 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 // The two halves of that rule are gated differently, for the same reason they
 // are one level up. A vector has no per-element validity anywhere in the
 // system, so a null coordinate has no representation to fall back to and the
-// refusal is unconditional. A scalar column can be nullable, and it is only
-// this wire format that cannot say so -- FieldData carries no valid_data --
-// so the refusal there is an improvement on storing a zero rather than the
-// only possible answer, and compatibilityMode restores the zero for a client
-// that has not been corrected yet.
+// refusal is unconditional. A scalar column can be nullable, and this wire
+// format cannot say so for the legacy scalar decoders. TEXT is the exception:
+// its decoder below derives ValidData from null elements. For the other scalar
+// types, compatibilityMode restores the previous zero-value behavior for a
+// client that has not been corrected yet.
 func rejectNullInFieldPayload(dataType schemapb.DataType, fieldName string, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		// absent; the typed decoder reports its own error
+		return nil
+	}
+	if dataType == schemapb.DataType_Text {
 		return nil
 	}
 	if !typeutil.IsVectorType(dataType) && paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() {
