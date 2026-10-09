@@ -22,7 +22,7 @@ type SubscribeServer struct {
 	logStream  wal.TransformLogStream
 	stream     streamingpb.StreamingNodeHandlerService_SubscribeTransformServer
 	ctx        context.Context
-	cancel     context.CancelFunc
+	cancel     context.CancelCauseFunc
 	outgoing   chan response
 	requestMu  sync.Mutex
 	subsMu     sync.Mutex
@@ -50,7 +50,7 @@ func CreateSubscribeServer(
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(stream.Context()) //nolint:gosec // Execute defers the stored cancel
+	ctx, cancel := context.WithCancelCause(stream.Context()) //nolint:gosec // Execute defers the stored cancel
 	return &SubscribeServer{
 		ctx: ctx, cancel: cancel, outgoing: make(chan response, 16),
 		walManager: walManager,
@@ -63,7 +63,7 @@ func CreateSubscribeServer(
 
 func (s *SubscribeServer) Execute() error {
 	defer s.closeAll()
-	defer s.cancel()
+	defer s.cancel(nil)
 	if err := s.stream.SendHeader(metadata.Pairs("transform-stream-ready", "true")); err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (s *SubscribeServer) Execute() error {
 	case <-s.logStream.Done():
 		return s.logStream.Error()
 	case <-s.ctx.Done():
-		return s.ctx.Err()
+		return context.Cause(s.ctx)
 	}
 }
 
@@ -95,7 +95,7 @@ func (s *SubscribeServer) sendLoop() error {
 				return err
 			}
 		case <-s.ctx.Done():
-			return s.ctx.Err()
+			return context.Cause(s.ctx)
 		}
 	}
 }
@@ -121,7 +121,7 @@ func (s *SubscribeServer) receive() error {
 func (s *SubscribeServer) processRequest(request *streamingpb.TransformRequest) error {
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
-	if err := s.ctx.Err(); err != nil {
+	if err := context.Cause(s.ctx); err != nil {
 		return err
 	}
 	switch req := request.GetRequest().(type) {
@@ -151,13 +151,13 @@ func (s *SubscribeServer) send(resp *streamingpb.TransformResponse) error {
 	select {
 	case s.outgoing <- outgoing:
 	case <-s.ctx.Done():
-		return s.ctx.Err()
+		return context.Cause(s.ctx)
 	}
 	select {
 	case err := <-outgoing.result:
 		return err
 	case <-s.ctx.Done():
-		return s.ctx.Err()
+		return context.Cause(s.ctx)
 	}
 }
 
@@ -197,7 +197,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 	exists := s.subs[req.GetSubscriptionId()] != nil
 	s.subsMu.Unlock()
 	if exists {
-		return s.sendSubscriptionError(req.GetSubscriptionId(), req.GetVchannel(), wal.ErrTransformLogInvalidReadOption)
+		return s.handleSubscriptionError(req.GetSubscriptionId(), req.GetVchannel(), wal.ErrTransformLogInvalidReadOption)
 	}
 	handler := newServerEventHandler(
 		s.ctx, req.GetSubscriptionId(),
@@ -220,7 +220,7 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 			mlog.Uint64("startAfterTimeTick", req.GetStartAfterTimeTick()),
 			mlog.Err(err),
 		)
-		return s.sendSubscriptionError(req.GetSubscriptionId(), req.GetVchannel(), err)
+		return s.handleSubscriptionError(req.GetSubscriptionId(), req.GetVchannel(), err)
 	}
 	s.subsMu.Lock()
 	s.subs[req.GetSubscriptionId()] = &serverSubscription{TransformLogSubscription: sub, handler: handler}
@@ -250,7 +250,27 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 	return nil
 }
 
-func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel string, err error) error {
+func (s *SubscribeServer) handleSubscriptionError(subscriptionID int64, vchannel string, err error) error {
+	// Explicit unsubscription closes the forwarding handler before canceling
+	// its reader. Errors reaching here belong to an active provider operation.
+	// Prefer the PChannel failure over a reader's consequential cancellation.
+	if s.ctx.Err() != nil {
+		return context.Cause(s.ctx)
+	}
+	select {
+	case <-s.logStream.Done():
+		s.cancel(s.logStream.Error())
+		return context.Cause(s.ctx)
+	default:
+	}
+	se := status.AsStreamingError(err)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		se.IsOnShutdown() || se.IsWrongStreamingNode() || se.IsFenced() {
+		// End the physical RPC outside the reader callback. No logical
+		// subscription error is delivered for an unavailable PChannel owner.
+		s.cancel(err)
+		return err
+	}
 	return s.send(&streamingpb.TransformResponse{
 		Response: &streamingpb.TransformResponse_SubscriptionError{
 			SubscriptionError: &streamingpb.TransformSubscriptionError{
@@ -265,23 +285,13 @@ func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel s
 
 func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEvent) error {
 	if event.Err != nil {
-		// Local SN streams report canceled reads while shutting down. Those are
-		// transport failures: reconnect rather than poison the QN subscription.
-		if errors.Is(event.Err, context.Canceled) || errors.Is(event.Err, context.DeadlineExceeded) {
-			select {
-			case <-s.logStream.Done():
-				s.cancel()
-				return event.Err
-			default:
-			}
-		}
 		mlog.Debug(s.stream.Context(), "streamingnode transform log subscription failed",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.FieldVChannel(event.VChannel),
 			mlog.Int64("subscriptionID", event.SubscriptionID),
 			mlog.Err(event.Err),
 		)
-		return s.sendSubscriptionError(event.SubscriptionID, event.VChannel, event.Err)
+		return s.handleSubscriptionError(event.SubscriptionID, event.VChannel, event.Err)
 	}
 	if event.Entry != nil {
 		mlog.Debug(s.stream.Context(), "streamingnode transform log forward entry",

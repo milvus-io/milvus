@@ -32,6 +32,7 @@ type contractStream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	mu     sync.Mutex
+	err    error
 	wg     sync.WaitGroup
 }
 
@@ -67,7 +68,14 @@ func newContractSource(t *testing.T) *contractSource {
 		return stream, nil
 	}).Build())
 	patch(t, mockey.Mock((*contractStream).Done).To(func(s *contractStream) <-chan struct{} { return s.ctx.Done() }).Build())
-	patch(t, mockey.Mock((*contractStream).Error).To(func(s *contractStream) error { return s.ctx.Err() }).Build())
+	patch(t, mockey.Mock((*contractStream).Error).To(func(s *contractStream) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.err != nil {
+			return s.err
+		}
+		return s.ctx.Err()
+	}).Build())
 	patch(t, mockey.Mock((*contractStream).Close).To(func(s *contractStream) error { s.mu.Lock(); s.cancel(); s.mu.Unlock(); s.wg.Wait(); return nil }).Build())
 	patch(t, mockey.Mock((*contractSubscription).ID).To(func(s *contractSubscription) int64 { return s.opt.SubscriptionID }).Build())
 	patch(t, mockey.Mock((*contractSubscription).VChannel).To(func(s *contractSubscription) string { return s.opt.VChannel }).Build())
