@@ -61,6 +61,13 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 		return actionNone
 	}
 	if target, managed := snap.TargetNodes(shardID); managed && len(target) == 0 {
+		// No capacity in this replica's RG: preserve lifecycle state until
+		// topology changes. Node-failure reports still advance the state machine;
+		// capacity loss alone must not turn recovery into an explicit release.
+		replica := findReplica(desired, shardID.ReplicaID)
+		if len(snap.CandidateNodes(replica.ResourceGroup)) == 0 {
+			return actionNone
+		}
 		if !hasAnyView {
 			return actionNone
 		}
@@ -144,7 +151,9 @@ func healthyUp(snap balanceInput, id qviews.ShardID) bool {
 	if entry != nil {
 		for _, node := range entry.UpNodes() {
 			n := snap.NodesMap()[node]
-			if n == nil || !n.Alive || n.Stopping {
+			// Stopping forbids new placement, but an existing Up view can
+			// still serve until its replacement is ready or a node fails.
+			if n == nil || !n.Alive {
 				return false
 			}
 		}

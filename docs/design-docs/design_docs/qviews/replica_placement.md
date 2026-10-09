@@ -59,6 +59,16 @@ When N = 0, no valid new placement exists for nonempty data. Preserve lifecycle
 state and wait for node events or retries without generating invalid targets.
 When R = 0, discard targets and clean up residual views.
 
+Allocation eligibility and existing serving coverage are separate: an Alive
+but Stopping QN cannot receive new placements, but its existing Up views still
+count as serving coverage. With N = 0, the balancer does not release Up,
+Preparing, or Unrecoverable views merely because their target sets are empty.
+Actual node-failure reports continue to drive the QueryView state machine;
+retaining lifecycle state does not assert that a failed node can serve queries.
+When eligible nodes return, prepare replacements and let the existing lifecycle
+perform handoff or recovery. Explicit unload or replica removal still releases
+residual views even when the resource group has no eligible nodes.
+
 Feasibility still requires target nodes to load the data. The current interfaces
 provide no capacity admission control, so node count alone cannot guarantee
 sufficient memory. In particular, when N < R, each Active replica has only one

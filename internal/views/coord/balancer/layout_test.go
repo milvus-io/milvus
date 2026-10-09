@@ -146,6 +146,71 @@ func TestReplicaSuspensionPreservesLastServingCover(t *testing.T) {
 	require.Empty(t, plan.Retries)
 }
 
+func TestReplicaZeroCapacityPreservesLifecycle(t *testing.T) {
+	for _, nodeState := range []string{"stopping", "dead", "absent", "other resource group"} {
+		for _, state := range []string{"absent", "Up", "Preparing", "Unrecoverable"} {
+			t.Run(nodeState+"/"+state, func(t *testing.T) {
+				c := replicaCache(1, 0)
+				id := cacheShard(1, 10)
+				switch nodeState {
+				case "stopping":
+					c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg1", Alive: true, Stopping: true})
+				case "dead":
+					c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg1"})
+				case "other resource group":
+					c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg2", Alive: true})
+				}
+				switch state {
+				case "Up":
+					c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
+				case "Preparing":
+					c.PublishShard(id, withPreparingVersion(testShardStats(nil, 0, placement(1000, 1, 1, coordview.SegmentStatePreparing)), ver(1, 0, 1)))
+				case "Unrecoverable":
+					c.PublishShard(id, testShardStats(nil, 0, placement(1000, 1, 1, coordview.SegmentStateUnrecoverable)))
+				}
+				p := NewDefaultBalancePolicy()
+				for range 3 {
+					plan := p.Plan(c, []qviews.ShardID{id})
+					require.Empty(t, plan.Prepares)
+					require.Empty(t, plan.Releases, "capacity loss is not an explicit release")
+					require.Empty(t, plan.Retries)
+				}
+				// Explicit unload still tears down every resident lifecycle state.
+				c.PublishLoadConfig(1, nil, 2)
+				plan := p.Plan(c, []qviews.ShardID{id})
+				if state != "absent" {
+					require.Contains(t, plan.Releases, id)
+				}
+			})
+		}
+	}
+}
+
+func TestReplicaSuspensionRetainsStoppingCoverUntilSiblingUp(t *testing.T) {
+	c := replicaCache(2, 1)
+	a, b := cacheShard(1, 10), cacheShard(1, 11)
+	p := NewDefaultBalancePolicy()
+	initial := p.Plan(c, []qviews.ShardID{a})
+	require.Len(t, initial.Prepares, 1)
+	for id := range initial.Prepares {
+		a = id
+	}
+	if a.ReplicaID == b.ReplicaID {
+		b.ReplicaID = 10
+	}
+	// The suspended replica is still serving on a stopping node outside targets.
+	c.PublishNode(2, &NodeInfo{NodeID: 2, ResourceGroup: "rg1", Alive: true, Stopping: true})
+	c.PublishShard(b, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 2, coordview.SegmentStateUp)))
+	c.PublishShard(a, withPreparingVersion(testShardStats(nil, 0, placement(1000, 1, 1, coordview.SegmentStateReady)), ver(1, 0, 1)))
+	plan := p.Plan(c, []qviews.ShardID{a, b})
+	require.Empty(t, plan.Releases, "a Preparing sibling cannot replace the last serving cover")
+	require.Empty(t, plan.Prepares)
+	c.PublishShard(a, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
+	plan = p.Plan(c, []qviews.ShardID{a})
+	require.Contains(t, plan.Releases, b)
+	require.NotContains(t, plan.Prepares, b)
+}
+
 func TestReplicaLayoutLoadingCostAndCompatibility(t *testing.T) {
 	c := replicaCache(2, 4)
 	version := qviews.DataVersion{StreamingVersion: 1}

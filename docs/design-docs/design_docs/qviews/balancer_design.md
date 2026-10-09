@@ -485,7 +485,11 @@ Return BalancePlan { Prepares, Releases }
 
 Compare desired state, actual state and the retained target layout. Before
 ordinary classification, a zero-quota replica drains after protecting the last
-serving cover; it never retries allocation. An
+serving cover; it never retries allocation. If its resource group has no
+eligible QNs at all, preserve lifecycle state and wait for topology changes
+instead of releasing views. Stopping prevents new allocation but does not by
+itself invalidate an existing Up view's serving coverage. Explicit unload or
+replica removal still takes precedence. An
 in-flight view on a lost/ineligible node is replaceable. An Up view outside
 its active target requires Must convergence. For other dirty shards:
 

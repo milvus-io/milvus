@@ -15,9 +15,81 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
+
+func TestReplicaControllerZeroCapacityHandoff(t *testing.T) {
+	var releases, handoffs atomic.Int64
+	observer := mockey.Mock(qvobserve.Observe).To(func(_ context.Context, event qvobserve.Event) {
+		switch event.(type) {
+		case qvobserve.CoordViewReleaseRequestedEvent:
+			releases.Add(1)
+		case qvobserve.CoordViewHandoffToNewUpEvent:
+			handoffs.Add(1)
+		}
+	}).Build()
+	t.Cleanup(func() { observer.UnPatch() })
+	responses := make(chan syncer.SyncView, 1)
+	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
+		for _, views := range group.ViewsByNode {
+			for _, view := range views {
+				if node, ok := view.View.WorkNode().(qviews.QueryNode); ok && node.ID == 2 && view.View.State() == qviews.QueryViewStatePreparing {
+					responses <- view
+					continue
+				}
+				response := view.View.IntoProto()
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStatePreparing {
+					response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+				}
+				view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+			}
+		}
+		return nil
+	})
+	c := replicaCache(1, 1)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	c.MarkReady()
+	controller := NewDefaultBalancer(c, registry, nil)
+	controller.Trigger()
+	require.NoError(t, controller.Reconcile(t.Context()))
+	id := cacheShard(1, 10)
+	mgr := registry.Get(id)
+	require.NotNil(t, mgr)
+	require.Eventually(t, func() bool { return mgr.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	old := *mgr.Stats().UpVersion
+	c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg1", Alive: true, Stopping: true})
+	for range 3 {
+		controller.Trigger()
+		require.NoError(t, controller.Reconcile(t.Context()))
+		require.Same(t, mgr, registry.Get(id))
+		require.Equal(t, &old, mgr.Stats().UpVersion)
+		require.Nil(t, mgr.Stats().PreparingVersion)
+	}
+	require.Zero(t, releases.Load())
+	c.PublishNode(2, &NodeInfo{NodeID: 2, ResourceGroup: "rg1", Alive: true})
+	require.NoError(t, controller.Reconcile(t.Context()))
+	var pending syncer.SyncView
+	select {
+	case pending = <-responses:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement was not prepared on the new QN")
+	}
+	require.Equal(t, &old, mgr.Stats().UpVersion, "old Up survives until replacement is ready")
+	require.NotNil(t, mgr.Stats().PreparingVersion)
+	require.Zero(t, handoffs.Load())
+	response := pending.View.IntoProto()
+	response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+	pending.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+	require.Eventually(t, func() bool {
+		stats := mgr.Stats()
+		return stats.UpVersion != nil && stats.UpVersion.QueryVersion > old.QueryVersion && stats.PreparingVersion == nil
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, []int64{2}, mgr.Stats().UpNodes)
+	require.EqualValues(t, 1, handoffs.Load())
+	require.Zero(t, releases.Load())
+}
 
 func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 	for _, patch := range []*mockey.Mocker{
