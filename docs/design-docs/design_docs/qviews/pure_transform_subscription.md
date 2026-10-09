@@ -44,6 +44,17 @@ covering both the closing send and response. Expiry terminates the stream with
 `context.DeadlineExceeded`. RPC cancellation does not cancel the parent
 resumable stream, and subscription cleanup still runs once.
 
+Owner shutdown may arrive as a subscription cancellation event before the RPC
+ends. The resumable client consumes cancellation, shutdown, fencing, and stale
+owner errors internally: it cancels only that connection attempt, closes it
+outside the delivery callback, and resubscribes from each handler's last accepted
+Entry/SyncUp cursor. These events must not fail the shared QN buffer or its
+segment registrations. The client also recognizes the exact legacy UNKNOWN
+causes `context canceled` and `context deadline exceeded`; other UNKNOWN errors
+remain visible to subscribers. Invalid options and semantic/data failures are
+not suppressed. Explicit consumer Close terminates the resumable stream rather
+than reconnecting.
+
 ## Cursor and visibility contracts
 
 - `StartAfterTimeTick` is exclusive. A nonzero `EndTimeTick` bounds replay;

@@ -1,9 +1,14 @@
 package transformlog
 
 import (
+	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
 type resumableSubscription struct {
@@ -141,8 +146,36 @@ func (h *checkpointEventHandler) Close() {
 	h.inner.Close()
 }
 
-type nopCloseHandler struct {
+type resumableEventHandler struct {
 	wal.TransformLogEventHandler
+	cancel context.CancelFunc
 }
 
-func (h nopCloseHandler) Close() {}
+func (h resumableEventHandler) Handle(event wal.TransformLogStreamEvent) error {
+	if isRetryableSubscriptionError(event.Err) {
+		// Do not close the underlying stream inside its delivery callback:
+		// Close may wait for that callback. The resume loop owns cleanup.
+		h.cancel()
+		return nil
+	}
+	return h.TransformLogEventHandler.Handle(event)
+}
+
+func (h resumableEventHandler) Close() {}
+
+func isRetryableSubscriptionError(err error) bool {
+	if status.IsCanceled(err) {
+		return true
+	}
+	var se *status.StreamingError
+	if !errors.As(err, &se) {
+		return false
+	}
+	if se.IsOnShutdown() || se.IsWrongStreamingNode() || se.IsFenced() {
+		return true
+	}
+	// Existing SNs encode context cancellation as UNKNOWN, losing its type.
+	// Match only these exact legacy causes; other UNKNOWN errors remain fatal.
+	return se.Code == streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN &&
+		(se.Cause == context.Canceled.Error() || se.Cause == context.DeadlineExceeded.Error())
+}
