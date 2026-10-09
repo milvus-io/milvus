@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -71,6 +72,10 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
+	if requestbudget.Active(c.Request.Context()) {
+		renderBudgetJSON(c, code, result)
+		return
+	}
 	c.JSON(code, result)
 }
 
@@ -82,6 +87,10 @@ func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 		c.Set(HTTPReturnMessage, errorMsg)
 	}
 	setTraceIDHeader(c)
+	if requestbudget.Active(c.Request.Context()) {
+		renderBudgetJSON(c, code, result)
+		return
+	}
 	c.Render(code, jsonRender{Data: result})
 }
 
@@ -897,6 +906,10 @@ func nullElementIn(value gjson.Result) (int, bool) {
 }
 
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
+	return checkAndSetDataWithContext(context.Background(), body, collSchema, partialUpdate, fieldOps...)
+}
+
+func checkAndSetDataWithContext(ctx context.Context, body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
 	jsonPathFields := make(map[string]bool)
@@ -909,8 +922,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	nativeJSONResponse := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
-	dataResult := gjson.GetBytes(body, HTTPRequestData)
-	dataResultArray := dataResult.Array()
+	var dataResultArray []gjson.Result
+	if requestbudget.Active(ctx) {
+		var err error
+		dataResultArray, err = rawDataRows(ctx, body)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		dataResultArray = gjson.GetBytes(body, HTTPRequestData).Array()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if len(dataResultArray) == 0 {
 		return reallyDataArray, validDataMap, merr.ErrMissingRequiredParameters
 	}
@@ -927,6 +951,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	}
 
 	for _, data := range dataResultArray {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		reallyData := map[string]interface{}{}
 		if data.Type == gjson.JSON {
 			for _, structField := range collSchema.StructArrayFields {
@@ -1484,6 +1511,13 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 // StructArray operand must contain all children for an element path or exactly
 // the selected child for a child path. The collection schema remains complete.
 func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	return schemaForPathReplaceOperandsWithContext(context.Background(), body, collSchema, fieldOps)
+}
+
+func schemaForPathReplaceOperandsWithContext(ctx context.Context, body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	targets := make(map[string]string)
 	for _, fieldOp := range fieldOps {
 		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
@@ -1494,7 +1528,19 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		return collSchema, nil
 	}
 
-	rows := gjson.GetBytes(body, HTTPRequestData).Array()
+	var rows []gjson.Result
+	if requestbudget.Active(ctx) {
+		var err error
+		rows, err = rawDataRows(ctx, body)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		rows = gjson.GetBytes(body, HTTPRequestData).Array()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(rows) == 0 {
 		return collSchema, nil
 	}
@@ -1506,6 +1552,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			continue
 		}
 		for rowIndex, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			rawValue := gjson.Get(row.Raw, field.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				continue
@@ -1528,6 +1577,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		}
 		var expectedMask []string
 		for rowIndex, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			rawValue := gjson.Get(row.Raw, structSchema.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())

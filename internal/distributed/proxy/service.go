@@ -36,8 +36,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/atomic"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -50,6 +48,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/h2transport/http2"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/h2transport/http2/h2c"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
@@ -261,12 +262,49 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
+	configured, err := Params.ParseRequestBudgetPolicy()
+	if err != nil {
+		errChan <- err
+		return
+	}
+	policy := requestbudget.Policy{
+		OverallTimeoutBudget:      configured.OverallTimeoutBudget,
+		ReadHeaderTimeout:         configured.ReadHeaderTimeout,
+		MaxConnectionIdleInterval: configured.MaxConnectionIdleInterval,
+	}
+	restHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := requestbudget.StartedAt(r)
+		if err := requestbudget.Run(w, r, policy, startedAt, ginHandler); err != nil {
+			httpserver.WriteRequestBudgetError(w, err)
+		}
+	})
+	transportHandler := h2c.NewHandler(s.httpHandler(restHandler), http2Server)
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
-		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
-		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
-		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
-		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// h2c Upgrade buffers its HTTP/1 body before the application handler.
+			// Guard that read using the first request's budget, then let the
+			// HTTP/2 transport own deadlines for each subsequent stream.
+			if h2c.IsH2CUpgrade(r.Header) && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+				startedAt := requestbudget.StartedAt(r)
+				deadline, err := policy.Resolve(r.Context(), startedAt, r.Header.Get("Request-Timeout"))
+				if err != nil {
+					httpserver.WriteRequestBudgetError(w, err)
+					return
+				}
+				if !deadline.After(time.Now()) {
+					httpserver.WriteRequestBudgetError(w, context.DeadlineExceeded)
+					return
+				}
+				if err := requestbudget.ApplyIODeadline(w, deadline); err != nil {
+					httpserver.WriteRequestBudgetError(w, err)
+					return
+				}
+				r = requestbudget.WithUpgradeStart(r, startedAt)
+			}
+			transportHandler.ServeHTTP(w, r)
+		}),
+		ReadHeaderTimeout: policy.ReadHeaderTimeout,
+		IdleTimeout:       policy.MaxConnectionIdleInterval,
 		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
 	}
 	if err := http2.ConfigureServer(s.httpServer, http2Server); err != nil {

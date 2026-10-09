@@ -17,11 +17,17 @@
 package paramtable
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestHTTPConfig_Init(t *testing.T) {
@@ -71,4 +77,156 @@ func TestHTTPConfig_V1Override(t *testing.T) {
 	require.NoError(t, base.Save(cfg.EnableV1.Key, "false"))
 	assert.False(t, cfg.EnableV1.GetAsBool())
 	assert.True(t, cfg.Enabled.GetAsBool(), "the route switch must not disable the HTTP listener")
+}
+
+func httpBudgetFixture(t *testing.T, yaml string) *httpConfig {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(yaml), 0o600))
+	t.Setenv("MILVUSCONF", dir)
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipRemote(true), SkipEnv(true), Interval(0))
+	t.Cleanup(base.mgr.Close)
+	cfg := &httpConfig{}
+	cfg.init(base)
+	return cfg
+}
+
+func TestHTTPConfigBudgetDefaultsToApproved120Seconds(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    requestTimeoutMs: 30000\n")
+	got, err := cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 120*time.Second, got.OverallTimeoutBudget)
+	require.Equal(t, 5*time.Second, got.ReadHeaderTimeout)
+}
+
+func TestHTTPConfigBudgetDoesNotRequireIOIdle(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 120s\n")
+	got, err := cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 120*time.Second, got.OverallTimeoutBudget)
+	require.Equal(t, 5*time.Second, got.ReadHeaderTimeout)
+	require.Equal(t, 300*time.Second, got.MaxConnectionIdleInterval)
+}
+
+func TestHTTPConfigBudgetAllowsOverallShorterThanHeader(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 4s\n    readHeaderTimeout: 5s\n")
+	got, err := cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 4*time.Second, got.OverallTimeoutBudget)
+	require.Equal(t, 5*time.Second, got.ReadHeaderTimeout)
+}
+
+func TestHTTPConfigBudgetMigratesLegacyIdle(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 120s\n    idleTimeout: 25s\n")
+	got, err := cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 120*time.Second, got.OverallTimeoutBudget)
+	require.Equal(t, 5*time.Second, got.ReadHeaderTimeout)
+	require.Equal(t, 25*time.Second, got.MaxConnectionIdleInterval)
+
+	cfg = httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 120s\n")
+	got, err = cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 300*time.Second, got.MaxConnectionIdleInterval)
+}
+
+func TestHTTPConfigBudgetDetectsExplicitIdleConflict(t *testing.T) {
+	base := "proxy:\n  http:\n    overallTimeoutBudget: 120s\n"
+	for _, tt := range []struct {
+		name, old, current string
+		conflict           bool
+	}{
+		{"different", "300s", "301s", true},
+		{"old explicit default", "300s", "20s", true},
+		{"equivalent", "300s", "5m", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := httpBudgetFixture(t, base+"    idleTimeout: "+tt.old+"\n    maxConnectionIdleInterval: "+tt.current+"\n")
+			got, err := cfg.ParseRequestBudgetPolicy()
+			if tt.conflict {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Contains(t, err.Error(), "idleTimeout")
+				require.Contains(t, err.Error(), "maxConnectionIdleInterval")
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, 300*time.Second, got.MaxConnectionIdleInterval)
+			}
+		})
+	}
+}
+
+func TestHTTPConfigBudgetRejectsLegacyReadWrite(t *testing.T) {
+	for _, key := range []string{"readTimeout", "writeTimeout"} {
+		t.Run(key, func(t *testing.T) {
+			cfg := httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 120s\n    "+key+": 10s\n")
+			_, err := cfg.ParseRequestBudgetPolicy()
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.True(t, strings.Contains(err.Error(), key) && strings.Contains(err.Error(), "clear"), err)
+		})
+	}
+}
+
+func TestHTTPConfigBudgetRejectsLegacyRequestTimeoutOverride(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    requestTimeoutMs: 120000\n")
+	_, err := cfg.ParseRequestBudgetPolicy()
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Contains(t, err.Error(), "requestTimeoutMs")
+	require.Contains(t, err.Error(), "overallTimeoutBudget")
+}
+
+func TestHTTPConfigBudgetRejectsMalformedAndOutOfRange(t *testing.T) {
+	for _, tt := range []struct{ key, value string }{
+		{"overallTimeoutBudget", "not-a-duration"},
+		{"overallTimeoutBudget", "0s"},
+		{"readHeaderTimeout", "bad"},
+		{"maxConnectionIdleInterval", "-1s"},
+		{"idleTimeout", "bad"},
+		{"readTimeout", "bad"},
+	} {
+		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+			overall := "120s"
+			if tt.key == "overallTimeoutBudget" {
+				overall = tt.value
+			}
+			yaml := "proxy:\n  http:\n    overallTimeoutBudget: " + overall + "\n"
+			if tt.key != "overallTimeoutBudget" {
+				yaml += "    " + tt.key + ": " + tt.value + "\n"
+			}
+			cfg := httpBudgetFixture(t, yaml)
+			_, err := cfg.ParseRequestBudgetPolicy()
+			if !errors.Is(err, merr.ErrServiceInternal) || !strings.Contains(err.Error(), tt.key) {
+				t.Fatalf("error = %v, want system config error naming %s", err, tt.key)
+			}
+		})
+	}
+}
+
+func TestHTTPConfigBudgetRejectsExplicitEmptyDuration(t *testing.T) {
+	for _, key := range []string{
+		"overallTimeoutBudget", "readHeaderTimeout",
+		"maxConnectionIdleInterval", "readTimeout", "writeTimeout", "idleTimeout",
+	} {
+		t.Run(key, func(t *testing.T) {
+			overall := "120s"
+			if key == "overallTimeoutBudget" {
+				overall = ""
+			}
+			yaml := "proxy:\n  http:\n    overallTimeoutBudget: " + overall + "\n"
+			if key != "overallTimeoutBudget" {
+				yaml += "    " + key + ": \n"
+			}
+			cfg := httpBudgetFixture(t, yaml)
+			_, err := cfg.ParseRequestBudgetPolicy()
+			if !errors.Is(err, merr.ErrServiceInternal) || !strings.Contains(err.Error(), key) {
+				t.Fatalf("error = %v, want system config error naming %s", err, key)
+			}
+		})
+	}
+}
+
+func TestHTTPConfigBudgetAcceptsExplicitLegacyReadWriteZero(t *testing.T) {
+	cfg := httpBudgetFixture(t, "proxy:\n  http:\n    overallTimeoutBudget: 120s\n    readTimeout: 0s\n    writeTimeout: 0s\n")
+	got, err := cfg.ParseRequestBudgetPolicy()
+	require.NoError(t, err)
+	require.Equal(t, 120*time.Second, got.OverallTimeoutBudget)
 }

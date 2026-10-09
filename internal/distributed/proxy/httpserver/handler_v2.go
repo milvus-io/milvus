@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -437,10 +439,20 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
-			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
+		if err := bindRESTRequest(gCtx, req); err != nil {
+			mlog.Warn(gCtx.Request.Context(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
-			if _, ok := err.(validator.ValidationErrors); ok {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, os.ErrDeadlineExceeded) {
+				HTTPAbortReturn(gCtx, http.StatusRequestTimeout, gin.H{
+					HTTPReturnCode:    merr.TimeoutCode,
+					HTTPReturnMessage: "request timeout",
+				})
+			} else if errors.Is(err, merr.ErrParameterInvalid) {
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+			} else if _, ok := err.(validator.ValidationErrors); ok {
 				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
@@ -527,6 +539,19 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			}
 		}
 	}
+}
+
+func bindRESTRequest(gCtx *gin.Context, req any) error {
+	if !requestbudget.Active(gCtx.Request.Context()) {
+		return gCtx.ShouldBindBodyWith(req, binding.JSON)
+	}
+	dataReq, isBulkData := req.(*CollectionDataReq)
+	if !isBulkData {
+		return bindBudgetJSONUnit(gCtx, req, requestbudget.MaxJSONUnitBytes)
+	}
+	return bindBudgetBulkRows(gCtx, req, 1<<20, func(rows []map[string]any) {
+		dataReq.Data = rows
+	})
 }
 
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
@@ -1778,8 +1803,12 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
+	httpReq.Data, validDataMap, err = checkAndSetDataWithContext(ctx, body.([]byte), collSchema, false)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			HTTPAbortReturn(c, http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+			return nil, err
+		}
 		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
@@ -1866,8 +1895,12 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	requestSchema, err := schemaForPathReplaceOperands(body.([]byte), collSchema, fieldOps)
+	requestSchema, err := schemaForPathReplaceOperandsWithContext(ctx, body.([]byte), collSchema, fieldOps)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			HTTPAbortReturn(c, http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+			return nil, err
+		}
 		mlog.Warn(ctx, "high level restful api, fail to resolve PATH_REPLACE operand", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
@@ -1876,8 +1909,12 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
+	httpReq.Data, validDataMap, err = checkAndSetDataWithContext(ctx, body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			HTTPAbortReturn(c, http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+			return nil, err
+		}
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),

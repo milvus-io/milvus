@@ -564,10 +564,9 @@ proxy:
     # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
     # cost. Disabling restores the old always-decode behavior.
     dqlAdmissionEnabled: true
-    readHeaderTimeout: 5s # HTTP server timeout for reading request headers
-    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
-    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
-    idleTimeout: 300s # HTTP server keep-alive idle timeout
+    readHeaderTimeout: 5s # Independent short guard for incomplete request headers; this stage precedes the REST request budget
+    overallTimeoutBudget: 120s # Server-side cap from completed headers through response write; Request-Timeout may shorten but never extend it
+    maxConnectionIdleInterval: 300s # Reclaim an idle HTTP keep-alive connection between requests; unrelated to a request budget
     maxHeaderBytes: 16777216 # Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
