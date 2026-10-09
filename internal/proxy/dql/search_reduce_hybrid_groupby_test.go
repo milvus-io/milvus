@@ -61,8 +61,10 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 					{FieldID: 101, Name: "group", DataType: schemapb.DataType_VarChar, Nullable: true},
-					{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, Nullable: true,
-						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+					{
+						FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
 					{FieldID: 103, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
 				},
 			}
@@ -166,11 +168,13 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 						fields := map[int64]*schemapb.FieldData{
 							100: multiGroupByTestLongField(100, ids),
 							103: value,
-							102: {FieldId: 102, Type: schemapb.DataType_FloatVector,
+							102: {
+								FieldId: 102, Type: schemapb.DataType_FloatVector,
 								Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
 									Dim: 2, ValidData: vectorValid,
 									Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
-								}}},
+								}},
+							},
 						}
 						for _, fieldID := range plan.GetOutputFieldIds() {
 							data.FieldsData = append(data.FieldsData, fields[fieldID])
