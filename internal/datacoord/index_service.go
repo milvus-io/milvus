@@ -617,6 +617,14 @@ func (s *Server) selectSegmentIndexesStats(ctx context.Context, filters ...Segme
 	}
 	hasCompactionLineage := false
 	segmentsIndexes := s.meta.indexMeta.getSegmentsIndexStates(segments[0].CollectionID, segmentIDs)
+	if s.droppedSinceSnapshot(ctx, segments, segmentsIndexes) {
+		// The index states carry a task aborted because its segment was
+		// dropped after the snapshot. The abort is persisted only once the
+		// drop is in meta, so a snapshot taken now sees the drop, along with
+		// any compaction output committed with it, which has no index state
+		// read yet and therefore counts as unissued.
+		segments = s.meta.SelectSegments(ctx, filters...)
+	}
 	for _, info := range segments {
 		hasCompactionLineage = hasCompactionLineage || len(info.GetCompactionFrom()) > 0
 		is := &indexStats{
@@ -743,6 +751,29 @@ func newQueryLineageCycleChecker(validSegmentInfos map[int64]*SegmentInfo) func(
 		return false
 	}
 	return check
+}
+
+// droppedSinceSnapshot reports whether a segment that the snapshot sees as
+// flushed has a failed index state and is no longer flushed in meta.
+func (s *Server) droppedSinceSnapshot(ctx context.Context, segments []*SegmentInfo, segmentsIndexes map[int64]map[int64]*indexpb.SegmentIndexState) bool {
+	for _, info := range segments {
+		if !isFlushState(info.GetState()) || !hasFailedSegmentIndex(segmentsIndexes[info.GetID()]) {
+			continue
+		}
+		if current := s.meta.GetSegment(ctx, info.GetID()); current == nil || !isFlushState(current.GetState()) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFailedSegmentIndex(states map[int64]*indexpb.SegmentIndexState) bool {
+	for _, state := range states {
+		if state.GetState() == commonpb.IndexState_Failed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) countIndexedRows(indexInfo *indexpb.IndexInfo, segments map[int64]*indexStats) int64 {
