@@ -255,7 +255,9 @@ func TestPendingViewOwnsSharedSegment(t *testing.T) {
 				releaseLifetimeView(t, manager, second)
 			}
 			require.Eventually(t, func() bool { return releases.Load() == 1 }, time.Second, time.Millisecond)
-			require.EqualValues(t, 1, closes.Load())
+			// The snapshot callback can run before Subscribe returns. If the view
+			// is released first, subscribeSegments closes the late subscription.
+			require.Eventually(t, func() bool { return closes.Load() == 1 }, time.Second, time.Millisecond)
 			require.EqualValues(t, 1, loads.Load())
 			manager.mu.Lock()
 			require.Empty(t, manager.views)
