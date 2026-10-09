@@ -25,11 +25,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (m *dataViewManager) captureFrontiers(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+func (m *dataViewManager) captureFrontiers(ctx context.Context, collectionID int64, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 	if m.frontierProjector == nil {
 		return nil, nil
 	}
-	return m.frontierProjector(ctx, collectionID)
+	frontiers := make(map[string]uint64, len(view.GetShards()))
+	for _, shard := range view.GetShards() {
+		frontiers[shard.GetVchannel()] = shard.GetTransformStartAfterTimetick()
+	}
+	return m.frontierProjector(ctx, collectionID, frontiers)
 }
 
 // advanceTransformFrontiers combines the checkpoint/unpublished bounds with
@@ -69,7 +73,7 @@ func advanceTransformFrontiers(view *viewpb.DataViewOfCollection, bounds map[str
 // their successor: an old empty membership alone must not pick today's K and
 // overtake a later snapshot that still needs an earlier Segment cursor.
 func (m *dataViewManager) restoreTransformFrontiers(ctx context.Context, state *collectionState) error {
-	bounds, err := m.captureFrontiers(ctx, state.id)
+	bounds, err := m.captureFrontiers(ctx, state.id, latestView(state))
 	if err != nil || bounds == nil {
 		return err
 	}

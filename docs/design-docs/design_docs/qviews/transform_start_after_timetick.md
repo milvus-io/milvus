@@ -107,8 +107,16 @@ boundary, not the Segment cursor or the Transform materialization cursor.
 Use the checkpoint belonging to the shard; do not compare timestamps from
 unrelated PChannels to derive a collection-wide minimum.
 
-If K is missing or predates B, it cannot authorize advancement: keep the
-initialized safe frontier. With no current members, remaining unpublished data
+The frontier projector receives the complete shard skeleton and the previous
+runtime F from DataViewManager. It does not look up the lazily populated
+DataCoord collection cache or make a metadata RPC. Empty shards are included.
+
+If K is missing or lags the already-proven runtime F (including the initial B),
+it cannot authorize advancement: use that proven F as the checkpoint bound,
+then still apply all Import and Segment constraints. A lower Segment cursor
+must still fail the monotonicity check; retaining F is not permission to clamp
+away a coverage regression. With no prior runtime F during recovery, missing K
+still blocks readiness until coverage can be reconstructed. With no current members, remaining unpublished data
 still constrains F; with neither set, K supplies a finite bound. Never replace
 an empty set with a published infinity or reset the frontier to zero.
 Unknown coverage must not be skipped. It needs a proven conservative lower

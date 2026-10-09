@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -57,18 +58,23 @@ func minSegmentTransformStart(segments []*SegmentInfo) uint64 {
 // every healthy Segment (even already-published ones) is conservative and closes
 // the window between durable output creation and DataView publication. No
 // partition filter may be applied here.
-func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64) (map[string]uint64, error) {
-	collection := metadata.GetCollection(collectionID)
-	if collection == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("collection %d metadata is not ready", collectionID)
-	}
-	bounds := make(map[string]uint64, len(collection.VChannelNames))
-	for _, channel := range collection.VChannelNames {
+func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error) {
+	// The DataView owns the full shard skeleton; collection metadata is a lazy
+	// cache and is not a prerequisite for publishing a flush. Keep the proven
+	// runtime frontier when checkpoint reporting has not caught up yet.
+	bounds := maps.Clone(frontiers)
+	for channel, previous := range frontiers {
 		checkpoint := metadata.GetChannelCheckpoint(channel)
-		if checkpoint == nil || checkpoint.GetTimestamp() == 0 || funcutil.IsDroppedChannelCheckpoint(checkpoint) {
+		if funcutil.IsDroppedChannelCheckpoint(checkpoint) {
+			return nil, merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is dropped", channel)
+		}
+		bound := max(previous, checkpoint.GetTimestamp())
+		if bound == 0 {
+			// Recovery has no previous runtime frontier to retain. It must
+			// still reconstruct coverage before exposing a recovered View.
 			return nil, merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is not ready", channel)
 		}
-		bounds[channel] = checkpoint.GetTimestamp()
+		bounds[channel] = bound
 	}
 	// Read task pins before Segment metadata. A completed task has already
 	// persisted all Segment cursors, so its removal cannot create a gap.

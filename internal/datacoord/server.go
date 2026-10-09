@@ -693,8 +693,8 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
-			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
-				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			dataview.WithShardFrontierProjector(func(ctx context.Context, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID, frontiers)
 			}),
 		)
 		return err

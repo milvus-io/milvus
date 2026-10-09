@@ -51,9 +51,25 @@ type Projector func(ctx context.Context, collectionID int64) ([]LoadableSegment,
 // projected. Its bounds include all registered unpublished data in the shard.
 type FrontierProjector func(ctx context.Context, collectionID int64) (map[string]uint64, error)
 
+// ShardFrontierProjector receives every declared shard, including empty shards,
+// with its previously proven runtime frontier (zero when not yet recovered).
+// It runs under the collection lock and must not call back into the manager.
+type ShardFrontierProjector func(ctx context.Context, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error)
+
 type Option func(*dataViewManager)
 
 func WithFrontierProjector(project FrontierProjector) Option {
+	return func(m *dataViewManager) {
+		m.frontierProjector = nil
+		if project != nil {
+			m.frontierProjector = func(ctx context.Context, collectionID int64, _ map[string]uint64) (map[string]uint64, error) {
+				return project(ctx, collectionID)
+			}
+		}
+	}
+}
+
+func WithShardFrontierProjector(project ShardFrontierProjector) Option {
 	return func(m *dataViewManager) { m.frontierProjector = project }
 }
 
@@ -196,7 +212,7 @@ type dataViewManager struct {
 	// async Recompute worker runs against it. nil means the manager is not
 	// wired for async reconciliation (Recompute returns an error).
 	projector         Projector
-	frontierProjector FrontierProjector
+	frontierProjector ShardFrontierProjector
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
 	// a process-lifetime context; RecoverManager derives it from the caller's
 	// ctx so the worker stops when the coordinator does.
@@ -474,7 +490,7 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 	if err := addSegments(view, event.Segments); err != nil {
 		return nil, err
 	}
-	bounds, err := m.captureFrontiers(ctx, event.CollectionID)
+	bounds, err := m.captureFrontiers(ctx, event.CollectionID, view)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +525,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 	defer unlock()
 
 	base := latestView(state)
-	bounds, err := m.captureFrontiers(ctx, collectionID)
+	bounds, err := m.captureFrontiers(ctx, collectionID, base)
 	if err != nil {
 		return nil, err
 	}
@@ -836,12 +852,12 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		return nil, noop, noop, nil
 	}
 
-	bounds, err := m.captureFrontiers(ctx, event.CollectionID)
+	base := latestView(state)
+	bounds, err := m.captureFrontiers(ctx, event.CollectionID, base)
 	if err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}
-	base := latestView(state)
 	next := canonicalDataViewClone(base)
 	if next == nil {
 		next = &viewpb.DataViewOfCollection{CollectionId: event.CollectionID}

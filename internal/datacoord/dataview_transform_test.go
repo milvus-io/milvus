@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -47,16 +49,16 @@ func TestTransformBoundsCoverUnpublishedPartitions(t *testing.T) {
 	} {
 		metadata.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 	}
-	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
+	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 60, "v2": 20}, bounds)
 	// Durable but unpublished output still constrains the next DataView.
 	metadata.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 100, PartitionID: 3, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 60}))
-	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.NoError(t, err)
 	require.Equal(t, uint64(60), bounds["v1"])
 	delete(metadata.channelCPs.checkpoints, "v2")
-	_, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	_, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
 
@@ -103,10 +105,10 @@ func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
 		TransformCommitTimeticks: map[string]uint64{"v1": 100},
 	}}
 	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
-	_, err := transformFrontierBounds(ctx, metadata, imports, 100)
+	_, err := transformFrontierBounds(ctx, metadata, imports, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.ErrorIs(t, err, merr.ErrServiceNotReady, "one shard's ack cannot establish another shard's coverage")
 	job.TransformCommitTimeticks["v2"] = 200
-	bounds, err := transformFrontierBounds(ctx, metadata, imports, 100)
+	bounds, err := transformFrontierBounds(ctx, metadata, imports, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 100, "v2": 200}, bounds)
 
@@ -117,7 +119,7 @@ func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
 		TransformStartAfterTimetick: 100,
 	}))
 	job.State = internalpb.ImportJobState_Completed
-	bounds, err = transformFrontierBounds(ctx, metadata, imports, 100)
+	bounds, err = transformFrontierBounds(ctx, metadata, imports, 100, map[string]uint64{"v1": 0, "v2": 0})
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 100, "v2": 400}, bounds)
 }
@@ -132,21 +134,21 @@ func TestTransformBoundsRejectUnknownDataButAllowEmptyAllocation(t *testing.T) {
 		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segment-10", packed.ManifestEarliest),
 	}
 	metadata.segments.SetSegment(10, NewSegmentInfo(segment))
-	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
+	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0})
 	require.NoError(t, err)
 	require.Equal(t, uint64(300), bounds["v1"])
 	segment.NumOfRows = 1
 	for _, state := range []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed} {
 		segment.State = state
-		bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
+		bounds, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0})
 		require.NoError(t, err)
 		require.Equal(t, uint64(300), bounds["v1"], "unregistered first packs remain protected by K even after row-count reports or sealing")
 	}
 	segment.ManifestPath = packed.MarshalManifestPath("segment-10", 1)
-	_, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	_, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0})
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	segment.StartPosition = &msgpb.MsgPosition{Timestamp: 400}
-	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
+	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0})
 	require.NoError(t, err)
 	require.Equal(t, uint64(300), bounds["v1"], "new data beyond captured K cannot pull the frontier past K")
 }
@@ -167,4 +169,45 @@ func TestSegmentTransformCursorKeepsFirstInsertAndImportCommit(t *testing.T) {
 	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick())
 	require.True(t, UpdateCommitTimestamp(2, 0)(pack))
 	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick(), "removing the MVCC override cannot erase base coverage")
+}
+
+func TestTransformBoundsUseDeclaredShardsWithoutCollectionCache(t *testing.T) {
+	ctx := t.Context()
+	// Deliberately omit the collection cache: the DataView supplies every
+	// declared shard, including v2, which has no registered Segment.
+	metadata := &meta{ctx: ctx, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	previous := map[string]uint64{"v1": 50, "v2": 60}
+	metadata.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Growing,
+		TransformStartAfterTimetick: 80,
+	}))
+	for _, tick := range []uint64{0, 30, 200} {
+		t.Run(fmt.Sprint(tick), func(t *testing.T) {
+			metadata.channelCPs.checkpoints["v1"] = &msgpb.MsgPosition{Timestamp: tick}
+			bounds, err := transformFrontierBounds(ctx, metadata, nil, 100, previous)
+			require.NoError(t, err)
+			expected := uint64(50)
+			if tick == 200 {
+				expected = 80
+			}
+			require.Equal(t, map[string]uint64{"v1": expected, "v2": 60}, bounds)
+			require.Equal(t, map[string]uint64{"v1": 50, "v2": 60}, previous)
+		})
+	}
+	// A lower Segment cursor must reach the monotonicity check, not be
+	// clamped away while retaining a previous frontier.
+	metadata.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+		TransformStartAfterTimetick: 40,
+	}))
+	delete(metadata.channelCPs.checkpoints, "v1")
+	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100, previous)
+	require.NoError(t, err)
+	require.Equal(t, uint64(40), bounds["v1"])
+
+	_, err = transformFrontierBounds(ctx, metadata, nil, 100, map[string]uint64{"v1": 0})
+	require.ErrorIs(t, err, merr.ErrServiceNotReady, "unrecovered zero is not a safe fallback")
+	metadata.channelCPs.checkpoints["v1"] = &msgpb.MsgPosition{Timestamp: funcutil.DroppedChannelCheckpointTimestamp}
+	_, err = transformFrontierBounds(ctx, metadata, nil, 100, previous)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady, "a dropped checkpoint must never authorize advancement")
 }
