@@ -43,7 +43,7 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),
-		transformStartAfterTimetick: shardView.TransformStartAfterTimetick,
+		transformStartAfterTimetick: min(shardView.GetGrowingTransformStartAfterTimetick(), shardView.GetCompactedTransformStartAfterTimetick()),
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
 		segmentTransformStarts:      starts,

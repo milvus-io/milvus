@@ -14,11 +14,12 @@ type CollectionDataView struct {
 
 // ShardDataView is one vchannel's DataView within a collection.
 type ShardDataView struct {
-	VChannel                    string
-	TransformStartAfterTimetick uint64
-	Partitions                  []*PartitionDataView
-	TotalRows                   int64
-	SegmentCount                int
+	VChannel                             string
+	GrowingTransformStartAfterTimetick   uint64
+	CompactedTransformStartAfterTimetick uint64
+	Partitions                           []*PartitionDataView
+	TotalRows                            int64
+	SegmentCount                         int
 }
 
 // PartitionDataView is one partition's segment list within a shard. The
@@ -92,4 +93,10 @@ type DataViewListener func(collectionID int64, view *CollectionDataView)
 // without a missing-update window. The returned function unregisters it.
 type DataViewPublisher interface {
 	RegisterDataViewListener(DataViewListener) func()
+}
+
+// TransformStartAfterTimetick derives the QueryView subscription start from
+// this immutable DataVersion's two persisted inputs.
+func (s *ShardDataView) TransformStartAfterTimetick() uint64 {
+	return min(s.GrowingTransformStartAfterTimetick, s.CompactedTransformStartAfterTimetick)
 }

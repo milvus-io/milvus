@@ -65,7 +65,7 @@ For node-side Phase 1 planning and Phase 2 execution, see
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** `RequeryOnView` returns Unimplemented. Proxy orchestration and
-  QN execution are wired in this qv branch. The checkpoint-bounded `min(K, S, G)`
+  QN execution are wired in this qv branch. The persisted W/A and derived `min(W, A)`
   frontier and shared buffer retention requirements are described in
   [Transform Start Frontier](transform_start_after_timetick.md).
   TransformLog subscriptions accept Summary's retained lower bound; this
@@ -183,15 +183,15 @@ Key observations:
 - A Segment's Manifest version is monotonic across DataViews. Replaying the
   same version is a no-op, a higher version advances it, and a lower version is
   rejected (a projection reporting zero preserves the stored version).
-- DataCoord dynamically produces the shard `transform_start_after_timetick` as
-  `min(K, S, G)`: the reported channel checkpoint, published Segment coverage,
-  and unpublished Segment constraints across all partitions. Growing data
-  constrains the cursor without entering DataView membership; independent
-  Flush ordering is preserved. See
+- DataCoord persists per-version W (SN-certified final Flush frontier) and A
+  (minimum cursor across all selected Segment bases). It derives the shared
+  TransformLog start as `min(W, A)` when producing QueryView; DataView has no
+  separate derived-cursor proto field. W advances atomically with final L1
+  publication, while A is recomputed on every membership/base change, including
+  Flush. W and the shared start are monotonic; A may decrease after a late Flush.
+  Checkpoint reports cannot generate DataViews. See
   [Transform Start-After TimeTick](transform_start_after_timetick.md) for the
-  completeness proof and TransformLog-only recovery contract. The derived field
-  is carried on the wire (`DataViewOfShard`, `QueryViewMeta`) but omitted from
-  DataView persistence; recovery regenerates it from its inputs.
+  materialization prerequisite, Import fences, and recovery contract.
 
 ### 5.4 Constraints
 

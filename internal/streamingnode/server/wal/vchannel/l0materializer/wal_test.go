@@ -237,7 +237,7 @@ func walTxn(t *testing.T, children ...message.ImmutableMessage) message.Immutabl
 func TestWALMaterializerWholeTxnAndRegistrationGate(t *testing.T) {
 	m, tasks, batches := testWALMaterializer(t, 0, 1)
 	registered := false
-	m.growingSegmentsRegistered = func(tt uint64) bool { require.Equal(t, uint64(300), tt); return registered }
+	m.earlierSegmentsFlushed = func(tt uint64) bool { require.Equal(t, uint64(300), tt); return registered }
 	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(50).WithLastConfirmed(rmq.NewRmqID(49)).IntoImmutableMessage(rmq.NewRmqID(50))
 	txn := walTxn(t, insert, walDelete(100), walDelete(200))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)

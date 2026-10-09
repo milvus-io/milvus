@@ -3381,7 +3381,6 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 		m.channelCPs.Lock()
 		m.channelCPs.checkpoints[vChannel] = pos
 		m.channelCPs.Unlock()
-		m.recomputeDataView(ctx, funcutil.GetCollectionIDFromVChannel(vChannel))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		mlog.Info(ctx, "UpdateChannelCheckpoint done",
 			mlog.String("vChannel", vChannel),
@@ -3482,7 +3481,6 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 	m.channelCPs.Unlock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
-		m.recomputeDataView(ctx, funcutil.GetCollectionIDFromVChannel(channel))
 		mlog.Info(ctx, "UpdateChannelCheckpoint done", mlog.String("channel", channel),
 			mlog.Stringer("walName", pos.WALName),
 			mlog.Uint64("ts", pos.GetTimestamp()),

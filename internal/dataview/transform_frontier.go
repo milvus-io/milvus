@@ -25,78 +25,147 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (m *dataViewManager) captureFrontiers(ctx context.Context, collectionID int64, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+func (m *dataViewManager) captureFrontiers(ctx context.Context, collectionID int64) (map[string]uint64, error) {
 	if m.frontierProjector == nil {
 		return nil, nil
 	}
-	frontiers := make(map[string]uint64, len(view.GetShards()))
-	for _, shard := range view.GetShards() {
-		frontiers[shard.GetVchannel()] = shard.GetTransformStartAfterTimetick()
-	}
-	return m.frontierProjector(ctx, collectionID, frontiers)
+	return m.frontierProjector(ctx, collectionID)
 }
 
-// advanceTransformFrontiers combines the checkpoint/unpublished bounds with
-// the exact Segment revisions selected into this snapshot. Missing checkpoint
-// reports cannot authorize progress. A regression is never hidden by clamping.
+// advanceTransformFrontiers derives A from the selected bases and F from W/A.
+// Bounds are WAL certificates, not recovery checkpoint observations. A may fall
+// after a late Flush; the resulting shared-buffer frontier must never regress.
 func advanceTransformFrontiers(view *viewpb.DataViewOfCollection, bounds map[string]uint64) error {
-	if bounds == nil {
-		return nil
-	}
 	for _, shard := range view.GetShards() {
-		old := shard.GetTransformStartAfterTimetick()
-		candidate, exists := bounds[shard.GetVchannel()]
-		if !exists {
-			candidate = old
+		old := transformStart(shard)
+		w := max(shard.GetGrowingTransformStartAfterTimetick(), bounds[shard.GetVchannel()])
+		if w == 0 && bounds == nil {
+			// Legacy, unwired managers are also used without Transform metadata.
+			continue
 		}
+		if w == 0 {
+			return merr.WrapErrServiceNotReadyMsg("WAL publication proof for %s is not available", shard.GetVchannel())
+		}
+		a := w
+		hasMembers := false
 		for _, partition := range shard.GetPartitions() {
+			if len(partition.GetSegmentIds()) != len(partition.GetSegmentTransformStartAfterTimeticks()) {
+				return merr.WrapErrDataIntegrityMsg("Segment Transform cursors are misaligned in shard %s", shard.GetVchannel())
+			}
 			for _, start := range partition.GetSegmentTransformStartAfterTimeticks() {
 				if start == 0 {
 					return merr.WrapErrServiceNotReadyMsg("Segment Transform coverage is not available")
 				}
-				candidate = min(candidate, start)
+				if !hasMembers || start < a {
+					a = start
+				}
+				hasMembers = true
 			}
 		}
-		if candidate == 0 {
-			return merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is not available", shard.GetVchannel())
-		}
+		candidate := min(w, a)
 		if candidate < old {
 			return merr.WrapErrDataIntegrityMsg("Transform frontier cannot regress: collection=%d vchannel=%s old=%d candidate=%d", view.GetCollectionId(), shard.GetVchannel(), old, candidate)
 		}
-		shard.TransformStartAfterTimetick = candidate
+		shard.GrowingTransformStartAfterTimetick = w
+		shard.CompactedTransformStartAfterTimetick = a
 	}
 	return nil
 }
 
-// restoreTransformFrontiers derives runtime-only cursors before recovered
-// snapshots are exposed. Historical empty snapshots must also be bounded by
-// their successor: an old empty membership alone must not pick today's K and
-// overtake a later snapshot that still needs an earlier Segment cursor.
-func (m *dataViewManager) restoreTransformFrontiers(ctx context.Context, state *collectionState) error {
-	bounds, err := m.captureFrontiers(ctx, state.id, latestView(state))
-	if err != nil || bounds == nil {
+func (m *dataViewManager) advanceTransformFrontiers(ctx context.Context, view *viewpb.DataViewOfCollection, certificates map[string]uint64) error {
+	var constraints map[string]uint64
+	if m.pendingTransformProjector != nil {
+		var err error
+		constraints, err = m.pendingTransformProjector(ctx, view)
+		if err != nil {
+			return err
+		}
+	}
+	certificates = maps.Clone(certificates)
+	for channel, certificate := range certificates {
+		if certificate == 0 {
+			delete(certificates, channel)
+		}
+	}
+	if len(certificates) == 0 {
+		certificates = nil
+	}
+	for channel, bound := range constraints {
+		if certificate, ok := certificates[channel]; ok {
+			certificates[channel] = min(certificate, bound)
+		}
+	}
+	if err := advanceTransformFrontiers(view, certificates); err != nil {
 		return err
 	}
-	bounds = maps.Clone(bounds)
+	for _, shard := range view.GetShards() {
+		if bound, ok := constraints[shard.GetVchannel()]; ok && transformStart(shard) > bound {
+			return merr.WrapErrServiceNotReadyMsg("pending data for %s requires Transform history before %d", shard.GetVchannel(), bound)
+		}
+		if m.frontierProjector != nil && shard.GetGrowingTransformStartAfterTimetick() == 0 {
+			return merr.WrapErrServiceNotReadyMsg("WAL publication proof for %s is not available", shard.GetVchannel())
+		}
+	}
+	return nil
+}
+
+// restoreTransformFrontiers validates each version's persisted W/A before it is
+// exposed. Only pre-W/A snapshots use the isolated legacy migration projection;
+// their reconstructed frontier is bounded by all retained successors.
+func (m *dataViewManager) restoreTransformFrontiers(ctx context.Context, state *collectionState) error {
+	var bounds map[string]uint64
+	needsMigration := false
 	entries := make([]*versionEntry, 0, len(state.versions))
 	for _, entry := range state.versions {
 		entries = append(entries, entry)
+		for _, shard := range entry.view.GetShards() {
+			needsMigration = needsMigration || shard.GetGrowingTransformStartAfterTimetick() == 0
+		}
+	}
+	if needsMigration {
+		var err error
+		bounds, err = m.captureFrontiers(ctx, state.id)
+		if err != nil {
+			return err
+		}
+		bounds = maps.Clone(bounds)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return compareDataVersion(entries[i].view.GetDataVersion(), entries[j].view.GetDataVersion()) > 0
 	})
+	successors := make(map[string]*viewpb.DataViewOfShard)
 	for _, entry := range entries {
-		// Entries already handed to consumers stay immutable. An entry with
-		// unknown F has never been acquirable, so it can be initialized here.
-		if !transformFrontiersReady(entry.view) {
+		{
 			restored := canonicalDataViewClone(entry.view)
-			if err := advanceTransformFrontiers(restored, bounds); err != nil {
-				return err
+			for _, shard := range restored.GetShards() {
+				one := &viewpb.DataViewOfCollection{CollectionId: state.id, Shards: []*viewpb.DataViewOfShard{shard}}
+				if shard.GetGrowingTransformStartAfterTimetick() == 0 {
+					if err := advanceTransformFrontiers(one, bounds); err != nil {
+						return err
+					}
+				} else {
+					storedA := shard.GetCompactedTransformStartAfterTimetick()
+					if err := advanceTransformFrontiers(one, nil); err != nil {
+						return err
+					}
+					if storedA != shard.GetCompactedTransformStartAfterTimetick() {
+						return merr.WrapErrDataIntegrityMsg("persisted Transform coverage does not match selected bases in %s", shard.GetVchannel())
+					}
+				}
+			}
+			for _, shard := range restored.GetShards() {
+				if next := successors[shard.GetVchannel()]; next != nil &&
+					(shard.GetGrowingTransformStartAfterTimetick() > next.GetGrowingTransformStartAfterTimetick() || transformStart(shard) > transformStart(next)) {
+					return merr.WrapErrDataIntegrityMsg("persisted Transform frontiers regress across DataVersions in %s", shard.GetVchannel())
+				}
+				successors[shard.GetVchannel()] = shard
 			}
 			entry.view = restored
 		}
 		for _, shard := range entry.view.GetShards() {
-			bounds[shard.GetVchannel()] = min(bounds[shard.GetVchannel()], shard.GetTransformStartAfterTimetick())
+			if bounds != nil {
+				bounds[shard.GetVchannel()] = min(bounds[shard.GetVchannel()], transformStart(shard))
+			}
 		}
 	}
 	return nil
@@ -122,9 +191,15 @@ func (m *dataViewManager) acquireReadyRefLocked(ctx context.Context, state *coll
 
 func transformFrontiersReady(view *viewpb.DataViewOfCollection) bool {
 	for _, shard := range view.GetShards() {
-		if shard.GetTransformStartAfterTimetick() == 0 {
+		if transformStart(shard) == 0 {
 			return false
 		}
 	}
 	return true
+}
+
+// transformStart is the exclusive shared-buffer cursor. DataView persists only
+// the two inputs; QueryView receives their minimum at publication time.
+func transformStart(shard *viewpb.DataViewOfShard) uint64 {
+	return min(shard.GetGrowingTransformStartAfterTimetick(), shard.GetCompactedTransformStartAfterTimetick())
 }

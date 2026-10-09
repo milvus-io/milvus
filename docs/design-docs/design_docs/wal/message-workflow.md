@@ -115,7 +115,8 @@ recoverable prefix. RecoveryStorage caps checkpoint publication at that frontier
 WALMaterializer retains the outer Delete/Txn message until L0 output and
 DataCoord registration succeed and dirty materialization metadata is installed.
 Size, age, explicit completion and recovery-tail requests drive output; only
-initial L1 registration is a prerequisite, not final L1 flush.
+final publication of every L1 created before the materialization boundary is a
+prerequisite, across all partitions. Initial L1 registration is insufficient.
 
 ### Flush-Style Messages
 
@@ -125,8 +126,8 @@ work in multiple SegmentViews and L0Materializers. Each asynchronous Segment
 consumer owns an independent clone. L0Materializer merges the relevant boundary
 without storing a BarrierEntry. ManualFlush, FlushAll, DropCollection,
 DropPartition, TruncateCollection and AlterWAL additionally retain one handle
-per affected VChannel until the requested L0 boundary completes. L1 and L0 tasks run independently
-and their handles join before message completion. Dirty materialization metadata must be installed before these handles
+per affected VChannel until the requested L0 boundary completes. L1 tasks run independently; L0 tasks retry until earlier L1 final publication
+completes, and their handles join before message completion. Dirty materialization metadata must be installed before these handles
 release. This pins checkpoint and broadcast completion; unfinished requests
 are rebuilt from WAL replay. Ordinary Segment Flush and generic DDL barriers
 do not create explicit L0 requests.

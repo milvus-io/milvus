@@ -18,11 +18,11 @@ package datacoord
 
 import (
 	"context"
-	"maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -54,27 +54,23 @@ func minSegmentTransformStart(segments []*SegmentInfo) uint64 {
 	return start
 }
 
-// transformFrontierBounds captures K before any metadata projection. Including
+// transformFrontierBounds is only used to migrate legacy snapshots without W/A.
+// It captures K before any metadata projection. Including
 // every healthy Segment (even already-published ones) is conservative and closes
 // the window between durable output creation and DataView publication. No
 // partition filter may be applied here.
-func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error) {
-	// The DataView owns the full shard skeleton; collection metadata is a lazy
-	// cache and is not a prerequisite for publishing a flush. Keep the proven
-	// runtime frontier when checkpoint reporting has not caught up yet.
-	bounds := maps.Clone(frontiers)
-	for channel, previous := range frontiers {
+func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64) (map[string]uint64, error) {
+	collection := metadata.GetCollection(collectionID)
+	if collection == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d metadata is not ready", collectionID)
+	}
+	bounds := make(map[string]uint64, len(collection.VChannelNames))
+	for _, channel := range collection.VChannelNames {
 		checkpoint := metadata.GetChannelCheckpoint(channel)
-		if funcutil.IsDroppedChannelCheckpoint(checkpoint) {
-			return nil, merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is dropped", channel)
-		}
-		bound := max(previous, checkpoint.GetTimestamp())
-		if bound == 0 {
-			// Recovery has no previous runtime frontier to retain. It must
-			// still reconstruct coverage before exposing a recovered View.
+		if checkpoint == nil || checkpoint.GetTimestamp() == 0 || funcutil.IsDroppedChannelCheckpoint(checkpoint) {
 			return nil, merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is not ready", channel)
 		}
-		bounds[channel] = bound
+		bounds[channel] = checkpoint.GetTimestamp()
 	}
 	// Read task pins before Segment metadata. A completed task has already
 	// persisted all Segment cursors, so its removal cannot create a gap.
@@ -114,6 +110,55 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 		}
 		channel := segment.GetInsertChannel()
 		bounds[channel] = min(bounds[channel], start)
+	}
+	return bounds, nil
+}
+
+// pendingTransformBounds protects asynchronous publications not yet represented
+// by the candidate View. Ordinary WAL completeness comes from the SN's W proof;
+// this projection neither reads checkpoints nor requires the collection cache.
+func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportMeta, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+	bounds := make(map[string]uint64)
+	pin := func(channel string, start uint64) {
+		if old, ok := bounds[channel]; !ok || start < old {
+			bounds[channel] = start
+		}
+	}
+	if imports != nil {
+		for _, job := range imports.GetJobBy(ctx, WithCollectionID(view.GetCollectionId()), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+			for _, channel := range job.GetVchannels() {
+				start := job.(*importJob).GetTransformCommitTimeticks()[channel]
+				if start == 0 {
+					return nil, merr.WrapErrServiceNotReadyMsg("import job %d Transform fence for %s is not ready", job.GetJobID(), channel)
+				}
+				pin(channel, start)
+			}
+		}
+	}
+	selected := make(map[int64]struct{})
+	for _, shard := range view.GetShards() {
+		for _, partition := range shard.GetPartitions() {
+			for _, id := range partition.GetSegmentIds() {
+				selected[id] = struct{}{}
+			}
+		}
+	}
+	// Read task pins before Segment metadata: completion first installs the
+	// Segment coverage, so a completed task cannot disappear from both sets.
+	for _, segment := range metadata.SelectSegments(ctx, WithCollection(view.GetCollectionId())) {
+		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
+			continue
+		}
+		start := segmentTransformStart(segment)
+		if start == 0 {
+			if !segment.GetIsImporting() && !segment.GetCreatedByCompaction() &&
+				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) {
+				// SN's certificate includes even a first pack not registered here.
+				continue
+			}
+			return nil, merr.WrapErrServiceNotReadyMsg("Segment %d Transform coverage is not ready", segment.GetID())
+		}
+		pin(segment.GetInsertChannel(), start)
 	}
 	return bounds, nil
 }

@@ -57,7 +57,7 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	}, nil).Once()
 
 	detached := 0
-	data := api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 100, DataVersion: qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, Shards: []*api.ShardDataView{{VChannel: "v0", TransformStartAfterTimetick: 10}}})
+	data := api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 100, DataVersion: qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, Shards: []*api.ShardDataView{{VChannel: "v0", GrowingTransformStartAfterTimetick: 10, CompactedTransformStartAfterTimetick: 10}}})
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*fakeRuntimeDataViewProvider).RegisterDataViewListener).To(func(_ *fakeRuntimeDataViewProvider, listener api.DataViewListener) func() {
 			listener(100, data)

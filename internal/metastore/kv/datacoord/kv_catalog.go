@@ -519,16 +519,9 @@ func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOf
 	return kc.MetaKv.Save(ctx, key, string(value))
 }
 
-// marshalDataView persists membership and Segment revisions only. The shard
-// Transform frontier is derived from recovered metadata and must never become
-// a durable source of truth. Clone before clearing it: the caller may already
-// have published the runtime snapshot to readers.
+// marshalDataView persists membership, Segment revisions, and version-bound W/A.
 func marshalDataView(dataView *viewpb.DataViewOfCollection) ([]byte, error) {
-	persisted := proto.Clone(dataView).(*viewpb.DataViewOfCollection)
-	for _, shard := range persisted.GetShards() {
-		shard.TransformStartAfterTimetick = 0
-	}
-	return proto.Marshal(persisted)
+	return proto.Marshal(dataView)
 }
 
 func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {

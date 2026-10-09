@@ -584,6 +584,11 @@ message SaveBinlogPathsRequest {
   // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
   // from req.Field2StatslogPaths via the iteration helper.
   Statistics stats = 19;
+
+  // WAL-side publication proof for this vchannel, conditional on this final
+  // L1 Flush committing. Other unpublished L1 segments cannot require an
+  // earlier TransformLog start. Zero means no new proof (older writers).
+  uint64 growing_transform_start_after_timetick = 20;
 }
 
 message CheckPoint {

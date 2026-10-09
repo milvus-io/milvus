@@ -35,7 +35,8 @@ local Retained consumers have released and BroadcastAck is the only remaining
 Owner holder. Explicit Flush/lifecycle requests include L0Materializer among
 these consumers: readiness waits for L1 final commit, required L0 output, and
 installation of dirty materialization metadata. The current WAL materializer also retains ordinary Delete handles through
-output and registration. L1/L0 work on an explicit request joins independently.
+output and registration. L1/L0 work on an explicit request joins through message handles; L0 waits for
+final publication of every L1 created before its materialization boundary.
 
 For successful consumers the callback marks the task ready and nonblockingly
 wakes the dispatcher; it performs no Coordinator I/O. If any consumer poisoned

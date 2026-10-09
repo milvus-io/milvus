@@ -4,20 +4,16 @@
 - Primary Approver: @czs007
 - Independent Approver: @congqixia
 - Design Review: 2026-07-29
-- Design Update: 2026-10-03
+- Design Update: 2026-10-09
 
-Status: the checkpoint-bounded producer, runtime-only DataView frontier,
-version-bound Segment cursors, Import registration, and conservative history
-retention are implemented. L0 compaction retains the prior Segment cursor until
-it can supply a continuous-prefix coverage certificate; a manifest update alone
-does not justify advancement. Legacy or external data without recoverable
-coverage must remain not-ready instead of fabricating a replay start.
+Status: the dual-frontier contract below supersedes the checkpoint-bounded
+producer. Implementation and regression verification are in progress.
 
-DataCoord calculates the shard frontier from the existing reported channel
-checkpoint, published Segment coverage, and unpublished Segment constraints.
-This replaces the earlier mandatory shard-wide rotation/Flush barrier proposal.
-Partitions may Flush independently, and no new SN-to-DataCoord watermark RPC is
-required while the existing Growing registration/checkpoint contract is retained.
+Each DataView shard persists two version-bound inputs: WAL publication frontier
+W (`growing_transform_start_after_timetick`) and selected-base coverage A
+(`compacted_transform_start_after_timetick`). Its shared TransformLog start is
+F = min(W, A), derived at runtime and not persisted. Channel checkpoint reports
+neither generate DataViews nor participate in native frontier calculation.
 
 ## 1. Two levels of coverage
 
@@ -73,183 +69,121 @@ QueryView must not load or forward L0 Segments to fill a gap before F. Storage
 compaction may still inline changes into the selected base; query recovery
 consumes the remaining suffix from WAL/WALSummary.
 
-## 2. Generation in DataCoord
+## 2. Persisted W and A, runtime F
 
-At collection creation, initialize each shard independently:
+At CreateCollection, synchronously create the full shard skeleton and set
+W = A = F = B, where B is that business VChannel's CreateCollection WAL TimeTick.
+Do not use the control-channel TimeTick, wall-clock time, or a later checkpoint.
+An early background notification cannot create the initial shard skeleton.
 
-```text
-B = this VChannel's CreateCollection WAL TimeTick
-F(initialView, vchannel) = B
-```
+W is a WAL-side publication certificate: after the associated Flush transaction
+commits, every ordinary WAL L1 requiring a replay start before W has already
+been published. Other data publication paths must preserve equivalent constraints.
+W advances only with successful final L1 publication, never with checkpoint
+updates or growing data-pack persistence.
 
-Preserve B as an immutable origin. Do not substitute the control-channel
-TimeTick, the broadcast maximum, wall-clock time, or a later checkpoint.
-
-For each subsequent snapshot, calculate:
-
-```text
-K = accepted channel checkpoint for this VChannel
-S = min C(s, selected base) over members of the new DataView
-G = min safe start over registered data that can still enter a later DataView
-
-F(newView, vchannel) = min(K, S, G)
-```
-
-Omit an empty S or G set from the minimum. G covers **all partitions** of the
-VChannel and includes Growing, Sealed/Flushing, and data whose output is durable
-but whose publication into DataView is not yet committed. It is defined by
-publication status, not just the `Growing` enum. Pending Import and other new
-data publication paths must supply equivalent constraints as described below.
-
-K is the recovery checkpoint already delivered through
-`PChannelCheckpointUpdater -> UpdateChannelCheckpoint`. It is a completeness
-boundary, not the Segment cursor or the Transform materialization cursor.
-Use the checkpoint belonging to the shard; do not compare timestamps from
-unrelated PChannels to derive a collection-wide minimum.
-
-The frontier projector receives the complete shard skeleton and the previous
-runtime F from DataViewManager. It does not look up the lazily populated
-DataCoord collection cache or make a metadata RPC. Empty shards are included.
-
-If K is missing or lags the already-proven runtime F (including the initial B),
-it cannot authorize advancement: use that proven F as the checkpoint bound,
-then still apply all Import and Segment constraints. A lower Segment cursor
-must still fail the monotonicity check; retaining F is not permission to clamp
-away a coverage regression. With no prior runtime F during recovery, missing K
-still blocks readiness until coverage can be reconstructed. With no current members, remaining unpublished data
-still constrains F; with neither set, K supplies a finite bound. Never replace
-an empty set with a published infinity or reset the frontier to zero.
-Unknown coverage must not be skipped. It needs a proven conservative lower
-bound or must prevent publication of the affected new View. A candidate below
-the previous F is an invariant violation; `max(oldF, candidate)` would conceal
-missing history and is not a repair.
-
-Example, with X and Y in different partitions of the same shard:
-
-| Event | DataView members | Unpublished constraint | K | F |
-|---|---|---|---|---|
-| Y, with C=100, Flushes before X | Y | X starts at 50 | 200 | 50 |
-| X later Flushes | X, Y | none | 200 | 50 |
-
-X moves from G to S. Neither early Flush of X nor delayed publication of Y is
-required. A cold Growing Segment can retain more Transform history, but does
-not impose a cross-partition Flush ordering requirement.
-
-## 3. Why the checkpoint makes the calculation complete
-
-The existing ordinary streaming L1 path has this ordering:
+A is the minimum C(s, selected base) over **all members of the new DataView**,
+across every partition of this shard. Its name refers to data-base coverage,
+not to the most recent Compaction's timestamp. Recalculate A after Flush as well
+as Compaction, import, removal and every other membership/base change. A may
+fall when a late Segment joins; W must already protect that Segment's history.
+For an empty shard use A = W, a finite bound, rather than publishing infinity.
 
 ```text
-persist the first Insert pack
-  -> PersistGrowingSegment registers its StartPosition in DataCoord
-  -> install stable Segment state and release Insert handles
-  -> publish the continuous recovery checkpoint
-  -> report that checkpoint to DataCoord
+W(new) = max(W(previous), accepted WAL Flush certificate)
+A(new) = min C(s, selected base) over new members, or W(new) when empty
+F(new) = min(W(new), A(new))
 ```
 
-CreateSegment registration also precedes completion of its retained handle.
-A Segment's first data position is the first effective Insert, not its creation
-TimeTick. Later packs preserve the original StartPosition.
+Only W and F must be nondecreasing. Never clamp a regressing F: reject the
+publication because the new data needs history consumers may already have
+trimmed. Ordinary non-L0 Compaction inherits the actual input bases' C; an
+L0/Transform compaction may advance C only with complete-prefix coverage for
+the exact new base. A maximum Delete timestamp or a newer Manifest is not proof.
 
-StorageV3 allocates a version-zero Manifest path before any data is committed.
-That placeholder and row-count reports are not first-pack registration evidence.
-A Growing or Sealed Segment without StartPosition, binlogs, or a committed
-Manifest remains protected by K until registration supplies its cursor.
+## 3. WAL Flush certificate
 
-For an Insert at t whose initial data registration has not completed, K cannot
-pass t. Thus DataCoord does not need to see the latest complete Growing list:
+The final L1 SaveBinlogPaths request carries
+`growing_transform_start_after_timetick`. It is separate from the Segment's
+own C and from its Flush message timestamp.
 
-- Registered but unpublished data is constrained by G.
-- Not-yet-registered data is constrained by K, with `F <= K <= t`.
-- Published data is constrained by S, with `F <= C(s, base)`.
+Under the VChannel observation lock, capture:
 
-For every current member, replaying from F therefore includes every required
-Transform. For later ordinary Flushes, the incoming cursor was already
-protected by G or was no earlier than the previous K. Transferring a cursor
-from G to S without a gap cannot lower F. K and existing coverage advance
-monotonically; removing a constraint cannot lower a minimum. Atomic parent-to-
-output replacement preserves this argument only when compaction inheritance
-uses valid input versions.
+```text
+H = the completely observed ordered WAL prefix
+P = every Segment not yet confirmed finally published/retired in DataCoord,
+    across all partitions, excluding only this request's atomic publication
+W(request) = min(H, min CreateSegmentTimeTick(s) for s in P)
+```
 
-These are the producer's proof obligations. Retiring legacy Growing binlog
-publication or checkpoint reporting must preserve the first-pack registration
-barrier until an equivalent registration-completeness protocol is installed.
-A dedicated SN safe-watermark RPC is a possible replacement, not a prerequisite
-for this design.
+An empty P contributes no constraint. Segment creation is a conservative bound
+before its first effective Insert and exists before first-pack persistence.
+An in-flight RPC remains in P until its durable publication is confirmed.
+Do not exclude another task merely because its objects were written or its RPC
+was sent. The current request is excluded conditionally: its certificate only
+becomes effective with its own SegmentMeta + DataView transaction.
 
-## 4. Consistent publication and other data sources
+Observe and capture use the same serialization, so an unobserved future
+CreateSegment is after H. H is an observation boundary, not a recovery checkpoint
+or the append tail. Recovered pending Segments must be reconstructed before
+issuing a certificate. Ownership validation applies to the entire publication.
 
-### Snapshot construction
+Out-of-order Flush example: X needs C=50 and Y needs C=100, in different
+partitions. Y publishes first, but its W is bounded by X's creation position,
+which is <=50. A may be 100 while F remains <=50. When X publishes, W can advance
+but A becomes 50. F therefore cannot skip X's history. Later coverage advances
+can raise A. No cross-partition L1 Flush ordering is required.
 
-1. Capture K before reading the Segment projection.
-2. Under collection publication synchronization, construct a consistent new
-   membership and unpublished set, with coverage for the selected base versions.
-3. Calculate F and check that it does not regress.
-4. Persist DataView membership and version-bound Segment coverage, together
-   with any membership transfer that must be atomic. Keep the calculated F only
-   in the runtime snapshot exposed to consumers; do not serialize it.
+A retry of a previously committed Segment returns the original
+`sealed_at_data_version`; a newer certificate in a retry is not a new publication.
+Unknown certificates from older writers do not authorize W advancement.
 
-Do not pair a newer checkpoint with an older Segment list. The synchronization
-must include state/coverage changes relevant to S and G; a DataView lock alone
-is insufficient if a producer mutates the projected metadata outside it.
+## 4. Atomic publication and Transform materialization
 
-For ordinary Flush, keep the existing atomic SegmentMeta + DataView commit:
-before it the Segment contributes to G, and after it the Segment contributes
-to S. Observing Flush, finishing object writes, or changing a state enum must
-not create an intermediate state where the Segment belongs to neither set.
-Retries return the original `sealed_at_data_version`.
+Persist the selected Segment metadata, W, A and DataVersion in the same final
+Flush transaction. Publish F only after commit, and retain immutable old versions.
+Compaction and other publication paths inherit W and recalculate A from their
+exact post-change members. Checkpoint updates never enqueue DataView recompute.
+Native frontier generation needs neither the lazy collection cache nor a
+checkpoint RPC/report. A-only/W changes are published as part of their owning
+data mutation, not as an independent checkpoint-driven version.
 
-Checkpoint advancement requests a coalesced, retryable recompute. A changed F
-alone creates a new `compact_version`; it does not increment streaming_version.
-Ordinary Flush retains its existing streaming_version transition. Membership
-or Manifest changes can publish with unchanged F. Unchanged snapshot content
-creates no new version. Recovery must reconcile persisted inputs even if the
-notification preceding a crash was lost.
+Import jobs and other asynchronous publication paths must not fall through the
+WAL-L1 proof. Pending CommitImport positions remain constraints until selected
+Segment bases carry the matching C. Unknown coverage remains not-ready. A stale
+Compaction output cannot inherit coverage from a newer parent base it did not
+read. QueryView continues to consume TransformLog only, never L0 as a replay
+fallback.
 
-### Import and other new data
+### Required materialization ordering
 
-The streaming Insert proof does not automatically cover an asynchronous
-CommitImport callback. Pending imports must remain represented in G until
-publication, including the interval after WAL commit but before its TimeTick
-has reached DataCoord's callback.
+Before materializing a complete Transform interval through T, all relevant L1
+Segments created before T, in all partitions of the VChannel, must have finished
+final DataCoord publication (or confirmed retirement). Growing registration,
+object writes and the Sealed enum alone do not satisfy this condition. L1 final
+commits execute independently; materialization waits for them, never vice versa.
 
-The implementation registers each business VChannel's CommitImport TimeTick in
-ImportJob metadata from the broadcaster's synchronous AckOnce callback. SN
-retains ownership of the CommitImport WAL message until that callback succeeds,
-so K cannot pass the commit before its constraint is durable. The asynchronous
-joined callback then persists Segment C and visibility before completing the
-job. The projection reads job constraints before Segment metadata, and includes
-all healthy Segments even when their DataView publication is pending. Thus a
-completed job's constraint is already represented by its Segments.
+The maximum position of a batch, not its first Delete, determines this gate.
+All physical output groups must succeed before the interval is called complete.
+L0 materialization by itself does not advance any selected L1 base's C; the
+appropriate compaction must still inline the complete relevant prefix. Partial
+partition/Segment completion does not prove a shard-wide coverage advance.
 
-Missing task fences block frontier generation conservatively. This also keeps
-legacy pending jobs without registration evidence from authorizing progress.
-These task-level commit timestamps are recovery inputs; they are not a persisted
-copy of DataView F.
-
-This ordering must cover replicated imports and recovered tasks as well as
-local broadcasts. An already-acknowledged commit cannot retrospectively be protected
-by pinning today's F. Legacy tasks without a proof need reconciliation before
-advancement. Equivalent obligations apply to copy/external publication paths;
-do not assume their cursors satisfy the ordinary Insert registration rule.
+This ordering is required independently of W/A. W/A itself does not require a
+separate periodic materialization-frontier report to DataCoord.
 
 ## 5. Recovery, retention, and shared buffers
 
-DataView F is dynamically calculated and is **not persisted**. Persist C with
-each referenced Segment data revision, so recovery can calculate the minimum
-for the exact revisions selected by a View. Recover channel checkpoints,
-publication state, and pending task constraints before generating runtime F.
-A shard frontier serialized by an older writer is not authoritative.
+Persist W and A with each immutable DataView version. Keep the per-Segment C
+bound to its selected base/Manifest revision. Restore F from that version's own
+W and A, and validate A against its selected members. Do not use today's
+checkpoint, today's Segment bases or a successor View's W to reconstruct an
+older View. The DataView proto and catalog store only W/A; F is calculated for QueryView.
 
-Reconstruct runtime snapshots before exposing them to QueryView builders. For
-retained historical versions, use their own version-bound coverage and cap the
-result by the next retained version's reconstructed F; do not substitute the
-latest Segment revision's C. This preserves version ordering even for an old
-empty View followed by a View containing Segments. Once a runtime snapshot is
-handed to a consumer, keep it immutable. Existing QueryViews keep their own
-adopted cursor until their references are released. Missing recovery inputs
-must block readiness rather than fabricate a current timestamp. A zero legacy
-field means unknown coverage.
+A legacy snapshot without W/A requires conservative migration from trustworthy
+historical inputs before it is ready; zero is unknown, not an unconstrained
+frontier. Published read objects remain immutable. Old QueryViews retain their
+own version's inputs until all references have been released.
 
 The cursor proof and history availability are separate requirements:
 
@@ -289,10 +223,10 @@ The producer is complete only after these pieces are wired:
 - Per-VChannel CreateCollection origin and initial F propagation.
 - Segment C production, version-bound persistence, snapshot/load propagation,
   and compaction inheritance/coverage validation.
-- A consistent K/S/G projection over every partition, including unpublished
-  and pending external-data states.
-- Atomic G-to-S transfer, monotonic F validation, checkpoint-driven recompute,
-  and immutable snapshot recovery.
+- A complete WAL Flush certificate across every partition, plus consistent
+  pending external-data publication constraints.
+- Atomic W/A publication, monotonic F validation, no checkpoint-triggered
+  recompute, and exact-version recovery.
 - WALSummary retention that protects the TransformLog-only query path.
 
 Required scenarios include out-of-order Flush across partitions; delayed first
@@ -300,7 +234,7 @@ pack registration; checkpoint/projection races; concurrent compaction;
 Import callback delay and restart; empty shards; metadata publication failures;
 SN/DataCoord/QN restart; old/new View coexistence; Segment moves; and reload
 while Summary GC runs after SN local Segments have been released. Assert both
-nondecreasing dynamically generated F, absence of F from persisted DataViews,
+nondecreasing dynamically generated F, persistence of W/A but absence of F from persisted DataViews,
 and exact Delete/Upsert query results.
 
 ## Key packages and current evidence
@@ -323,3 +257,14 @@ Related contracts: [DataView](data_view.md),
 [Transform subscriptions](pure_transform_subscription.md),
 [Segment persistence](../wal/segment_view_module.md), and
 [Checkpoint persistence](../wal/checkpoint-persistence.md).
+
+### DataView wire representation
+
+This feature is unreleased. Remove the former derived
+`DataViewOfShard.transform_start_after_timetick` field and reuse tag 3 for
+`growing_transform_start_after_timetick`; tag 4 stores
+`compacted_transform_start_after_timetick`. DataView contains only W/A.
+The coordinator calculates `min(W, A)` when projecting the immutable DataView
+into QueryView; `QueryViewMeta.transform_start_after_timetick` remains the
+consumer-facing exclusive replay start. There is no clear-on-serialization or
+restore-a-third-field path.

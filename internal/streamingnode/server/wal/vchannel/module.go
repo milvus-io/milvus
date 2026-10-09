@@ -163,14 +163,14 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		}
 	}
 	module.l0Materializer = l0materializer.NewWALMaterializer(l0materializer.WALConfig{
-		VChannel:                  config.VChannel,
-		MaterializedTimeTick:      config.VChannelMeta.GetTransformMaterializedTimeTick(),
-		MaterializeMaxRows:        config.L0MaterializeRows,
-		MaterializeMaxBytes:       config.L0MaterializeBytes,
-		Materializer:              config.L0Materializer,
-		Runtime:                   config.Runtime,
-		OnMaterialized:            module.markL0Materialized,
-		GrowingSegmentsRegistered: module.growingSegmentsRegistered,
+		VChannel:               config.VChannel,
+		MaterializedTimeTick:   config.VChannelMeta.GetTransformMaterializedTimeTick(),
+		MaterializeMaxRows:     config.L0MaterializeRows,
+		MaterializeMaxBytes:    config.L0MaterializeBytes,
+		Materializer:           config.L0Materializer,
+		Runtime:                config.Runtime,
+		OnMaterialized:         module.markL0Materialized,
+		EarlierSegmentsFlushed: module.earlierSegmentsFlushed,
 	})
 	module.refreshQueryRetentionLocked()
 	return module, nil
@@ -544,13 +544,30 @@ func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, v
 	m.markSegmentDirty(segmentID, view)
 }
 
-// L0 may precede L1 output, but DataCoord must know every earlier L1 so its
-// compaction policy can protect growing data. No L1 flush is requested here.
-func (m *VChannelRecoveryModule) growingSegmentsRegistered(through uint64) bool {
+// GrowingTransformStartAfterTimeTick captures a conditional publication proof.
+// Only this request's Segment may be excluded before its final commit succeeds.
+func (m *VChannelRecoveryModule) GrowingTransformStartAfterTimeTick(publishingSegmentID int64) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	start := m.queryObservedTimeTick
+	for id, view := range m.segments {
+		if id == publishingSegmentID {
+			continue
+		}
+		if created, pending := view.L1MaterializationBlockerTimeTick(); pending {
+			start = min(start, created)
+		}
+	}
+	return start
+}
+
+// Transform materialization through T requires final DataCoord publication of
+// every earlier L1, including other partitions and in-flight Flush RPCs.
+func (m *VChannelRecoveryModule) earlierSegmentsFlushed(through uint64) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, view := range m.segments {
-		if view.CreateTimeTick() <= through && !view.Registered() {
+		if created, pending := view.L1MaterializationBlockerTimeTick(); pending && created < through {
 			return false
 		}
 	}

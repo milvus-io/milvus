@@ -842,7 +842,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				}
 			}
 			flushView, commitView, abortView, err := s.dataViewManager.PrepareFlush(ctx, FlushDataViewEvent{
-				CollectionID: segment.GetCollectionID(),
+				CollectionID:           segment.GetCollectionID(),
+				GrowingTransformStarts: map[string]uint64{segment.GetInsertChannel(): req.GetGrowingTransformStartAfterTimetick()},
 				Segments: []dataview.LoadableSegment{{
 					SegmentID:                   segment.GetID(),
 					VChannel:                    segment.GetInsertChannel(),

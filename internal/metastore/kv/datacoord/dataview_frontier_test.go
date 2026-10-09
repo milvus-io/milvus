@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func TestDataViewFrontierIsNotPersisted(t *testing.T) {
+func TestDataViewPersistsVersionBoundDualFrontiers(t *testing.T) {
 	for _, composite := range []bool{false, true} {
 		name := "snapshot"
 		if composite {
@@ -58,11 +58,12 @@ func TestDataViewFrontierIsNotPersisted(t *testing.T) {
 				DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
 				Shards: []*viewpb.DataViewOfShard{
 					{
-						Vchannel:                    "v1",
-						TransformStartAfterTimetick: 100,
-						Partitions:                  []*viewpb.DataViewOfPartition{{PartitionId: 10, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{7}}},
+						Vchannel:                             "v1",
+						GrowingTransformStartAfterTimetick:   300,
+						CompactedTransformStartAfterTimetick: 100,
+						Partitions:                           []*viewpb.DataViewOfPartition{{PartitionId: 10, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{7}}},
 					},
-					{Vchannel: "v2", TransformStartAfterTimetick: 200},
+					{Vchannel: "v2", GrowingTransformStartAfterTimetick: 200, CompactedTransformStartAfterTimetick: 200},
 				},
 			}
 			original := proto.Clone(view)
@@ -77,12 +78,10 @@ func TestDataViewFrontierIsNotPersisted(t *testing.T) {
 			persisted := &viewpb.DataViewOfCollection{}
 			require.NoError(t, proto.Unmarshal([]byte(values[buildDataViewVersionKey(100, 2, 1)]), persisted))
 			for _, shard := range persisted.GetShards() {
-				require.Zero(t, shard.GetTransformStartAfterTimetick())
+				require.NotZero(t, shard.GetGrowingTransformStartAfterTimetick())
+				require.NotZero(t, shard.GetCompactedTransformStartAfterTimetick())
 			}
 			expected := proto.Clone(view).(*viewpb.DataViewOfCollection)
-			for _, shard := range expected.GetShards() {
-				shard.TransformStartAfterTimetick = 0
-			}
 			require.True(t, proto.Equal(expected, persisted), "membership and data revisions must survive persistence")
 		})
 	}

@@ -69,26 +69,26 @@ version is kept) rather than regressed: after an L0 compaction advanced the
 Manifest, a replay that has not yet observed the new manifest must not roll the
 snapshot back.
 
-The DataCoord producer dynamically calculates
-`transform_start_after_timetick`. It initializes the runtime snapshot
-from each VChannel's CreateCollection TimeTick, then calculates `F = min(K, S, G)`:
-the accepted channel checkpoint, coverage of the new snapshot's Segment data
-versions, and the earliest safe start of registered but unpublished data across
-all partitions. Growing/Flushing data constrains F without becoming DataView
-members. The producer must supply these inputs consistently; the Manager must
-not infer completeness from an unsynchronized SegmentMeta scan.
+The DataCoord producer persists two per-shard inputs with every DataVersion:
+`W = GrowingTransformStartAfterTimeTick` and
+`A = CompactedTransformStartAfterTimeTick`. Both begin at the VChannel's
+CreateCollection WAL TimeTick. W advances only with a final L1 SaveBinlogPaths
+publication carrying an SN proof. A is the minimum cursor of the exact Segment
+bases in the new snapshot across every partition; it is recomputed on Flush and
+Compaction, and may decrease. An empty shard uses A=W.
 
-F is nondecreasing and generated dynamically for runtime snapshots; it is not
-persisted in DataView metadata. Recovery rebuilds it from checkpoint and
-publication constraints plus each View's version-bound Segment coverage,
-preserving the ordering of retained versions. Published runtime snapshots stay
-immutable. An
-F-only change advances compact_version; Manifest or membership updates may keep
-F unchanged. Existing checkpoint reporting and Growing registration supply the
-initial completeness contract; a shard-wide Flush order or new watermark RPC
-is not required. See [Transform Start-After TimeTick](transform_start_after_timetick.md)
-for the proof, atomic publication requirements, Import constraints, and
-TransformLog retention obligations. The catalog omits the derived shard field on both standalone and atomic Flush writes.
+The shared TransformLog start is calculated as `F = min(W, A)` when projecting
+DataView into QueryView. There is no F field in the DataView proto. W and F are
+nondecreasing, while published snapshots remain immutable. Recovery uses each
+version's own W/A. Checkpoint reports neither calculate these inputs nor trigger
+DataView versions. SN proves W using its completely observed WAL prefix and all
+L1 Segments whose final publication is outstanding, including concurrent Flush
+RPCs and other partitions; it excludes only the Segment in this atomic request.
+
+TransformLog/L0 materialization through T waits for final publication of every
+L1 created before T. Pending imports and other asynchronous publications retain
+their own fences. See [Transform Start-After TimeTick](transform_start_after_timetick.md)
+for the proof, atomic publication requirements, and retention obligations.
 
 ## Lifecycle
 
@@ -461,6 +461,6 @@ projection, event-driven repair, Balancer policy, Segment reference queries,
 or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
 of SegmentMeta rather than an event-accumulated log. The planned frontier
-producer extends this projection with a checkpoint-bounded, consistent coverage
+producer extends this projection with a W/A-based, consistent coverage
 calculation; it does not restore the removed unsynchronized SegmentMeta-only
 frontier calculation. See [Transform Start-After TimeTick](transform_start_after_timetick.md).

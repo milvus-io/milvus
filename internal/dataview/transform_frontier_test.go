@@ -42,40 +42,38 @@ func transformTestView(version int64, starts ...uint64) *viewpb.DataViewOfCollec
 func TestTransformFrontierIncludesEveryPartition(t *testing.T) {
 	view := transformTestView(1, 90, 70)
 	require.NoError(t, advanceTransformFrontiers(view, map[string]uint64{"v1": 100}))
-	require.Equal(t, uint64(70), view.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(70), transformStart(view.Shards[0]))
 
 	// Another partition's unflushed data constrains the entire shard buffer.
 	view = transformTestView(1, 90, 70)
 	require.NoError(t, advanceTransformFrontiers(view, map[string]uint64{"v1": 50}))
-	require.Equal(t, uint64(50), view.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(50), transformStart(view.Shards[0]))
 
-	// Publishing that partition transfers its constraint from G to S.
+	// Publishing that partition transfers its constraint from W to A.
 	view = transformTestView(2, 90, 70, 50)
 	require.NoError(t, advanceTransformFrontiers(view, map[string]uint64{"v1": 100}))
-	require.Equal(t, uint64(50), view.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(50), transformStart(view.Shards[0]))
 }
 
 func TestTransformFrontierDoesNotFabricateCoverage(t *testing.T) {
 	view := transformTestView(1, 0)
 	require.ErrorIs(t, advanceTransformFrontiers(view, map[string]uint64{"v1": 100}), merr.ErrServiceNotReady)
 	view = transformTestView(1, 50)
-	view.Shards[0].TransformStartAfterTimetick = 60
+	view.Shards[0].GrowingTransformStartAfterTimetick = 60
+	view.Shards[0].CompactedTransformStartAfterTimetick = 60
 	require.ErrorIs(t, advanceTransformFrontiers(view, map[string]uint64{"v1": 100}), merr.ErrDataIntegrity)
-	require.Equal(t, uint64(60), view.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(60), transformStart(view.Shards[0]))
 
 	view = transformTestView(1, 100)
-	view.Shards[0].TransformStartAfterTimetick = 40
+	view.Shards[0].CompactedTransformStartAfterTimetick = 40
+	view.Shards[0].GrowingTransformStartAfterTimetick = 40
 	require.NoError(t, advanceTransformFrontiers(view, map[string]uint64{}))
-	require.Equal(t, uint64(40), view.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(40), transformStart(view.Shards[0]))
 }
 
 func TestTransformFrontierRecoveryIsDynamicAndVersionOrdered(t *testing.T) {
 	bounds := map[string]uint64{"v1": 200}
-	manager := newManager(context.Background(), nil, nil, WithShardFrontierProjector(func(_ context.Context, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error) {
-		require.Equal(t, int64(1), collectionID)
-		require.Equal(t, map[string]uint64{"v1": 0}, frontiers)
-		return bounds, nil
-	}))
+	manager := newManager(context.Background(), nil, nil, WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) { return bounds, nil }))
 	state := newCollectionState(1)
 	// Old empty and compacted Views retain their own base coverage. There is
 	// deliberately no persisted F, and no lookup of current Segment revisions.
@@ -89,7 +87,7 @@ func TestTransformFrontierRecoveryIsDynamicAndVersionOrdered(t *testing.T) {
 	require.NoError(t, manager.restoreTransformFrontiers(context.Background(), state))
 	for i, expected := range []uint64{50, 50, 80} {
 		entry := state.versions[protoVersionToStruct(views[i].DataVersion)]
-		require.Equal(t, expected, entry.view.Shards[0].TransformStartAfterTimetick)
+		require.Equal(t, expected, transformStart(entry.view.Shards[0]))
 	}
 	require.True(t, proto.Equal(original, views[1]), "reconstruction must not mutate catalog snapshots")
 	require.Equal(t, uint64(200), bounds["v1"], "projection input remains owned by the producer")
@@ -131,48 +129,16 @@ func TestTransformFrontierRetriesRecoveryWithoutMutatingPublishedViews(t *testin
 	require.NoError(t, err)
 	defer ref.Deref()
 	require.NotNil(t, native)
-	require.Equal(t, uint64(80), native.Shard("v1").TransformStartAfterTimetick)
+	require.Equal(t, uint64(80), native.Shard("v1").TransformStartAfterTimetick())
 	segment, ok := native.Segment(10)
 	require.True(t, ok)
 	require.Equal(t, int64(1), segment.ManifestVersion)
 	require.Equal(t, uint64(80), segment.TransformStartAfterTimetick)
 	published := ref.DataView()
-	require.Equal(t, uint64(80), published.Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(80), transformStart(published.Shards[0]))
 	older, err := manager.Get(ctx, 1, old.view.DataVersion)
 	require.NoError(t, err)
 	defer older.Deref()
-	require.Equal(t, uint64(50), older.DataView().Shards[0].TransformStartAfterTimetick)
+	require.Equal(t, uint64(50), transformStart(older.DataView().Shards[0]))
 	require.True(t, proto.Equal(published, ref.DataView()))
-}
-
-func TestShardFrontierInputsCoverBootstrapFlushAndRecompute(t *testing.T) {
-	m := newPublicationTestManager(t)
-	calls := 0
-	WithShardFrontierProjector(func(_ context.Context, collectionID int64, frontiers map[string]uint64) (map[string]uint64, error) {
-		require.Equal(t, int64(1), collectionID)
-		expected := map[string]uint64{"v1": 10, "v2": 20}
-		if calls == 0 {
-			expected = map[string]uint64{"v1": 0, "v2": 0}
-		}
-		require.Equal(t, expected, frontiers, "empty shards must not be inferred from Segment membership")
-		calls++
-		return map[string]uint64{"v1": 10, "v2": 20}, nil
-	})(m)
-	_, err := m.OnBootstrapCollection(t.Context(), BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v1", "v2"}})
-	require.NoError(t, err)
-	old, err := m.Latest(t.Context(), 1)
-	require.NoError(t, err)
-	defer old.Deref()
-	before := old.DataView()
-	segment := LoadableSegment{SegmentID: 10, VChannel: "v1", PartitionID: 1, ManifestVersion: 1, TransformStartAfterTimetick: 30, RowNum: 1}
-	view, commit, _, err := m.PrepareFlush(t.Context(), FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{segment}})
-	require.NoError(t, err)
-	require.Equal(t, int64(2), view.GetDataVersion().GetStreamingVersion())
-	require.Equal(t, uint64(10), view.Shards[0].GetTransformStartAfterTimetick())
-	require.Equal(t, uint64(20), view.Shards[1].GetTransformStartAfterTimetick())
-	commit()
-	_, err = m.RecomputeNow(t.Context(), 1, func(context.Context, int64) ([]LoadableSegment, error) { return []LoadableSegment{segment}, nil })
-	require.NoError(t, err)
-	require.Equal(t, 3, calls)
-	require.True(t, proto.Equal(before, old.DataView()), "published runtime snapshots remain immutable")
 }
