@@ -572,37 +572,24 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
 
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            auto col = pinned ? chunked->bulk_subscript_from_state(
-                                    pinned,
-                                    &local_ctx,
-                                    field_id,
-                                    offsets,
-                                    size,
-                                    target_dynamic_fields)
-                              : bulk_subscript(&local_ctx,
-                                               field_id,
-                                               offsets,
-                                               size,
-                                               target_dynamic_fields);
+        auto& field_meta = plan->schema_->operator[](field_id);
+        const std::vector<std::string>* dynamic_field_names =
+            (plan->schema_->get_dynamic_field_id().has_value() &&
+             plan->schema_->get_dynamic_field_id().value() == field_id &&
+             !plan->target_dynamic_fields_.empty())
+                ? &plan->target_dynamic_fields_
+                : nullptr;
+        auto col = BulkSubscriptWithSnapshot(this,
+                                             snapshot,
+                                             &local_ctx,
+                                             field_id,
+                                             field_meta,
+                                             offsets,
+                                             size,
+                                             dynamic_field_names);
+        if (dynamic_field_names != nullptr) {
             fields_data->AddAllocated(col.release());
             continue;
-        }
-        std::unique_ptr<DataArray> col;
-        auto& field_meta = plan->schema_->operator[](field_id);
-        bool field_exists =
-            pinned ? pinned->schema->get_fields().find(field_id) !=
-                         pinned->schema->get_fields().end()
-                   : is_field_exist(field_id);
-        if (!field_exists) {
-            col = bulk_subscript_not_exist_field(field_meta, size);
-        } else {
-            col = pinned ? chunked->bulk_subscript_from_state(
-                               pinned, &local_ctx, field_id, offsets, size)
-                         : bulk_subscript(&local_ctx, field_id, offsets, size);
         }
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {

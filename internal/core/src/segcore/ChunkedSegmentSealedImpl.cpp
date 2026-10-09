@@ -1331,12 +1331,11 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return Column(field_id);
     }
 
-    // Type-erased published state for result-fill reuse. The segment that
-    // created this snapshot reinterprets the pointer via the alias shared_ptr
-    // constructor; nothing outside ChunkedSegmentSealedImpl dereferences it.
-    const void*
-    GetState() const override {
-        return state_.get();
+    // Plain (non-virtual) accessor so the enclosing segment's ToPublishedState
+    // can rebind the concrete published state. The facade itself stays opaque.
+    const std::shared_ptr<const PublishedSegmentState>&
+    GetPublishedState() const {
+        return state_;
     }
 
  private:
@@ -1365,23 +1364,67 @@ ChunkedSegmentSealedImpl::ToPublishedState(
     if (!snapshot) {
         return nullptr;
     }
-    // The type-erased pointer is only valid if the snapshot is really a
-    // SealedReadSnapshot (created by this class via CaptureReadSnapshot).
-    // Guards every call site — including the export paths that bypass
-    // FillTargetEntry's cross-segment assertion.
-    AssertInfo(dynamic_cast<const SealedReadSnapshot*>(snapshot.get()) !=
-                   nullptr,
+    // A non-SealedReadSnapshot would make the pointer reinterpretation below
+    // invalid. Sealed reads always come from CaptureReadSnapshot, so the
+    // downcast both guards every call site (including the export paths that
+    // bypass FillTargetEntry's cross-segment assertion) and yields direct
+    // access to the concrete state.
+    auto* sealed = dynamic_cast<const SealedReadSnapshot*>(snapshot.get());
+    AssertInfo(sealed != nullptr,
                "read_snapshot_ is not a sealed segment read snapshot");
-    const void* state = snapshot->GetState();
-    if (state == nullptr) {
-        return nullptr;
-    }
-    // Alias constructor: shares the snapshot's control block (no ref-count
-    // churn) and reinterprets the type-erased pointer. The snapshot owns the
-    // concrete state through SealedReadSnapshot::state_, so the alias keeps it
-    // alive as long as the request result lives.
+    // Alias constructor: shares the snapshot's shared_ptr control block (one
+    // ref-count bump), so the concrete state stays owned by
+    // SealedReadSnapshot::state_ for the request lifetime — no separate
+    // ownership of the published state and no atomic ref-count traffic on the
+    // shared published_state_ control block.
     return std::shared_ptr<const PublishedSegmentState>(
-        snapshot, static_cast<const PublishedSegmentState*>(state));
+        snapshot, sealed->GetPublishedState().get());
+}
+
+std::unique_ptr<DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names) {
+    auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
+    auto pinned =
+        chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                : std::shared_ptr<
+                      const ChunkedSegmentSealedImpl::PublishedSegmentState>();
+    // Dynamic-field extraction bypasses the field-exists gate: the requested
+    // sub-fields are read from the JSON column even when the field is absent
+    // from the schema (matching the pre-helper dispatch).
+    if (dynamic_field_names == nullptr) {
+        bool field_exists = pinned
+                                ? pinned->schema->get_fields().find(field_id) !=
+                                      pinned->schema->get_fields().end()
+                                : segment->is_field_exist(field_id);
+        if (!field_exists) {
+            return segment->bulk_subscript_not_exist_field(field_meta, count);
+        }
+    }
+    if (pinned) {
+        if (dynamic_field_names != nullptr) {
+            return chunked->bulk_subscript_from_state(pinned,
+                                                      op_ctx,
+                                                      field_id,
+                                                      seg_offsets,
+                                                      count,
+                                                      *dynamic_field_names);
+        }
+        return chunked->bulk_subscript_from_state(
+            pinned, op_ctx, field_id, seg_offsets, count);
+    }
+    if (dynamic_field_names != nullptr) {
+        return segment->bulk_subscript(
+            op_ctx, field_id, seg_offsets, count, *dynamic_field_names);
+    }
+    return segment->bulk_subscript(op_ctx, field_id, seg_offsets, count);
 }
 
 std::shared_ptr<const ChunkedSegmentSealedImpl::RuntimeResourceState>

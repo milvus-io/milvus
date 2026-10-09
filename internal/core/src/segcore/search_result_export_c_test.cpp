@@ -2881,9 +2881,9 @@ TEST(SearchResultExport, FillOutputFieldsOrderedPinnedMatchesUnpinned) {
     SearchResult pinned_sr;
     AttachSealedRequestLease(pinned_sr, segment.get(), /*pin_snapshot=*/true);
     ASSERT_NE(pinned_sr.read_snapshot_, nullptr);
-    ASSERT_NE(ChunkedSegmentSealedImpl::ToPublishedState(
-                  pinned_sr.read_snapshot_),
-              nullptr);
+    ASSERT_NE(
+        ChunkedSegmentSealedImpl::ToPublishedState(pinned_sr.read_snapshot_),
+        nullptr);
     SearchResult unpinned_sr;
     AttachSealedRequestLease(
         unpinned_sr, segment.get(), /*pin_snapshot=*/false);

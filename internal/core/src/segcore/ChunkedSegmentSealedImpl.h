@@ -549,9 +549,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::vector<std::string>& dynamic_field_names) const;
 
     // Rebind a request-scoped SegmentReadSnapshot to the concrete published
-    // state, sharing the snapshot's shared_ptr ownership (zero ref-count
-    // churn). Returns nullptr when the snapshot is null or not a sealed
-    // snapshot; callers then fall back to CapturePublishedState().
+    // state, sharing the snapshot's shared_ptr ownership (one ref-count bump)
+    // and avoiding a second reference to the published state. Returns nullptr
+    // when the snapshot is null; callers then fall back to
+    // CapturePublishedState().
     static std::shared_ptr<const PublishedSegmentState>
     ToPublishedState(
         const std::shared_ptr<const SegmentReadSnapshot>& snapshot);

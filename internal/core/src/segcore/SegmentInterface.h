@@ -131,17 +131,6 @@ class SegmentReadSnapshot {
     GetColumn(FieldId field_id) const {
         return GetDataScanResources(field_id).first.get();
     }
-
-    // Type-erased accessor to the immutable published state behind the
-    // snapshot. Returns nullptr for growing segments and non-sealed / test
-    // snapshots. Only the segment implementation that created the snapshot may
-    // reinterpret the returned pointer (via the alias shared_ptr constructor);
-    // the abstract facade stays minimal so common/ never depends on the
-    // segment's concrete state type.
-    virtual const void*
-    GetState() const {
-        return nullptr;
-    }
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -1013,6 +1002,23 @@ class SegmentInternalInterface : public SegmentInterface {
     // Assigned once per constructed object; never reused within a process.
     const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
+
+// Shared result-fill dispatch: reads one output field through the
+// request-pinned sealed snapshot when the segment is a sealed segment that
+// owns it, otherwise falls back to the per-call segment path (growing /
+// non-pinned / not-loaded field). Centralizes the
+// dynamic_cast -> ToPublishedState -> field-exists -> bulk_subscript dispatch
+// so callers never name the segment's concrete published-state type.
+std::unique_ptr<milvus::DataArray>
+BulkSubscriptWithSnapshot(
+    const SegmentInternalInterface* segment,
+    const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const milvus::FieldMeta& field_meta,
+    const int64_t* seg_offsets,
+    int64_t count,
+    const std::vector<std::string>* dynamic_field_names = nullptr);
 
 }  // namespace milvus::segcore
 
