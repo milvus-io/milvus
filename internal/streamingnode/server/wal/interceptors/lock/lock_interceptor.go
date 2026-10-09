@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
@@ -36,7 +37,7 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 				r.txnManager.FailTxnAtVChannel("")
 				r.glock.Unlock()
 			}
-		} else {
+		} else if !funcutil.IsControlChannel(vchannel) {
 			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
 			return func() {
@@ -53,6 +54,11 @@ func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.
 				r.glock.RUnlock()
 			}
 		}
+		// Collection-scoped DDL is exclusive on its data VChannels. Its
+		// control-channel copy uses the shared path below so DDL with
+		// non-conflicting resource keys can append concurrently. Conflicting
+		// DDL is serialized by the broadcaster resource-key lock. PChannel-level
+		// messages already acquire the global write lock above.
 	}
 	if msg.MessageType() == message.MessageTypeCommitTxn &&
 		message.HasPartialUpdateCAS(msg) && msg.ReplicateHeader() == nil {
