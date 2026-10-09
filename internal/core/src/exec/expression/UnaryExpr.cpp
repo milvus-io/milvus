@@ -733,18 +733,21 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
 
-            std::shared_ptr<const IArrayOffsets> array_offsets;
+            std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
             if (index_ptr->IsNestedIndex()) {
-                array_offsets = segment_->GetArrayOffsets(field_id_);
-                AssertInfo(array_offsets != nullptr,
-                           "array offsets are required for nested ARRAY index");
+                struct_element_offsets =
+                    segment_->GetStructElementOffsets(field_id_);
+                AssertInfo(struct_element_offsets != nullptr,
+                           "struct element offsets are required for nested "
+                           "ARRAY index");
             }
 
-            auto to_row_offset = [&array_offsets](size_t offset) -> size_t {
-                if (array_offsets == nullptr) {
+            auto to_row_offset =
+                [&struct_element_offsets](size_t offset) -> size_t {
+                if (struct_element_offsets == nullptr) {
                     return offset;
                 }
-                auto [row_id, _] = array_offsets->ElementIDToRowID(
+                auto [row_id, _] = struct_element_offsets->ElementIDToRowID(
                     static_cast<int32_t>(offset));
                 return static_cast<size_t>(row_id);
             };

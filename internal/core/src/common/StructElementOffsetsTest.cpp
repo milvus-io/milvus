@@ -25,26 +25,26 @@
 
 #include "bitset/bitset.h"
 #include "bitset/common.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
 
 using namespace milvus;
 
-class ArrayOffsetsTest : public ::testing::Test {
+class StructElementOffsetsTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
     }
 };
 
-TEST_F(ArrayOffsetsTest, SealedBasic) {
-    // Create a simple ArrayOffsetsSealed manually
+TEST_F(StructElementOffsetsTest, SealedBasic) {
+    // Create a simple StructElementOffsetsSealed manually
     // row 0: 2 elements (elem 0, 1)
     // row 1: 3 elements (elem 2, 3, 4)
     // row 2: 1 element  (elem 5)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6}
-                               // row_to_element_start (size = row_count + 1)
+    StructElementOffsetsSealed offsets(
+        {0, 2, 5, 6}  // row_to_element_start (size = row_count + 1)
     );
 
     // Test GetRowCount
@@ -104,8 +104,8 @@ TEST_F(ArrayOffsetsTest, SealedBasic) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitset) {
-    ArrayOffsetsSealed offsets({0, 2, 5, 6}  // row_to_element_start
+TEST_F(StructElementOffsetsTest, SealedRowBitsetToElementBitset) {
+    StructElementOffsetsSealed offsets({0, 2, 5, 6}  // row_to_element_start
     );
 
     // row_bitset: row 0 = true, row 1 = false, row 2 = true
@@ -135,10 +135,10 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitset) {
     EXPECT_TRUE(elem_bitset[5]);
 }
 
-TEST_F(ArrayOffsetsTest, SealedEmptyArrays) {
+TEST_F(StructElementOffsetsTest, SealedEmptyArrays) {
     // Test with some rows having empty arrays
     // row 0: 2 elements, row 1: 0 elements, row 2: 3 elements, row 3: 0 elements
-    ArrayOffsetsSealed offsets({0, 2, 2, 5, 5}  // row_to_element_start
+    StructElementOffsetsSealed offsets({0, 2, 2, 5, 5}  // row_to_element_start
     );
 
     EXPECT_EQ(offsets.GetRowCount(), 4);
@@ -158,8 +158,8 @@ TEST_F(ArrayOffsetsTest, SealedEmptyArrays) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingBasicInsert) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingBasicInsert) {
+    StructElementOffsetsGrowing offsets;
 
     // Insert rows in order
     std::vector<int32_t> lens1 = {2};  // row 0: 2 elements
@@ -210,8 +210,8 @@ TEST_F(ArrayOffsetsTest, GrowingBasicInsert) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingBatchInsert) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingBatchInsert) {
+    StructElementOffsetsGrowing offsets;
 
     // Insert multiple rows at once
     std::vector<int32_t> lens = {2, 3, 1};  // row 0, 1, 2
@@ -237,8 +237,8 @@ TEST_F(ArrayOffsetsTest, GrowingBatchInsert) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingOutOfOrderInsert) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingOutOfOrderInsert) {
+    StructElementOffsetsGrowing offsets;
 
     // Insert out of order - row 2 arrives before row 1
     std::vector<int32_t> lens0 = {2};
@@ -274,8 +274,8 @@ TEST_F(ArrayOffsetsTest, GrowingOutOfOrderInsert) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingEmptyArrays) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingEmptyArrays) {
+    StructElementOffsetsGrowing offsets;
 
     // Insert rows with some empty arrays
     std::vector<int32_t> lens = {2, 0, 3, 0};  // row 1 and row 3 are empty
@@ -298,8 +298,8 @@ TEST_F(ArrayOffsetsTest, GrowingEmptyArrays) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitset) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingRowBitsetToElementBitset) {
+    StructElementOffsetsGrowing offsets;
 
     std::vector<int32_t> lens = {2, 3, 1};
     offsets.Insert(0, lens.data(), 3);
@@ -327,8 +327,8 @@ TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitset) {
     EXPECT_TRUE(elem_bitset[5]);
 }
 
-TEST_F(ArrayOffsetsTest, GrowingConcurrentRead) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingConcurrentRead) {
+    StructElementOffsetsGrowing offsets;
 
     // Insert initial data
     std::vector<int32_t> lens = {2, 3, 1};
@@ -364,8 +364,8 @@ TEST_F(ArrayOffsetsTest, GrowingConcurrentRead) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, SingleRow) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, SingleRow) {
+    StructElementOffsetsGrowing offsets;
 
     std::vector<int32_t> lens = {5};
     offsets.Insert(0, lens.data(), 1);
@@ -384,8 +384,8 @@ TEST_F(ArrayOffsetsTest, SingleRow) {
     EXPECT_EQ(end, 5);
 }
 
-TEST_F(ArrayOffsetsTest, SingleElementPerRow) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, SingleElementPerRow) {
+    StructElementOffsetsGrowing offsets;
 
     std::vector<int32_t> lens = {1, 1, 1, 1, 1};
     offsets.Insert(0, lens.data(), 5);
@@ -404,10 +404,10 @@ TEST_F(ArrayOffsetsTest, SingleElementPerRow) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, SealedElementIDToRowInfo) {
+TEST_F(StructElementOffsetsTest, SealedElementIDToRowInfo) {
     // Adjacent singleton rows, an empty row, a multi-element row, and a final
     // singleton row.
-    ArrayOffsetsSealed offsets({0, 1, 2, 2, 5, 6});
+    StructElementOffsetsSealed offsets({0, 1, 2, 2, 5, 6});
 
     for (int32_t element_id = 0; element_id < 6; ++element_id) {
         const auto info = offsets.ElementIDToRowInfo(element_id);
@@ -421,8 +421,8 @@ TEST_F(ArrayOffsetsTest, SealedElementIDToRowInfo) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingElementIDToRowInfo) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingElementIDToRowInfo) {
+    StructElementOffsetsGrowing offsets;
     std::vector<int32_t> lengths = {1, 1, 0, 3, 1};
     offsets.Insert(0, lengths.data(), lengths.size());
 
@@ -438,8 +438,8 @@ TEST_F(ArrayOffsetsTest, GrowingElementIDToRowInfo) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, LargeArrayLength) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, LargeArrayLength) {
+    StructElementOffsetsGrowing offsets;
 
     // Single row with many elements
     std::vector<int32_t> lens = {10000};
@@ -466,11 +466,11 @@ TEST_F(ArrayOffsetsTest, LargeArrayLength) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsets) {
+TEST_F(StructElementOffsetsTest, SealedRowBitsetToElementOffsets) {
     // row 0: 2 elements (elem 0, 1)
     // row 1: 3 elements (elem 2, 3, 4)
     // row 2: 1 element  (elem 5)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     // Select row 0 and row 2
     TargetBitmap row_bitset(3);
@@ -488,12 +488,12 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsets) {
     EXPECT_EQ(elem_offsets[2], 5);
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsetsWithRowStart) {
+TEST_F(StructElementOffsetsTest, SealedRowBitsetToElementOffsetsWithRowStart) {
     // row 0: 2 elements (elem 0, 1)
     // row 1: 3 elements (elem 2, 3, 4)
     // row 2: 1 element  (elem 5)
     // row 3: 2 elements (elem 6, 7)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6, 8});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6, 8});
 
     // Select from row 1 onwards, select row 1 and row 3 (relative indices 0 and 2)
     TargetBitmap row_bitset(3);
@@ -513,8 +513,8 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsetsWithRowStart) {
     EXPECT_EQ(elem_offsets[4], 7);
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsetsEmpty) {
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+TEST_F(StructElementOffsetsTest, SealedRowBitsetToElementOffsetsEmpty) {
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     // No rows selected
     TargetBitmap row_bitset(3, false);
@@ -524,11 +524,11 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementOffsetsEmpty) {
     EXPECT_EQ(elem_offsets.size(), 0);
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowOffsetsToElementOffsets) {
+TEST_F(StructElementOffsetsTest, SealedRowOffsetsToElementOffsets) {
     // row 0: 2 elements (elem 0, 1)
     // row 1: 3 elements (elem 2, 3, 4)
     // row 2: 1 element  (elem 5)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     // Select row 0 and row 2
     FixedVector<int32_t> row_offsets = {0, 2};
@@ -541,19 +541,19 @@ TEST_F(ArrayOffsetsTest, SealedRowOffsetsToElementOffsets) {
     EXPECT_EQ(elem_offsets[2], 5);
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowOffsetsToElementOffsetsEmpty) {
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+TEST_F(StructElementOffsetsTest, SealedRowOffsetsToElementOffsetsEmpty) {
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     FixedVector<int32_t> row_offsets;
     auto elem_offsets = offsets.RowOffsetsToElementOffsets(row_offsets);
     EXPECT_EQ(elem_offsets.size(), 0);
 }
 
-TEST_F(ArrayOffsetsTest, SealedForEachRowElementRange) {
+TEST_F(StructElementOffsetsTest, SealedForEachRowElementRange) {
     // row 0: 2 elements (elem 0, 1)
     // row 1: 3 elements (elem 2, 3, 4)
     // row 2: 1 element  (elem 5)
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     // Predicate: return true if row has more than 1 element
     auto predicate = [](int32_t elem_start, int32_t elem_end) {
@@ -568,9 +568,9 @@ TEST_F(ArrayOffsetsTest, SealedForEachRowElementRange) {
     EXPECT_FALSE(result[2]);  // row 2: 1 element <= 1
 }
 
-TEST_F(ArrayOffsetsTest, SealedForEachRowElementRangeWithRowStart) {
+TEST_F(StructElementOffsetsTest, SealedForEachRowElementRangeWithRowStart) {
     // row 0: 2 elements, row 1: 3 elements, row 2: 1 element, row 3: 4 elements
-    ArrayOffsetsSealed offsets({0, 2, 5, 6, 10});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6, 10});
 
     auto predicate = [](int32_t elem_start, int32_t elem_end) {
         return (elem_end - elem_start) >= 3;
@@ -585,9 +585,9 @@ TEST_F(ArrayOffsetsTest, SealedForEachRowElementRangeWithRowStart) {
     EXPECT_TRUE(result[2]);   // row 3: 4 elements >= 3
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitsetWithRowStart) {
+TEST_F(StructElementOffsetsTest, SealedRowBitsetToElementBitsetWithRowStart) {
     // row 0: 2 elements, row 1: 3 elements, row 2: 1 element, row 3: 2 elements
-    ArrayOffsetsSealed offsets({0, 2, 5, 6, 8});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6, 8});
 
     // Start from row 1, select row 1 and row 3
     TargetBitmap row_bitset(3);
@@ -617,9 +617,10 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitsetWithRowStart) {
     EXPECT_TRUE(elem_bitset[5]);
 }
 
-TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitsetWithInvalidRows) {
+TEST_F(StructElementOffsetsTest,
+       SealedRowBitsetToElementBitsetWithInvalidRows) {
     // row 0: 2 elements, row 1: 3 elements, row 2: 1 element
-    ArrayOffsetsSealed offsets({0, 2, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 6});
 
     TargetBitmap row_bitset(3);
     row_bitset[0] = true;
@@ -653,8 +654,8 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitsetWithInvalidRows) {
     EXPECT_TRUE(valid_elem_bitset[5]);
 }
 
-TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementOffsets) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingRowBitsetToElementOffsets) {
+    StructElementOffsetsGrowing offsets;
     std::vector<int32_t> lens = {2, 3, 1};
     offsets.Insert(0, lens.data(), 3);
 
@@ -672,8 +673,8 @@ TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementOffsets) {
     EXPECT_EQ(elem_offsets[2], 5);
 }
 
-TEST_F(ArrayOffsetsTest, GrowingRowOffsetsToElementOffsets) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingRowOffsetsToElementOffsets) {
+    StructElementOffsetsGrowing offsets;
     std::vector<int32_t> lens = {2, 3, 1};
     offsets.Insert(0, lens.data(), 3);
 
@@ -686,8 +687,8 @@ TEST_F(ArrayOffsetsTest, GrowingRowOffsetsToElementOffsets) {
     EXPECT_EQ(elem_offsets[2], 5);
 }
 
-TEST_F(ArrayOffsetsTest, GrowingForEachRowElementRange) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingForEachRowElementRange) {
+    StructElementOffsetsGrowing offsets;
     std::vector<int32_t> lens = {2, 3, 1};
     offsets.Insert(0, lens.data(), 3);
 
@@ -703,8 +704,8 @@ TEST_F(ArrayOffsetsTest, GrowingForEachRowElementRange) {
     EXPECT_FALSE(result[2]);  // 1 <= 1
 }
 
-TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitsetWithRowStart) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingRowBitsetToElementBitsetWithRowStart) {
+    StructElementOffsetsGrowing offsets;
     std::vector<int32_t> lens = {2, 3, 1, 2};
     offsets.Insert(0, lens.data(), 4);
 
@@ -737,7 +738,7 @@ namespace {
 
 // Per-bit reference implementation of ANY-semantics element->row reduction.
 TargetBitmap
-ReferenceAnyReduce(const IArrayOffsets& offsets,
+ReferenceAnyReduce(const IStructElementOffsets& offsets,
                    const TargetBitmap& elem_bitset,
                    int64_t elem_offset,
                    int64_t row_start,
@@ -756,7 +757,7 @@ ReferenceAnyReduce(const IArrayOffsets& offsets,
 }
 
 void
-CheckAnyReduce(const IArrayOffsets& offsets,
+CheckAnyReduce(const IStructElementOffsets& offsets,
                const TargetBitmap& elem_bitset,
                int64_t elem_offset,
                int64_t row_start,
@@ -776,9 +777,9 @@ CheckAnyReduce(const IArrayOffsets& offsets,
 
 }  // namespace
 
-TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
+TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
     // row 0: elems [0,2), row 1: elems [2,5), row 2: empty, row 3: elems [5,6)
-    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 5, 6});
 
     TargetBitmap elem_bitset(6);
     elem_bitset[3] = true;  // row 1
@@ -803,8 +804,8 @@ TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyBasic) {
     EXPECT_TRUE(preset[3]);
 }
 
-TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
-    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+TEST_F(StructElementOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
+    StructElementOffsetsSealed offsets({0, 2, 5, 5, 6});
 
     // All-zero element bitmap -> no rows.
     {
@@ -861,7 +862,7 @@ TEST_F(ArrayOffsetsTest, SealedElementBitsetToRowBitsetAnyEdgeCases) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, ElementBitsetToRowBitsetAnyRandomized) {
+TEST_F(StructElementOffsetsTest, ElementBitsetToRowBitsetAnyRandomized) {
     std::mt19937 rng(12345);
     for (int iter = 0; iter < 20; ++iter) {
         // Random layout: mixes empty rows, short and long (multi-word) rows.
@@ -875,8 +876,8 @@ TEST_F(ArrayOffsetsTest, ElementBitsetToRowBitsetAnyRandomized) {
         }
         int64_t total = starts[num_rows];
 
-        ArrayOffsetsSealed sealed(starts);
-        ArrayOffsetsGrowing growing;
+        StructElementOffsetsSealed sealed(starts);
+        StructElementOffsetsGrowing growing;
         growing.Insert(0, lengths.data(), num_rows);
 
         for (double density : {0.0, 0.005, 0.1, 0.9, 1.0}) {
@@ -908,9 +909,9 @@ TEST_F(ArrayOffsetsTest, ElementBitsetToRowBitsetAnyRandomized) {
 
 // ==== CopyRowElementStarts / CopyRowElementRanges (batched row lookups) ====
 
-TEST_F(ArrayOffsetsTest, SealedCopyRowElementStarts) {
+TEST_F(StructElementOffsetsTest, SealedCopyRowElementStarts) {
     // row 0: [0,2), row 1: [2,5), row 2: empty, row 3: [5,6)
-    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 5, 6});
 
     // Full range: row_count + 1 entries.
     {
@@ -943,8 +944,8 @@ TEST_F(ArrayOffsetsTest, SealedCopyRowElementStarts) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingCopyRowElementStartsClamp) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingCopyRowElementStartsClamp) {
+    StructElementOffsetsGrowing offsets;
 
     // No committed rows yet: every entry clamps to 0.
     {
@@ -990,9 +991,9 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementStartsClamp) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, SealedCopyRowElementRanges) {
+TEST_F(StructElementOffsetsTest, SealedCopyRowElementRanges) {
     // row 0: [0,2), row 1: [2,5), row 2: empty, row 3: [5,6)
-    ArrayOffsetsSealed offsets({0, 2, 5, 5, 6});
+    StructElementOffsetsSealed offsets({0, 2, 5, 5, 6});
 
     // Arbitrary order + duplicates.
     std::vector<int32_t> rows = {3, 0, 2, 0};
@@ -1019,8 +1020,8 @@ TEST_F(ArrayOffsetsTest, SealedCopyRowElementRanges) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingCopyRowElementRanges) {
+    StructElementOffsetsGrowing offsets;
 
     {
         const int32_t invalid_row = -1;
@@ -1073,8 +1074,8 @@ TEST_F(ArrayOffsetsTest, GrowingCopyRowElementRanges) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingEmptyTableRange) {
-    ArrayOffsetsGrowing offsets;
+TEST_F(StructElementOffsetsTest, GrowingEmptyTableRange) {
+    StructElementOffsetsGrowing offsets;
 
     EXPECT_EQ(offsets.GetRowCount(), 0);
     EXPECT_EQ(offsets.GetTotalElementCount(), 0);
@@ -1089,8 +1090,8 @@ TEST_F(ArrayOffsetsTest, GrowingEmptyTableRange) {
     EXPECT_TRUE(valid_elements.empty());
 }
 
-TEST_F(ArrayOffsetsTest, GrowingChunkBoundary) {
-    constexpr int64_t kChunk = ArrayOffsetsGrowing::kEntriesPerChunk;
+TEST_F(StructElementOffsetsTest, GrowingChunkBoundary) {
+    constexpr int64_t kChunk = StructElementOffsetsGrowing::kEntriesPerChunk;
     constexpr int64_t kTotalRows = 2 * kChunk + 137;
 
     std::vector<int32_t> lens(kTotalRows);
@@ -1100,7 +1101,7 @@ TEST_F(ArrayOffsetsTest, GrowingChunkBoundary) {
         expected[i + 1] = expected[i] + lens[i];
     }
 
-    ArrayOffsetsGrowing offsets;
+    StructElementOffsetsGrowing offsets;
 
     // Leave a gap before each chunk boundary, insert the following rows as
     // pending, then fill the gap and drain across the boundary.
@@ -1253,7 +1254,7 @@ TEST_F(ArrayOffsetsTest, GrowingChunkBoundary) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingConcurrentWriterReaderStress) {
+TEST_F(StructElementOffsetsTest, GrowingConcurrentWriterReaderStress) {
     constexpr int64_t kTotalRows = 100000;
     constexpr int64_t kInsertBatch = 32;
     static_assert(kTotalRows % kInsertBatch == 0);
@@ -1284,7 +1285,7 @@ TEST_F(ArrayOffsetsTest, GrowingConcurrentWriterReaderStress) {
         allowed_counts[planned_next] = true;
     }
 
-    ArrayOffsetsGrowing offsets;
+    StructElementOffsetsGrowing offsets;
     std::atomic<bool> start{false};
     std::atomic<bool> done{false};
     std::atomic<int32_t> ready{0};
@@ -1522,7 +1523,7 @@ TEST_F(ArrayOffsetsTest, GrowingConcurrentWriterReaderStress) {
     }
 }
 
-TEST_F(ArrayOffsetsTest, GrowingConcurrentWriters) {
+TEST_F(StructElementOffsetsTest, GrowingConcurrentWriters) {
     constexpr int64_t kTotalRows = 20000;
     constexpr int64_t kBatchSize = 25;
     constexpr int64_t kBatchCount = kTotalRows / kBatchSize;
@@ -1542,7 +1543,7 @@ TEST_F(ArrayOffsetsTest, GrowingConcurrentWriters) {
     std::mt19937 gen(2026);
     std::shuffle(batches.begin(), batches.end(), gen);
 
-    ArrayOffsetsGrowing offsets;
+    StructElementOffsetsGrowing offsets;
     std::atomic<int64_t> next_batch{0};
     std::atomic<int32_t> ready{0};
     std::atomic<bool> start{false};

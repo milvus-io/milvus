@@ -1394,7 +1394,7 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         (std::set<int64_t>{0, 2}));
 }
 
-TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
+TEST(StructElementOffsetsReopen, ConcurrentReadersAreSynchronized) {
     auto schema = std::make_shared<Schema>();
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
@@ -1409,7 +1409,7 @@ TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                if (segment->GetArrayOffsets(base_sub_fid) == nullptr) {
+                if (segment->GetStructElementOffsets(base_sub_fid) == nullptr) {
                     missing.fetch_add(1, std::memory_order_relaxed);
                 }
             }

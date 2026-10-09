@@ -38,7 +38,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
@@ -265,11 +265,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id,
                          const std::string& nested_path) const override;
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override {
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const override {
         auto runtime = CaptureRuntimeResourceState();
-        auto it = runtime->array_offsets_map.find(field_id);
-        if (it != runtime->array_offsets_map.end()) {
+        auto it = runtime->struct_element_offsets_map.find(field_id);
+        if (it != runtime->struct_element_offsets_map.end()) {
             return it->second;
         }
         return nullptr;
@@ -330,10 +330,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
-            struct_to_array_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
-            array_offsets_map;
+        std::unordered_map<std::string,
+                           std::shared_ptr<StructElementOffsetsSealed>>
+            struct_to_element_offsets;
+        std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
+            struct_element_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
@@ -595,7 +596,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
@@ -1915,14 +1916,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 const SegmentLoadInfo* load_info) const;
 
     static void
-    InvalidateStaleStructArrayOffsets(const SchemaPtr& current_schema,
-                                      const SchemaPtr& target_schema,
-                                      RuntimeResourceState& runtime);
+    InvalidateStaleStructElementOffsets(const SchemaPtr& current_schema,
+                                        const SchemaPtr& target_schema,
+                                        RuntimeResourceState& runtime);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count,
-                                     RuntimeResourceState& runtime);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count,
+                                       RuntimeResourceState& runtime);
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,
@@ -2317,9 +2318,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return FieldAccessible(field_id);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    TestGetArrayOffsets(FieldId field_id) const {
-        return GetArrayOffsets(field_id);
+    std::shared_ptr<const IStructElementOffsets>
+    TestGetStructElementOffsets(FieldId field_id) const {
+        return GetStructElementOffsets(field_id);
     }
 
     std::shared_ptr<const SegmentLoadInfo>
