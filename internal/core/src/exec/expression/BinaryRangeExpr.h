@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <fmt/core.h>
 #include <simdjson.h>
 #include <stdint.h>
@@ -80,13 +81,17 @@ struct BinaryRangeElementFunc {
                 }
                 auto offset = (offsets) ? offsets[i] : i;
                 if constexpr (lower_inclusive && upper_inclusive) {
-                    res[i] = val1 <= src[offset] && src[offset] <= val2;
+                    res[i] = ScalarLessEqual(val1, src[offset]) &&
+                             ScalarLessEqual(src[offset], val2);
                 } else if constexpr (lower_inclusive && !upper_inclusive) {
-                    res[i] = val1 <= src[offset] && src[offset] < val2;
+                    res[i] = ScalarLessEqual(val1, src[offset]) &&
+                             ScalarLess(src[offset], val2);
                 } else if constexpr (!lower_inclusive && upper_inclusive) {
-                    res[i] = val1 < src[offset] && src[offset] <= val2;
+                    res[i] = ScalarLess(val1, src[offset]) &&
+                             ScalarLessEqual(src[offset], val2);
                 } else {
-                    res[i] = val1 < src[offset] && src[offset] < val2;
+                    res[i] = ScalarLess(val1, src[offset]) &&
+                             ScalarLess(src[offset], val2);
                 }
             }
             return;
@@ -176,13 +181,17 @@ struct BinaryRangeElementFuncForJson {
                 offset = (offsets) ? offsets[i] : i;
             }
             if constexpr (lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONCompare(val1 <= value && value <= val2);
+                BinaryRangeJSONCompare(ScalarLessEqual(val1, value) &&
+                                       ScalarLessEqual(value, val2));
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                BinaryRangeJSONCompare(val1 <= value && value < val2);
+                BinaryRangeJSONCompare(ScalarLessEqual(val1, value) &&
+                                       ScalarLess(value, val2));
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONCompare(val1 < value && value <= val2);
+                BinaryRangeJSONCompare(ScalarLess(val1, value) &&
+                                       ScalarLessEqual(value, val2));
             } else {
-                BinaryRangeJSONCompare(val1 < value && value < val2);
+                BinaryRangeJSONCompare(ScalarLess(val1, value) &&
+                                       ScalarLess(value, val2));
             }
         }
     }
@@ -223,20 +232,24 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (index >= src[offset].length()) {
+            if (index >= src[offset].length() ||
+                !src[offset].is_element_valid(index)) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
             }
             auto value = src[offset].get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
-                res[i] = val1 <= value && value <= val2;
+                res[i] = ScalarLessEqual(val1, value) &&
+                         ScalarLessEqual(value, val2);
             } else if constexpr (lower_inclusive && !upper_inclusive) {
-                res[i] = val1 <= value && value < val2;
+                res[i] =
+                    ScalarLessEqual(val1, value) && ScalarLess(value, val2);
             } else if constexpr (!lower_inclusive && upper_inclusive) {
-                res[i] = val1 < value && value <= val2;
+                res[i] =
+                    ScalarLess(val1, value) && ScalarLessEqual(value, val2);
             } else {
-                res[i] = val1 < value && value < val2;
+                res[i] = ScalarLess(val1, value) && ScalarLess(value, val2);
             }
         }
     }

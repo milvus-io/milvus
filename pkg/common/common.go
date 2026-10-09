@@ -137,13 +137,11 @@ const (
 	//   (see MinScalarIndexVersionForFMINDEX).
 	//
 	// Scalar index engine version 6:
-	// - Scalar/nested STL_SORT excludes NaN from ordered entries while retaining
-	//   source validity and using offset -1 for a valid row without a posting.
-	//   Older readers cannot interpret this sentinel and their range complement
-	//   assumes every valid row has a posting, so writers require version >= 6.
-	// - Ordinary ARRAY HYBRID supports high-cardinality sorted parent-row
-	//   postings, retaining BITMAP for low cardinality without NaN.
-	// - On-disk file format is unchanged from v3.
+	// - Floating-point indexes use one total order: all NaNs compare equal and
+	//   sort after +Inf. Tantivy maps every NaN to the maximum uint64 key.
+	// - Readers use raw data for older floating-point indexes until rebuilt.
+	// - Ordinary ARRAY HYBRID supports sorted parent-row postings.
+	// - Physical containers are unchanged; floating-point key semantics change.
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(6)
 	MaximumScalarIndexEngineVersion = int32(6)
@@ -166,11 +164,9 @@ const (
 	// lower version would break rolling upgrade (old QueryNodes cannot load it).
 	MinScalarIndexVersionForFMINDEX = int32(5)
 
-	// MinScalarIndexVersionForNaNRows is the minimum scalar index engine version
-	// that preserves NaN source validity without a STL_SORT posting. Below it,
-	// builders reject valid NaN builds rather than emit offset sentinels an older
-	// reader cannot interpret.
-	MinScalarIndexVersionForNaNRows = int32(6)
+	// MinScalarIndexVersionForNaNTotalOrder is the minimum engine version
+	// with canonical NaN keys and NaN-aware scalar comparisons.
+	MinScalarIndexVersionForNaNTotalOrder = int32(6)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

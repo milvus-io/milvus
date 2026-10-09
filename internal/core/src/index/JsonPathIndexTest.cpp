@@ -238,7 +238,7 @@ TEST(JsonPathIndexTest, StringToDoubleNaNIsValidNumericProjection) {
     ASSERT_NE(scalar, nullptr);
     ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
     EXPECT_EQ(scalar->Count(), 11);
-    EXPECT_EQ(scalar->Size(), 5);
+    EXPECT_EQ(scalar->Size(), 8);
     for (int row : {8, 9, 10}) {
         EXPECT_FALSE(scalar->Reverse_Lookup(row).has_value());
     }
@@ -301,7 +301,7 @@ TEST(JsonPathIndexTest, StringToDoubleAllNaNStillBuilds) {
     ASSERT_NE(scalar, nullptr);
     ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
     EXPECT_EQ(scalar->Count(), 3);
-    EXPECT_EQ(scalar->Size(), 0);
+    EXPECT_EQ(scalar->Size(), 3);
     EXPECT_EQ(scalar->Exists().count(), 3);
     for (size_t row = 0; row < 3; ++row) {
         ASSERT_TRUE(scalar->Reverse_Lookup(row).has_value());
@@ -957,6 +957,20 @@ CheckValidNaNJsonProjection(ScalarIndex<double>& index) {
     }
     const double inf = std::numeric_limits<double>::infinity();
     EXPECT_EQ(index.Range(-inf, true, inf, true).count(), 2);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    auto nan_hit = index.In(1, &nan);
+    EXPECT_EQ(nan_hit.count(), 2);
+    EXPECT_TRUE(nan_hit[0]);
+    EXPECT_TRUE(nan_hit[1]);
+    EXPECT_EQ(index.NotIn(1, &nan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 4);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
+    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 4);
+    EXPECT_EQ(index.Range(-inf, true, nan, false).count(), 2);
 }
 }  // namespace
 
@@ -987,10 +1001,17 @@ TEST(JsonPathIndexTest,
         auto* built_scalar = dynamic_cast<ScalarIndex<double>*>(built.get());
         ASSERT_NE(built_scalar, nullptr);
         built_scalar->BuildWithFieldData({json});
-        if (type != INVERTED_INDEX_TYPE) {
-            CheckValidNaNJsonProjection(*built_scalar);
-            // Numeric NaNs remain valid, but have no comparable sorted entries.
-            EXPECT_EQ(built_scalar->Size(), 2);
+        if (type == INVERTED_INDEX_TYPE) {
+            auto* inverted = dynamic_cast<
+                JsonScalarIndexWrapper<double, InvertedIndexTantivy<double>>*>(
+                built.get());
+            ASSERT_NE(inverted, nullptr);
+            inverted->finish();
+            inverted->create_reader(milvus::index::SetBitsetSealed);
+        }
+        CheckValidNaNJsonProjection(*built_scalar);
+        if (type == ASCENDING_SORT) {
+            EXPECT_EQ(built_scalar->Size(), 4);
             EXPECT_FALSE(built_scalar->Serialize({}).Contains("nan_rows"));
         }
         auto stats = built->UploadUnified({});

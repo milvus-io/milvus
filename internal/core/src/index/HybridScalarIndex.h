@@ -212,9 +212,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  protected:
-    bool
-    SelectSortForNaN(const std::vector<FieldDataPtr>& field_datas);
-
     ScalarIndexType
     SelectIndexBuildType(const std::vector<FieldDataPtr>& field_datas);
 

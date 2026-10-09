@@ -24,6 +24,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// Float32ToSortableUint32 encodes the scalar SQL order without widening FLOAT.
+// All NaNs share the maximum key; signed zeros share one key.
+func Float32ToSortableUint32(value float32) uint32 {
+	if math.IsNaN(float64(value)) {
+		return math.MaxUint32
+	}
+	if value == 0 {
+		value = 0
+	}
+	bits := math.Float32bits(value)
+	const sign = uint32(1) << 31
+	if bits&sign != 0 {
+		return ^bits
+	}
+	return bits ^ sign
+}
+
+// Float64ToSortableUint64 is the DOUBLE form of Float32ToSortableUint32.
+func Float64ToSortableUint64(value float64) uint64 {
+	if math.IsNaN(value) {
+		return math.MaxUint64
+	}
+	if value == 0 {
+		value = 0
+	}
+	bits := math.Float64bits(value)
+	const sign = uint64(1) << 63
+	if bits&sign != 0 {
+		return ^bits
+	}
+	return bits ^ sign
+}
+
 func bfloat16IsNaN(f uint16) bool {
 	// the nan value of bfloat16 is x111 1111 1xxx xxxx
 	return (f&0x7F80 == 0x7F80) && (f&0x007f != 0)

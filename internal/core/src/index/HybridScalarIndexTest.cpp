@@ -1517,7 +1517,10 @@ template <typename T>
 class ExposedHybridNaNSelection : public HybridScalarIndex<T> {
  public:
     using HybridScalarIndex<T>::HybridScalarIndex;
-    using HybridScalarIndex<T>::SelectSortForNaN;
+    ScalarIndexType
+    SelectPublic(const std::vector<FieldDataPtr>& fields) {
+        return this->SelectIndexBuildType(fields);
+    }
 };
 
 template <typename T>
@@ -1546,7 +1549,8 @@ template <typename T>
 class HybridNaNVersionGuardTest : public testing::Test {};
 TYPED_TEST_SUITE(HybridNaNVersionGuardTest, HybridNaNTypes);
 
-TYPED_TEST(HybridNaNVersionGuardTest, RawBuildRejectsUnsupportedValidNaN) {
+TYPED_TEST(HybridNaNVersionGuardTest,
+           NaNUsesCardinalityAndRespectsWriterVersion) {
     using T = TypeParam;
     const T values[] = {std::numeric_limits<T>::quiet_NaN(), T(3)};
     ExposedHybridNaNSelection<T> legacy(2);
@@ -1558,18 +1562,14 @@ TYPED_TEST(HybridNaNVersionGuardTest, RawBuildRejectsUnsupportedValidNaN) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
     }
     ExposedHybridNaNSelection<T> current(2);
-    current.scalar_index_version_ = kMinScalarIndexVersionForNaNRows;
+    current.scalar_index_version_ = kMinScalarIndexVersionForNaNTotalOrder;
     ASSERT_NO_THROW(current.Build(2, values));
-    EXPECT_EQ(current.internal_index_type_, ScalarIndexType::STLSORT);
+    EXPECT_EQ(current.internal_index_type_, ScalarIndexType::BITMAP);
     EXPECT_EQ(current.Count(), 2);
-    EXPECT_EQ(current.Size(), 1);
     EXPECT_EQ(current.IsNotNull().count(), 2);
-    auto* sorted =
-        dynamic_cast<ScalarIndexSort<T>*>(current.internal_index_.get());
-    ASSERT_NE(sorted, nullptr);
-    for (const auto& entry : *sorted) {
-        EXPECT_FALSE(std::isnan(entry.a_));
-    }
+    const T nan = values[0];
+    EXPECT_EQ(current.In(1, &nan).count(), 1);
+    EXPECT_EQ(current.Range(T(3), OpType::GreaterThan).count(), 1);
     const bool valid[] = {false, true};
     ExposedHybridNaNSelection<T> hidden(2);
     hidden.scalar_index_version_ = 5;
@@ -1579,28 +1579,18 @@ TYPED_TEST(HybridNaNVersionGuardTest, RawBuildRejectsUnsupportedValidNaN) {
 }
 
 TYPED_TEST(HybridNaNVersionGuardTest,
-           OrdinaryAndNestedArrayIgnoreHiddenMemberNaN) {
+           OrdinaryAndNestedArrayCountNaNAsOneDistinctValue) {
     using T = TypeParam;
     for (bool nested : {false, true}) {
-        for (int32_t version : {5, kMinScalarIndexVersionForNaNRows}) {
-            ExposedHybridNaNSelection<T> valid(2, {}, nested);
-            valid.scalar_index_version_ = version;
-            if (version < kMinScalarIndexVersionForNaNRows) {
-                try {
-                    valid.SelectSortForNaN({HybridNaNArrayData<T>(true)});
-                    FAIL() << "Unsupported array NaN must not reach std::set";
-                } catch (const SegcoreError& error) {
-                    EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
-                }
-            } else {
-                EXPECT_TRUE(
-                    valid.SelectSortForNaN({HybridNaNArrayData<T>(true)}));
-                EXPECT_EQ(valid.internal_index_type_, ScalarIndexType::STLSORT);
-            }
-            ExposedHybridNaNSelection<T> hidden(2, {}, nested);
-            hidden.scalar_index_version_ = version;
-            EXPECT_FALSE(
-                hidden.SelectSortForNaN({HybridNaNArrayData<T>(false)}));
+        for (bool valid_nan : {false, true}) {
+            ExposedHybridNaNSelection<T> index(2, {}, nested);
+            index.scalar_index_version_ =
+                kMinScalarIndexVersionForNaNTotalOrder;
+            index.field_type_ = proto::schema::DataType::Array;
+            index.bitmap_index_cardinality_limit_ = 2;
+            EXPECT_EQ(
+                index.SelectPublic({HybridNaNArrayData<T>(valid_nan)}),
+                valid_nan ? ScalarIndexType::STLSORT : ScalarIndexType::BITMAP);
         }
     }
 }

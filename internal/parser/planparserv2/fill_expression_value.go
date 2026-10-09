@@ -90,11 +90,6 @@ func fillExpressionValueWithBudgetAndSchema(
 	if err := validateQueryValues(expr); err != nil {
 		return err
 	}
-	for _, value := range templateValues {
-		if queryValueHasNaN(value) {
-			return newNaNQueryError()
-		}
-	}
 	if budget == nil {
 		budget = NewMembershipPreflightBudget()
 	}
@@ -103,7 +98,10 @@ func fillExpressionValueWithBudgetAndSchema(
 		return err
 	}
 	ctx.schema = schema
-	return fillExpressionValue(expr, templateValues, ctx)
+	if err := fillExpressionValue(expr, templateValues, ctx); err != nil {
+		return err
+	}
+	return validateQueryValues(expr)
 }
 
 type fillExpressionContext struct {

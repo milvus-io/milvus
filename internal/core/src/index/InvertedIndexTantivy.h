@@ -140,6 +140,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     void
+    SetSupportsNaNTotalOrder(bool enabled) {
+        supports_nan_total_order_ = enabled;
+    }
+
+    void
     Build(const Config& config = {}) override;
 
     int64_t
@@ -353,6 +358,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     folly::coro::Task<void>
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
+
+ private:
+    bool supports_nan_total_order_ = true;
 
  protected:
     const TargetBitmap

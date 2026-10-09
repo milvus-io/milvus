@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <fmt/core.h>
 #include <folly/Unit.h>
 
@@ -60,17 +61,17 @@ UnaryCompare(const T& get_value,
              const UnaryCompareContext* context = nullptr) {
     switch (op_type) {
         case proto::plan::GreaterThan:
-            return get_value > val;
+            return ScalarGreater(get_value, val);
         case proto::plan::GreaterEqual:
-            return get_value >= val;
+            return ScalarGreaterEqual(get_value, val);
         case proto::plan::LessThan:
-            return get_value < val;
+            return ScalarLess(get_value, val);
         case proto::plan::LessEqual:
-            return get_value <= val;
+            return ScalarLessEqual(get_value, val);
         case proto::plan::Equal:
-            return get_value == val;
+            return ScalarEqual(get_value, val);
         case proto::plan::NotEqual:
-            return get_value != val;
+            return !ScalarEqual(get_value, val);
         case proto::plan::InnerMatch:
         case proto::plan::PostfixMatch:
         case proto::plan::PrefixMatch:
@@ -305,17 +306,17 @@ struct UnaryElementFunc {
                       std::is_same_v<T, std::string>) {
             for (int i = 0; i < size; ++i) {
                 if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = src[i] == val;
+                    res[i] = ScalarEqual(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = src[i] != val;
+                    res[i] = !ScalarEqual(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = src[i] > val;
+                    res[i] = ScalarGreater(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = src[i] < val;
+                    res[i] = ScalarLess(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = src[i] >= val;
+                    res[i] = ScalarGreaterEqual(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = src[i] <= val;
+                    res[i] = ScalarLessEqual(src[i], val);
                 } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
                                      op == proto::plan::OpType::PostfixMatch ||
                                      op == proto::plan::OpType::InnerMatch) {
@@ -381,17 +382,17 @@ struct UnaryElementFunc {
             for (int i = 0; i < size; ++i) {
                 auto offset = (offsets != nullptr) ? offsets[i] : i;
                 if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = src[offset] == val;
+                    res[i] = ScalarEqual(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = src[offset] != val;
+                    res[i] = !ScalarEqual(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = src[offset] > val;
+                    res[i] = ScalarGreater(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = src[offset] < val;
+                    res[i] = ScalarLess(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = src[offset] >= val;
+                    res[i] = ScalarGreaterEqual(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = src[offset] <= val;
+                    res[i] = ScalarLessEqual(src[offset], val);
                 } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
                                      op == proto::plan::OpType::PostfixMatch ||
                                      op == proto::plan::OpType::InnerMatch) {
@@ -413,19 +414,19 @@ struct UnaryElementFunc {
                         continue;
                     }
                     if constexpr (op == proto::plan::OpType::Equal) {
-                        res[i] = src[i] == val;
+                        res[i] = ScalarEqual(src[i], val);
                     } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                        res[i] = src[i] != val;
+                        res[i] = !ScalarEqual(src[i], val);
                     } else if constexpr (op ==
                                          proto::plan::OpType::GreaterThan) {
-                        res[i] = src[i] > val;
+                        res[i] = ScalarGreater(src[i], val);
                     } else if constexpr (op == proto::plan::OpType::LessThan) {
-                        res[i] = src[i] < val;
+                        res[i] = ScalarLess(src[i], val);
                     } else if constexpr (op ==
                                          proto::plan::OpType::GreaterEqual) {
-                        res[i] = src[i] >= val;
+                        res[i] = ScalarGreaterEqual(src[i], val);
                     } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                        res[i] = src[i] <= val;
+                        res[i] = ScalarLessEqual(src[i], val);
                     } else if constexpr (op ==
                                              proto::plan::OpType::PrefixMatch ||
                                          op == proto::plan::OpType::
@@ -483,7 +484,8 @@ struct UnaryElementFunc {
         if constexpr (std::is_same_v<GetType, proto::plan::Array>) {     \
             res[i] = false;                                              \
         } else {                                                         \
-            if (index >= src[offset].length()) {                         \
+            if (index >= src[offset].length() ||                         \
+                !src[offset].is_element_valid(index)) {                  \
                 res[i] = false;                                          \
                 valid_res[i] = false;                                    \
                 continue;                                                \
@@ -545,36 +547,38 @@ struct UnaryElementFuncForArray {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = src[offset].is_same_array(val);
                 } else {
-                    if (index >= src[offset].length()) {
+                    if (index >= src[offset].length() ||
+                        !src[offset].is_element_valid(index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
                         src[offset].template get_data_unchecked<GetType>(index);
-                    res[i] = array_data == val;
+                    res[i] = ScalarEqual(array_data, val);
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                     res[i] = !src[offset].is_same_array(val);
                 } else {
-                    if (index >= src[offset].length()) {
+                    if (index >= src[offset].length() ||
+                        !src[offset].is_element_valid(index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
                         src[offset].template get_data_unchecked<GetType>(index);
-                    res[i] = array_data != val;
+                    res[i] = !ScalarEqual(array_data, val);
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                UnaryArrayCompare(array_data > val);
+                UnaryArrayCompare(ScalarGreater(array_data, val));
             } else if constexpr (op == proto::plan::OpType::LessThan) {
-                UnaryArrayCompare(array_data < val);
+                UnaryArrayCompare(ScalarLess(array_data, val));
             } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                UnaryArrayCompare(array_data >= val);
+                UnaryArrayCompare(ScalarGreaterEqual(array_data, val));
             } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                UnaryArrayCompare(array_data <= val);
+                UnaryArrayCompare(ScalarLessEqual(array_data, val));
             } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
                                  op == proto::plan::OpType::PostfixMatch ||
                                  op == proto::plan::OpType::InnerMatch) {
@@ -587,7 +591,8 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (index >= src[offset].length() ||
+                        !src[offset].is_element_valid(index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
@@ -607,7 +612,8 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (index >= src[offset].length() ||
+                        !src[offset].is_element_valid(index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
@@ -800,37 +806,37 @@ BatchUnaryCompare(const T* src,
     switch (op_type) {
         case proto::plan::GreaterThan: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] > val;
+                res[i] = ScalarGreater(src[i], val);
             }
             break;
         }
         case proto::plan::GreaterEqual: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] >= val;
+                res[i] = ScalarGreaterEqual(src[i], val);
             }
             break;
         }
         case proto::plan::LessThan: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] < val;
+                res[i] = ScalarLess(src[i], val);
             }
             break;
         }
         case proto::plan::LessEqual: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] <= val;
+                res[i] = ScalarLessEqual(src[i], val);
             }
             break;
         }
         case proto::plan::Equal: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] == val;
+                res[i] = ScalarEqual(src[i], val);
             }
             break;
         }
         case proto::plan::NotEqual: {
             for (int i = 0; i < size; ++i) {
-                res[i] = src[i] != val;
+                res[i] = !ScalarEqual(src[i], val);
             }
             break;
         }

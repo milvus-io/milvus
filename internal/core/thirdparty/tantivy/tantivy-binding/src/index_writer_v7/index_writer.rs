@@ -18,7 +18,7 @@ use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_reader_c::SetBitsetFn;
 use crate::index_writer::TantivyValue;
-use crate::util::{c_ptr_to_str, ptr_len_to_str};
+use crate::util::{c_ptr_to_str, canonical_f64, ptr_len_to_str};
 
 #[inline]
 pub(crate) fn schema_builder_add_field(
@@ -67,7 +67,7 @@ impl TantivyValue<TantivyDocument> for u64 {
 impl TantivyValue<TantivyDocument> for f64 {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
-        document.add_f64(Field::from_field_id(field), *self);
+        document.add_f64(Field::from_field_id(field), canonical_f64(*self));
     }
 }
 

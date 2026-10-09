@@ -800,7 +800,7 @@ func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
 	})
 }
 
-func Test_IndexEngineVersionManager_NaNRowsRollingUpgrade(t *testing.T) {
+func Test_IndexEngineVersionManager_NaNTotalOrderRollingUpgrade(t *testing.T) {
 	paramtable.Init()
 	previousTarget := Params.DataCoordCfg.TargetScalarIndexVersion.GetValue()
 	previousForce := Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetValue()
@@ -811,7 +811,7 @@ func Test_IndexEngineVersionManager_NaNRowsRollingUpgrade(t *testing.T) {
 	Params.Save("dataCoord.targetScalarIndexVersion", "-1")
 	Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
 
-	newReaderVersion := common.MinScalarIndexVersionForNaNRows
+	newReaderVersion := common.MinScalarIndexVersionForNaNTotalOrder
 	oldReaderVersion := newReaderVersion - 1
 	reader := func(id int64, version int32) *sessionutil.Session {
 		return &sessionutil.Session{
@@ -829,7 +829,7 @@ func Test_IndexEngineVersionManager_NaNRowsRollingUpgrade(t *testing.T) {
 	m.AddNode(reader(2, oldReaderVersion))
 	assert.Equal(t, oldReaderVersion, m.ResolveScalarIndexVersion())
 
-	// An explicit target cannot enable NaN metadata while an old reader remains.
+	// An explicit target cannot enable NaN total-order keys while an old reader remains.
 	Params.Save("dataCoord.targetScalarIndexVersion", strconv.Itoa(int(newReaderVersion)))
 	for _, force := range []string{"false", "true"} {
 		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", force)

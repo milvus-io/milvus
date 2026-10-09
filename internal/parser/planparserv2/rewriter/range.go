@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type bound struct {
@@ -410,10 +411,10 @@ func newBinaryRangeExpr(col *planpb.ColumnInfo, lowerInclusive bool, upperInclus
 }
 
 // compareInt64ToFloat64 compares an int64 and float64 without lossy integer
-// promotion. Callers must reject NaN before relying on the result.
+// promotion. NaN sorts after every integer.
 func compareInt64ToFloat64(lhs int64, rhs float64) int {
 	if math.IsNaN(rhs) {
-		return 0
+		return -1
 	}
 	const (
 		int64Lower = -0x1p63
@@ -446,6 +447,18 @@ func compareInt64ToFloat64(lhs int64, rhs float64) int {
 
 // CompareRangeValues compares two supported range literals exactly.
 func CompareRangeValues(a, b *planpb.GenericValue) (int, bool) {
+	// Range validation accepts NaN even though the optimizer conservatively
+	// leaves NaN-bearing expressions unmerged.
+	isNumber := func(v *planpb.GenericValue) bool {
+		switch v.GetVal().(type) {
+		case *planpb.GenericValue_Int64Val, *planpb.GenericValue_FloatVal:
+			return true
+		}
+		return false
+	}
+	if isNumber(a) && isNumber(b) {
+		return cmpGeneric(schemapb.DataType_Double, a, b), true
+	}
 	aType, aOK := resolveJSONEffectiveType(a)
 	bType, bOK := resolveJSONEffectiveType(b)
 	if !aOK || !bOK || aType != bType {
@@ -490,7 +503,8 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 			case *planpb.GenericValue_Int64Val:
 				return -compareInt64ToFloat64(b.GetInt64Val(), a.GetFloatVal())
 			case *planpb.GenericValue_FloatVal:
-				af, bf := a.GetFloatVal(), b.GetFloatVal()
+				af := typeutil.Float64ToSortableUint64(a.GetFloatVal())
+				bf := typeutil.Float64ToSortableUint64(b.GetFloatVal())
 				if af < bf {
 					return -1
 				}

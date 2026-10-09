@@ -184,8 +184,8 @@ PhyTermFilterExpr::CanSkipSegment() {
     T max{};
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
-        max = i == 0 ? val : std::max(val, max);
-        min = i == 0 ? val : std::min(val, min);
+        max = i == 0 ? val : std::max(val, max, ScalarLessThan<T>{});
+        min = i == 0 ? val : std::min(val, min, ScalarLessThan<T>{});
     }
     auto can_skip = [&]() -> bool {
         bool res = false;
@@ -337,8 +337,11 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
         }
         auto executor = [&](size_t offset) {
             for (int i = 0; i < data[offset].length(); i++) {
+                if (!data[offset].is_element_valid(i)) {
+                    continue;
+                }
                 auto val = data[offset].template get_data_unchecked<GetType>(i);
-                if (val == target_val) {
+                if (ScalarEqual(val, target_val)) {
                     return true;
                 }
             }
@@ -455,7 +458,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                 res[i] = false;
                 continue;
             }
-            if (index >= data[offset].length()) {
+            if (index >= data[offset].length() ||
+                !data[offset].is_element_valid(index)) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
@@ -554,7 +558,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
                 if (val.error()) {
                     continue;
                 }
-                if (val.value() == target_val) {
+                if (ScalarEqual(val.value(), target_val)) {
                     return std::make_pair(true, true);
                 }
             }

@@ -56,11 +56,11 @@ PreparedInQuery::PreparedInQuery(std::vector<Metrics> values)
                     if (!value.has_value()) {
                         return;  // Mixed numeric types keep the old fallback.
                     }
-                    if (*value < min) {
+                    if (ScalarLess(*value, min)) {
                         min = *value;
                         min_index = i;
                     }
-                    if (*value > max) {
+                    if (ScalarGreater(*value, max)) {
                         max = *value;
                         max_index = i;
                     }
@@ -166,7 +166,7 @@ SkipIndexStatsBuilder::Build(
                 break;
             }
             chunk_metrics = std::make_unique<FloatFieldChunkMetrics<float>>(
-                info->min_, info->max_);
+                info->min_, info->max_, true);
             break;
         }
         case milvus::DataType::DOUBLE: {
@@ -176,7 +176,7 @@ SkipIndexStatsBuilder::Build(
                 break;
             }
             chunk_metrics = std::make_unique<FloatFieldChunkMetrics<double>>(
-                info->min_, info->max_);
+                info->min_, info->max_, true);
             break;
         }
         case milvus::DataType::VARCHAR: {

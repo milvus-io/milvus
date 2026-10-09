@@ -20,6 +20,7 @@
 #include <vector>
 #include "common/EasyAssert.h"
 #include "common/JsonCastType.h"
+#include "common/ScalarComparison.h"
 #include "common/Types.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
@@ -140,44 +141,20 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         TargetBitmap bitset(this->Count());
         switch (op) {
             case OpType::LessThan: {
-                this->wrapper_->json_range_query(json_path_,
-                                                 T(),
-                                                 UpperQueryBound(value, false),
-                                                 true,
-                                                 false,
-                                                 false,
-                                                 false,
-                                                 &bitset);
+                this->wrapper_->json_range_query(
+                    json_path_, T(), value, true, false, false, false, &bitset);
             } break;
             case OpType::LessEqual: {
-                this->wrapper_->json_range_query(json_path_,
-                                                 T(),
-                                                 UpperQueryBound(value, true),
-                                                 true,
-                                                 false,
-                                                 true,
-                                                 false,
-                                                 &bitset);
+                this->wrapper_->json_range_query(
+                    json_path_, T(), value, true, false, true, false, &bitset);
             } break;
             case OpType::GreaterThan: {
-                this->wrapper_->json_range_query(json_path_,
-                                                 LowerQueryBound(value, false),
-                                                 T(),
-                                                 false,
-                                                 true,
-                                                 false,
-                                                 false,
-                                                 &bitset);
+                this->wrapper_->json_range_query(
+                    json_path_, value, T(), false, true, false, false, &bitset);
             } break;
             case OpType::GreaterEqual: {
-                this->wrapper_->json_range_query(json_path_,
-                                                 LowerQueryBound(value, true),
-                                                 T(),
-                                                 false,
-                                                 true,
-                                                 true,
-                                                 false,
-                                                 &bitset);
+                this->wrapper_->json_range_query(
+                    json_path_, value, T(), false, true, true, false, &bitset);
             } break;
             default:
                 ThrowInfo(OpTypeInvalid,
@@ -202,15 +179,14 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         tracer::AutoSpan span("JsonFlatIndexQueryExecutor::RangeWithBounds",
                               tracer::GetRootSpan());
         TargetBitmap bitset(this->Count());
-        this->wrapper_->json_range_query(
-            json_path_,
-            LowerQueryBound(lower_bound_value, lb_inclusive),
-            UpperQueryBound(upper_bound_value, ub_inclusive),
-            false,
-            false,
-            lb_inclusive,
-            ub_inclusive,
-            &bitset);
+        this->wrapper_->json_range_query(json_path_,
+                                         lower_bound_value,
+                                         upper_bound_value,
+                                         false,
+                                         false,
+                                         lb_inclusive,
+                                         ub_inclusive,
+                                         &bitset);
         OrF64Range(bitset,
                    lower_bound_value,
                    lb_inclusive,
@@ -255,57 +231,11 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
     using U64Range = std::optional<std::pair<uint64_t, uint64_t>>;
     using I64Range = std::optional<std::pair<int64_t, int64_t>>;
 
-    template <typename V>
-    static V
-    LowerQueryBound(V value, bool inclusive) {
-        if constexpr (std::is_floating_point_v<V>) {
-            if (value == V(0)) {
-                return std::copysign(V(0), inclusive ? V(-1) : V(1));
-            }
-        }
-        return value;
-    }
-
-    template <typename V>
-    static V
-    UpperQueryBound(V value, bool inclusive) {
-        if constexpr (std::is_floating_point_v<V>) {
-            if (value == V(0)) {
-                return std::copysign(V(0), inclusive ? V(1) : V(-1));
-            }
-        }
-        return value;
-    }
-
     TargetBitmap
     TermBitset(size_t n, const T* values) {
         TargetBitmap bitset(this->Count());
-        if constexpr (std::is_floating_point_v<T>) {
-            std::vector<T> terms;
-            terms.reserve(n);
-            for (size_t i = 0; i < n; ++i) {
-                terms.push_back(values[i]);
-                if (values[i] == T(0)) {
-                    terms.push_back(-values[i]);
-                }
-            }
-            if (!terms.empty()) {
-                this->wrapper_->json_terms_query(
-                    json_path_, terms.data(), terms.size(), &bitset);
-                OrU64TermRanges(bitset, terms.size(), terms.data());
-            }
-        } else {
-            this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
-            OrU64TermRanges(bitset, n, values);
-            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
-                if (n != 0 &&
-                    std::find(values, values + n, T(0)) != values + n) {
-                    const double zeros[] = {-0.0, 0.0};
-                    this->wrapper_->json_terms_query(
-                        json_path_, zeros, 2, &bitset);
-                }
-            }
-        }
+        this->wrapper_->json_terms_query(json_path_, values, n, &bitset);
+        OrU64TermRanges(bitset, n, values);
         return bitset;
     }
 
@@ -359,48 +289,44 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             auto double_value = static_cast<double>(value);
             switch (op) {
                 case OpType::LessThan: {
-                    this->wrapper_->json_range_query(
-                        json_path_,
-                        double{},
-                        UpperQueryBound(double_value, false),
-                        true,
-                        false,
-                        false,
-                        false,
-                        &bitset);
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double{},
+                                                     double_value,
+                                                     true,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     &bitset);
                 } break;
                 case OpType::LessEqual: {
-                    this->wrapper_->json_range_query(
-                        json_path_,
-                        double{},
-                        UpperQueryBound(double_value, true),
-                        true,
-                        false,
-                        true,
-                        false,
-                        &bitset);
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double{},
+                                                     double_value,
+                                                     true,
+                                                     false,
+                                                     true,
+                                                     false,
+                                                     &bitset);
                 } break;
                 case OpType::GreaterThan: {
-                    this->wrapper_->json_range_query(
-                        json_path_,
-                        LowerQueryBound(double_value, false),
-                        double{},
-                        false,
-                        true,
-                        false,
-                        false,
-                        &bitset);
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double_value,
+                                                     double{},
+                                                     false,
+                                                     true,
+                                                     false,
+                                                     false,
+                                                     &bitset);
                 } break;
                 case OpType::GreaterEqual: {
-                    this->wrapper_->json_range_query(
-                        json_path_,
-                        LowerQueryBound(double_value, true),
-                        double{},
-                        false,
-                        true,
-                        true,
-                        false,
-                        &bitset);
+                    this->wrapper_->json_range_query(json_path_,
+                                                     double_value,
+                                                     double{},
+                                                     false,
+                                                     true,
+                                                     true,
+                                                     false,
+                                                     &bitset);
                 } break;
                 default:
                     ThrowInfo(OpTypeInvalid,
@@ -418,10 +344,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
             this->wrapper_->json_range_query(
                 json_path_,
-                LowerQueryBound(static_cast<double>(lower_bound_value),
-                                lb_inclusive),
-                UpperQueryBound(static_cast<double>(upper_bound_value),
-                                ub_inclusive),
+                static_cast<double>(lower_bound_value),
+                static_cast<double>(upper_bound_value),
                 false,
                 false,
                 lb_inclusive,
@@ -542,14 +466,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     static U64Range
     DoubleRangeForValue(double value, OpType op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
-
         switch (op) {
             case OpType::LessThan: {
                 auto upper = LastU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) < value;
+                    return ScalarLess(static_cast<double>(u), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -559,7 +479,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::LessEqual: {
                 auto upper = LastU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) <= value;
+                    return ScalarLessEqual(static_cast<double>(u), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -569,7 +489,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterThan: {
                 auto lower = FirstU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) > value;
+                    return ScalarGreater(static_cast<double>(u), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -579,7 +499,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterEqual: {
                 auto lower = FirstU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) >= value;
+                    return ScalarGreaterEqual(static_cast<double>(u), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -598,15 +518,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                          bool lb_inclusive,
                          double upper_bound_value,
                          bool ub_inclusive) {
-        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
-            return std::nullopt;
-        }
-
         auto lower =
             FirstU64Where([lower_bound_value, lb_inclusive](uint64_t u) {
                 auto value = static_cast<double>(u);
-                return lb_inclusive ? value >= lower_bound_value
-                                    : value > lower_bound_value;
+                return lb_inclusive
+                           ? ScalarGreaterEqual(value, lower_bound_value)
+                           : ScalarGreater(value, lower_bound_value);
             });
         if (!lower.has_value()) {
             return std::nullopt;
@@ -615,8 +532,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         auto upper =
             LastU64Where([upper_bound_value, ub_inclusive](uint64_t u) {
                 auto value = static_cast<double>(u);
-                return ub_inclusive ? value <= upper_bound_value
-                                    : value < upper_bound_value;
+                return ub_inclusive ? ScalarLessEqual(value, upper_bound_value)
+                                    : ScalarLess(value, upper_bound_value);
             });
         if (!upper.has_value() || *lower > *upper) {
             return std::nullopt;
@@ -627,14 +544,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     static I64Range
     DoubleI64RangeForValue(double value, OpType op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
-
         switch (op) {
             case OpType::LessThan: {
                 auto upper = LastI64Where([value](int64_t i) {
-                    return static_cast<double>(i) < value;
+                    return ScalarLess(static_cast<double>(i), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -644,7 +557,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::LessEqual: {
                 auto upper = LastI64Where([value](int64_t i) {
-                    return static_cast<double>(i) <= value;
+                    return ScalarLessEqual(static_cast<double>(i), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -654,7 +567,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterThan: {
                 auto lower = FirstI64Where([value](int64_t i) {
-                    return static_cast<double>(i) > value;
+                    return ScalarGreater(static_cast<double>(i), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -664,7 +577,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterEqual: {
                 auto lower = FirstI64Where([value](int64_t i) {
-                    return static_cast<double>(i) >= value;
+                    return ScalarGreaterEqual(static_cast<double>(i), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -683,15 +596,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                             bool lb_inclusive,
                             double upper_bound_value,
                             bool ub_inclusive) {
-        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
-            return std::nullopt;
-        }
-
         auto lower =
             FirstI64Where([lower_bound_value, lb_inclusive](int64_t i) {
                 auto value = static_cast<double>(i);
-                return lb_inclusive ? value >= lower_bound_value
-                                    : value > lower_bound_value;
+                return lb_inclusive
+                           ? ScalarGreaterEqual(value, lower_bound_value)
+                           : ScalarGreater(value, lower_bound_value);
             });
         if (!lower.has_value()) {
             return std::nullopt;
@@ -699,8 +609,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
         auto upper = LastI64Where([upper_bound_value, ub_inclusive](int64_t i) {
             auto value = static_cast<double>(i);
-            return ub_inclusive ? value <= upper_bound_value
-                                : value < upper_bound_value;
+            return ub_inclusive ? ScalarLessEqual(value, upper_bound_value)
+                                : ScalarLess(value, upper_bound_value);
         });
         if (!upper.has_value() || *lower > *upper) {
             return std::nullopt;
@@ -832,6 +742,12 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     }
 
     void
+    SetSupportsNaNTotalOrder(bool enabled) {
+        InvertedIndexTantivy<std::string>::SetSupportsNaNTotalOrder(enabled);
+        supports_nan_total_order_ = enabled;
+    }
+
+    void
     build_index_for_json(const std::vector<std::shared_ptr<FieldDataBase>>&
                              field_datas) override;
 
@@ -872,6 +788,7 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
 
  private:
     std::string nested_path_;
+    bool supports_nan_total_order_{true};
 };
 
 template <typename T>

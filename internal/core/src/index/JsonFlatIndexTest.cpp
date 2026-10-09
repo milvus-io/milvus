@@ -101,7 +101,9 @@ struct ChunkManagerWrapper {
 
 std::unique_ptr<index::JsonFlatIndex>
 BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data,
-                           const std::vector<bool>& valid_rows = {}) {
+                           const std::vector<bool>& valid_rows = {},
+                           int32_t scalar_index_version = 6,
+                           const std::string& nested_path = "") {
     auto file_manager_ctx = storage::FileManagerContext();
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
@@ -112,7 +114,8 @@ BuildInMemoryJsonFlatIndex(const std::vector<std::string>& json_data,
     index::CreateIndexInfo json_index_info;
     json_index_info.index_type = index::INVERTED_INDEX_TYPE;
     json_index_info.json_cast_type = JsonCastType::FromString("JSON");
-    json_index_info.json_path = "";
+    json_index_info.json_path = nested_path;
+    json_index_info.scalar_index_engine_version = scalar_index_version;
     auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
         json_index_info, file_manager_ctx);
     auto json_index = std::unique_ptr<index::JsonFlatIndex>(
@@ -1660,6 +1663,76 @@ TEST(JsonFlatIndexFloatingQueryTest, SignedZerosAreEqual) {
     EXPECT_EQ(hit.count(), 1);
     EXPECT_TRUE(hit[3]);
     EXPECT_EQ(executor->NotIn(1, &one).count(), 3);
+}
+
+TEST(JsonFlatIndexFloatingQueryTest, LegacyWriterRejectsIndexedNegativeZero) {
+    for (const auto& source :
+         {R"({"a": -0.0})", R"({"a": [1, -0.0]})", R"({"a": {"b": -0.0}})"}) {
+        SCOPED_TRACE(source);
+        EXPECT_THROW(BuildInMemoryJsonFlatIndex({source}, {}, 5),
+                     std::exception);
+        EXPECT_NO_THROW(BuildInMemoryJsonFlatIndex({source}, {}, 6));
+    }
+    EXPECT_NO_THROW(BuildInMemoryJsonFlatIndex({R"({"a": -0.0})"}, {false}, 5));
+    EXPECT_NO_THROW(BuildInMemoryJsonFlatIndex({R"({"a": "-0.0"})"}, {}, 5));
+    EXPECT_NO_THROW(
+        BuildInMemoryJsonFlatIndex({R"({"a": 1, "b": -0.0})"}, {}, 5, "/a"));
+}
+
+TEST(JsonFlatIndexFloatingQueryTest, NaNBoundsIncludeEveryNumericType) {
+    auto index = BuildInMemoryJsonFlatIndex({R"({"a": -2})",
+                                             R"({"a": 1.5})",
+                                             R"({"a": 18446744073709551615})",
+                                             R"({"a": "NaN"})",
+                                             R"({"a": null})",
+                                             R"({})"});
+    std::string path = "/a";
+    auto executor = index->create_executor<double>(path);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_EQ(executor->In(1, &nan).count(), 0);
+    EXPECT_EQ(executor->NotIn(1, &nan).count(), 3);
+    EXPECT_EQ(executor->Range(nan, OpType::LessThan).count(), 3);
+    EXPECT_EQ(executor->Range(nan, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(executor->Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(executor->Range(nan, OpType::GreaterEqual).count(), 0);
+    EXPECT_EQ(
+        executor
+            ->Range(-std::numeric_limits<double>::infinity(), true, nan, false)
+            .count(),
+        3);
+    EXPECT_EQ(executor->Range(0.0, true, nan, true).count(), 2);
+    EXPECT_EQ(executor->Range(nan, true, nan, true).count(), 0);
+}
+
+TEST(JsonFlatIndexFloatingQueryTest, NaNBoundsForHomogeneousNumericFastFields) {
+    for (const auto& [numbers, at_least_one] :
+         std::vector<std::pair<std::vector<std::string>, size_t>>{
+             {{R"({"a": -2})", R"({"a": 0})", R"({"a": 2})"}, 1},
+             {{R"({"a": -2.5})", R"({"a": 0.5})", R"({"a": 2.5})"}, 1},
+             {{R"({"a": 1})", R"({"a": 2})", R"({"a": 18446744073709551615})"},
+              3}}) {
+        SCOPED_TRACE(numbers.front());
+        auto rows = numbers;
+        rows.insert(rows.end(), {R"({"a":"NaN"})", R"({"a":null})", R"({})"});
+        auto index = BuildInMemoryJsonFlatIndex(rows);
+        std::string path = "/a";
+        auto executor = index->create_executor<double>(path);
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        EXPECT_EQ(executor->In(1, &nan).count(), 0);
+        EXPECT_EQ(executor->NotIn(1, &nan).count(), 3);
+        EXPECT_EQ(executor->Range(nan, OpType::LessThan).count(), 3);
+        EXPECT_EQ(executor->Range(nan, OpType::LessEqual).count(), 3);
+        EXPECT_EQ(executor->Range(nan, OpType::GreaterThan).count(), 0);
+        EXPECT_EQ(executor->Range(nan, OpType::GreaterEqual).count(), 0);
+        EXPECT_EQ(
+            executor
+                ->Range(
+                    -std::numeric_limits<double>::infinity(), true, nan, false)
+                .count(),
+            3);
+        EXPECT_EQ(executor->Range(1.0, true, nan, true).count(), at_least_one);
+        EXPECT_EQ(executor->Range(nan, true, nan, true).count(), 0);
+    }
 }
 
 }  // namespace milvus::test

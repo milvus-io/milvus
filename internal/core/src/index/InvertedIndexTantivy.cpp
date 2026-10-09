@@ -39,6 +39,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
+#include "common/ScalarComparison.h"
 #include "folly/SharedMutex.h"
 #include "glog/logging.h"
 #include "index/InvertedIndexTantivy.h"
@@ -69,7 +70,7 @@ namespace milvus::index {
 namespace {
 
 // Keep all term-query surfaces (IN, NOT IN, callbacks and filtered IN) on
-// IEEE equality semantics.
+// SQL floating equality semantics; the binding canonicalizes NaN and zero.
 template <typename T>
 void
 QueryTerms(const std::shared_ptr<TantivyIndexWrapper>& wrapper,
@@ -78,23 +79,6 @@ QueryTerms(const std::shared_ptr<TantivyIndexWrapper>& wrapper,
            TargetBitmap* result) {
     if (n == 0) {
         return;
-    }
-    if constexpr (std::is_floating_point_v<T>) {
-        if (std::any_of(
-                values, values + n, [](T value) { return value == T(0); })) {
-            std::vector<T> comparable;
-            comparable.reserve(n + 1);
-            for (size_t i = 0; i < n; ++i) {
-                if (values[i] != T(0)) {
-                    comparable.push_back(values[i]);
-                }
-            }
-            // Tantivy stores the two IEEE zero encodings as distinct terms.
-            comparable.push_back(T(0));
-            comparable.push_back(-T(0));
-            wrapper->terms_query(comparable.data(), comparable.size(), result);
-            return;
-        }
     }
     wrapper->terms_query(values, n, result);
 }
@@ -605,48 +589,18 @@ InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
     tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
 
-    const T* bound = &value;
-    T normalized_bound{};
-    if constexpr (std::is_floating_point_v<T>) {
-        if (value == T(0)) {
-            normalized_bound =
-                op == OpType::LessThan || op == OpType::GreaterEqual ? -T(0)
-                                                                     : T(0);
-            bound = &normalized_bound;
-        }
-    }
-    if constexpr (std::is_floating_point_v<T>) {
-        // Tantivy orders both NaN encodings outside the IEEE numeric domain.
-        // Bound the formerly unbounded side by infinity to exclude them.
-        const T inf = std::numeric_limits<T>::infinity();
-        switch (op) {
-            case OpType::LessThan:
-            case OpType::LessEqual:
-                wrapper_->range_query(
-                    -inf, *bound, true, op == OpType::LessEqual, &bitset);
-                break;
-            case OpType::GreaterThan:
-            case OpType::GreaterEqual:
-                wrapper_->range_query(
-                    *bound, inf, op == OpType::GreaterEqual, true, &bitset);
-                break;
-            default:
-                ThrowInfo(OpTypeInvalid, "Invalid OperatorType: {}", op);
-        }
-        return bitset;
-    }
     switch (op) {
         case OpType::LessThan: {
-            wrapper_->upper_bound_range_query(*bound, false, &bitset);
+            wrapper_->upper_bound_range_query(value, false, &bitset);
         } break;
         case OpType::LessEqual: {
-            wrapper_->upper_bound_range_query(*bound, true, &bitset);
+            wrapper_->upper_bound_range_query(value, true, &bitset);
         } break;
         case OpType::GreaterThan: {
-            wrapper_->lower_bound_range_query(*bound, false, &bitset);
+            wrapper_->lower_bound_range_query(value, false, &bitset);
         } break;
         case OpType::GreaterEqual: {
-            wrapper_->lower_bound_range_query(*bound, true, &bitset);
+            wrapper_->lower_bound_range_query(value, true, &bitset);
         } break;
         default:
             ThrowInfo(OpTypeInvalid,
@@ -665,20 +619,16 @@ InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
     tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
-    const T* lower = &lower_bound_value;
-    const T* upper = &upper_bound_value;
-    T normalized_lower{}, normalized_upper{};
-    if constexpr (std::is_floating_point_v<T>) {
-        if (lower_bound_value == T(0)) {
-            normalized_lower = lb_inclusive ? -T(0) : T(0);
-            lower = &normalized_lower;
-        }
-        if (upper_bound_value == T(0)) {
-            normalized_upper = ub_inclusive ? T(0) : -T(0);
-            upper = &normalized_upper;
-        }
+    if (ScalarGreater(lower_bound_value, upper_bound_value) ||
+        (ScalarEqual(lower_bound_value, upper_bound_value) &&
+         !(lb_inclusive && ub_inclusive))) {
+        return bitset;
     }
-    wrapper_->range_query(*lower, *upper, lb_inclusive, ub_inclusive, &bitset);
+    wrapper_->range_query(lower_bound_value,
+                          upper_bound_value,
+                          lb_inclusive,
+                          ub_inclusive,
+                          &bitset);
     return bitset;
 }
 
@@ -820,6 +770,39 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::BuildWithFieldData(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!supports_nan_total_order_) {
+            const auto needs_canonical_encoding = [](T value) {
+                return ScalarIsNaN(value) ||
+                       (value == T(0) && std::signbit(value));
+            };
+            for (const auto& data : field_datas) {
+                for (size_t row = 0; row < data->get_num_rows(); ++row) {
+                    if (!data->is_valid(row)) {
+                        continue;
+                    }
+                    if (data->get_data_type() == DataType::ARRAY) {
+                        const auto* array =
+                            static_cast<const Array*>(data->RawValue(row));
+                        for (size_t i = 0; i < array->length(); ++i) {
+                            if (array->is_element_valid(i) &&
+                                needs_canonical_encoding(
+                                    array->get_data_unchecked<T>(i))) {
+                                ThrowInfo(Unsupported,
+                                          "INVERTED requires scalar index "
+                                          "version 6 for NaN total order");
+                            }
+                        }
+                    } else if (needs_canonical_encoding(*static_cast<const T*>(
+                                   data->RawValue(row)))) {
+                        ThrowInfo(Unsupported,
+                                  "INVERTED requires scalar index version 6 "
+                                  "for NaN total order");
+                    }
+                }
+            }
+        }
+    }
     if (schema_.nullable()) {
         int64_t total = 0;
         for (const auto& data : field_datas) {

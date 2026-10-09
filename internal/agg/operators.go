@@ -3,6 +3,7 @@ package agg
 import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func terminateSingleSlot(slots []*FieldValue) (any, error) {
@@ -253,13 +254,13 @@ func shouldReplaceOrderedValue(target, new any, op string) (bool, error) {
 		if !ok {
 			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is float32, new is %T", new)
 		}
-		return shouldReplaceOrdered(newVal, targetVal, op), nil
+		return shouldReplaceOrdered(typeutil.Float32ToSortableUint32(newVal), typeutil.Float32ToSortableUint32(targetVal), op), nil
 	case float64:
 		newVal, ok := new.(float64)
 		if !ok {
 			return false, merr.WrapErrParameterInvalidMsg("type mismatch: target is float64, new is %T", new)
 		}
-		return shouldReplaceOrdered(newVal, targetVal, op), nil
+		return shouldReplaceOrdered(typeutil.Float64ToSortableUint64(newVal), typeutil.Float64ToSortableUint64(targetVal), op), nil
 	case string:
 		newVal, ok := new.(string)
 		if !ok {
@@ -271,8 +272,8 @@ func shouldReplaceOrderedValue(target, new any, op string) (bool, error) {
 	}
 }
 
-// Direct comparisons preserve existing NaN behavior for float min/max.
-func shouldReplaceOrdered[T ~int | ~int32 | ~int64 | ~float32 | ~float64 | ~string](newVal, targetVal T, op string) bool {
+// Floating callers compare the shared typed sortable keys.
+func shouldReplaceOrdered[T ~int | ~int32 | ~int64 | ~uint32 | ~uint64 | ~string](newVal, targetVal T, op string) bool {
 	if op == kMin {
 		return newVal < targetVal
 	}

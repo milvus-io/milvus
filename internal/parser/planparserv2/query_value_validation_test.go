@@ -8,11 +8,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestQueryNaNRejected(t *testing.T) {
+func TestQueryNaNAccepted(t *testing.T) {
 	schema := newTestSchema(true)
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		FieldID: 2000, Name: "FloatArray", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double,
@@ -61,16 +60,8 @@ func TestQueryNaNRejected(t *testing.T) {
 				values = map[string]*schemapb.TemplateValue{"value": tc.value}
 			}
 			parsed, err := ParseExpr(helper, tc.expression, values)
-			require.Nil(t, parsed)
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			code := int32(1100)
-			if tc.value == nil {
-				code = 2201
-			}
-			require.Equal(t, code, merr.Code(err))
-			require.Contains(t, err.Error(), "NaN")
-			require.False(t, merr.IsRetryableErr(err))
-			require.Equal(t, "true", merr.Status(err).GetExtraInfo()[merr.InputErrorFlagKey])
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
 		})
 	}
 	for _, createPlan := range []func() error{
@@ -83,7 +74,7 @@ func TestQueryNaNRejected(t *testing.T) {
 			return err
 		},
 	} {
-		require.ErrorIs(t, createPlan(), merr.ErrParameterInvalid)
+		require.NoError(t, createPlan())
 	}
 
 	for _, tc := range []struct {
@@ -109,10 +100,46 @@ func TestQueryNaNRejected(t *testing.T) {
 		expr, err := ParseExprTemplate(helper, exprStr, nil)
 		require.NoError(t, err)
 		err = FillExpressionValue(expr, map[string]*planpb.GenericValue{"value": NewFloat(math.NaN())})
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NoError(t, err)
 	}
 	finite, err := ParseExpr(helper, "DoubleField == 1.5", nil)
 	require.NoError(t, err)
 	finite.GetUnaryRangeExpr().Value = NewFloat(math.NaN())
-	require.ErrorIs(t, FillExpressionValue(finite, nil), merr.ErrParameterInvalid)
+	require.NoError(t, FillExpressionValue(finite, nil))
+}
+
+func TestNaNConstantComparisonOrder(t *testing.T) {
+	nan := NewFloat(math.NaN())
+	otherNaN := NewFloat(math.Float64frombits(0xfff8000000000001))
+	infinity := NewFloat(math.Inf(1))
+	for _, tc := range []struct {
+		actual *ExprWithType
+		want   bool
+	}{
+		{Equal(nan, otherNaN), true},
+		{NotEqual(nan, otherNaN), false},
+		{Less(nan, otherNaN), false},
+		{LessEqual(nan, otherNaN), true},
+		{Greater(nan, infinity), true},
+		{GreaterEqual(nan, infinity), true},
+		{Less(infinity, nan), true},
+		{LessEqual(infinity, nan), true},
+		{Greater(NewInt(3), nan), false},
+		{Less(NewInt(3), nan), true},
+	} {
+		require.NotNil(t, tc.actual)
+		require.Equal(t, tc.want, getGenericValue(tc.actual).GetBoolVal())
+	}
+	helper, err := typeutil.CreateSchemaHelper(newTestSchema(true))
+	require.NoError(t, err)
+	for expr, want := range map[string]bool{
+		"((-1.0)**0.5) == ((-1.0)**0.5)": true,
+		"((-1.0)**0.5) > (2.0**1024)":    true,
+		"((-1.0)**0.5) != ((-1.0)**0.5)": false,
+		"((-1.0)**0.5) < 3":              false,
+	} {
+		parsed, err := ParseExpr(helper, expr, nil)
+		require.NoError(t, err, expr)
+		require.Equal(t, want, parsed.GetAlwaysTrueExpr() != nil, expr)
+	}
 }

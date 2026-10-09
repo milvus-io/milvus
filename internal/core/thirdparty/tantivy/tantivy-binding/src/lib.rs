@@ -33,6 +33,9 @@ mod util;
 mod util_c;
 mod vec_collector;
 
+#[cfg(test)]
+mod floating_order_test;
+
 pub mod analyzer;
 pub mod phrase_match_slop;
 mod phrase_match_slop_c;

@@ -31,9 +31,14 @@ func TestEqualGroupValuesNullSemantics(t *testing.T) {
 	require.False(t, EqualGroupValues([]any{int64(0)}, []any{nil}))
 }
 
-func TestEqualGroupValuesNaNNeverEqual(t *testing.T) {
+func TestEqualGroupValuesCanonicalNaNAndZero(t *testing.T) {
 	nan := math.NaN()
-	require.False(t, EqualGroupValues([]any{nan}, []any{nan}))
+	require.True(t, EqualGroupValues([]any{nan}, []any{math.Float64frombits(0xfff8000000000001)}))
+	require.Equal(t, HashGroupValues([]any{nan}), HashGroupValues([]any{math.Float64frombits(0xfff8000000000001)}))
+	require.True(t, EqualGroupValues([]any{math.Copysign(0, -1)}, []any{float64(0)}))
+	require.Equal(t, HashGroupValues([]any{math.Copysign(0, -1)}), HashGroupValues([]any{float64(0)}))
+	require.False(t, EqualGroupValues([]any{nan}, []any{nil}))
+	require.False(t, EqualGroupValues([]any{nan}, []any{math.Inf(1)}))
 	require.False(t, EqualGroupValues([]any{nan}, []any{float64(1.0)}))
 }
 

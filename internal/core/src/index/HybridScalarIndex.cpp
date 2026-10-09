@@ -197,20 +197,7 @@ ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(size_t n,
                                            const T* values,
                                            const bool* valid_data) {
-    if constexpr (std::is_floating_point_v<T>) {
-        for (size_t i = 0; i < n; ++i) {
-            if ((!valid_data || valid_data[i]) && std::isnan(values[i])) {
-                if (scalar_index_version_ < kMinScalarIndexVersionForNaNRows) {
-                    ThrowInfo(Unsupported,
-                              "HYBRID cannot preserve NaN source rows below "
-                              "scalar index version 6");
-                }
-                internal_index_type_ = ScalarIndexType::STLSORT;
-                return internal_index_type_;
-            }
-        }
-    }
-    std::set<T> distinct_vals;
+    std::set<T, ScalarLessThan<T>> distinct_vals;
     for (size_t i = 0; i < n; i++) {
         if (valid_data && !valid_data[i]) {
             continue;
@@ -224,51 +211,10 @@ HybridScalarIndex<T>::SelectIndexBuildType(size_t n,
 }
 
 template <typename T>
-bool
-HybridScalarIndex<T>::SelectSortForNaN(
-    const std::vector<FieldDataPtr>& field_datas) {
-    if constexpr (std::is_floating_point_v<T>) {
-        for (const auto& data : field_datas) {
-            for (size_t row = 0; row < data->get_num_rows(); ++row) {
-                if (!data->is_valid(row)) {
-                    continue;
-                }
-                bool has_nan = false;
-                if (data->get_data_type() == DataType::ARRAY) {
-                    const auto* array =
-                        static_cast<const Array*>(data->RawValue(row));
-                    for (size_t i = 0; i < array->length(); ++i) {
-                        if (array->is_element_valid(i) &&
-                            std::isnan(array->get_data_unchecked<T>(i))) {
-                            has_nan = true;
-                            break;
-                        }
-                    }
-                } else {
-                    has_nan =
-                        std::isnan(*static_cast<const T*>(data->RawValue(row)));
-                }
-                if (has_nan) {
-                    if (scalar_index_version_ <
-                        kMinScalarIndexVersionForNaNRows) {
-                        ThrowInfo(Unsupported,
-                                  "HYBRID cannot preserve NaN source rows "
-                                  "below scalar index version 6");
-                    }
-                    internal_index_type_ = ScalarIndexType::STLSORT;
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T> distinct_vals;
+    std::set<T, ScalarLessThan<T>> distinct_vals;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
@@ -289,7 +235,7 @@ template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectBuildTypeForArrayType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T> distinct_vals;
+    std::set<T, ScalarLessThan<T>> distinct_vals;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {
@@ -303,14 +249,6 @@ HybridScalarIndex<T>::SelectBuildTypeForArrayType(
                     continue;
                 }
                 auto val = array->template get_data_unchecked<T>(j);
-                if constexpr (std::is_floating_point_v<T>) {
-                    if (!is_nested_index_ &&
-                        scalar_index_version_ >=
-                            kArrayHybridStlSortMinVersion &&
-                        std::isnan(val)) {
-                        continue;
-                    }
-                }
                 distinct_vals.insert(val);
 
                 // Limit the bitmap index cardinality because of memory usage
@@ -339,9 +277,6 @@ template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(
     const std::vector<FieldDataPtr>& field_datas) {
-    if (SelectSortForNaN(field_datas)) {
-        return internal_index_type_;
-    }
     if (IsPrimitiveType(field_type_)) {
         return SelectBuildTypeForPrimitiveType(field_datas);
     } else if (IsArrayType(field_type_)) {
@@ -360,21 +295,27 @@ HybridScalarIndex<T>::GetInternalIndex() {
         return internal_index_;
     }
     if (internal_index_type_ == ScalarIndexType::BITMAP) {
-        internal_index_ = std::make_shared<BitmapIndex<T>>(
+        auto index = std::make_shared<BitmapIndex<T>>(
             this->file_manager_context_, is_nested_index_);
+        index->SetSupportsNaNTotalOrder(scalar_index_version_ >=
+                                        kMinScalarIndexVersionForNaNTotalOrder);
+        internal_index_ = std::move(index);
     } else if (internal_index_type_ == ScalarIndexType::STLSORT) {
         auto index = std::make_shared<ScalarIndexSort<T>>(
             this->file_manager_context_, is_nested_index_);
-        index->SetSupportsUnindexedNaN(scalar_index_version_ >=
-                                       kMinScalarIndexVersionForNaNRows);
+        index->SetSupportsNaNTotalOrder(scalar_index_version_ >=
+                                        kMinScalarIndexVersionForNaNTotalOrder);
         internal_index_ = std::move(index);
     } else if (internal_index_type_ == ScalarIndexType::INVERTED) {
-        internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
+        auto index = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_,
             this->file_manager_context_,
             false,
             true,
             is_nested_index_);
+        index->SetSupportsNaNTotalOrder(scalar_index_version_ >=
+                                        kMinScalarIndexVersionForNaNTotalOrder);
+        internal_index_ = std::move(index);
     } else {
         ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");

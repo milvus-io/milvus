@@ -49,9 +49,6 @@
 
 namespace milvus::index {
 
-// Version 6 preserves source-valid NaN rows as unindexed offsets (-1).
-inline constexpr int32_t kMinScalarIndexVersionForNaNRows = 6;
-
 template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
     static_assert(std::is_arithmetic_v<T>,
@@ -102,8 +99,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
     void
-    SetSupportsUnindexedNaN(bool enabled) {
-        supports_unindexed_nan_ = enabled;
+    SetSupportsNaNTotalOrder(bool enabled) {
+        supports_nan_total_order_ = enabled;
     }
 
     void
@@ -264,21 +261,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
     void
-    UpdateUnindexedNaNFlag() {
-        if constexpr (std::is_floating_point_v<T>) {
-            // Single-valued rows have one entry per comparable valid value.
-            // Ordinary arrays use parent-row postings and cannot use this test.
-            has_unindexed_nan_ = (!is_array_field_ || is_nested_index_) &&
-                                 valid_bitset_.count() > size_;
-        }
-    }
+    CheckNaNCompatibility(T value) const;
 
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
     bool is_array_field_ = false;
-    bool supports_unindexed_nan_ = true;
-    bool has_unindexed_nan_ = false;
+    bool supports_nan_total_order_ = true;
     bool is_built_ = false;
     Config config_;
     // idx_to_offsets: maps row_id to sorted offset, or -1 when unindexed.

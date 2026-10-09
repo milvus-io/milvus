@@ -1066,7 +1066,7 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		})
 	})
 
-	s.Run("NaN and different dynamic types should fail", func() {
+	s.Run("NaN bounds follow total order and different dynamic types fail", func() {
 		bounds := func(min, max *schemapb.TemplateValue) map[string]*schemapb.TemplateValue {
 			return map[string]*schemapb.TemplateValue{"min": min, "max": max}
 		}
@@ -1075,15 +1075,13 @@ func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON()
 		array := func(v int64) *schemapb.TemplateValue {
 			return value(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{v}))
 		}
-		for _, c := range []testcase{
-			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Int64, int64(10)))},
-			{`{min} < A < {max}`, bounds(value(schemapb.DataType_Int64, int64(1)), value(schemapb.DataType_Double, math.NaN()))},
-			{`{min} < DoubleField < {max}`, bounds(value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Double, float64(10)))},
-		} {
-			expr, err := ParseExpr(schemaH, c.expr, c.values)
-			s.ErrorIs(err, merr.ErrParameterInvalid, c.expr)
-			s.Nil(expr, c.expr)
-		}
+		_, err := ParseExpr(schemaH, `{min} < DoubleField < {max}`, bounds(
+			value(schemapb.DataType_Double, float64(1)), value(schemapb.DataType_Double, math.NaN())))
+		s.NoError(err)
+		_, err = ParseExpr(schemaH, `{min} < DoubleField < {max}`, bounds(
+			value(schemapb.DataType_Double, math.NaN()), value(schemapb.DataType_Double, float64(10))))
+		s.Error(err)
+
 		for _, c := range []testcase{
 			{`{min} < A < {max}`, mixedBounds},
 			{`1 < A < {max}`, map[string]*schemapb.TemplateValue{"max": value(schemapb.DataType_String, "z")}},

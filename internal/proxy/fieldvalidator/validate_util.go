@@ -1127,9 +1127,7 @@ func (v *ValidateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchem
 		return merr.WrapErrParameterInvalid("need float32 array", "got nil", msg)
 	}
 
-	if v.checkNAN {
-		return typeutil.VerifyFloats32(data)
-	}
+	// Scalar floats preserve NaN and infinities; vector validation stays finite-only.
 
 	return nil
 }
@@ -1141,9 +1139,7 @@ func (v *ValidateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 		return merr.WrapErrParameterInvalid("need float64(double) array", "got nil", msg)
 	}
 
-	if v.checkNAN {
-		return typeutil.VerifyFloats64(data)
-	}
+	// Scalar floats preserve NaN and infinities; vector validation stays finite-only.
 
 	return nil
 }

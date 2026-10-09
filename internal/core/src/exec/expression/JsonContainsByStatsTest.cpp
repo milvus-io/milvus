@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1468,5 +1469,166 @@ TEST(JsonStatsThreeValuedAuditTest,
                 proto::plan::JSONContainsExpr_JSONOp_Contains,
                 true,
                 std::vector<proto::plan::GenericValue>{value})));
+    }
+}
+
+TEST(JsonStatsThreeValuedAuditTest, NaNQueriesMatchRawAcrossSharedAndShredded) {
+    auto schema = std::make_shared<Schema>();
+    auto fid = schema->AddDebugField("json", DataType::JSON, true);
+    const std::vector<std::string> numbers{"3.0",
+                                           "-2.0",
+                                           "9007199254740993",
+                                           "9223372036854775809",
+                                           R"("NaN")",
+                                           "null",
+                                           "{}",
+                                           "[]"};
+    const std::vector<std::string> arrays{"[3.0]",
+                                          "[-2.0]",
+                                          "[9007199254740993]",
+                                          "[9223372036854775809]",
+                                          R"(["NaN"])",
+                                          "null",
+                                          "[]",
+                                          "[3.0, null]"};
+    std::vector<std::string> rows;
+    for (size_t i = 0; i < 32; ++i) {
+        const auto n = i < numbers.size() ? numbers[i] : "3.0";
+        const auto a = i < arrays.size() ? arrays[i] : "[3.0]";
+        auto row = fmt::format(R"({{"n":{},"a":{}}})", n, a);
+        // Fewer than 30% of rows contain these paths, forcing shared BSON.
+        if (i < numbers.size()) {
+            row = fmt::format(
+                R"({{"n":{},"a":{},"shared_n":{},"shared_a":{}}})", n, a, n, a);
+        }
+        rows.push_back(std::move(row));
+    }
+    const std::vector<uint8_t> parent_validity{0xff, 0xff, 0xff, 0x7f};
+    auto stats = BuildAndLoadJsonKeyStats(rows,
+                                          fid,
+                                          TestLocalPath,
+                                          1204,
+                                          2204,
+                                          3204,
+                                          fid.get(),
+                                          5204,
+                                          1,
+                                          &parent_validity);
+    ASSERT_FALSE(
+        stats->GetShreddingField(JsonPointer({"n"}), JSONType::DOUBLE).empty());
+    ASSERT_TRUE(
+        stats->GetShreddingField(JsonPointer({"shared_n"}), JSONType::DOUBLE)
+            .empty());
+    auto stats_segment = segcore::CreateSealedSegment(schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(stats_segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
+    auto raw_segment = segcore::CreateSealedSegment(schema);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    for (auto* segment : {stats_segment.get(), raw_segment.get()}) {
+        auto field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(rows, parent_validity));
+        auto load_info =
+            PrepareSingleFieldInsertBinlog(0, 0, 0, fid.get(), {field}, cm);
+        segment->LoadFieldData(load_info);
+    }
+    stats_segment->DropFieldData(fid);
+    ASSERT_FALSE(stats_segment->HasFieldData(fid));
+    auto evaluate = [&](const expr::TypedExprPtr& expression,
+                        const segcore::SegmentInternalInterface* segment,
+                        exec::OffsetVector* offsets) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment, rows.size(), MAX_TIMESTAMP, offsets);
+    };
+    auto check = [&](const expr::TypedExprPtr& expression) {
+        SCOPED_TRACE(expression->ToString());
+        // Unary/IN/contains statistics executors currently support sequential
+        // batches; offset execution deliberately uses the raw field instead.
+        for (auto* selected : {static_cast<exec::OffsetVector*>(nullptr)}) {
+            auto raw = evaluate(expression, raw_segment.get(), selected);
+            auto actual = evaluate(expression, stats_segment.get(), selected);
+            ASSERT_EQ(actual->size(), raw->size());
+            TargetBitmapView raw_bits(raw->GetRawData(), raw->size());
+            TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+            TargetBitmapView bits(actual->GetRawData(), actual->size());
+            TargetBitmapView valid(actual->GetValidRawData(), actual->size());
+            for (size_t i = 0; i < raw->size(); ++i) {
+                EXPECT_EQ(valid[i], raw_valid[i]) << "row " << i;
+                EXPECT_EQ(bits[i], raw_bits[i]) << "row " << i;
+            }
+        }
+    };
+    proto::plan::GenericValue nan, three, zero;
+    nan.set_float_val(std::numeric_limits<double>::quiet_NaN());
+    three.set_float_val(3.0);
+    zero.set_int64_val(0);
+    for (const auto* path : {"n", "shared_n"}) {
+        auto column = expr::ColumnInfo(fid, DataType::JSON, {path});
+        for (auto op : {proto::plan::Equal,
+                        proto::plan::NotEqual,
+                        proto::plan::LessThan,
+                        proto::plan::LessEqual,
+                        proto::plan::GreaterThan,
+                        proto::plan::GreaterEqual}) {
+            auto unary =
+                std::make_shared<expr::UnaryRangeFilterExpr>(column, op, nan);
+            // Finite JSON numbers (including exact large integers) are below
+            // NaN. A JSON string "NaN" must never become a numeric NaN.
+            if (op == proto::plan::LessThan) {
+                auto oracle = evaluate(unary, raw_segment.get(), nullptr);
+                TargetBitmapView oracle_bits(oracle->GetRawData(),
+                                             oracle->size());
+                TargetBitmapView oracle_valid(oracle->GetValidRawData(),
+                                              oracle->size());
+                for (size_t row : {0, 1, 2, 3}) {
+                    EXPECT_TRUE(oracle_valid[row]);
+                    EXPECT_TRUE(oracle_bits[row]);
+                }
+                EXPECT_FALSE(oracle_bits[4]);
+                EXPECT_FALSE(oracle_bits[31]);
+                EXPECT_FALSE(oracle_valid[31]);
+            }
+            check(unary);
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, unary));
+        }
+        for (bool inclusive : {false, true}) {
+            check(std::make_shared<expr::BinaryRangeFilterExpr>(
+                column, zero, nan, true, inclusive));
+            check(std::make_shared<expr::BinaryRangeFilterExpr>(
+                column, nan, nan, true, inclusive));
+        }
+        for (const auto& values :
+             {std::vector<proto::plan::GenericValue>{nan},
+              std::vector<proto::plan::GenericValue>{nan, three},
+              std::vector<proto::plan::GenericValue>{three, nan}}) {
+            auto term = std::make_shared<expr::TermFilterExpr>(column, values);
+            check(term);
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, term));
+        }
+    }
+    for (const auto* path : {"a", "shared_a"}) {
+        for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                        proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+            for (const auto& values :
+                 {std::vector<proto::plan::GenericValue>{nan},
+                  std::vector<proto::plan::GenericValue>{three, nan}}) {
+                auto contains = std::make_shared<expr::JsonContainsExpr>(
+                    expr::ColumnInfo(fid, DataType::JSON, {path}),
+                    op,
+                    values.size() == 1,
+                    values);
+                check(contains);
+                check(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, contains));
+            }
+        }
     }
 }

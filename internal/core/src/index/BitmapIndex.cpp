@@ -157,6 +157,16 @@ BitmapIndex<T>::UnmapIndexData() {
 
 template <typename T>
 void
+BitmapIndex<T>::CheckNaNCompatibility(T value) const {
+    if (ScalarIsNaN(value) && !supports_nan_total_order_) {
+        ThrowInfo(Unsupported,
+                  "BITMAP requires rebuilding with scalar index version 6 for "
+                  "NaN total order");
+    }
+}
+
+template <typename T>
+void
 BitmapIndex<T>::Build(const Config& config) {
     if (is_built_) {
         return;
@@ -183,6 +193,7 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
     T* p = const_cast<T*>(data);
     for (int i = 0; i < n; ++i, ++p) {
         if (valid_data == nullptr || valid_data[i]) {
+            CheckNaNCompatibility(*p);
             data_[*p].add(i);
             valid_bitset_.set(i);
         }
@@ -211,6 +222,7 @@ BitmapIndex<T>::BuildPrimitiveField(
         for (size_t i = 0; i < slice_row_num; ++i) {
             if (data->is_valid(i)) {
                 auto val = reinterpret_cast<const T*>(data->RawValue(i));
+                CheckNaNCompatibility(*val);
                 data_[*val].add(offset);
                 valid_bitset_.set(offset);
             }
@@ -278,12 +290,10 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
                     auto val = array->get_data_unchecked<T>(j);
-                    if constexpr (std::is_floating_point_v<T>) {
-                        // A hidden NaN payload must not enter the ordered map.
-                        if (!array->is_element_valid(j) && std::isnan(val)) {
-                            continue;
-                        }
+                    if (!array->is_element_valid(j)) {
+                        continue;
                     }
+                    CheckNaNCompatibility(val);
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -313,12 +323,11 @@ BitmapIndex<T>::BuildArrayFieldNested(
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
                 auto val = array->get_data_unchecked<T>(j);
-                if constexpr (std::is_floating_point_v<T>) {
-                    if (!array->is_element_valid(j) && std::isnan(val)) {
-                        ++offset;
-                        continue;
-                    }
+                if (!array->is_element_valid(j)) {
+                    ++offset;
+                    continue;
                 }
+                CheckNaNCompatibility(val);
                 data_[val].add(offset++);
             }
         }
@@ -329,7 +338,12 @@ BitmapIndex<T>::BuildArrayFieldNested(
                   "nested scalar bitmap index can not build null values");
     }
     total_num_rows_ = offset;
-    valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (const auto& [key, postings] : data_) {
+        for (const auto row : postings) {
+            valid_bitset_.set(row);
+        }
+    }
 }
 
 template <typename T>
@@ -447,7 +461,7 @@ BitmapIndex<T>::Serialize(const Config& config) {
     BinarySet ret_set;
     ret_set.Append(BITMAP_INDEX_DATA, index_data, index_data_size);
     ret_set.Append(BITMAP_INDEX_META, index_meta.first, index_meta.second);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         ret_set.Append(
             BITMAP_INDEX_VALID_BITSET, valid_bitset.first, valid_bitset.second);
@@ -603,6 +617,7 @@ BitmapIndex<T>::ParseKey(std::span<const uint8_t>& input) {
     T key;
     milvus::fastmem::FastMemcpy(&key, input.data(), sizeof(T));
     input = input.subspan(sizeof(T));
+    CheckNaNCompatibility(key);
     return key;
 }
 
@@ -1008,7 +1023,7 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
                                   bitsets_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1017,7 +1032,7 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
                                   bitsets_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1026,7 +1041,7 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
                                   bitsets_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1035,7 +1050,7 @@ BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
                                   bitsets_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1082,7 +1097,7 @@ BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
                                   bitmap_info_map_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1091,7 +1106,7 @@ BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
                                   bitmap_info_map_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1100,7 +1115,7 @@ BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
                                   bitmap_info_map_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1109,7 +1124,7 @@ BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
                                   bitmap_info_map_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1146,7 +1161,7 @@ BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
                                   data_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1155,7 +1170,7 @@ BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
                                   data_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1164,7 +1179,7 @@ BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
                                   data_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1173,7 +1188,7 @@ BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
                                   data_.end(),
                                   std::make_pair(value, TargetBitmap()),
                                   [](const auto& lhs, const auto& rhs) {
-                                      return lhs.first < rhs.first;
+                                      return ScalarLess(lhs.first, rhs.first);
                                   });
             break;
         }
@@ -1201,8 +1216,9 @@ BitmapIndex<T>::RangeForBitset(const T& lower_value,
 
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
-    if (lower_value > upper_value ||
-        (lower_value == upper_value && !(lb_inclusive && ub_inclusive))) {
+    if (ScalarGreater(lower_value, upper_value) ||
+        (ScalarEqual(lower_value, upper_value) &&
+         !(lb_inclusive && ub_inclusive))) {
         return res;
     }
     if (ShouldSkip(lower_value, upper_value, OpType::Range)) {
@@ -1217,14 +1233,14 @@ BitmapIndex<T>::RangeForBitset(const T& lower_value,
                               bitsets_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         lb = std::upper_bound(bitsets_.begin(),
                               bitsets_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1233,14 +1249,14 @@ BitmapIndex<T>::RangeForBitset(const T& lower_value,
                               bitsets_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         ub = std::lower_bound(bitsets_.begin(),
                               bitsets_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1279,8 +1295,9 @@ BitmapIndex<T>::RangeForMmap(const T& lower_value,
 
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
-    if (lower_value > upper_value ||
-        (lower_value == upper_value && !(lb_inclusive && ub_inclusive))) {
+    if (ScalarGreater(lower_value, upper_value) ||
+        (ScalarEqual(lower_value, upper_value) &&
+         !(lb_inclusive && ub_inclusive))) {
         return res;
     }
     if (ShouldSkip(lower_value, upper_value, OpType::Range)) {
@@ -1295,14 +1312,14 @@ BitmapIndex<T>::RangeForMmap(const T& lower_value,
                               bitmap_info_map_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         lb = std::upper_bound(bitmap_info_map_.begin(),
                               bitmap_info_map_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1311,14 +1328,14 @@ BitmapIndex<T>::RangeForMmap(const T& lower_value,
                               bitmap_info_map_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         ub = std::lower_bound(bitmap_info_map_.begin(),
                               bitmap_info_map_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1341,8 +1358,9 @@ BitmapIndex<T>::RangeForRoaring(const T& lower_value,
 
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
-    if (lower_value > upper_value ||
-        (lower_value == upper_value && !(lb_inclusive && ub_inclusive))) {
+    if (ScalarGreater(lower_value, upper_value) ||
+        (ScalarEqual(lower_value, upper_value) &&
+         !(lb_inclusive && ub_inclusive))) {
         return res;
     }
     if (ShouldSkip(lower_value, upper_value, OpType::Range)) {
@@ -1357,14 +1375,14 @@ BitmapIndex<T>::RangeForRoaring(const T& lower_value,
                               data_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         lb = std::upper_bound(data_.begin(),
                               data_.end(),
                               std::make_pair(lower_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1373,14 +1391,14 @@ BitmapIndex<T>::RangeForRoaring(const T& lower_value,
                               data_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     } else {
         ub = std::lower_bound(data_.begin(),
                               data_.end(),
                               std::make_pair(upper_value, TargetBitmap()),
                               [](const auto& lhs, const auto& rhs) {
-                                  return lhs.first < rhs.first;
+                                  return ScalarLess(lhs.first, rhs.first);
                               });
     }
 
@@ -1461,28 +1479,28 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
         switch (op) {
             case OpType::LessThan: {
                 // lower_value == upper_value
-                should_skip = lower_bound >= lower_value;
+                should_skip = ScalarGreaterEqual(lower_bound, lower_value);
                 break;
             }
             case OpType::LessEqual: {
                 // lower_value == upper_value
-                should_skip = lower_bound > lower_value;
+                should_skip = ScalarGreater(lower_bound, lower_value);
                 break;
             }
             case OpType::GreaterThan: {
                 // lower_value == upper_value
-                should_skip = upper_bound <= lower_value;
+                should_skip = ScalarLessEqual(upper_bound, lower_value);
                 break;
             }
             case OpType::GreaterEqual: {
                 // lower_value == upper_value
-                should_skip = upper_bound < lower_value;
+                should_skip = ScalarLess(upper_bound, lower_value);
                 break;
             }
             case OpType::Range: {
                 // lower_value == upper_value
-                should_skip =
-                    lower_bound > upper_value || upper_bound < lower_value;
+                should_skip = ScalarGreater(lower_bound, upper_value) ||
+                              ScalarLess(upper_bound, lower_value);
                 break;
             }
             default:
@@ -1584,7 +1602,7 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     uint8_t* data_ptr = index_data.get();
     SerializeIndexData(data_ptr);
     writer->WriteEntry(BITMAP_INDEX_DATA, index_data.get(), index_data_size);
-    if (schema_.nullable()) {
+    if (schema_.nullable() || is_nested_index_) {
         auto valid_bitset = SerializeValidBitsetData();
         writer->WriteEntry(BITMAP_INDEX_VALID_BITSET,
                            valid_bitset.first.get(),

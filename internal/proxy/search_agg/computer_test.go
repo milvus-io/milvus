@@ -365,9 +365,9 @@ func TestSearchAggregationComputerNormalizesInt32GroupKey(t *testing.T) {
 	require.True(t, isInt64, "int32 group-by key must be normalized to int64")
 }
 
-func TestSearchAggregationComputerNaNDistinctBuckets(t *testing.T) {
+func TestSearchAggregationComputerCanonicalNaNBucket(t *testing.T) {
 	t.Parallel()
-	// Two NaN group-by values must NOT merge (NaN != NaN).
+	// Signed NaNs with different payloads form one non-NULL group.
 	ctx := newTestAggregationContext(t, 1,
 		[]LevelContext{{OwnFieldIDs: []int64{101}, Size: 100, TopHits: &TopHitsConfig{Size: 100}}},
 		nil,
@@ -386,7 +386,7 @@ func TestSearchAggregationComputerNaNDistinctBuckets(t *testing.T) {
 				Type:    schemapb.DataType_Double,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{
-						Data: []float64{math.NaN(), math.NaN()},
+						Data: []float64{math.NaN(), math.Float64frombits(0xfff8000000000001)},
 					}},
 				}},
 			},
@@ -396,18 +396,11 @@ func TestSearchAggregationComputerNaNDistinctBuckets(t *testing.T) {
 	computer := NewSearchAggregationComputer(data, ctx)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
-	require.Len(t, result[0], 2, "two NaN rows must stay in distinct buckets")
-	require.Equal(t, int64(1), result[0][0].Count, "each NaN bucket must hold exactly one row")
-	require.Equal(t, int64(1), result[0][1].Count, "each NaN bucket must hold exactly one row")
-	// Both bucket keys must carry the original NaN through — a silent
-	// normalization into some other non-nil sentinel would still produce 2
-	// buckets, so len==2 alone is not enough to pin the contract.
-	k0, ok0 := result[0][0].Key[101].(float64)
-	require.True(t, ok0, "NaN group key must stay float64")
-	require.True(t, math.IsNaN(k0), "bucket 0 key must be NaN")
-	k1, ok1 := result[0][1].Key[101].(float64)
-	require.True(t, ok1, "NaN group key must stay float64")
-	require.True(t, math.IsNaN(k1), "bucket 1 key must be NaN")
+	require.Len(t, result[0], 1, "all NaN rows must share one bucket")
+	require.Equal(t, int64(2), result[0][0].Count)
+	key, ok := result[0][0].Key[101].(float64)
+	require.True(t, ok, "group key remains a floating value")
+	require.True(t, math.IsNaN(key))
 }
 
 func TestSearchAggregationComputerNullGrouping(t *testing.T) {
@@ -1432,5 +1425,24 @@ func testInt32FieldData(fieldID int64, values []int32) *schemapb.FieldData {
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}},
 		}},
+	}
+}
+
+func TestSearchAggregationFloatingOrder(t *testing.T) {
+	tests := []struct {
+		left, right any
+		expected    int
+	}{
+		{math.NaN(), math.Inf(1), 1},
+		{math.Inf(1), math.NaN(), -1},
+		{math.NaN(), math.Float64frombits(0xfff8000000000001), 0},
+		{math.Copysign(0, -1), float64(0), 0},
+		{float32(math.NaN()), float32(math.Inf(1)), 1},
+		{float32(math.NaN()), math.Float32frombits(0xffc00001), 0},
+	}
+	for _, test := range tests {
+		order, err := compareValues(test.left, test.right)
+		require.NoError(t, err)
+		require.Equal(t, test.expected, order)
 	}
 }

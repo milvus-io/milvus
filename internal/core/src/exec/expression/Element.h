@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -162,7 +163,7 @@ class FlatVectorElement : public MultiElement {
     In(const ValueType& value) const override {
         if (std::holds_alternative<T>(value)) {
             for (const auto& v : values_) {
-                if (v == std::get<T>(value))
+                if (ScalarEqual(v, std::get<T>(value)))
                     return true;
             }
         }
@@ -197,7 +198,7 @@ class SetElement : public MultiElement {
     using SetType = std::conditional_t<
         std::is_same_v<T, std::string>,
         ankerl::unordered_dense::set<T, StringHash, std::equal_to<>>,
-        ankerl::unordered_dense::set<T>>;
+        ankerl::unordered_dense::set<T, ScalarHash<T>, ScalarEqualTo<T>>>;
 
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
@@ -409,12 +410,8 @@ class SimdBatchElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         T v = std::get<T>(value);
-        if constexpr (std::is_floating_point_v<T>) {
-            if (std::isnan(v)) {
-                return false;
-            }
-        }
-        return std::binary_search(vals_.begin(), vals_.end(), v);
+        return std::binary_search(
+            vals_.begin(), vals_.end(), v, ScalarLessThan<T>{});
     }
 
     // Batch SIMD filter — delegates to runtime-dispatched simdFilterChunk().
@@ -432,12 +429,10 @@ class SimdBatchElement : public MultiElement {
         if (bit_offset != 0) {
             int head = std::min(size, 8 - bit_offset);
             for (int i = 0; i < head; ++i) {
-                if constexpr (std::is_floating_point_v<T>) {
-                    if (std::isnan(data[i])) {
-                        continue;
-                    }
-                }
-                if (std::binary_search(vals_.begin(), vals_.end(), data[i])) {
+                if (std::binary_search(vals_.begin(),
+                                       vals_.end(),
+                                       data[i],
+                                       ScalarLessThan<T>{})) {
                     res[i] = true;
                 }
             }

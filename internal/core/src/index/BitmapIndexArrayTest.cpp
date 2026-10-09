@@ -2186,7 +2186,7 @@ TEST(BitmapIndexArrayNestedTest,
 }
 
 TYPED_TEST(FloatingIndexQueryTest,
-           InvertedNumericRangesExcludeBothNaNEncodings) {
+           InvertedNumericRangesOrderEveryNaNAfterInfinity) {
     using T = TypeParam;
     auto [ctx, ignored] =
         MakeFloatingQueryFixture<T>("inverted_nan_range_domain", 3193);
@@ -2216,13 +2216,79 @@ TYPED_TEST(FloatingIndexQueryTest,
     EXPECT_FALSE(not_zero[7]);
     EXPECT_EQ(loaded.Range(zero, OpType::LessThan).count(), 1);
     EXPECT_EQ(loaded.Range(zero, OpType::LessEqual).count(), 3);
-    EXPECT_EQ(loaded.Range(zero, OpType::GreaterThan).count(), 2);
-    EXPECT_EQ(loaded.Range(zero, OpType::GreaterEqual).count(), 4);
+    EXPECT_EQ(loaded.Range(zero, OpType::GreaterThan).count(), 4);
+    EXPECT_EQ(loaded.Range(zero, OpType::GreaterEqual).count(), 6);
     EXPECT_EQ(loaded.Range(-inf, OpType::LessEqual).count(), 1);
-    EXPECT_EQ(loaded.Range(inf, OpType::GreaterEqual).count(), 1);
+    EXPECT_EQ(loaded.Range(inf, OpType::GreaterEqual).count(), 3);
+    EXPECT_EQ(loaded.In(1, &nan).count(), 2);
+    EXPECT_EQ(loaded.Range(nan, OpType::LessThan).count(), 5);
+    EXPECT_EQ(loaded.Range(nan, OpType::LessEqual).count(), 7);
+    EXPECT_EQ(loaded.Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(loaded.Range(nan, OpType::GreaterEqual).count(), 2);
+    EXPECT_EQ(loaded.Range(-inf, true, nan, true).count(), 7);
+    EXPECT_EQ(loaded.Range(nan, true, nan, true).count(), 2);
     auto all_numeric = loaded.Range(-inf, true, inf, true);
     EXPECT_EQ(all_numeric.count(), 5);
     EXPECT_FALSE(all_numeric[0]);
     EXPECT_FALSE(all_numeric[6]);
     EXPECT_FALSE(all_numeric[7]);
+}
+
+TYPED_TEST(FloatingIndexQueryTest, BitmapNaNHasDistinctPostingAndTotalOrder) {
+    using T = TypeParam;
+    auto [ctx, ignored] =
+        MakeFloatingQueryFixture<T>("bitmap_nan_total_order", 3198);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
+    const uint8_t validity = 0x7f;
+    constexpr auto dtype =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto field = std::make_shared<FieldData<T>>(dtype, true);
+    field->FillFieldData(values, &validity, std::size(values), 0);
+    index::BitmapIndex<T> built(ctx);
+    built.BuildWithFieldData({field});
+    auto check = [&](index::BitmapIndex<T>& index) {
+        EXPECT_EQ(index.Count(), 8);
+        EXPECT_EQ(index.IsNotNull().count(), 7);
+        EXPECT_EQ(index.IsNull().count(), 1);
+        EXPECT_EQ(index.In(1, &nan).count(), 2);
+        EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
+        EXPECT_EQ(index.Range(T(0), OpType::GreaterThan).count(), 4);
+        EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
+        EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 5);
+        EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 7);
+        EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
+        EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
+        EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
+        EXPECT_EQ(index.Range(-inf, true, inf, true).count(), 5);
+        EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 7);
+        EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(0)));
+        EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(6)));
+        EXPECT_EQ(index.Reverse_Lookup(7), std::nullopt);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    index::BitmapIndex<T> loaded(ctx);
+    loaded.Load(binary, {});
+    check(loaded);
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    index::BitmapIndex<T> packed(ctx);
+    packed.LoadUnified(config);
+    check(packed);
+    index::BitmapIndex<T> unsupported(ctx);
+    unsupported.SetSupportsNaNTotalOrder(false);
+    EXPECT_THROW(unsupported.BuildWithFieldData({field}), SegcoreError);
+}
+
+TYPED_TEST(FloatingIndexQueryTest, InvertedLegacyWriterRejectsNegativeZero) {
+    using T = TypeParam;
+    auto [ctx, field] =
+        MakeFloatingQueryFixture<T>("inverted_legacy_negative_zero", 3200);
+    index::InvertedIndexTantivy<T> unsupported(7, ctx);
+    unsupported.SetSupportsNaNTotalOrder(false);
+    EXPECT_THROW(unsupported.BuildWithFieldData({field}), SegcoreError);
 }

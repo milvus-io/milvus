@@ -69,9 +69,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
         auto n = result.field_data->get_num_rows();
         int64_t total_rows = n;
-        const bool use_nan_sort = this->SelectSortForNaN({result.field_data});
-        std::set<T> distinct_vals;
-        for (size_t i = 0; !use_nan_sort && i < n; ++i) {
+        std::set<T, ScalarLessThan<T>> distinct_vals;
+        for (size_t i = 0; i < n; ++i) {
             if (result.field_data->is_valid(i)) {
                 auto val =
                     reinterpret_cast<const T*>(result.field_data->RawValue(i));
@@ -82,9 +81,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                 }
             }
         }
-        if (!use_nan_sort) {
-            this->SelectIndexTypeByCardinality(distinct_vals.size());
-        }
+        this->SelectIndexTypeByCardinality(distinct_vals.size());
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;
@@ -131,9 +128,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         int64_t total_rows = n;
         // Do cardinality counting that respects is_valid(), unlike the base
         // class SelectBuildTypeForPrimitiveType which counts invalid rows too.
-        const bool use_nan_sort = this->SelectSortForNaN({result.field_data});
-        std::set<T> distinct_vals;
-        for (size_t i = 0; !use_nan_sort && i < n; ++i) {
+        std::set<T, ScalarLessThan<T>> distinct_vals;
+        for (size_t i = 0; i < n; ++i) {
             if (result.field_data->is_valid(i)) {
                 auto val =
                     reinterpret_cast<const T*>(result.field_data->RawValue(i));
@@ -144,9 +140,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                 }
             }
         }
-        if (!use_nan_sort) {
-            this->SelectIndexTypeByCardinality(distinct_vals.size());
-        }
+        this->SelectIndexTypeByCardinality(distinct_vals.size());
         this->BuildInternal({result.field_data});
 
         this->is_built_ = true;

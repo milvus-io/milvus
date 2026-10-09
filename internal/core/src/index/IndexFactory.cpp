@@ -91,8 +91,19 @@ CreateVersionedScalarSort(const storage::FileManagerContext& context,
                           bool is_nested,
                           int32_t scalar_version) {
     auto index = CreateScalarIndexSort<T>(context, is_nested);
-    index->SetSupportsUnindexedNaN(scalar_version >=
-                                   kMinScalarIndexVersionForNaNRows);
+    index->SetSupportsNaNTotalOrder(scalar_version >=
+                                    kMinScalarIndexVersionForNaNTotalOrder);
+    return index;
+}
+
+template <typename T>
+std::unique_ptr<BitmapIndex<T>>
+CreateVersionedBitmap(const storage::FileManagerContext& context,
+                      bool is_nested,
+                      int32_t scalar_version) {
+    auto index = std::make_unique<BitmapIndex<T>>(context, is_nested);
+    index->SetSupportsNaNTotalOrder(scalar_version >=
+                                    kMinScalarIndexVersionForNaNTotalOrder);
     return index;
 }
 
@@ -358,13 +369,20 @@ IndexFactory::CreatePrimitiveScalarIndex(
     if (index_type == INVERTED_INDEX_TYPE) {
         assert(create_index_info.tantivy_index_version != 0);
         // scalar_index_engine_version 0 means we should built tantivy index within single segment
-        return std::make_unique<InvertedIndexTantivy<T>>(
+        auto index = std::make_unique<InvertedIndexTantivy<T>>(
             create_index_info.tantivy_index_version,
             file_manager_context,
             create_index_info.scalar_index_engine_version == 0);
+        index->SetSupportsNaNTotalOrder(
+            create_index_info.scalar_index_engine_version >=
+            kMinScalarIndexVersionForNaNTotalOrder);
+        return index;
     }
     if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<T>>(file_manager_context);
+        return CreateVersionedBitmap<T>(
+            file_manager_context,
+            false,
+            create_index_info.scalar_index_engine_version);
     }
     if (index_type == HYBRID_INDEX_TYPE) {
         return CreateVersionedHybrid<T>(
@@ -1252,9 +1270,12 @@ MakeJsonWrapped(const CreateIndexInfo& info,
         ctx,
         std::forward<Args>(args)...);
     if constexpr (std::is_floating_point_v<T>) {
-        if constexpr (std::is_base_of_v<ScalarIndexSort<T>, BaseIndex>) {
-            index->SetSupportsUnindexedNaN(info.scalar_index_engine_version >=
-                                           kMinScalarIndexVersionForNaNRows);
+        if constexpr (std::is_base_of_v<ScalarIndexSort<T>, BaseIndex> ||
+                      std::is_base_of_v<BitmapIndex<T>, BaseIndex> ||
+                      std::is_base_of_v<InvertedIndexTantivy<T>, BaseIndex>) {
+            index->SetSupportsNaNTotalOrder(
+                info.scalar_index_engine_version >=
+                kMinScalarIndexVersionForNaNTotalOrder);
         }
     }
     return index;
@@ -1366,11 +1387,16 @@ IndexFactory::CreateJsonIndex(
                                    InvertedIndexTantivy<std::string>>(
                 create_index_info, file_manager_context, tantivy_ver);
         }
-        case JsonCastType::DataType::JSON:
-            return std::make_unique<JsonFlatIndex>(
+        case JsonCastType::DataType::JSON: {
+            auto index = std::make_unique<JsonFlatIndex>(
                 file_manager_context,
                 nested_path,
                 create_index_info.tantivy_index_version);
+            index->SetSupportsNaNTotalOrder(
+                create_index_info.scalar_index_engine_version >=
+                kMinScalarIndexVersionForNaNTotalOrder);
+            return index;
+        }
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
@@ -1394,8 +1420,8 @@ IndexFactory::CreateNestedIndex(
     const storage::FileManagerContext& file_manager_context,
     int32_t scalar_index_version) {
     if (index_type == INVERTED_INDEX_TYPE) {
-        return CreateNestedIndexInverted(tantivy_index_version,
-                                         file_manager_context);
+        return CreateNestedIndexInverted(
+            tantivy_index_version, file_manager_context, scalar_index_version);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return CreateNestedIndexBitmap(file_manager_context);
@@ -1412,7 +1438,8 @@ IndexFactory::CreateNestedIndex(
 IndexBasePtr
 IndexFactory::CreateNestedIndexInverted(
     int32_t tantivy_index_version,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    int32_t scalar_index_version) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
@@ -1435,12 +1462,20 @@ IndexFactory::CreateNestedIndexInverted(
         case DataType::INT64:
             return std::make_unique<InvertedIndexTantivy<int64_t>>(
                 tantivy_index_version, file_manager_context, false, true, true);
-        case DataType::FLOAT:
-            return std::make_unique<InvertedIndexTantivy<float>>(
+        case DataType::FLOAT: {
+            auto index = std::make_unique<InvertedIndexTantivy<float>>(
                 tantivy_index_version, file_manager_context, false, true, true);
-        case DataType::DOUBLE:
-            return std::make_unique<InvertedIndexTantivy<double>>(
+            index->SetSupportsNaNTotalOrder(
+                scalar_index_version >= kMinScalarIndexVersionForNaNTotalOrder);
+            return index;
+        }
+        case DataType::DOUBLE: {
+            auto index = std::make_unique<InvertedIndexTantivy<double>>(
                 tantivy_index_version, file_manager_context, false, true, true);
+            index->SetSupportsNaNTotalOrder(
+                scalar_index_version >= kMinScalarIndexVersionForNaNTotalOrder);
+            return index;
+        }
         case DataType::STRING:
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
