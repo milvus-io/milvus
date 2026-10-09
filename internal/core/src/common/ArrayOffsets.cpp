@@ -433,6 +433,10 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
             }
         }
     } else if (field_meta.is_nested_array()) {
+        // TODO(local-format): Recursive ARRAY offset construction still uses
+        // the Raw Chunk contract. Migrate this to ArrayValueViews or Scan/Take
+        // before declaring recursive ARRAY supported by Vortex local format;
+        // the initial integration intentionally leaves this capability gap.
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             auto pinned_chunk = column.GetChunk(op_ctx_ptr, chunk_id);
             auto* array_chunk =

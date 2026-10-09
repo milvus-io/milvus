@@ -245,6 +245,10 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::VARCHAR:
         case DataType::TEXT:
             return arrow::utf8();
+        // TODO(local-format): Milvus currently writes each scalar ARRAY row as
+        // serialized ScalarFieldProto in Arrow Binary. Unify the writer and
+        // Vortex local-format reader on native Arrow/Vortex List after the
+        // ARRAY representation stabilizes; the reader accepts both meanwhile.
         case DataType::ARRAY:
         case DataType::JSON:
             return arrow::binary();
