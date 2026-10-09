@@ -538,3 +538,36 @@ these settings support runtime updates. Disabling either feature clears usage
 state; re-enabling starts a fresh TTL on the first scan. Activity tracks request
 attempts rather than running-query leases, so an individual query can outlive
 the idle TTL.
+
+
+## Complex-condition delete
+
+The Proxy injects its QueryView client into `DeleteRunner`. For a delete whose
+predicate cannot be resolved directly to primary keys, the runner uses
+`Legacy().Query` (the existing request-format adapter over QueryView execution)
+to retrieve matching primary keys. It does not discover legacy shard leaders
+or call the delegator's `QueryStream` on this path.
+
+Both the retrieve plan and request use an unlimited row count, retaining the
+partition selection, namespace and authorization predicates. The request
+carries the delete consistency level and guarantee timestamp; QueryView planning
+selects the execution views and their MVCC timestamps. All worker results must
+arrive successfully before any delete is submitted. The Proxy deduplicates
+primary keys across these results, accounts for query scan costs, applies the
+delete rate limiter, and passes the keys to the existing DeleteTask/WAL write
+path. Empty results produce no write. Query failures or an incomplete result
+(`HasMoreResult`) fail before any delete is submitted; write failures retain the
+existing delete-path semantics.
+
+This implementation materializes the complete matching primary-key set in
+memory and remains subject to unary RPC and query-result size limits. Exceeding
+those limits must fail the request, rather than silently deleting a prefix of
+the matching rows. The legacy streaming path remains available to callers that
+do not configure a QueryView client; the production Proxy configures it.
+
+**TODO: streaming QueryView query.** Add a QueryView-native streaming query API
+and migrate complex-condition delete to bounded-memory result batches with
+backpressure and cancellation. Define view/MVCC lifetime and retry semantics
+before enabling writes during result delivery, so retrying a shard cannot
+replay already-submitted delete side effects. This is not implemented by the
+current batch-query adaptation.
