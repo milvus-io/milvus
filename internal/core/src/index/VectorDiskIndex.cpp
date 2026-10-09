@@ -71,7 +71,7 @@ namespace {
 
 constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY = "empty_emb_list_offsets";
 constexpr const char* MRL_META_KEY = "MRL_META";
-constexpr const char* MRL_REFINE_STATE_KEY = "MRL_REFINE/DATA_VIEW_STATE";
+constexpr const char* MRL_REFINE_STATE_KEY = "MRL_REFINE__DATA_VIEW_STATE";
 
 void
 WriteBinary(const std::shared_ptr<storage::LocalChunkManager>& chunk_manager,

@@ -110,16 +110,9 @@ ParseFromString(google::protobuf::Message& params, const std::string& str) {
 
 int64_t
 GetDimFromConfig(const Config& config) {
-    auto dimension = GetValueFromConfig<std::string>(config, "dim");
+    auto dimension = GetValueFromConfig<int64_t>(config, "dim");
     AssertInfo(dimension.has_value(), "dimension not exist in config");
-    try {
-        return (std::stoi(dimension.value()));
-    } catch (const std::logic_error& e) {
-        auto err_message = fmt::format(
-            "invalided dimension:{}, error:{}", dimension.value(), e.what());
-        LOG_ERROR("{}", err_message);
-        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(err_message));
-    }
+    return dimension.value();
 }
 
 std::string
