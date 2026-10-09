@@ -62,8 +62,8 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
 	return mockey.Mock(packed.SubmitManifestUpdates).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(string, error)) error {
-			complete(packed.MarshalManifestPath(base, version+1), nil)
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+			complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil)
 			return nil
 		},
 	).Build()
@@ -317,11 +317,11 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	mock := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mock := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			entered <- struct{}{}
 			<-release
-			return packed.MarshalManifestPath(base, version+2), nil
+			return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+2), nil), nil
 		},
 	).Build()
 	defer mock.UnPatch()
@@ -551,10 +551,10 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 	}
 	type submission struct {
 		ctx      context.Context
-		complete func(string, error)
+		complete func(packed.ManifestUpdateResult, error)
 	}
 	submitted := make(chan submission, len(commits))
-	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(string, error)) error {
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		submitted <- submission{ctx, complete}
 		return nil
 	}).Build()
@@ -574,8 +574,8 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 			t.Fatal("batch waited for completion before submitting remaining work")
 		}
 	}
-	pending[0].complete(packed.MarshalManifestPath(base, 8), nil)
-	pending[1].complete("", merr.ErrServiceUnavailable)
+	pending[0].complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, 8), nil), nil)
+	pending[1].complete(packed.ManifestUpdateResult{}, merr.ErrServiceUnavailable)
 	require.ErrorIs(t, pending[2].ctx.Err(), context.Canceled)
 	select {
 	case err := <-done:
@@ -591,7 +591,7 @@ func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
 		require.False(t, locked, "accepted work must retain every segment lock")
 	}
 	require.Zero(t, catalog.alterCalls.Load())
-	pending[2].complete("", context.Canceled)
+	pending[2].complete(packed.ManifestUpdateResult{}, context.Canceled)
 	require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
 	for _, commit := range commits {
 		require.Equal(t, packed.MarshalManifestPath(base, 7), mt.GetSegment(ctx, commit.SegmentID).GetManifestPath())
@@ -606,6 +606,8 @@ func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
 	require.NoError(t, err)
 	mt.manifestCommitExecutor.close()
 	mt.manifestCommitExecutor = newManifestCommitExecutor(1)
+	read := mockey.Mock(packed.SubmitManifestIndexInfos).Return(merr.ErrServiceInternal).Build()
+	defer read.UnPatch()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	var commits []SegmentManifestCommit
 	for id := int64(1); id <= 3; id++ {
@@ -629,6 +631,7 @@ func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	require.NoError(t, mt.CommitSegmentManifests(ctx, commits))
+	require.Zero(t, read.Times(), "commits must not reopen the final revision for its marker")
 	for _, commit := range commits {
 		segment := mt.GetSegment(ctx, commit.SegmentID)
 		require.False(t, segment.GetManifestHasIndex())

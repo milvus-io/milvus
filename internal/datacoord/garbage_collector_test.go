@@ -5565,7 +5565,7 @@ func mockV3ManifestIndexEntry(t *testing.T, newManifest string) {
 	}}, nil).Build()
 	t.Cleanup(func() { infos.UnPatch() })
 
-	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).Return(newManifest, nil).Build()
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(mockManifestUpdateResult(newManifest, nil), nil).Build()
 	t.Cleanup(func() { commit.UnPatch() })
 
 	blocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
@@ -5622,7 +5622,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_BatchesSameSegmentManifestRetr
 	gc := newGarbageCollector(m, nil, GcOption{cli: cm})
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
-	assert.Equal(t, 2, store.readCount, "read ownership once and verify the committed marker once")
+	assert.Equal(t, 1, store.readCount, "read ownership once; commit returns its marker without a read")
 	assert.True(t, m.GetSegment(context.TODO(), 4001).GetManifestHasIndex())
 	assert.Equal(t, 1, store.commitCount)
 	_, firstExists := m.indexMeta.segmentBuildInfo.Get(4100)
@@ -5644,10 +5644,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes_BatchCommitsOnlyDeletedFiles(t
 		v3GCManifestIndex(401, 4200),
 	}, nil).Build().UnPatch()
 	defer mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build().UnPatch()
-	defer mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	defer mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, []packed.DropIndexEntry{{IndexID: 400, ExpectedBuildID: 4100}}, updates.DropIndexes)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		}).Build().UnPatch()
 
 	cm := mocks.NewChunkManager(t)
@@ -5682,7 +5682,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_MixedManifestAndLegacyOwnershi
 	gc := newGarbageCollector(m, nil, GcOption{cli: cm})
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
-	assert.Equal(t, 2, store.readCount, "read ownership once and verify the committed marker once")
+	assert.Equal(t, 1, store.readCount, "read ownership once; commit returns its marker without a read")
 	assert.False(t, m.GetSegment(context.TODO(), 4001).GetManifestHasIndex())
 	assert.Equal(t, 1, store.commitCount)
 	assert.Empty(t, store.revisions[newManifest])
@@ -5710,7 +5710,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_BatchKeepsSnapshotPinnedIndex(
 	gc := newGarbageCollector(m, nil, GcOption{cli: cm})
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
-	assert.Equal(t, 2, store.readCount, "read ownership once and verify the committed marker once")
+	assert.Equal(t, 1, store.readCount, "read ownership once; commit returns its marker without a read")
 	assert.True(t, m.GetSegment(context.TODO(), 4001).GetManifestHasIndex())
 	assert.Equal(t, 1, store.commitCount)
 	require.Len(t, store.revisions[newManifest], 1)
@@ -5773,7 +5773,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SplitsAtCatalogTransactionLimi
 	gc := newGarbageCollector(m, nil, GcOption{cli: cm})
 	gc.recycleUnusedSegIndexes(context.TODO(), nil)
 
-	assert.Equal(t, 3, store.readCount, "one ownership read and one final marker read per transaction")
+	assert.Equal(t, 1, store.readCount, "one ownership read; neither commit rereads its marker")
 	assert.Equal(t, 2, store.commitCount)
 	assert.False(t, m.GetSegment(context.TODO(), 4001).GetManifestHasIndex())
 	_, firstExists := m.indexMeta.segmentBuildInfo.Get(4100)

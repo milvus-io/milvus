@@ -568,13 +568,22 @@ func mockManifestIndexSubmissions(t *testing.T) {
 	t.Cleanup(func() { mock.UnPatch() })
 }
 
+func mockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdates) packed.ManifestUpdateResult {
+	result := packed.ManifestUpdateResult{ManifestPath: manifestPath}
+	if updates != nil && (len(updates.Indexes) > 0 || len(updates.DropIndexes) > 0) {
+		value := len(updates.Indexes) > 0
+		result.HasIndexes = &value
+	}
+	return result
+}
+
 // Adapt a mocked blocking commit to callback delivery. Install only alongside a
-// CommitManifestUpdatesAsync mock, since the real wrapper calls the submit API.
+// CommitManifestUpdatesWithResultAsync mock, since the real wrapper calls the submit API.
 func mockManifestUpdateSubmissions(t *testing.T) {
 	t.Helper()
-	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(string, error)) error {
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		go func() {
-			manifestPath, err := packed.CommitManifestUpdatesAsync(ctx, io, base, version, config, updates)
+			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
 			complete(manifestPath, err)
 		}()
 		return nil
@@ -588,8 +597,8 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	mockManifestIndexSubmissions(t)
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 
-	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.commitCount++
@@ -611,7 +620,8 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 			next = append(next, updates.Indexes...)
 			published := packed.MarshalManifestPath(basePath, version+1)
 			s.revisions[published] = next
-			return published, nil
+			hasIndexes := len(next) > 0
+			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes}, nil
 		}).Build()
 	t.Cleanup(func() { commit.UnPatch() })
 

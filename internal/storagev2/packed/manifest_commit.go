@@ -41,6 +41,9 @@ type WriterOutput interface {
 	// applyTo stages the output onto a loon transaction handle. Called by
 	// applyManifestUpdates as part of CommitManifestUpdates.
 	applyTo(handle C.LoonTransactionHandle) error
+	// Appending files invalidates indexes on columns with new files. Adding new
+	// column groups and registering LOBs do not invalidate existing indexes.
+	invalidatedIndexColumns() []string
 }
 
 // ManifestUpdates bundles every data-file-level change a single caller
@@ -50,8 +53,8 @@ type WriterOutput interface {
 // one shot, and commits.
 //
 // NewFiles holds C memory produced by an FFI writer and MUST be released
-// by the caller via Destroy after CommitManifestUpdates returns (success
-// or failure).
+// by the caller via Destroy after the blocking commit returns (success or
+// failure), or after the terminal callback when using SubmitManifestUpdates.
 type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.

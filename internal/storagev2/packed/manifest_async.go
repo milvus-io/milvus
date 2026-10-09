@@ -30,6 +30,7 @@ import "C"
 import (
 	"context"
 	"runtime/cgo"
+	"slices"
 	"sync"
 	"time"
 	"unsafe"
@@ -426,42 +427,50 @@ func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]
 	return manifestIndexInfos(manifest, manifestPath)
 }
 
+// ManifestUpdateResult carries the committed path and the index-marker change.
+// A nil HasIndexes means the mutation preserves the caller's existing marker.
+// Marker changes are delivered only after a successful commit (or a proven no-op).
+type ManifestUpdateResult struct {
+	ManifestPath string
+	HasIndexes   *bool
+}
+
 // SubmitManifestUpdates waits only for admission, then chains native open and
 // commit on io's executor. An accepted submission calls complete exactly once,
 // possibly before returning; rejection returns an error without a callback.
 // Updates must remain immutable until completion. The callback must not block,
 // submit more work, or close its own IO context. Close drains accepted work.
-func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(string, error)) error {
+func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(ManifestUpdateResult, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if updates.isEmpty() {
-		complete(MarshalManifestPath(base, version), nil)
+		complete(ManifestUpdateResult{ManifestPath: MarshalManifestPath(base, version)}, nil)
 		return nil
 	}
 	if err := io.acquire(ctx); err != nil {
 		return err
 	}
 	err := io.submitOpen(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, func(result manifestOpenResult) {
-		finish := func(manifestPath string, err error) {
+		finish := func(updateResult ManifestUpdateResult, err error) {
 			defer io.release()
 			if result.transaction != 0 {
 				defer C.loon_transaction_destroy(result.transaction)
 			}
-			complete(manifestPath, err)
+			complete(updateResult, err)
 		}
 		if result.err != nil {
-			finish("", result.err)
+			finish(ManifestUpdateResult{}, result.err)
 			return
 		}
 		manifestPath := MarshalManifestPath(base, version)
-		changed, err := applyAsyncManifestUpdates(result.transaction, manifestPath, updates)
+		changed, hasIndexes, err := applyAsyncManifestUpdates(result.transaction, manifestPath, updates)
 		if err != nil {
-			finish("", err)
+			finish(ManifestUpdateResult{}, err)
 			return
 		}
 		if !changed {
-			finish(manifestPath, nil)
+			finish(ManifestUpdateResult{manifestPath, hasIndexes}, nil)
 			return
 		}
 		// Keep the original admission slot and transaction until commit completes.
@@ -469,13 +478,13 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base stri
 		err = io.submitCommit(ctx, result.transaction, func(result manifestCommitResult) {
 			committed, err := result.finish(ctx)
 			if err != nil {
-				finish("", err)
+				finish(ManifestUpdateResult{}, err)
 				return
 			}
-			finish(MarshalManifestPath(base, committed), nil)
+			finish(ManifestUpdateResult{MarshalManifestPath(base, committed), hasIndexes}, nil)
 		})
 		if err != nil {
-			finish("", err)
+			finish(ManifestUpdateResult{}, err)
 		}
 	})
 	if err != nil {
@@ -484,40 +493,73 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, base stri
 	return err
 }
 
-// Drop validation uses the already loaded transaction instead of another read.
-func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string, updates *ManifestUpdates) (bool, error) {
-	var drops []int64
-	if len(updates.DropIndexes) > 0 {
-		indexes, err := transactionIndexInfos(txn, manifestPath)
+// OVERWRITE applies mutations to this transaction's exact read revision, even
+// when conflict retries allocate a newer version. Reuse that in-memory snapshot
+// both for drop validation and for the final index-presence projection.
+func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string, updates *ManifestUpdates) (bool, *bool, error) {
+	var columns []string
+	if updates.NewFiles != nil {
+		columns = updates.NewFiles.invalidatedIndexColumns()
+	}
+	var indexes []ManifestIndexInfo
+	if len(updates.DropIndexes) > 0 || (len(columns) > 0 && len(updates.Indexes) == 0) {
+		var err error
+		indexes, err = transactionIndexInfos(txn, manifestPath)
 		if err != nil {
-			return false, err
-		}
-		drops, err = resolveManifestIndexDrops(manifestPath, indexes, updates.DropIndexes)
-		if err != nil {
-			return false, err
-		}
-		if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-			len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
-			return false, nil
+			return false, nil, err
 		}
 	}
-	return true, applyManifestUpdates(txn, updates, drops)
+	drops, err := resolveManifestIndexDrops(manifestPath, indexes, updates.DropIndexes)
+	if err != nil {
+		return false, nil, err
+	}
+	hasIndexes := manifestIndexesAfterUpdates(indexes, updates, drops, columns)
+	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
+		return false, hasIndexes, nil
+	}
+	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
 }
 
-// CommitManifestUpdatesAsync waits for the terminal callback, including on cancellation.
-func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestUpdates, drops []int64, appendedColumns []string) *bool {
+	// Storage applies file invalidation and drops before additions. At least one
+	// addition therefore guarantees a nonempty index section after a valid commit.
+	value := len(updates.Indexes) > 0
+	if value {
+		return &value
+	}
+	if len(updates.DropIndexes) == 0 && len(appendedColumns) == 0 {
+		return nil
+	}
+	for _, index := range indexes {
+		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, index.ColumnName) {
+			value = true
+			break
+		}
+	}
+	return &value
+}
+
+// CommitManifestUpdatesWithResultAsync also returns the index-marker change.
+func CommitManifestUpdatesWithResultAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (ManifestUpdateResult, error) {
 	type commitResult struct {
-		path string
-		err  error
+		result ManifestUpdateResult
+		err    error
 	}
 	done := make(chan commitResult, 1)
-	if err := SubmitManifestUpdates(ctx, io, base, version, config, updates, func(path string, err error) {
-		done <- commitResult{path, err}
+	if err := SubmitManifestUpdates(ctx, io, base, version, config, updates, func(result ManifestUpdateResult, err error) {
+		done <- commitResult{result, err}
 	}); err != nil {
-		return "", err
+		return ManifestUpdateResult{}, err
 	}
 	result := <-done
-	return result.path, result.err
+	return result.result, result.err
+}
+
+// CommitManifestUpdatesAsync waits for the terminal callback and returns its path.
+func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+	result, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
+	return result.ManifestPath, err
 }
 
 // AddDeltaLogsToManifestOverwriteAsync serves the legacy L0 publication path.

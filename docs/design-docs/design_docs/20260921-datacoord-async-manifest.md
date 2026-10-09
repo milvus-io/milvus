@@ -123,9 +123,14 @@ The segment lock remains held through terminal callback and catalog publication.
 The batch caller submits through `SubmitManifestUpdates`; native open, in-memory
 mutation and native commit are chained on the same executor. Executor admission
 is the only commit concurrency limit, with no additional batch worker pool or
-per-segment waiting goroutines. After generation, the caller submits any required
-index-marker reads on that executor. Each phase drains all accepted callbacks
-before releasing locks. Failure cancels peers and prevents catalog publication.
+per-segment waiting goroutines. The packed adapter derives index presence from
+the already-loaded exact revision and the staged mutations: file appends invalidate
+indexes on affected columns, explicit drops remove matching IDs, and additions
+are applied last. OVERWRITE uses that same input even on version-allocation
+retries. A successful callback carries the marker along with the committed path;
+DataCoord does not reopen the final revision or run a second batch phase. Unchanged
+index sections preserve the existing marker. Failures cancel peers and drain all
+accepted callbacks before releasing locks, without catalog publication.
 
 Cancellation requests native cancellation and waits for the terminal result.
 The native timeout is a queue deadline: it prevents work from starting after

@@ -66,12 +66,12 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	deltalogs := []*datapb.FieldBinlog{{
 		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
 	}}
-	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			require.Equal(t, basePath, base)
 			require.EqualValues(t, 7, version)
 			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -108,10 +108,10 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 	}
 
 	var commitCount int
-	commit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			commitCount++
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, nil), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -309,16 +309,16 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 
 	release := make(chan struct{})
 	var entered atomic.Int32
-	mockCommit := mockey.Mock(packed.CommitManifestUpdatesAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			if entered.Add(1) == targets {
 				close(release)
 			}
 			select {
 			case <-release:
-				return packed.MarshalManifestPath(base, version+1), nil
+				return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil
 			case <-time.After(30 * time.Second):
-				return "", errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
+				return mockManifestUpdateResult("", nil), errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
 			}
 		}).Build()
 	defer mockCommit.UnPatch()
