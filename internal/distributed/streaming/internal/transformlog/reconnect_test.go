@@ -145,12 +145,14 @@ func TestMigrationRecoveryPreservesTerminalSubscriptions(t *testing.T) {
 				t.Fatal("semantic error did not close handler")
 			}
 			require.Error(t, sub.Close())
+			local := <-source.opened
 			select {
-			case <-stream.Done():
+			case <-local.ctx.Done():
 			case <-ctx.Done():
-				t.Fatal("terminal subscription was retried")
+				t.Fatal("idle physical stream was not released")
 			}
-			require.Len(t, source.opened, 1)
+			requireLogicalStreamAlive(t, stream)
+			require.Empty(t, source.opened)
 		})
 	}
 }
@@ -178,12 +180,14 @@ func TestMigrationRecoveryDoesNotRetryRejectedConsumer(t *testing.T) {
 			if sub != nil {
 				require.ErrorIs(t, sub.Close(), failure)
 			}
+			local := <-source.opened
 			select {
-			case <-stream.Done():
+			case <-local.ctx.Done():
 			case <-ctx.Done():
-				t.Fatal("rejected consumer was retried")
+				t.Fatal("idle physical stream was not released")
 			}
-			require.Len(t, source.opened, 1)
+			requireLogicalStreamAlive(t, stream)
+			require.Empty(t, source.opened)
 		})
 	}
 }

@@ -63,6 +63,7 @@ func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode)
 			return nil, err
 		}
 		buf = newVChannelBuffer(b, pchannel, vchannel, startFrom)
+		buf.stream = stream
 		b.channels[vchannel] = buf
 		stream.refs[vchannel] = buf
 	}
@@ -70,7 +71,7 @@ func (b *Buffer) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode)
 		b.mu.Unlock()
 		return nil, err
 	}
-	stream := b.streamsByPChannel[pchannel]
+	stream := buf.stream
 	b.mu.Unlock()
 	if stream != nil {
 		if err := buf.ensureSubscribed(ctx, stream.stream); err != nil {
@@ -117,11 +118,11 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 	if state := b.streamsByPChannel[pchannel]; state != nil {
 		select {
 		case <-state.stream.Done():
+			// This is the logical stream's terminal Done, not a physical RPC
+			// disconnect. Old buffers keep their own state until released.
+			delete(b.streamsByPChannel, pchannel)
 			if len(state.refs) == 0 {
-				delete(b.streamsByPChannel, pchannel)
 				state.close()
-			} else {
-				return state, nil
 			}
 		default:
 			return state, nil
@@ -161,10 +162,12 @@ func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) *streamState
 	if b.channels[vchannel] == buf {
 		delete(b.channels, vchannel)
 	}
-	if state := b.streamsByPChannel[buf.pchannel]; state != nil {
+	if state := buf.stream; state != nil {
 		delete(state.refs, vchannel)
 		if len(state.refs) == 0 {
-			delete(b.streamsByPChannel, buf.pchannel)
+			if b.streamsByPChannel[buf.pchannel] == state {
+				delete(b.streamsByPChannel, buf.pchannel)
+			}
 			return state
 		}
 	}
@@ -243,6 +246,7 @@ type vchannelBuffer struct {
 	owner    *Buffer
 	pchannel string
 	vchannel string
+	stream   *streamState
 	sub      wal.TransformLogSubscription
 
 	subscribeAttempt *subscribeAttempt

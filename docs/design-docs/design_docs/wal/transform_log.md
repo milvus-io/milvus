@@ -47,8 +47,17 @@ AcquireStream(PChannel)
 
 One stream may carry several VChannel subscriptions. A subscription reads
 strictly after its start cursor. An unset end means continuous delivery; a set
-end means bounded replay through that position. Stream closure releases all
-subscriptions; closing one subscription does not close a shared stream.
+end means bounded replay through that position.
+
+`AcquireStream` returns an owner-held logical stream, independent of its physical
+RPC connections. Closing the logical stream releases all subscriptions.
+Closing one subscription releases only that subscription. Physical connections
+are on-demand: the first subscription starts a connection, and removing the last
+subscription cancels the connection or pending connection attempt. The logical
+stream remains idle and can accept new subscriptions; no physical connection is
+created or retried while it has no subscriptions. An idle/transport close does
+not close the logical stream's `Done`. Explicit owner close, parent shutdown, or
+a terminal stream error ends the logical stream.
 
 QueryNode uses continuous subscriptions to catch loaded sealed Segments up and
 then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
