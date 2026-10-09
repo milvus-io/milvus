@@ -180,12 +180,11 @@ v6 NaN indexes requires rebuilding for the old version and reverts query semanti
 No compatibility is promised for intermediate, unpublished skip-NaN formats from
 this PR's earlier revisions.
 
-Current implementation gaps: the Go RLS write-policy evaluator still uses IEEE
-floating equality and raw floating map keys, so NaN policy literals can disagree
-with native read filtering. Segment resource estimates also still use index
-metadata before the reader excludes legacy floating indexes; their estimates
-must be aligned with raw fallback. These are outstanding follow-ups, not behavior
-established by the scalar comparison and REST changes.
+RLS policy evaluation is outside the scope of this change.
+
+Current implementation gap: segment resource estimates still use index metadata
+before the reader excludes legacy floating indexes. Their estimates must be
+aligned with raw fallback; this remains an outstanding follow-up.
 
 ## Test plan
 
