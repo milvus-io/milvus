@@ -159,9 +159,9 @@ CachedSearchIterator::CachedSearchIterator(
     nq_ = query_ds.num_queries;
     Init(search_info);
 
-    // VECTOR_ARRAY element-level search: growing stores one VectorArray row
-    // (or mmap VectorArrayView) per chunk slot, so we must flatten each chunk
-    // into a contiguous buffer that Knowhere can read.
+    // VECTOR_ARRAY element-level search: growing stores one VectorArrayView
+    // per chunk slot, so we must flatten each chunk into a contiguous buffer
+    // that Knowhere can read.
     // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
@@ -174,8 +174,6 @@ CachedSearchIterator::CachedSearchIterator(
             : nullptr;
     AssertInfo(!is_element_level || vector_array_column != nullptr,
                "element-level growing iterator requires VECTOR_ARRAY storage");
-    const bool mmap_vector_array =
-        vector_array_column != nullptr && vector_array_column->is_mmap();
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
@@ -221,16 +219,10 @@ CachedSearchIterator::CachedSearchIterator(
             if (!is_element_level) {
                 raw_data = {range_begin, query_ds.dim, chunk_size, range_data};
             } else {
-                auto flat =
-                    mmap_vector_array
-                        ? FlattenVectorArrayRows(
-                              static_cast<const VectorArrayView*>(range_data),
-                              chunk_size,
-                              false)
-                        : FlattenVectorArrayRows(
-                              static_cast<const VectorArray*>(range_data),
-                              chunk_size,
-                              false);
+                auto flat = FlattenVectorArrayRows(
+                    static_cast<const VectorArrayView*>(range_data),
+                    chunk_size,
+                    false);
                 const void* flat_data = flat.payload.get();
                 raw_data = {element_offset,
                             query_ds.dim,

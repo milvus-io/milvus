@@ -73,11 +73,14 @@ CreateColumnarArrayChildChunk(
 // payload. Each node's TypeSchema supplies its child type and nullability.
 //
 // Construction flow (implemented in ColumnarArrayChunkBuilder.cpp):
-//   1. Sealed Arrow ListArrays, growing mmap rows, and single-row ArrayValue
-//      inputs build a temporary ColumnarArrayBuildNode tree through
-//      BuildNodeFromArrow, BuildNodeFromProtoRows, or BuildNodeFromViews.
-//      Each Array node records offsets and validity; the leaf records its
-//      validity and flattened scalar payload.
+//   1. The input builds a temporary ColumnarArrayBuildNode tree: Arrow
+//      ListArrays (sealed, and single-row ArrayValues read from Arrow) through
+//      BuildNodeFromArrow; protobuf rows (a growing insert batch, and
+//      single-row ArrayValues built from protobuf) through
+//      BuildNodeFromProtoRows; and existing ArrayValues (a growing batch
+//      loaded from FieldData) through BuildNodeFromViews. Each Array node
+//      records offsets and validity; the leaf records its validity and
+//      flattened scalar payload.
 //   2. The builder calculates the serialized size and writes the tree into one
 //      contiguous target buffer. A complete column block serializes the root
 //      node, including its recursively serialized child, and appends trailing
@@ -87,9 +90,10 @@ CreateColumnarArrayChildChunk(
 //      then CreateColumnarArrayChildChunk recursively creates non-owning child
 //      Chunk views over the same buffer.
 //
-// The returned chunk does not own its bytes. Its mmap descriptor (or the
-// owning ArrayValueStorage in the single-row heap path) must outlive the chunk
-// and all ArrayValueViews derived from it.
+// The returned chunk does not own its bytes. Their owner must outlive the
+// chunk and all ArrayValueViews derived from it: the growing chunk's batch
+// memory (mmap or heap), or the ArrayValueStorage of a single-row
+// ArrayValue.
 class ColumnarArrayChunk final : public Chunk {
     friend class ArrayValue;
     friend class ArrayValueView;
