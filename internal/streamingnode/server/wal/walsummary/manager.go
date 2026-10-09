@@ -41,8 +41,8 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // contiguous dense span of the pchannel log kept in two forms:
 //
 //   - in memory: the records of the span not yet sealed into a chunk.
-//     ObserveMessage builds the record of every message that carries an
-//     idempotency key immediately and copies it into the pending buffer; the
+//     ObserveMessage builds records for committed Inserts and Deletes
+//     immediately and copies them into the pending buffer; the
 //     WAL message itself is never retained.
 //   - in object storage: sealed chunks, an append-only time-ordered log of
 //     per-vchannel records, indexed by the manifest.
@@ -52,6 +52,9 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
+	chunkIndex     *chunkIndex
+	queryRetention map[string]uint64 // exclusive lower bound required by query snapshots
+
 	mu sync.Mutex
 	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
 	// deliberately left to the GC design TODO.
@@ -77,6 +80,7 @@ type Manager struct {
 	latestCoveredTimeTick uint64
 	readableThrough       uint64
 	readableChanged       chan struct{}
+	transformNotifiers    map[string]*transformNotifier
 	restoredTimeTick      uint64
 	terminalErr           error
 	gcFrontiers           map[string]uint64
@@ -87,7 +91,9 @@ type Manager struct {
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
 type ManagerConfig struct {
-	Runtime moduleapi.Runtime
+	// CacheMaxBytes bounds cached encoded chunk buffers per PChannel; zero disables residency.
+	CacheMaxBytes uint64
+	Runtime       moduleapi.Runtime
 	// FlushMaxBytes seals a chunk at this staging size. Zero disables size-based sealing.
 	FlushMaxBytes uint64
 	PChannel      string
@@ -112,6 +118,7 @@ type ManagerConfig struct {
 // NewManager creates the summary manager of one pchannel.
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
+		chunkIndex:            newChunkIndex(config.CacheMaxBytes),
 		gcFrontiers:           make(map[string]uint64),
 		pendingTransforms:     make(map[string]*streamingpb.VChannelSummaryTransformIndex),
 		materializedFrontiers: make(map[string]uint64),
@@ -129,7 +136,7 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		return
 	}
 
-	idempotency, insert := idempotencyHalvesOf(msg)
+	idempotency, insert := insertSummaryOf(msg)
 	var entry *streamingpb.TransformLogEntry
 	// Barriers only advance the consumer window; Summary stores Delete payloads,
 	// not payload-free BarrierEntries.
@@ -145,7 +152,10 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
 		m.stageRecordLocked(msg, idempotency, insert, entry)
 	}
-	m.advanceReadableLocked(msg.TimeTick())
+	if msg.TimeTick() > m.readableThrough {
+		m.advanceReadableLocked(msg.TimeTick())
+		m.notifyTransformMessageLocked(msg)
+	}
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
@@ -194,38 +204,30 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 	return size
 }
 
-// idempotencyHalvesOf builds what the idempotency sections remember about a
-// message, or nil when the message is not one the append path deduplicates.
-//
-// Only a write carrying a client key is staged. A keyless committed write
-// materializes nothing for any consumer today -- the insert section is written
-// for it only when it accompanies a keyed write in the same chunk -- and
-// staging every insert would put the whole write path's primary keys into
-// object storage for nobody to read.
-func idempotencyHalvesOf(msg message.ImmutableMessage) (
+// insertSummaryOf records every committed insert unit. Keyless writes retain
+// their WAL positions without acquiring an idempotency identity. Optional
+// results come from headers; recording an insert never decodes its Body.
+func insertSummaryOf(msg message.ImmutableMessage) (
 	*streamingpb.VChannelSummaryIdempotencyRecord,
 	*streamingpb.VChannelSummaryInsertRecord,
 ) {
-	key := idempotencyKeyOf(msg)
-	if key == "" {
+	result, hasInsert := insertResultOf(msg)
+	if !hasInsert {
 		return nil, nil
 	}
+	key := idempotencyKeyOf(msg)
 	insert := &streamingpb.VChannelSummaryInsertRecord{
 		SourceMessageId:        messageIDProto(msg.MessageID()),
 		SourceTimetick:         msg.TimeTick(),
 		LastConfirmedMessageId: messageIDProto(msg.LastConfirmedMessageID()),
 	}
-	keys := &streamingpb.VChannelSummaryIdempotencyRecord{Key: key}
-	result, hasResult := idempotentInsertResultOf(msg)
-	if !hasResult && msg.MessageType() == message.MessageTypeTxn {
-		// A keyed txn whose per-body results could not be rebuilt (corrupt or
-		// absent headers) must produce NO record. Staging the key with nil Ids
-		// would make a post-restart duplicate answer success with no primary
-		// keys at all; producing nothing only costs the dedup opportunity,
-		// which degrades to the behavior without this feature.
-		return nil, nil
+	if result == nil && msg.MessageType() == message.MessageTypeTxn {
+		// Keep the write fact, but never restore a duplicate response from an
+		// incomplete transaction result.
+		key = ""
 	}
-	if hasResult {
+	keys := &streamingpb.VChannelSummaryIdempotencyRecord{Key: key}
+	if result != nil {
 		insert.Ids = result.GetIds()
 		keys.RowOffsets = result.GetRowOffsets()
 	}
@@ -250,7 +252,7 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	// goes through a scanner that assembles transactions (the live flusher and
 	// the recovery stream share one txn buffer), so a commit always arrives
 	// wrapped in MessageTypeTxn and a CommitTxn case could never fire. Worse
-	// than unreachable: idempotentInsertResultOf has no CommitTxn case either,
+	// than unreachable: insertResultOf has no CommitTxn case either,
 	// so if one ever did arrive it would stage a record with nil Ids and answer
 	// a later duplicate with no primary keys.
 	switch msg.MessageType() {
@@ -278,8 +280,9 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	}
 }
 
-// idempotentInsertResultOf returns what a duplicate append replays back to the
-// client, when the message carries one.
+// insertResultOf reports whether the message contains committed inserts and
+// returns their optional header result. Replicated writes do not restore
+// source-cluster results; missing results do not erase the write fact.
 //
 // For a transaction it is REBUILT from the insert bodies rather than read off
 // the commit: the interceptor merges the per-body results in memory and hands
@@ -289,25 +292,32 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 // through MergeIdempotentInsertResults over the bodies in append order), which
 // is what makes a post-restart duplicate answer with the same primary keys the
 // first attempt returned.
-func idempotentInsertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
-	if msg.ReplicateHeader() != nil {
-		return nil, false
-	}
+func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
+	replicated := msg.ReplicateHeader() != nil
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
+		if replicated {
+			return nil, true
+		}
 		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
-			return nil, false
+			return nil, true
 		}
-		return message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
+		result, _ := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
+		return result, true
 	case message.MessageTypeTxn:
 		txnMsg := message.AsImmutableTxnMessage(msg)
 		if txnMsg == nil {
 			return nil, false
 		}
 		var results []*messagespb.IdempotentInsertResult
+		hasInsert := false
 		_ = txnMsg.RangeOver(func(sub message.ImmutableMessage) error {
 			if sub.MessageType() != message.MessageTypeInsert {
+				return nil
+			}
+			hasInsert = true
+			if replicated {
 				return nil
 			}
 			insertMsg, err := message.AsImmutableInsertMessageV1(sub)
@@ -319,15 +329,11 @@ func idempotentInsertResultOf(msg message.ImmutableMessage) (*messagespb.Idempot
 			}
 			return nil
 		})
-		merged, hadAny, err := message.MergeIdempotentInsertResults(results...)
-		if err != nil || !hadAny {
-			// Corruption and "no payload" are both answered as "no result" here
-			// rather than by staging a half-record: a record whose Ids are nil
-			// would answer a later duplicate with no primary keys at all, which
-			// is worse than not recognizing the duplicate.
-			return nil, false
+		merged, _, err := message.MergeIdempotentInsertResults(results...)
+		if err != nil {
+			return nil, hasInsert
 		}
-		return merged, true
+		return merged, hasInsert
 	default:
 		return nil, false
 	}
@@ -422,15 +428,17 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		}
 		sections[vchannel] = cs
 	}
-	footer, size, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections, sc.Coverage)
+	footer, payload, err := m.cfg.Store.writeChunk(ctx, sc.Generation, sections, sc.Coverage)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
-	sc.index = chunkIndexEntryFromFooter(footer, size)
+	sc.index = m.chunkIndex.newChunk(chunkIndexEntryFromFooter(footer, uint64(len(payload))),
+		&chunkPayload{bytes: payload, footerStart: chunkFooterOffset(payload)})
 	for len(m.pendingSealed) > 0 && m.pendingSealed[0].index != nil {
 		head := m.pendingSealed[0]
-		recordChunk(m.manifest, head.index)
+		recordChunk(m.manifest, head.index.PChannelSummaryChunkIndexEntry)
+		m.chunkIndex.chunks = append(m.chunkIndex.chunks, head.index)
 		for vchannel, records := range head.RecordsByVChannel {
 			for _, record := range records {
 				m.durableFrontiers[vchannel] = max(m.durableFrontiers[vchannel], record.timeTick)
@@ -536,10 +544,10 @@ func (m *Manager) ReadIdempotencyEntries(
 //
 // The chunk loop is the OUTER one on purpose: a chunk is a pchannel-wide object
 // with no range read, so reading vchannel by vchannel would download the same
-// object once per vchannel. Here each chunk is fetched once, decoded for every
-// vchannel that has a section in it, and released before the next one -- the
-// transfer drops from O(chunks x vchannels) to O(chunks) with no more memory
-// than a single chunk at a time.
+// object once per vchannel if the cache cannot retain the working set. Each
+// chunk is acquired once and decoded for all requested vchannels before moving
+// on. Encoded buffers share the bounded chunk cache; decoded results belong to
+// the caller.
 func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	ctx context.Context,
 	vchannels []string,
@@ -569,7 +577,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		}
 		inMemory[vchannel] = append(tails, staged)
 	}
-	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
+	chunks := m.chunkIndex.snapshot(from, to)
 	m.mu.Unlock()
 
 	out := make(map[string]*ChunkSections, len(vchannels))
@@ -584,7 +592,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		}
 		indexes := make(map[string]*streamingpb.VChannelSummaryChunkIndex)
 		for _, vchannel := range vchannels {
-			index := vchannelChunkIndex(chunk, vchannel)
+			index := vchannelChunkIndex(chunk.PChannelSummaryChunkIndexEntry, vchannel)
 			if index == nil || index.GetInserts() == nil {
 				continue
 			}
@@ -593,11 +601,15 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		if len(indexes) == 0 {
 			continue
 		}
-		decoded, err := m.cfg.Store.ReadIdempotencySectionsOfChunk(ctx, chunk.GetGeneration(), chunk.GetTerm(), indexes)
+		payload, err := m.chunkIndex.cache.read(ctx, m.cfg.Store, chunk)
 		if err != nil {
 			return nil, err
 		}
-		for vchannel, sections := range decoded {
+		for vchannel, index := range indexes {
+			sections, err := unmarshalIdempotencySections(payload.bytes, payload.footerStart, index)
+			if err != nil {
+				return nil, err
+			}
 			hasKeys := len(sections.Idempotency) != 0
 			anyKeys[vchannel] = anyKeys[vchannel] || hasKeys
 			target := out[vchannel]
@@ -702,7 +714,7 @@ type stagedRecord struct {
 // object without touching the manager state.
 type SealedChunk struct {
 	task              *chunkWriteTask
-	index             *streamingpb.PChannelSummaryChunkIndexEntry
+	index             *indexedChunk
 	Coverage          TimeTickRange
 	Transforms        map[string]*streamingpb.VChannelSummaryTransformIndex
 	Generation        uint64

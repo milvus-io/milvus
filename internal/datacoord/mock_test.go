@@ -712,6 +712,10 @@ func (s *mockMixCoord) ListCheckers(ctx context.Context, req *querypb.ListChecke
 	panic("implement me")
 }
 
+func (s *mockMixCoord) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (s *mockMixCoord) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	panic("implement me")
 }
@@ -745,6 +749,14 @@ func (s *mockMixCoord) GetPartitionStates(ctx context.Context, req *querypb.GetP
 }
 
 func (s *mockMixCoord) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) WatchQueryViewSegmentLoadInfo(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
 	panic("implement me")
 }
 
@@ -1192,4 +1204,12 @@ func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,
 	}
+}
+
+func (*mockMixCoord) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetQueryViewLoadInfo is not configured by this test")
+}
+
+func (*mockMixCoord) GetStreamingNodeQueryViewResources(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetStreamingNodeQueryViewResources is not configured by this test")
 }

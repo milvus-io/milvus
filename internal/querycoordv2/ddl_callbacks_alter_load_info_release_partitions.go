@@ -67,7 +67,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
 			WithControlChannelBroadcast().
-			MustBuildBroadcast() // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
+			MustBuildBroadcast()
 		collectionReleased = true
 	} else {
 		// only some partitions are released, alter the load config.

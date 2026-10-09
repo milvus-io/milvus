@@ -54,6 +54,10 @@ func (m *GrpcQueryCoordClient) GetStatisticsChannel(ctx context.Context, in *int
 	return &milvuspb.StringResponse{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) ShowLoadCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 	return &querypb.ShowCollectionsResponse{}, m.Err
 }
@@ -84,6 +88,10 @@ func (m *GrpcQueryCoordClient) GetPartitionStates(ctx context.Context, in *query
 
 func (m *GrpcQueryCoordClient) GetLoadSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
 	return &querypb.GetSegmentInfoResponse{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
+	return nil, m.Err
 }
 
 func (m *GrpcQueryCoordClient) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -208,4 +216,8 @@ func (m *GrpcQueryCoordClient) ComputePhraseMatchSlop(ctx context.Context, req *
 
 func (m *GrpcQueryCoordClient) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	return &querypb.ValidateAnalyzerResponse{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest, ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return &querypb.GetQueryViewLoadInfoResponse{}, m.Err
 }

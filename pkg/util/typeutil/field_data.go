@@ -291,3 +291,49 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 	}
 	return field
 }
+
+// CopyFieldDataMetadata copies field wrappers for consumer-local normalization.
+// Column values and validity bitmap backing arrays remain borrowed read-only.
+// Preserve both validity locations so conflicting input is still rejected by
+// ValidateAndNormalizeFieldDataValidData instead of being silently repaired.
+func CopyFieldDataMetadata(fields []*schemapb.FieldData) []*schemapb.FieldData {
+	if fields == nil {
+		return nil
+	}
+	result := make([]*schemapb.FieldData, len(fields))
+	for i, src := range fields {
+		if src == nil {
+			continue
+		}
+		dst := &schemapb.FieldData{
+			Type: src.Type, FieldName: src.FieldName, FieldId: src.FieldId,
+			IsDynamic: src.IsDynamic, ValidData: src.ValidData,
+		}
+		switch field := src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			var scalar *schemapb.ScalarField
+			if field.Scalars != nil {
+				scalar = &schemapb.ScalarField{Data: field.Scalars.Data, ValidData: field.Scalars.ValidData}
+				scalar.ProtoReflect().SetUnknown(slices.Clone(field.Scalars.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Scalars{Scalars: scalar}
+		case *schemapb.FieldData_Vectors:
+			var vector *schemapb.VectorField
+			if field.Vectors != nil {
+				vector = &schemapb.VectorField{Dim: field.Vectors.Dim, Data: field.Vectors.Data, ValidData: field.Vectors.ValidData}
+				vector.ProtoReflect().SetUnknown(slices.Clone(field.Vectors.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Vectors{Vectors: vector}
+		case *schemapb.FieldData_StructArrays:
+			var array *schemapb.StructArrayField
+			if field.StructArrays != nil {
+				array = &schemapb.StructArrayField{Fields: CopyFieldDataMetadata(field.StructArrays.Fields)}
+				array.ProtoReflect().SetUnknown(slices.Clone(field.StructArrays.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_StructArrays{StructArrays: array}
+		}
+		dst.ProtoReflect().SetUnknown(slices.Clone(src.ProtoReflect().GetUnknown()))
+		result[i] = dst
+	}
+	return result
+}

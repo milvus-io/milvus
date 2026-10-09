@@ -268,6 +268,7 @@ func (s *Server) startGrpcLoop() {
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("QueryNode"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
+	s.registerQueryViewServers()
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()

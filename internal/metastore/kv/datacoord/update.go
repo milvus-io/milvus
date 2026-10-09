@@ -137,7 +137,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				e.DataView.GetDataVersion().GetStreamingVersion(),
 				e.DataView.GetDataVersion().GetCompactVersion(),
 			)
-			value, err := proto.Marshal(e.DataView)
+			value, err := marshalDataView(e.DataView)
 			if err != nil {
 				return err
 			}

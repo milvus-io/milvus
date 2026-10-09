@@ -8,7 +8,7 @@ import (
 	consumer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	mock "github.com/stretchr/testify/mock"
 
 	producer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
@@ -118,6 +118,65 @@ func (_c *MockHandlerClient_CreateConsumer_Call) Return(_a0 consumer.Consumer, _
 }
 
 func (_c *MockHandlerClient_CreateConsumer_Call) RunAndReturn(run func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error)) *MockHandlerClient_CreateConsumer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AcquireTransformLogStream provides a mock function with given fields: ctx, pchannel
+func (_m *MockHandlerClient) AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	ret := _m.Called(ctx, pchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AcquireTransformLogStream")
+	}
+
+	var r0 wal.TransformLogStream
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (wal.TransformLogStream, error)); ok {
+		return rf(ctx, pchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) wal.TransformLogStream); ok {
+		r0 = rf(ctx, pchannel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(wal.TransformLogStream)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_AcquireTransformLogStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AcquireTransformLogStream'
+type MockHandlerClient_AcquireTransformLogStream_Call struct {
+	*mock.Call
+}
+
+// AcquireTransformLogStream is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+func (_e *MockHandlerClient_Expecter) AcquireTransformLogStream(ctx interface{}, pchannel interface{}) *MockHandlerClient_AcquireTransformLogStream_Call {
+	return &MockHandlerClient_AcquireTransformLogStream_Call{Call: _e.mock.On("AcquireTransformLogStream", ctx, pchannel)}
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) Run(run func(ctx context.Context, pchannel string)) *MockHandlerClient_AcquireTransformLogStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) Return(_a0 wal.TransformLogStream, _a1 error) *MockHandlerClient_AcquireTransformLogStream_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) RunAndReturn(run func(context.Context, string) (wal.TransformLogStream, error)) *MockHandlerClient_AcquireTransformLogStream_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -469,6 +528,100 @@ func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) Return(_a0 bo
 }
 
 func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) RunAndReturn(run func(context.Context, int64, string, []int64) (bool, error)) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryViewClient provides a mock function with no fields
+func (_m *MockHandlerClient) QueryViewClient() handler.QueryViewClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryViewClient")
+	}
+
+	var r0 handler.QueryViewClient
+	if rf, ok := ret.Get(0).(func() handler.QueryViewClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(handler.QueryViewClient)
+		}
+	}
+
+	return r0
+}
+
+// MockHandlerClient_QueryViewClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryViewClient'
+type MockHandlerClient_QueryViewClient_Call struct {
+	*mock.Call
+}
+
+// QueryViewClient is a helper method to define mock.On call
+func (_e *MockHandlerClient_Expecter) QueryViewClient() *MockHandlerClient_QueryViewClient_Call {
+	return &MockHandlerClient_QueryViewClient_Call{Call: _e.mock.On("QueryViewClient")}
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) Run(run func()) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) Return(_a0 handler.QueryViewClient) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) RunAndReturn(run func() handler.QueryViewClient) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryViewSyncClient provides a mock function with no fields
+func (_m *MockHandlerClient) QueryViewSyncClient() handler.QueryViewSyncClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryViewSyncClient")
+	}
+
+	var r0 handler.QueryViewSyncClient
+	if rf, ok := ret.Get(0).(func() handler.QueryViewSyncClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(handler.QueryViewSyncClient)
+		}
+	}
+
+	return r0
+}
+
+// MockHandlerClient_QueryViewSyncClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryViewSyncClient'
+type MockHandlerClient_QueryViewSyncClient_Call struct {
+	*mock.Call
+}
+
+// QueryViewSyncClient is a helper method to define mock.On call
+func (_e *MockHandlerClient_Expecter) QueryViewSyncClient() *MockHandlerClient_QueryViewSyncClient_Call {
+	return &MockHandlerClient_QueryViewSyncClient_Call{Call: _e.mock.On("QueryViewSyncClient")}
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) Run(run func()) *MockHandlerClient_QueryViewSyncClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) Return(_a0 handler.QueryViewSyncClient) *MockHandlerClient_QueryViewSyncClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) RunAndReturn(run func() handler.QueryViewSyncClient) *MockHandlerClient_QueryViewSyncClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

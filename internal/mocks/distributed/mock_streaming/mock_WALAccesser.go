@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -503,6 +504,53 @@ func (_c *MockWALAccesser_Read_Call) RunAndReturn(run func(context.Context, stre
 	return _c
 }
 
+// TransformLogStreamManager provides a mock function with no fields
+func (_m *MockWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TransformLogStreamManager")
+	}
+
+	var r0 wal.TransformLogStreamManager
+	if rf, ok := ret.Get(0).(func() wal.TransformLogStreamManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(wal.TransformLogStreamManager)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_TransformLogStreamManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransformLogStreamManager'
+type MockWALAccesser_TransformLogStreamManager_Call struct {
+	*mock.Call
+}
+
+// TransformLogStreamManager is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) TransformLogStreamManager() *MockWALAccesser_TransformLogStreamManager_Call {
+	return &MockWALAccesser_TransformLogStreamManager_Call{Call: _e.mock.On("TransformLogStreamManager")}
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Run(run func()) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Return(_a0 wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) RunAndReturn(run func() wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Replicate provides a mock function with no fields
 func (_m *MockWALAccesser) Replicate() streaming.ReplicateService {
 	ret := _m.Called()
@@ -555,7 +603,8 @@ func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.Repl
 func NewMockWALAccesser(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockWALAccesser {
+},
+) *MockWALAccesser {
 	mock := &MockWALAccesser{}
 	mock.Mock.Test(t)
 

@@ -110,3 +110,18 @@ func TestQueryViewAtCoordBuilder_MissingVChannelPanics(t *testing.T) {
 		NewQueryViewAtCoordBuilder(1, dataView, "v2")
 	})
 }
+
+func TestQueryViewBuilderPreservesSegmentTransformStarts(t *testing.T) {
+	view := &viewpb.DataViewOfCollection{
+		CollectionId: 1,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{
+			Vchannel:                    "v1",
+			TransformStartAfterTimetick: 40,
+			Partitions:                  []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentTransformStartAfterTimeticks: []uint64{50, 70}}},
+		}},
+	}
+	result := NewQueryViewAtCoordBuilder(1, view, "v1").SetAssignments(map[int64]map[int64][]int64{100: {1: {20, 10}}}).Build()
+	require.Equal(t, uint64(40), result.Meta.TransformStartAfterTimetick)
+	require.Equal(t, []uint64{70, 50}, result.QueryNode[0].Partitions[0].SegmentTransformStartAfterTimeticks)
+}

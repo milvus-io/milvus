@@ -138,8 +138,6 @@ type CRegistry struct {
 
 // Gather implements Gatherer.
 func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
-	var parser expfmt.TextParser
-
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
 
@@ -147,7 +145,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 	metricsStr := C.GoString(cMetricsStr)
 	C.free(unsafe.Pointer(cMetricsStr))
 
-	out, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	out, err := parseTextMetrics(metricsStr)
 	if err != nil {
 		mlog.Error(context.TODO(), "fail to parse knowhere prometheus metrics", mlog.Err(err))
 		return res, err
@@ -157,7 +155,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 	metricsStr = C.GoString(cMetricsStr)
 	C.free(unsafe.Pointer(cMetricsStr))
 
-	out1, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	out1, err := parseTextMetrics(metricsStr)
 	if err != nil {
 		mlog.Error(context.TODO(), "fail to parse storage prometheus metrics", mlog.Err(err))
 		return res, err
@@ -173,6 +171,14 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	res = NormalizeMetricFamilies(out)
 	return res, err
+}
+
+func parseTextMetrics(metricsStr string) (map[string]*dto.MetricFamily, error) {
+	// prometheus/common v0.55.0 (pinned in go.mod) has no expfmt.NewTextParser;
+	// the zero-value TextParser honors model.NameValidationScheme, whose default
+	// is LegacyValidation, matching the legacy name validation intent.
+	parser := expfmt.TextParser{}
+	return parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 }
 
 // gatherJemallocMetrics collects comprehensive jemalloc stats and returns them as metric families.

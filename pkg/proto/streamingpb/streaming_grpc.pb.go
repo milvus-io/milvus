@@ -467,6 +467,7 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	StreamingNodeHandlerService_SubscribeTransform_FullMethodName     = "/milvus.proto.streaming.StreamingNodeHandlerService/SubscribeTransform"
 	StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetReplicateCheckpoint"
 	StreamingNodeHandlerService_GetSalvageCheckpoint_FullMethodName   = "/milvus.proto.streaming.StreamingNodeHandlerService/GetSalvageCheckpoint"
 	StreamingNodeHandlerService_Produce_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
@@ -477,6 +478,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error)
@@ -508,6 +510,37 @@ func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) Streaming
 	return &streamingNodeHandlerServiceClient{cc}
 }
 
+func (c *streamingNodeHandlerServiceClient) SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error) {
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[0], StreamingNodeHandlerService_SubscribeTransform_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &streamingNodeHandlerServiceSubscribeTransformClient{stream}
+	return x, nil
+}
+
+type StreamingNodeHandlerService_SubscribeTransformClient interface {
+	Send(*TransformRequest) error
+	Recv() (*TransformResponse, error)
+	grpc.ClientStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformClient struct {
+	grpc.ClientStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Send(m *TransformRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Recv() (*TransformResponse, error) {
+	m := new(TransformResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *streamingNodeHandlerServiceClient) GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error) {
 	out := new(GetReplicateCheckpointResponse)
 	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName, in, out, opts...)
@@ -527,7 +560,7 @@ func (c *streamingNodeHandlerServiceClient) GetSalvageCheckpoint(ctx context.Con
 }
 
 func (c *streamingNodeHandlerServiceClient) Produce(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ProduceClient, error) {
-	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[0], StreamingNodeHandlerService_Produce_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[1], StreamingNodeHandlerService_Produce_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +591,7 @@ func (x *streamingNodeHandlerServiceProduceClient) Recv() (*ProduceResponse, err
 }
 
 func (c *streamingNodeHandlerServiceClient) Consume(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ConsumeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[1], StreamingNodeHandlerService_Consume_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[2], StreamingNodeHandlerService_Consume_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -592,6 +625,7 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error)
@@ -619,6 +653,9 @@ type StreamingNodeHandlerServiceServer interface {
 type UnimplementedStreamingNodeHandlerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeHandlerServiceServer) SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeTransform not implemented")
+}
 func (UnimplementedStreamingNodeHandlerServiceServer) GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetReplicateCheckpoint not implemented")
 }
@@ -641,6 +678,32 @@ type UnsafeStreamingNodeHandlerServiceServer interface {
 
 func RegisterStreamingNodeHandlerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeHandlerServiceServer) {
 	s.RegisterService(&StreamingNodeHandlerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeHandlerService_SubscribeTransform_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StreamingNodeHandlerServiceServer).SubscribeTransform(&streamingNodeHandlerServiceSubscribeTransformServer{stream})
+}
+
+type StreamingNodeHandlerService_SubscribeTransformServer interface {
+	Send(*TransformResponse) error
+	Recv() (*TransformRequest, error)
+	grpc.ServerStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformServer struct {
+	grpc.ServerStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Send(m *TransformResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Recv() (*TransformRequest, error) {
+	m := new(TransformRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -749,6 +812,12 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
+			StreamName:    "SubscribeTransform",
+			Handler:       _StreamingNodeHandlerService_SubscribeTransform_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
 			StreamName:    "Produce",
 			Handler:       _StreamingNodeHandlerService_Produce_Handler,
 			ServerStreams: true,
@@ -765,15 +834,17 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingNodeManagerService_Assign_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
-	StreamingNodeManagerService_Remove_FullMethodName        = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
-	StreamingNodeManagerService_CollectStatus_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
+	StreamingNodeManagerService_ValidateRuntime_FullMethodName = "/milvus.proto.streaming.StreamingNodeManagerService/ValidateRuntime"
+	StreamingNodeManagerService_Assign_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Assign"
+	StreamingNodeManagerService_Remove_FullMethodName          = "/milvus.proto.streaming.StreamingNodeManagerService/Remove"
+	StreamingNodeManagerService_CollectStatus_FullMethodName   = "/milvus.proto.streaming.StreamingNodeManagerService/CollectStatus"
 )
 
 // StreamingNodeManagerServiceClient is the client API for StreamingNodeManagerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeManagerServiceClient interface {
+	ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error)
 	// Assign is a unary RPC to assign a channel on a log node.
 	// Block until the channel assignd is ready to read or write on the log
 	// node. Error: If the channel already exists, return error with code
@@ -799,6 +870,15 @@ type streamingNodeManagerServiceClient struct {
 
 func NewStreamingNodeManagerServiceClient(cc grpc.ClientConnInterface) StreamingNodeManagerServiceClient {
 	return &streamingNodeManagerServiceClient{cc}
+}
+
+func (c *streamingNodeManagerServiceClient) ValidateRuntime(ctx context.Context, in *StreamingNodeManagerValidateRuntimeRequest, opts ...grpc.CallOption) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	out := new(StreamingNodeManagerValidateRuntimeResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeManagerService_ValidateRuntime_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingNodeManagerServiceClient) Assign(ctx context.Context, in *StreamingNodeManagerAssignRequest, opts ...grpc.CallOption) (*StreamingNodeManagerAssignResponse, error) {
@@ -832,6 +912,7 @@ func (c *streamingNodeManagerServiceClient) CollectStatus(ctx context.Context, i
 // All implementations should embed UnimplementedStreamingNodeManagerServiceServer
 // for forward compatibility
 type StreamingNodeManagerServiceServer interface {
+	ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error)
 	// Assign is a unary RPC to assign a channel on a log node.
 	// Block until the channel assignd is ready to read or write on the log
 	// node. Error: If the channel already exists, return error with code
@@ -855,6 +936,9 @@ type StreamingNodeManagerServiceServer interface {
 type UnimplementedStreamingNodeManagerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeManagerServiceServer) ValidateRuntime(context.Context, *StreamingNodeManagerValidateRuntimeRequest) (*StreamingNodeManagerValidateRuntimeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateRuntime not implemented")
+}
 func (UnimplementedStreamingNodeManagerServiceServer) Assign(context.Context, *StreamingNodeManagerAssignRequest) (*StreamingNodeManagerAssignResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Assign not implemented")
 }
@@ -874,6 +958,24 @@ type UnsafeStreamingNodeManagerServiceServer interface {
 
 func RegisterStreamingNodeManagerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeManagerServiceServer) {
 	s.RegisterService(&StreamingNodeManagerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeManagerService_ValidateRuntime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeManagerValidateRuntimeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeManagerService_ValidateRuntime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeManagerServiceServer).ValidateRuntime(ctx, req.(*StreamingNodeManagerValidateRuntimeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeManagerService_Assign_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -937,6 +1039,10 @@ var StreamingNodeManagerService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingNodeManagerService",
 	HandlerType: (*StreamingNodeManagerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ValidateRuntime",
+			Handler:    _StreamingNodeManagerService_ValidateRuntime_Handler,
+		},
 		{
 			MethodName: "Assign",
 			Handler:    _StreamingNodeManagerService_Assign_Handler,

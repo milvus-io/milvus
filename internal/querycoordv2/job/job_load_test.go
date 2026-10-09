@@ -80,6 +80,24 @@ func (suite *LoadCollectionJobSuite) buildBroadcastResult(collectionID int64, pa
 	}
 }
 
+func (suite *LoadCollectionJobSuite) TestGenerateAlterLoadConfigMessageUsesControlChannelWithoutAckSyncUp() {
+	msg, err := GenerateAlterLoadConfigMessage(context.Background(), &AlterLoadConfigRequest{
+		CollectionInfo: &milvuspb.DescribeCollectionResponse{
+			DbId:         10,
+			CollectionID: 100,
+		},
+		Expected: ExpectedLoadConfig{
+			ExpectedPartitionIDs:  []int64{20},
+			ExpectedReplicaNumber: map[string]int{},
+		},
+	})
+
+	suite.NoError(err)
+	suite.NotNil(msg)
+	suite.Empty(msg.BroadcastHeader().VChannels)
+	suite.False(msg.BroadcastHeader().AckSyncUp)
+}
+
 // TestDescribeCollectionNotFound tests that Execute returns nil when the collection is not found.
 func (suite *LoadCollectionJobSuite) TestDescribeCollectionNotFound() {
 	ctx := context.Background()

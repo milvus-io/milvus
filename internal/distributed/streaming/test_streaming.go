@@ -214,12 +214,8 @@ func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
 	return &noopScanner{}
 }
 
-func (n *noopWALAccesser) ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
-	return types.PChannelInfo{
-		Name:       funcutil.ToPhysicalChannel(vchannel),
-		Term:       1,
-		AccessMode: types.AccessModeRW,
-	}, nil
+func (n *noopWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	return nil
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {

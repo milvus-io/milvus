@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -188,6 +189,8 @@ func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {
 	}).Maybe()
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.WALCheckpoint, error) {
 		if consumeCheckpoint == nil {
 			return nil, nil

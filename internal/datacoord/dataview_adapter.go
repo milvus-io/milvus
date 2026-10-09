@@ -33,12 +33,17 @@ type (
 )
 
 func (s *Server) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) (*viewpb.DataVersion, error) {
+	return s.CreateCollectionDataViewWithTransformStarts(ctx, collectionID, vchannels, nil)
+}
+
+func (s *Server) CreateCollectionDataViewWithTransformStarts(ctx context.Context, collectionID int64, vchannels []string, starts map[string]uint64) (*viewpb.DataVersion, error) {
 	if s.dataViewManager == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView manager is not initialized")
 	}
 	return s.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
-		CollectionID: collectionID,
-		VChannels:    vchannels,
+		CollectionID:    collectionID,
+		VChannels:       vchannels,
+		TransformStarts: starts,
 	})
 }
 

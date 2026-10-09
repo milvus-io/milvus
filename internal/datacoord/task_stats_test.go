@@ -1241,6 +1241,7 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 		expectCommit   bool
 		expectManifest string
 		expectStats    bool
+		expectNotify   bool
 	}{
 		{
 			name:           "fresh_commit",
@@ -1248,6 +1249,7 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			expectCommit:   true,
 			expectManifest: committedManifest,
 			expectStats:    true,
+			expectNotify:   true,
 		},
 		{
 			// Result already persisted (same BuildID): the idempotent-replay guard
@@ -1258,6 +1260,7 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			expectCommit:   false,
 			expectManifest: currentManifest,
 			expectStats:    true,
+			expectNotify:   true,
 		},
 		{
 			name:           "empty_stats_noop",
@@ -1270,6 +1273,9 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
+			recorder := newQueryViewLoadInfoNotificationRecorder()
+			s.mt.queryViewLoadInfoNotifier = recorder
+			defer func() { s.mt.queryViewLoadInfoNotifier = nil }()
 			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
 			if testCase.preStats != nil {
@@ -1329,6 +1335,14 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			} else {
 				s.Equal(0, catalogWrites)
 			}
+			if testCase.expectNotify {
+				s.Equal([]queryViewLoadInfoNotification{{
+					collectionID: s.collID,
+					segmentIDs:   []int64{s.segID},
+				}}, recorder.segments())
+			} else {
+				s.Empty(recorder.segments())
+			}
 		})
 	}
 }
@@ -1361,6 +1375,7 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 		expectCommit   bool
 		expectManifest string
 		expectStats    bool
+		expectNotify   bool
 	}{
 		{
 			name:           "fresh_commit",
@@ -1368,6 +1383,7 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			expectCommit:   true,
 			expectManifest: committedManifest,
 			expectStats:    true,
+			expectNotify:   true,
 		},
 		{
 			// Result already persisted (same BuildID): the idempotent-replay guard
@@ -1378,6 +1394,7 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			expectCommit:   false,
 			expectManifest: currentManifest,
 			expectStats:    true,
+			expectNotify:   true,
 		},
 		{
 			name:           "empty_stats_noop",
@@ -1390,6 +1407,9 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
+			recorder := newQueryViewLoadInfoNotificationRecorder()
+			s.mt.queryViewLoadInfoNotifier = recorder
+			defer func() { s.mt.queryViewLoadInfoNotifier = nil }()
 			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
 			if testCase.preStats != nil {
@@ -1446,6 +1466,14 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				s.Equal(1, catalogWrites)
 			} else {
 				s.Equal(0, catalogWrites)
+			}
+			if testCase.expectNotify {
+				s.Equal([]queryViewLoadInfoNotification{{
+					collectionID: s.collID,
+					segmentIDs:   []int64{s.segID},
+				}}, recorder.segments())
+			} else {
+				s.Empty(recorder.segments())
 			}
 		})
 	}

@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
 import "internal.proto";
@@ -13,7 +14,9 @@ import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
 
+
 service QueryCoord {
+    rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
     rpc ShowLoadCollections(ShowCollectionsRequest)
         returns (ShowCollectionsResponse) {
     }
@@ -36,6 +39,10 @@ service QueryCoord {
         returns (GetPartitionStatesResponse) {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
+    }
+
+    rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
+        returns (stream WatchQueryViewSegmentLoadInfoResponse) {
     }
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
@@ -104,6 +111,7 @@ service QueryCoord {
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -318,6 +326,55 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
+}
+
+message QueryViewSegmentLoadInfoRevision {
+    uint64 load_info_revision = 1;
+}
+
+message WatchQueryViewSegmentLoadInfoSubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+}
+
+message WatchQueryViewSegmentLoadInfoUnsubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    repeated WatchQueryViewSegmentLoadInfoSubscription subscribe = 2;
+    repeated WatchQueryViewSegmentLoadInfoUnsubscription unsubscribe = 3;
+}
+
+message QueryViewSegmentLoadInfoSnapshot {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+    SegmentLoadInfo load_info = 4;
+    repeated index.IndexInfo index_info_list = 5;
+}
+
+message WatchQueryViewSegmentLoadInfoResponse {
+    common.Status status = 1;
+    repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
 }
 
 message GetShardLeadersRequest {
@@ -1193,4 +1250,10 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+message EnsureCollectionReadyRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated string expected_vchannels = 3;
 }

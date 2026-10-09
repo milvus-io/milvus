@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -104,6 +105,7 @@ type SearchTask struct {
 	sched             *scheduler.TaskScheduler
 	lb                shardclient.LBPolicy
 	shardClientMgr    shardclient.ShardClientMgr
+	viewQueryClient   queryclient.Client
 	queryChannelsTs   map[string]Timestamp
 	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
 	queryInfos        []*planpb.QueryInfo
@@ -155,6 +157,7 @@ type ResolvedRLSSnapshot struct {
 // need to reach into the task's private fields.
 func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *scheduler.TaskScheduler, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, tr *timerecord.TimeRecorder) *SearchTask {
 	return &SearchTask{
+		viewQueryClient: viewQueryClientFromNode(node),
 		baseTask: baseTask{
 			MetaCache: node.GetMetaCache(),
 		},
@@ -1454,6 +1457,16 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "search execute by query view failed", mlog.Err(err))
+			return errors.Wrap(err, "failed to search")
+		}
+		log.Debug(ctx, "Search Execute done.",
+			mlog.Int64("collection", t.GetCollectionID()),
+			mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1496,6 +1509,22 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	log.Debug(ctx, "Search Execute done.",
 		mlog.Int64("collection", t.GetCollectionID()),
 		mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+	return nil
+}
+
+func (t *SearchTask) executeByQueryView(ctx context.Context) error {
+	result, err := t.viewQueryClient.Legacy().Search(ctx, &queryclient.LegacySearchRequest{
+		Req: t.SearchRequest,
+	})
+	if err != nil {
+		return err
+	}
+	if t.resultBuf == nil {
+		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+	}
+	for _, searchResult := range result.Results {
+		t.resultBuf.Insert(searchResult)
+	}
 	return nil
 }
 

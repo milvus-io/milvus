@@ -38,12 +38,22 @@ type TransformBatch struct {
 	// FastForwardTimeTick explicitly identifies retired history skipped by this read.
 	FastForwardTimeTick uint64
 	Changed             <-chan struct{}
+	// TransformChanged is captured with the same snapshot when WatchTransform
+	// is active for this VChannel. It omits unrelated PChannel coverage updates.
+	TransformChanged <-chan struct{}
 }
 
 // TransformReader is the storage contract shared by L0 and future subscriptions.
 type TransformReader interface {
 	ReadTransform(context.Context, string, uint64, uint64, ReadLimits) (TransformBatch, error)
 	TransformStats(string, uint64, uint64) TransformStats
+}
+
+// TransformChangeWatcher optionally supplies scoped notifications for live
+// subscriptions. Readers without it retain global coverage notifications.
+type TransformChangeWatcher interface {
+	// WatchTransform retains notification state until the returned release is called.
+	WatchTransform(vchannel string) (release func())
 }
 
 func (m *Manager) advanceReadableLocked(tt uint64) {
@@ -66,8 +76,8 @@ func (m *Manager) notifyReadersLocked() {
 // ReadTransform reads a complete, bounded prefix of (after, through]. The
 // snapshot includes durable chunks, sealed records and the pending tail exactly
 // once, even if a writer moves records between these states during the read.
-// Local physical GC is pinned only for this call. No payload cache grows with
-// backlog: decoding uses at most one chunk section in addition to the batch.
+// Local physical GC is pinned only for this call. Chunk buffers use the shared
+// byte-budgeted cache; decoding adds one section in addition to the batch.
 func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, through uint64, limits ReadLimits) (TransformBatch, error) {
 	m.readMu.RLock()
 	defer m.readMu.RUnlock()
@@ -76,6 +86,12 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		m.readableChanged = make(chan struct{})
 	}
 	batch := TransformBatch{CoveredThrough: after, ReadableThrough: m.readableThrough, Changed: m.readableChanged}
+	if notifier := m.transformNotifiers[vchannel]; notifier != nil {
+		if notifier.changed == nil {
+			notifier.changed = make(chan struct{})
+		}
+		batch.TransformChanged = notifier.changed
+	}
 	terminal := m.terminalErr
 	fastForward := m.manifest.GetTransformFastForwardTimeTick()[vchannel]
 	// The initial checkpoint is a replay floor, not readable stored history.
@@ -85,7 +101,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	} else if coverage.GetStartTimeTick() > 0 {
 		fastForward = max(fastForward, coverage.GetStartTimeTick()-1)
 	}
-	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
+	chunks := m.chunkIndex.snapshot(after, min(through, batch.ReadableThrough))
 	// Only copy slice descriptors, never the unmaterialized payload window.
 	sealed := make([][]*stagedRecord, 0, len(m.pendingSealed))
 	for _, chunk := range m.pendingSealed {
@@ -107,7 +123,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	batch.CoveredThrough = after
 
 	var rows, bytes uint64
-	appendEntry := func(entry *streamingpb.TransformLogEntry) bool {
+	appendEntry := func(entry *streamingpb.TransformLogEntry, shared bool) bool {
 		if entry == nil || entry.GetTimeTick() <= after || entry.GetTimeTick() > target {
 			return true
 		}
@@ -115,7 +131,10 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows+n > limits.MaxRows) || (limits.MaxBytes > 0 && bytes+size > limits.MaxBytes)) {
 			return false
 		}
-		batch.Entries = append(batch.Entries, proto.Clone(entry).(*streamingpb.TransformLogEntry))
+		if shared {
+			entry = proto.Clone(entry).(*streamingpb.TransformLogEntry)
+		}
+		batch.Entries = append(batch.Entries, entry)
 		batch.CoveredThrough = entry.GetTimeTick()
 		rows += n
 		bytes += size
@@ -131,16 +150,25 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if chunk.GetStartTimeTick() > target {
 			break
 		}
-		index := vchannelChunkIndex(chunk, vchannel)
-		if index == nil || index.GetTransform() == nil {
+		index := vchannelChunkIndex(chunk.PChannelSummaryChunkIndexEntry, vchannel)
+		if index == nil || index.GetTransform() == nil || index.GetTransform().GetEndTimeTick() <= after || index.GetTransform().GetStartTimeTick() > target {
 			continue
 		}
-		records, err := m.cfg.Store.ReadTransformSection(ctx, chunk.GetGeneration(), chunk.GetTerm(), vchannel, index)
+		// Once a batch is full, do not fetch the next object just to reject
+		// its first entry. Coverage remains at the last complete entry.
+		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows >= limits.MaxRows) || (limits.MaxBytes > 0 && bytes >= limits.MaxBytes)) {
+			return batch, nil
+		}
+		payload, err := m.chunkIndex.cache.read(ctx, m.cfg.Store, chunk)
+		if err != nil {
+			return TransformBatch{}, err
+		}
+		records, err := unmarshalTransformSection(payload.bytes, payload.footerStart, index)
 		if err != nil {
 			return TransformBatch{}, err
 		}
 		for _, record := range records {
-			if !appendEntry(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}) {
+			if !appendEntry(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}, false) {
 				return batch, nil
 			}
 		}
@@ -150,7 +178,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			if err := ctx.Err(); err != nil {
 				return TransformBatch{}, err
 			}
-			if !appendEntry(record.entry) {
+			if !appendEntry(record.entry, true) {
 				return batch, nil
 			}
 		}
@@ -159,7 +187,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if err := ctx.Err(); err != nil {
 			return TransformBatch{}, err
 		}
-		if record.vchannel == vchannel && !appendEntry(record.entry) {
+		if record.vchannel == vchannel && !appendEntry(record.entry, true) {
 			return batch, nil
 		}
 	}

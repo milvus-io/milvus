@@ -249,6 +249,61 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 	})
 }
 
+func TestProxyEnableAutoLoad(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	item := &params.EnableAutoLoad
+
+	assert.Equal(t, "proxy.enableAutoLoad", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, base.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, base.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestQueryCoordAutoRelease(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := queryCoordConfig{}
+	params.init(base)
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
+	}
+
+	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
+	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
+	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
+	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
+	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
+
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+
+	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+}
+
 func TestComponentParam_StorageIopsParams(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
@@ -415,6 +470,102 @@ func TestComponentParam_LazyColumnGroupEnabled(t *testing.T) {
 	assert.True(t, item.GetAsBool())
 	assert.NoError(t, params.Save(item.Key, "false"))
 	assert.False(t, item.GetAsBool())
+}
+
+func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryViewCfg.IDFLazyLoadSealedStats
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryView.idfOracle.lazyLoadSealedStats", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestComponentParam_IDFSealedStatsLoadConcurrencyRatio(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryViewCfg.IDFSealedStatsLoadConcurrencyRatio
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryView.idfOracle.sealedStatsLoadConcurrencyRatio", item.Key)
+	assert.Equal(t, "4", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 4.0, item.GetAsFloat())
+
+	assert.NoError(t, params.Save(item.Key, "2.5"))
+	assert.Equal(t, 2.5, item.GetAsFloat())
+	assert.NoError(t, params.Save(item.Key, "0"))
+	assert.Equal(t, 1.0, item.GetAsFloat())
+}
+
+func TestComponentParam_QueryViewConcurrency(t *testing.T) {
+	Init()
+	params := Get()
+	for _, test := range []struct {
+		name string
+		item *ParamItem
+	}{
+		{name: "segment catch-up", item: &params.QueryNodeCfg.QueryViewSegmentCatchupConcurrency},
+		{name: "transform log drain", item: &params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency},
+		{name: "transform log stream catch-up", item: &params.StreamingCfg.TransformLogCatchupConcurrencyPerStream},
+		{name: "live event dispatch", item: &params.StreamingCfg.QueryViewLiveEventDispatchConcurrencyPerPChannel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			key := test.item.Key
+			params.Reset(key)
+			t.Cleanup(func() { params.Reset(key) })
+
+			assert.Equal(t, 4, test.item.GetAsInt())
+			params.Save(key, "32")
+			assert.Equal(t, 32, test.item.GetAsInt())
+			params.Save(key, "0")
+			assert.Equal(t, 1, test.item.GetAsInt())
+		})
+	}
+}
+
+func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewFullReconsileInterval
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.fullReconsileInterval", item.Key)
+	assert.Equal(t, "10", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 10*time.Second, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "300")
+	assert.Equal(t, 5*time.Minute, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "0")
+	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
+}
+
+func TestComponentParam_QueryViewTargetRowsPerShardNode(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewTargetRowsPerShardNode
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.targetRowsPerShardNode", item.Key)
+	assert.Equal(t, "100000", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "250000"))
+	assert.EqualValues(t, 250_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "0"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "invalid"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
 }
 
 func TestComponentParam(t *testing.T) {
@@ -1434,6 +1585,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
 		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
 		assert.Equal(t, int64(4*1024*1024*1024), params.StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize())
+		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())
 		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, int64(4*1024*1024*1024), params.StreamingCfg.WALRecoveryTailLowWatermark.GetAsSize())
 		assert.Equal(t, int64(8*1024*1024*1024), params.StreamingCfg.WALRecoveryTailSoftWatermark.GetAsSize())

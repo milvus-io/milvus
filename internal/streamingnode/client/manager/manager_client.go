@@ -47,6 +47,9 @@ type ManagerClient interface {
 	// Return types.ErrNotAlive if the streaming node is not in the session view; in that case the wal on it is not confirmed closed.
 	Remove(ctx context.Context, pchannel types.PChannelInfoAssigned) error
 
+	// ValidateRuntime validates runtime-dependent artifacts on the streaming node of given server id.
+	ValidateRuntime(ctx context.Context, serverID int64, req *streamingpb.StreamingNodeManagerValidateRuntimeRequest) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error)
+
 	// Close closes the manager client.
 	// It close the underlying connection, stop the node watcher and release all resources.
 	Close()

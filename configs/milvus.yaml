@@ -621,6 +621,11 @@ queryCoord:
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
+  autoRelease:
+    enabled: false # Effective only with proxy.enableAutoLoad=true. Disabling either switch clears activity; enabling both starts a new idle TTL at the next scan.
+    idleTTLSeconds: 600 # Supports runtime updates without resetting activity. Idle time before releasing a collection with load config, even if it is still loading or an earlier query is running.
+    checkIntervalSeconds: 30 # Supports runtime updates that reset the timer for scanning load configs and collection activity.
+    releaseConcurrency: 16 # Maximum concurrent automatic releases in one scan. Runtime updates apply to the next release batch.
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -652,6 +657,9 @@ queryCoord:
     maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
     maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
+  queryView:
+    targetRowsPerShardNode: 100000 # Target sealed rows per QueryNode for QueryView shard fanout.
+    fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
   grpc:
@@ -823,6 +831,9 @@ queryNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
+  queryView:
+    segmentCatchupConcurrency: 4 # Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.
+    transformLogDrainConcurrency: 4 # Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.
   idfOracle:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
@@ -1659,12 +1670,23 @@ streamingNode:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
     clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte
 
+# Any configuration related to query views.
+queryView:
+  idfOracle:
+    lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
+    sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
+  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
   # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
   # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
   splitChunkSN: false
+  queryView:
+    liveEventDispatchConcurrencyPerPChannel: 4 # Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.
+  transformLog:
+    catchupConcurrencyPerStream: 4 # Maximum number of TransformLog subscriptions catching up concurrently on each stream.
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
@@ -1750,6 +1772,12 @@ streaming:
       # The max size of l0 segment, 32m by default.
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
+    l1:
+      # The max concurrency of L1 segment commit tasks per streaming node, 4 by default.
+      # Non-positive value means unlimited.
+      commitConcurrency: 4
+  summary:
+    cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.

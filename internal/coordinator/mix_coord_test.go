@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,6 +138,59 @@ func TestMixCoord_FlushAll(t *testing.T) {
 			assert.Equal(t, expectedErr, err)
 			assert.Nil(t, resp)
 		})
+	})
+}
+
+func TestMixCoordDropCollectionDataView(t *testing.T) {
+	mockey.PatchConvey("delegate collection data view deletion to datacoord", t, func() {
+		dataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{datacoordServer: dataCoord}
+		mockey.Mock((*datacoord.Server).DropCollectionDataView).
+			To(func(ctx context.Context, collectionID int64) error {
+				assert.Equal(t, int64(100), collectionID)
+				return nil
+			}).Build()
+
+		assert.NoError(t, coord.DropCollectionDataView(context.Background(), 100))
+	})
+}
+
+func TestMixCoordInitializesBeforeStartingDataAndQueryCoord(t *testing.T) {
+	mockey.PatchConvey("initialize both coordinators before starting background workers", t, func() {
+		dataCoord := &datacoord.Server{}
+		queryCoord := &querycoordv2.Server{}
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			datacoordServer:  dataCoord,
+			queryCoordServer: queryCoord,
+		}
+		var initialized atomic.Int32
+		var startedTooEarly atomic.Bool
+
+		mockey.Mock((*datacoord.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*datacoord.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+
+		assert.NoError(t, coord.initDataAndQueryCoord())
+		assert.Equal(t, int32(2), initialized.Load())
+		assert.False(t, startedTooEarly.Load())
 	})
 }
 

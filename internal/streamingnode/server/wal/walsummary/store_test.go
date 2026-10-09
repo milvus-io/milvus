@@ -17,10 +17,13 @@
 package walsummary
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,6 +81,64 @@ func TestMarshalUnmarshalChunkRoundTrip(t *testing.T) {
 	assert.Equal(t, []uint64{100, 102}, timeticks(decoded["v1"].Inserts))
 	assert.Equal(t, []uint64{101}, timeticks(decoded["v2"].Inserts))
 	assert.Equal(t, []int64{100}, decoded["v1"].Inserts[0].GetIds().GetIntId().GetData())
+}
+
+func TestChunkEncodingMatchesSeparateMarshal(t *testing.T) {
+	sections := map[string]*ChunkSections{
+		"keyed":   idempotencySections(pair(100, strings.Repeat("key", 4096), []int64{7, 8}, []uint32{0, 1})),
+		"unkeyed": idempotencySections(pair(102, "", []int64{9}, nil)),
+		"delete-only": {Transform: []*streamingpb.VChannelSummaryTransformRecord{{TimeTick: 103, Delete: &streamingpb.TransformDeleteEntry{
+			Blocks: []*streamingpb.TransformDeleteBlock{{PartitionId: 10, PrimaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}},
+			}}},
+		}}}},
+		"empty": {},
+	}
+	coverage := testRecordCoverage(sections)
+	actual, footer, err := marshalChunk("p1", 7, 1, sections, coverage)
+	require.NoError(t, err)
+	// Reproduce the previous encoder's temporary payload + Buffer.Write path.
+	// Comparing the entire object also verifies offsets, lengths and checksum.
+	patch := mockey.Mock(marshalIntoBuffer).IncludeCurrentGoRoutine().To(func(buf *bytes.Buffer, msg proto.Message) ([]byte, error) {
+		payload, err := marshalOptions.Marshal(msg)
+		if err == nil {
+			buf.Write(payload)
+		}
+		return payload, err
+	}).Build()
+	defer patch.UnPatch()
+	expected, expectedFooter, err := marshalChunk("p1", 7, 1, sections, coverage)
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+	require.True(t, proto.Equal(expectedFooter, footer))
+	decoded, _, err := unmarshalChunk(actual)
+	require.NoError(t, err)
+	require.Len(t, decoded, 3)
+	require.Len(t, decoded["keyed"].Idempotency, 1)
+	require.Empty(t, decoded["unkeyed"].Idempotency, "unkeyed sections are omitted from storage")
+}
+
+func TestMarshalIntoBufferCommitsOnlyValidEncoding(t *testing.T) {
+	prefix := []byte("existing chunk prefix")
+	buf := bytes.NewBuffer(append([]byte(nil), prefix...))
+	msg := &streamingpb.VChannelSummaryIdempotencyRecord{Key: "first"}
+	for _, key := range []string{"first", strings.Repeat("large", 4096)} {
+		msg.Key = key // Size must be recomputed after changing a message.
+		offset := buf.Len()
+		payload, err := marshalIntoBuffer(buf, msg)
+		require.NoError(t, err)
+		expected, err := marshalOptions.Marshal(msg)
+		require.NoError(t, err)
+		require.Equal(t, expected, payload)
+		require.Same(t, &buf.Bytes()[offset], &payload[0])
+	}
+	before := append([]byte(nil), buf.Bytes()...)
+	msg.Key = "\xff" // Invalid protobuf UTF-8 cannot commit a partial section.
+	payload, err := marshalIntoBuffer(buf, msg)
+	require.Error(t, err)
+	require.Nil(t, payload)
+	require.Equal(t, before, buf.Bytes())
+	require.Equal(t, prefix, buf.Bytes()[:len(prefix)])
 }
 
 func TestUnmarshalChunkCorrupted(t *testing.T) {

@@ -19,13 +19,22 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"sort"
 
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -57,7 +66,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		return err
 	}
 
-	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	legacyLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
 	// Node numbers are checked for a first load, and not for a config update
 	// on a loaded collection, which is master's rule and stays the stock
 	// binary's. With a form installed, a request that names resource groups
@@ -88,8 +97,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	checkNodeNum := currentLoadConfig.Collection == nil ||
-		(extension.FormInstalled() && len(scopedResourceGroups) > 0 && scopedLoadAddsReplicas(requestedReplicasNumber, currentLoadConfig))
+	checkNodeNum := legacyLoadConfig.Collection == nil ||
+		(extension.FormInstalled() && len(scopedResourceGroups) > 0 && scopedLoadAddsReplicas(requestedReplicasNumber, legacyLoadConfig))
 	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
 	if err != nil {
 		return err
@@ -102,11 +111,11 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	// that resolved the configuration, so both are decided from one reading of
 	// it.
 	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
-		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, currentLoadConfig)
+		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, legacyLoadConfig)
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
-		Current:        currentLoadConfig,
+		Current:        legacyLoadConfig,
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
@@ -116,7 +125,16 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
 	}
-	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
+
+	currentLoadConfig := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
+	msg, err := s.generateAlterLoadConfigMessageForLoadCollection(ctx, coll, currentLoadConfig, qviewsExpectedLoadConfig{
+		PartitionIDs:             partitionIDs,
+		ReplicaNumber:            expectedReplicasNumber,
+		FieldIndexID:             req.GetFieldIndexID(),
+		LoadFields:               req.GetLoadFields(),
+		Priority:                 req.GetPriority(),
+		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
+	})
 	if err != nil {
 		return err
 	}
@@ -197,6 +215,160 @@ func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
 	return replicaNumber, resourceGroups, true
 }
 
+type qviewsExpectedLoadConfig struct {
+	PartitionIDs             []int64
+	ReplicaNumber            map[string]int
+	FieldIndexID             map[int64]int64
+	LoadFields               []int64
+	Priority                 commonpb.LoadPriority
+	UserSpecifiedReplicaMode bool
+}
+
+func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
+	ctx context.Context,
+	coll *milvuspb.DescribeCollectionResponse,
+	current *loadmgr.LoadConfig,
+	expected qviewsExpectedLoadConfig,
+) (message.BroadcastMutableMessage, error) {
+	replicas, err := s.generateQViewsReplicaConfigs(ctx, current, expected)
+	if err != nil {
+		return nil, err
+	}
+	header := &messagespb.AlterLoadConfigMessageHeader{
+		DbId:                     coll.GetDbId(),
+		CollectionId:             coll.GetCollectionID(),
+		PartitionIds:             sortedInt64s(expected.PartitionIDs),
+		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
+		Replicas:                 replicas,
+		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
+	}
+	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
+		return nil, nil
+	}
+	return message.NewAlterLoadConfigMessageBuilderV2().
+		WithHeader(header).
+		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
+		WithControlChannelBroadcast().
+		MustBuildBroadcast(), nil
+}
+
+func (s *Server) generateQViewsReplicaConfigs(
+	ctx context.Context,
+	current *loadmgr.LoadConfig,
+	expected qviewsExpectedLoadConfig,
+) ([]*messagespb.LoadReplicaConfig, error) {
+	existingReplicaNum := make(map[string]int)
+	redundantReplicas := make([]int64, 0)
+	replicaConfigs := make([]*messagespb.LoadReplicaConfig, 0)
+	currentReplicas := sortedReplicaAssignments(current)
+	for _, replica := range currentReplicas {
+		rgName := replica.ResourceGroup
+		if existingReplicaNum[rgName] >= expected.ReplicaNumber[rgName] {
+			redundantReplicas = append(redundantReplicas, replica.ReplicaID)
+			continue
+		}
+		replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replica.ReplicaID, rgName, replica.Priority))
+		existingReplicaNum[rgName]++
+	}
+
+	rgNames := lo.Keys(expected.ReplicaNumber)
+	sort.Strings(rgNames)
+	for _, rgName := range rgNames {
+		for i := existingReplicaNum[rgName]; i < expected.ReplicaNumber[rgName]; i++ {
+			if len(redundantReplicas) > 0 {
+				replicaID := redundantReplicas[0]
+				redundantReplicas = redundantReplicas[1:]
+				replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replicaID, rgName, expected.Priority))
+				continue
+			}
+			replicaID, err := s.meta.AllocateReplicaID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replicaID, rgName, expected.Priority))
+		}
+	}
+	sort.Slice(replicaConfigs, func(i, j int) bool {
+		return replicaConfigs[i].GetReplicaId() < replicaConfigs[j].GetReplicaId()
+	})
+	return replicaConfigs, nil
+}
+
+func newLoadReplicaConfig(replicaID int64, rgName string, priority commonpb.LoadPriority) *messagespb.LoadReplicaConfig {
+	return &messagespb.LoadReplicaConfig{
+		ReplicaId:         replicaID,
+		ResourceGroupName: rgName,
+		Priority:          priority,
+	}
+}
+
+func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.AlterLoadConfigMessageHeader {
+	if cfg == nil {
+		return nil
+	}
+	replicas := lo.Map(sortedReplicaAssignments(cfg), func(replica *loadmgr.ReplicaAssignment, _ int) *messagespb.LoadReplicaConfig {
+		return &messagespb.LoadReplicaConfig{
+			ReplicaId:         replica.ReplicaID,
+			ResourceGroupName: replica.ResourceGroup,
+			Priority:          replica.Priority,
+		}
+	})
+	return &messagespb.AlterLoadConfigMessageHeader{
+		DbId:                     cfg.DbID,
+		CollectionId:             cfg.CollectionID,
+		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
+		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
+		Replicas:                 replicas,
+		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
+	}
+}
+
+func sortedReplicaAssignments(cfg *loadmgr.LoadConfig) []*loadmgr.ReplicaAssignment {
+	if cfg == nil {
+		return nil
+	}
+	replicas := append([]*loadmgr.ReplicaAssignment{}, cfg.Replicas...)
+	sort.Slice(replicas, func(i, j int) bool {
+		return replicas[i].ReplicaID < replicas[j].ReplicaID
+	})
+	return replicas
+}
+
+func generateQViewsLoadFields(loadedFields []int64, fieldIndexID map[int64]int64) []*messagespb.LoadFieldConfig {
+	loadFields := lo.Map(loadedFields, func(fieldID int64, _ int) *messagespb.LoadFieldConfig {
+		return &messagespb.LoadFieldConfig{
+			FieldId: fieldID,
+			IndexId: fieldIndexID[fieldID],
+		}
+	})
+	sort.Slice(loadFields, func(i, j int) bool {
+		return loadFields[i].GetFieldId() < loadFields[j].GetFieldId()
+	})
+	return loadFields
+}
+
+func cloneAndSortLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+	out := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, &messagespb.LoadFieldConfig{
+			FieldId: field.GetFieldId(),
+			IndexId: field.GetIndexId(),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GetFieldId() < out[j].GetFieldId()
+	})
+	return out
+}
+
+func sortedInt64s(values []int64) []int64 {
+	out := append([]int64{}, values...)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i] < out[j]
+	})
+	return out
+}
+
 // getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.
 func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, error) {
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
@@ -224,6 +396,9 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 }
 
 func (s *Server) getCurrentLoadConfig(ctx context.Context, collectionID int64) job.CurrentLoadConfig {
+	if s.qviewsRuntime != nil {
+		return qviewsCurrentLoadConfig(s.qviewsRuntime.loadConfigStore.GetConfig(collectionID))
+	}
 	partitionList := s.meta.GetPartitionsByCollection(ctx, collectionID)
 	loadedPartitions := make(map[int64]*meta.Partition)
 	for _, partitioin := range partitionList {
@@ -240,4 +415,28 @@ func (s *Server) getCurrentLoadConfig(ctx context.Context, collectionID int64) j
 		Partitions: loadedPartitions,
 		Replicas:   loadedReplicas,
 	}
+}
+
+// qviewsCurrentLoadConfig adapts desired placement to the existing admission
+// checks without consulting the legacy collection/replica caches.
+func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
+	current := job.CurrentLoadConfig{Partitions: make(map[int64]*meta.Partition), Replicas: make(map[int64]*meta.Replica)}
+	if cfg == nil {
+		return current
+	}
+	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
+	for _, field := range cfg.LoadFields {
+		info.LoadFields = append(info.LoadFields, field.GetFieldId())
+		if field.GetIndexId() != 0 {
+			info.FieldIndexID[field.GetFieldId()] = field.GetIndexId()
+		}
+	}
+	current.Collection = &meta.Collection{CollectionLoadInfo: info}
+	for _, id := range cfg.PartitionIDs {
+		current.Partitions[id] = &meta.Partition{PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: cfg.CollectionID, PartitionID: id, Status: querypb.LoadStatus_Loaded}}
+	}
+	for _, replica := range cfg.Replicas {
+		current.Replicas[replica.ReplicaID] = meta.NewReplicaWithPriority(&querypb.Replica{ID: replica.ReplicaID, CollectionID: cfg.CollectionID, ResourceGroup: replica.ResourceGroup}, replica.Priority)
+	}
+	return current
 }

@@ -279,6 +279,7 @@ message StreamingNodeInfo {
 
 // StreamingNodeAssignment is the assignment info of a streaming node.
 message StreamingNodeAssignment {
+    repeated PChannelInfo secondary_channels = 3;
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
 }
@@ -361,6 +362,7 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
@@ -756,6 +758,7 @@ message VChannelSummaryInsertRecord {
 // Client: log coord. There should be only one client globally to call this
 // service on all streamingnode.
 service StreamingNodeManagerService {
+    rpc ValidateRuntime(StreamingNodeManagerValidateRuntimeRequest) returns (StreamingNodeManagerValidateRuntimeResponse) {};
     // Assign is a unary RPC to assign a channel on a log node.
     // Block until the channel assignd is ready to read or write on the log
     // node. Error: If the channel already exists, return error with code
@@ -830,7 +833,12 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
+    view.DataVersion segment_data_version_summary = 6;
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
+    // Immutable per-VChannel CreateCollection TimeTick. Protects TransformLog
+    // history independently of materialization and local Segment lifetime.
+    uint64 create_collection_time_tick = 7;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -997,4 +1005,129 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+message CreateTransformSubscriptionRequest {
+    uint64 end_time_tick = 4;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+}
+
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+    }
+}
+
+message CreateTransformSubscriptionResponse {
+    uint64 end_time_tick = 5;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+
+    // Current SN TransformLog truncation cursor.
+    uint64 truncate_time_tick = 4;
+}
+
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Every requested transform through this TimeTick has been delivered.
+    // This is readable coverage, not a persistence acknowledgement.
+    uint64 time_tick = 3;
+}
+
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
+}
+
+// Legacy wire definition; WALSummary owns current transform storage.
+message TransformLogChunk {
+    uint64 chunk_id = 1;
+    repeated TransformLogEntry entries = 2;
+}
+
+// Legacy wire definition; not used by RecoveryStorage catalog persistence.
+message VChannelTransformLogMeta {
+    // TransformLog durable frontier published in recovery catalog.
+    uint64 checkpoint_time_tick = 1;
+
+    // Entries with time_tick <= truncate_time_tick may be removed.
+    uint64 truncate_time_tick = 2;
+
+    // Retained dense chunk id range: [first_chunk_id, next_chunk_id).
+    uint64 first_chunk_id = 3;
+    uint64 next_chunk_id = 4;
+
+    // L0 materializer cursor.
+    uint64 materialized_time_tick = 5;
+}
+
+message StreamingNodeRuntimeAnalyzerInfo {
+    string params = 1;
+    string field = 2;
+    string name = 3;
+}
+
+message StreamingNodeRuntimeAnalyzerValidation {
+    repeated StreamingNodeRuntimeAnalyzerInfo analyzer_infos = 1;
+}
+
+message StreamingNodeManagerValidateRuntimeRequest {
+    oneof validation {
+        StreamingNodeRuntimeAnalyzerValidation analyzer = 1;
+    }
+}
+
+message StreamingNodeManagerValidateRuntimeResponse {
+    common.Status status = 1;
+    repeated int64 resource_ids = 2;
 }

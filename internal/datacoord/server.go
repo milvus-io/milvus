@@ -94,12 +94,14 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
-	ctx              context.Context
-	serverLoopCtx    context.Context
-	serverLoopCancel context.CancelFunc
-	serverLoopWg     sync.WaitGroup
-	quitCh           chan struct{}
-	stateCode        atomic.Value
+	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
+	queryViewBalanceVersion   atomic.Uint64
+	ctx                       context.Context
+	serverLoopCtx             context.Context
+	serverLoopCancel          context.CancelFunc
+	serverLoopWg              sync.WaitGroup
+	quitCh                    chan struct{}
+	stateCode                 atomic.Value
 
 	etcdCli                             *clientv3.Client
 	tikvCli                             *txnkv.Client
@@ -210,15 +212,16 @@ func WithSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                 ctx,
-		quitCh:              make(chan struct{}),
-		factory:             factory,
-		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
-		dataNodeCreator:     defaultDataNodeCreatorFunc,
-		importJobLock:       lock.NewKeyLock[int64](),
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
-		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		ctx:                       ctx,
+		quitCh:                    make(chan struct{}),
+		factory:                   factory,
+		flushCh:                   make(chan UniqueID, 1024),
+		notifyIndexChan:           make(chan UniqueID, 1024),
+		queryViewLoadInfoNotifier: noopQueryViewLoadInfoNotifier{},
+		dataNodeCreator:           defaultDataNodeCreatorFunc,
+		importJobLock:             lock.NewKeyLock[int64](),
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+		metricsRequest:            metricsinfo.NewMetricsRequest(),
 	}
 
 	for _, opt := range opts {
@@ -318,10 +321,6 @@ func (s *Server) initDataCoord() error {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
-	if err != nil {
-		return err
-	}
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -660,6 +659,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
+	var recoveredImports ImportMeta
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		recoveredImports, err = NewImportMeta(s.ctx, catalog, s.allocator, recoveredMeta)
+		return err
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
@@ -675,6 +683,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			}),
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -682,8 +693,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
+	recoveredMeta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
 	recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
+	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	return nil
 }

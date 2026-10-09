@@ -9,12 +9,11 @@
 `VChannelRecoveryModule` for QueryRuntime. It is not a RecoveryStorage API and
 does not participate in the global checkpoint protocol.
 
-> Status: design intent. `VChannelWALView` and the QueryRuntime integration
-> chain (`QueryViewStateMachine.Acquire` → `PChannelRecoveryManager.Acquire` →
-> `VChannelRecoveryModule.queryWALViewLocked` → `QueryRuntime.Initialize`) are
-> **not yet implemented** in the current code; they are pending the qviews
-> feature (#51887). TransformLog subscriptions are also a future integration,
-> independent of the [L0Materializer](l0_materializer.md) split targeted by this PR.
+> Status: implemented for SN query resource preparation in this branch.
+> `VChannelRecoveryModule` captures the view and installs a shared QueryRuntime;
+> GrowingRuntime performs bounded Delete replay through the local Summary-backed
+> TransformLog stream. This does not enable QN remote subscriptions or replace
+> the existing WAL L0 materializer.
 
 ## 1. Ownership
 
@@ -31,7 +30,7 @@ The VChannel module must coordinate these inputs for a no-gap view:
 - VChannel and schema history;
 - growing Segment stable and pending state;
 - Segment lifecycle and durable commit state;
-- WALSummary readable history through the future TransformLog adaptor;
+- WALSummary readable history through the local TransformLog adaptor;
 - the live message observation path.
 
 ## 2. Runtime Frontiers
@@ -67,21 +66,34 @@ buffers, pending tasks, or WALSummary records. Messages observed afterward see
 the installed QueryRuntime and enter its pending event queue.
 
 The captured Transform boundary describes the snapshot's required WAL prefix,
-not L0Materializer's cursor. Bounded replay through the future TransformLog
+not L0Materializer's cursor. Bounded replay through the local TransformLog
 adaptor must wait until Summary can completely provide that range before
 reporting SyncUp/completion. Do not lower the required end because a sampled
 Summary frontier is behind, or raise it to recovered Summary history ahead of
-VChannel observation. The target observation order installs Summary records
-before VChannel state/window updates; snapshot capture must preserve the same
-no-gap guarantee when future query wiring is added.
+VChannel observation. RecoveryStorage installs Summary records before VChannel state/window updates;
+snapshot capture and runtime registration preserve the same no-gap guarantee.
 
 Protect the history before GC can remove it and hold that requirement through
-preparation. An already truncated start is an error, not an empty replay.
+preparation. The current adaptor accepts a start below Summary's lower bound
+and replays the retained suffix. This can complete an entirely skipped interval
+without entries; it does not prove the skipped interval had no Deletes. The
+[reliable retention TODO](summary.md#todo-reliable-retention-for-query-recovery)
+tracks the full recovery/GC guarantee.
 Neither L0 completion nor a subscription's delivery cursor proves that retained
 QueryViews no longer need historical Delete data.
 
-QueryRuntime receives ordinary immutable copies and never retains Message Ack
-handles.
+QueryRuntime receives ordinary immutable message references and never retains
+Message Ack handles. Snapshot capture and live delivery share the original
+payloads, including complete transactions. Releasing persistence handles clears
+the recovery owner's references; Go references held by query work keep the
+immutable data alive without delaying Ack completion. Consumers must not mutate
+the shared messages or their cached Body results.
+
+The [Immutable Message Body Cache](message_body_cache.md) shares read-only
+decoded bodies across RecoveryStorage and query consumers, with synchronous
+LRU capacity eviction and process-wide asynchronous idle expiry. Consumers copy execution metadata and field wrappers
+before timestamp replacement, validity normalization or legacy function-output
+materialization; large column values remain borrowed read-only.
 
 ## 4. Startup Readiness
 
@@ -123,3 +135,237 @@ There is no second recovery checkpoint tied to this lifecycle classification.
 3. QueryRuntime owns no RecoveryStorage handle.
 4. Runtime MVCC frontiers are not global recovery checkpoints.
 5. Readiness depends on concrete component state, not dual recovery phases.
+
+## 7. Current Preparation Flow
+
+1. A Preparing QueryView, or a recovered Up view in UpRecovering, calls the
+   PChannel resource manager's `Acquire`. The VChannel owner rejects inactive
+   channels and versions older than its retained segment-data floor.
+2. Under the VChannel lock, capture the schema, stable/pending segment snapshot,
+   requested DataVersion and observed TimeTick T. Install the runtime before
+   releasing the lock so subsequent messages enter its pending event queue.
+   A missing write-path state or incomplete final segment commit defers capture.
+3. Resolve partitions, loaded fields and indexes through `GetQueryViewLoadInfo`
+   when `load_info_version` is nonzero. The current minimal Coord implementation
+   supplies current load metadata; this is not a historical load-config store.
+4. GrowingRuntime creates segcore resources, loads persisted growing data and
+   replays snapshot Insert/Txn tails. Segments sealed after the requested
+   DataVersion remain queryable for that older view.
+5. GrowingRuntime subscribes to TransformLog for `(start, T]` and applies its
+   Delete entries. `start` is the maximum of the earliest retained segment's
+   creation TimeTick minus one (zero for missing legacy timestamps) and the
+   QueryView's transform start. With no visible segments, start equals T.
+   The adaptor clamps start to Summary's lower bound, then waits for and delivers
+   the retained interval through T. If T is at or below that bound, it completes
+   without entries at T. Missing/corrupt retained resources still fail preparation.
+   The current consumer buffers the full interval before applying entries;
+   bounded replay here refers to the interval, not total consumer memory. The
+   [incremental replay memory TODO](transform_log.md#9-todo-bound-sn-bootstrap-consumer-memory-deferred)
+   is explicitly deferred from this PR.
+6. IDF initializes from sealed statistics fetched for the requested DataVersion
+   and growing statistics from the same snapshot. It maintains one local
+   aggregate as described in [IDF Oracle Runtime](../qviews/snview/idf_oracle_runtime.md).
+7. QueryRuntime applies the initial queued live batch, enters Ready and keeps
+   draining ordered live events. Each QueryView additionally checks that no
+   segment final commit remains pending, publishes any completed sealed
+   notification not yet emitted by the owner callback, and waits for an ordered
+   event barrier. Only then does the callback move Preparing to Ready, or
+   UpRecovering to Up. A newly prepared view still needs Coord's Up instruction
+   before accepting queries. Queries wait for their required Growing/Transform
+   MVCC frontiers before using segment handles.
+
+For this bounded SN bootstrap, SyncUp(T) proves delivery through the captured
+snapshot boundary T. GrowingRuntime applies all collected Delete entries before
+publishing its base frontiers; SyncUp receipt alone does not complete resource
+preparation. The subsequent live-event barrier provides additional applied
+progress before reporting the view Ready. This is distinct from the QN
+use of unbounded SyncUp to establish catch-up to a sampled current tail. Neither
+path guarantees zero lag from new writes between readiness and Up. See
+[SyncUp's two roles](transform_log.md#3-entry-and-syncup-semantics).
+
+Later QueryViews on this VChannel reuse the runtime, without repeating initial
+TransformLog replay. They repeat the same commit check and applied-event barrier;
+an initialized runtime alone does not certify a new view's readiness. Their
+explicit DataVersions prepare the single shared IDF aggregate before readiness.
+Eager initialization loads BM25 resources; optional lazy initialization defers sealed
+resource discovery and materialization until the first BM25 query. Once materialized,
+later preparation applies the target version before reporting Ready. Once
+bootstrap finishes, Insert/Delete/Txn and lifecycle events arrive through the
+VChannel event path, not a second continuous TransformLog subscription.
+
+Implementation references (relative to repository root):
+
+- `internal/streamingnode/server/wal/vchannel/query_resource_module.go`
+- `internal/streamingnode/server/wal/vchannel/queryresource/{manager,runtime}.go`
+- `internal/streamingnode/server/wal/vchannel/growingruntime/{builder,delete_replay,live}.go`
+- `internal/streamingnode/server/wal/walsummary/stream.go`
+
+## 8. Preparation Retry and Loaded Partition Scope
+
+An initialization timeout or resource-read failure classified as locally
+retryable keeps the view in Preparing. NodeScheduler retries with backoff even
+if no new WAL message arrives.
+Each failed attempt closes its partial modules and buffered events outside the
+owner/manager locks. The next attempt captures a fresh snapshot and installs a
+fresh QueryRuntime under the same VChannel lock. It never reuses partially
+prepared modules. A released/cancelled build cannot install a replacement or
+report Ready for a later acquisition. Explicit data-integrity failures report
+Unrecoverable; owner cancellation stops the build. An older TransformLog start
+is accepted under the lower-bound compatibility policy described above.
+
+### Preparation failure ownership
+
+The intended contract assigns recovery to the component capable of resolving
+the failure:
+
+- **Worknode:** recoverable failures that can be resolved locally, such as
+  temporary storage/network failures, incomplete segment commits and short-lived
+  admission pressure. Keep the view Preparing and retry with backoff without
+  requiring Coord to replace it. Retry must preserve atomic publication and
+  discard partial initial builds as described above.
+- **Coord:** failures that cannot be repaired by retrying the current view on
+  this node, including unavailable required history, corrupt required data, an
+  unsatisfiable DataVersion, or insufficient capacity requiring a different
+  placement/resource allocation. The node exposes an Unrecoverable view so Coord
+  can orchestrate replacement, reassignment or cleanup. Coord ownership does not
+  guarantee that a replacement can repair permanent data loss or corruption.
+
+Unrecoverable is relative to the current view and node assignment; it does not
+mean that the shard is permanently unrecoverable. A temporary full queue or
+service throttle is distinct from a resource requirement the node cannot meet.
+Cancellation caused by release, shutdown or WAL handoff ends local work; it is
+not a new preparation failure to retry indefinitely.
+
+**Implementation gap / TODO:** the current `retryablePreparationError` allowlist
+does not fully implement this ownership contract. Some transient object-storage
+failures reach it as non-retryable `ErrIoFailed` and can make a view Unrecoverable.
+Conversely, it treats gRPC `ResourceExhausted` as retryable without distinguishing
+temporary throttling from capacity that requires Coord intervention. Error
+classification must reflect whether this node can recover, rather than relying
+on a broad status code alone. This documentation update does not change the
+classifier.
+
+For Preparing, `OnUnrecoverable` reports the failure to Coord. SN recovery retains
+the existing UpRecovering exception: a local recovery failure preserves the Up
+record and does not directly report Unrecoverable; the query error path is
+expected to trigger replacement. Full Coord/Proxy orchestration is outside this
+extraction, so this existing path is not evidence that the final recovery
+ownership protocol is fully integrated. See the
+[state machine](../qviews/query_view_state_machine.md#24-uprecovering-streamingnode-only-proto-state).
+
+### Live application failures: current PR decision
+
+The preparation retry protocol above does not apply to live events. In this PR,
+GrowingRuntime and IDF keep their fail-fast behavior: an application error
+panics the SN process. Do not skip the event, advance its MVCC frontier, or retry
+the entire event on the existing runtime. A transaction or multi-segment event
+may already have modified earlier segments/modules; segcore Insert reserves row
+offsets and writes columns without a whole-event rollback guarantee.
+
+This is an explicit scope/complexity tradeoff, not a claim that every error is
+permanent. Invariant violations and malformed data require investigation;
+resource failures such as native allocation failure may recover after capacity
+changes, but safe local runtime replacement is not implemented. Retain this
+behavior until a separate design defines failed-runtime isolation, rebuilding
+and the Ready/Up reporting protocol. The current `OnUnrecoverable` callback only
+handles Preparing/UpRecovering and is not sufficient for live failure recovery.
+
+Message decryption handles recoverable dependency failures with backoff before
+consumer application; see [decryption retry](message_body_cache.md#decryption-failures-and-retry).
+BM25/MinHash output is normally generated before WAL append. Older WAL and
+disabled/upgrade-period write-before materialization still use consumer-side
+compatibility filling; this PR retains its failure behavior rather than adding
+a new recovery mechanism for that compatibility path.
+
+Known limitation: legacy delegator Delete supports retries and marks failed
+segments offline for QueryCoord repair. New SN live Delete does not implement
+that retry/offline path; a returned Delete error follows the same panic path as
+Insert. Historical Delete replay during Prepare instead returns errors to the
+preparation machinery. Pending live events drained at the end of initialization
+still use live application and can panic.
+
+RecoveryStorage's existing PoisonedRelease protocol protects persistence/Ack
+completion and WAL retention. QueryRuntime owns plain immutable references,
+not persistence handles, so it does not participate in that protocol. Future
+query failure isolation must not make query progress gate persistence Ack or
+the global recovery checkpoint.
+
+### Loaded partition scope
+
+Once load metadata is resolved, its partition list is authoritative for the
+runtime: an empty list means no loaded partitions. A nil list in a legacy,
+unresolved WAL-only snapshot preserves the unrestricted behavior. Growing
+snapshot loading, live segment creation/inserts, candidate probing and handle
+acquisition all obey the prepared scope. An empty request partition list means
+all partitions in that scope; explicitly requesting an unloaded partition fails.
+IDF initialization and refresh filter both growing contributions and sealed
+resource descriptors using the same nil-versus-empty load-scope convention.
+
+TODO(#40451, pending discussion): a later QueryView with a different
+load_info_version or schema still reuses the initial runtime/load scope. It does
+not yet trigger resource-spec reconciliation or replacement. The minimal Coord
+load-info RPC also lacks exact historical-version resolution. This follow-up
+must define old/new resource ownership across Up leases while retaining one
+shared current BM25 aggregate. The partition-scope fix does not implement this
+load-config transition protocol.
+
+## 9. QueryView Readiness and Version Ordering
+
+The VChannel owner checks all current segments before each view's ready callback.
+Open growing segments do not need to flush; closing segments must finish their
+final commit. An incomplete commit delays the ready task with scheduler backoff,
+without occupying a worker waiting for the commit task. This conservative check
+can delay preparation while commits continuously overlap.
+
+`finalCommitDone` remains a durable-write fact, not proof of query visibility.
+The final task installs `SealedAtDataVersion` before its owner notification. Under
+the owner lock, the ready check therefore publishes completed sealed metadata
+itself when necessary, using the normal notification deduplication. It then queues
+an event barrier under the same lock and, after enqueue succeeds, waits for its
+completion without owner/manager locks. The barrier proves that the querying
+modules have applied the handoff metadata.
+Runtime closure wakes discarded-barrier waiters; after preparation the manager
+rechecks the view reference and runtime identity before reporting Ready.
+
+The resource manager maintains two distinct version boundaries:
+
+- Admission uses the highest DataVersion already accepted during the current
+  runtime/reference lifetime. A lower new acquisition is rejected through
+  `OnUnrecoverable`, including acquisitions from a different replica. Equal
+  versions and idempotent existing references remain valid. Removing the highest
+  reference does not lower this boundary; already retained older views continue
+  serving according to their lifecycle and leases.
+- Reclamation uses the minimum DataVersion among retained references. Reference
+  removal, recomputing this minimum and delivering `Advance` are serialized by
+  the manager. Runtime keeps its non-monotonic advance assertion. Initialization's
+  final watermark application, subsequent advances, live events and module close
+  share the runtime's application lock, preventing a recorded initial watermark
+  from overtaking or being overtaken by a later module advance.
+
+Object-storage work in `BeforeRelease` and external ready/dropped callbacks run
+outside these critical sections. The single current BM25 aggregate and deferred
+Delete replay memory optimization remain unchanged.
+
+Dropping the last reference cancels an outstanding initial build, but cancellation
+does not end a running `Prepare` or C call. Resource closure and `OnDropped` must
+wait for the scheduler handle to finish, including a canceled build that never
+started. A short-lived cleanup goroutine performs this wait outside the shard,
+owner and manager locks and without occupying a scheduler worker. `Manager.Close`
+also drains these detached builds. A subsequent acquisition may create a new
+runtime; the old build's completion cannot publish readiness for that runtime.
+
+### Deferred: slow-consumer backpressure and cancellation
+
+TODO(#40451, explicitly deferred from this PR): when GrowingRuntime consumption
+falls behind, the bounded pending event queue can fill. Enqueue then waits for
+capacity while the caller holds the VChannel owner lock, backpressuring the
+RecoveryStorage observation path and potentially delaying other VChannels on the
+same PChannel. The capacity wait currently does not wake on context cancellation
+alone; it needs capacity progress or runtime closure to unblock.
+
+This is a performance/availability degradation under sustained backlog or a
+stalled consumer. It does not let a readiness barrier overtake preceding events
+or replace the query's applied-MVCC checks. Keep the current implementation in
+this PR. A follow-up should make admission cancellation-aware and assess how to
+avoid prolonged owner-lock waits while preserving event order and backpressure,
+with full-queue slow-consumer and cancellation coverage.
