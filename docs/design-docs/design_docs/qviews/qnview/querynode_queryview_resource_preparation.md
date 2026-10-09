@@ -63,6 +63,16 @@ QueryNode.NewQueryViewSegmentManager
 | `QueryViewCollectionRuntimeManager` | Pins local collection runtime using collection schema/load metadata and exposes index meta update for segment load. |
 | `TransformLogBuffer` | Pins the view-level transform range and registers loaded sealed segments for catch-up. |
 
+The production construction entry point requires a load resource budget, chunk
+manager, collection metadata provider, TransformLog stream manager, and one
+`SegmentLoadInfoStreamFactory`. Missing dependencies or a factory returning a
+nil stream fail construction with an internal error before the scheduler or
+background workers are started. Both the QueryNode wrapper and resource
+constructor return `(SegmentManager, error)`; callers must propagate the error
+instead of installing a partially functional manager. This check does not wait
+for remote connectivity; transient transport failures remain the stream's
+reconnection responsibility.
+
 ## 4. Authoritative Acquire Execution Order
 
 This section is the single source of truth for the current QueryNode Acquire
