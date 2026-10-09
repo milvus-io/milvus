@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {
 	{
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			AlterCollectionFunctionRequest: &milvuspb.AlterCollectionFunctionRequest{},
 		}
 		err := task.OnEnqueue()
@@ -108,7 +108,7 @@ func (f *FunctionTaskSuite) TestFunctionOnType() {
 		f.Equal(task.ID(), int64(1))
 		task.SetTs(2)
 		f.Equal(task.EndTs(), uint64(2))
-		f.Equal(task.Name(), AlterCollectionFunctionTask)
+		f.Equal(task.Name(), AlterCollectionFunctionTaskName)
 	}
 }
 
@@ -128,7 +128,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: &schemapb.FunctionSchema{Name: "test"},
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 			mixCoord:                       mixc,
@@ -153,7 +153,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: &schemapb.FunctionSchema{Name: "test"},
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 			mixCoord:                       mixc,
@@ -186,7 +186,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: functionSchema,
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -216,7 +216,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: functionSchema,
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -256,7 +256,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: functionSchema,
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -286,7 +286,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: functionSchema,
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -330,7 +330,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			FunctionSchema: functionSchema,
 		}
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -368,7 +368,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 				OutputFieldNames: []string{"other_vec"},
 			},
 		}
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
@@ -436,7 +436,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskExecute() {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil)
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 			mixCoord:                       mockRootCoord,
@@ -472,7 +472,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskExecute() {
 			Reason:    "test error",
 		}, nil)
 
-		task := &alterCollectionFunctionTask{
+		task := &AlterCollectionFunctionTask{
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 			mixCoord:                       mockRootCoord,
@@ -495,7 +495,7 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskExecuteRPCError() {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "test error",
 	}, nil)
-	task := &alterCollectionFunctionTask{
+	task := &AlterCollectionFunctionTask{
 		Condition:                      NewTaskCondition(ctx),
 		AlterCollectionFunctionRequest: req,
 		mixCoord:                       mockRootCoord,

@@ -1,10 +1,11 @@
-package proxy
+package ddl
 
 import (
 	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -24,13 +25,13 @@ func TestFlushTaskDataCoordCompletion(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			task := &flushTask{
-				baseTask: baseTask{MetaCache: &MetaCache{}},
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "db", mock.Anything).Return(int64(100), nil).Maybe()
+			task := &FlushTask{
+				baseTask: baseTask{MetaCache: cache},
 				ctx:      ctx, mixCoord: &flushMixCoordClient{},
 				FlushRequest: &milvuspb.FlushRequest{DbName: "db", CollectionNames: []string{"a", "b"}},
 			}
-			patchID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
-			defer patchID.UnPatch()
 			calls := 0
 			patchFlush := mockey.Mock((*flushMixCoordClient).Flush).To(func(_ *flushMixCoordClient, _ context.Context, req *datapb.FlushRequest, _ ...grpc.CallOption) (*datapb.FlushResponse, error) {
 				calls++

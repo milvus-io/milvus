@@ -27,6 +27,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -343,20 +348,12 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 
 	paramtable.Init()
 
-	task := &CreateAliasTask{
-		baseTask: baseTask{
-			MetaCache: cache,
-		},
-		Condition: NewTaskCondition(ctx),
-		CreateAliasRequest: &milvuspb.CreateAliasRequest{
-			Base:           &commonpb.MsgBase{},
-			DbName:         "default",
-			CollectionName: "existing_alias",
-			Alias:          "new_alias",
-		},
-		ctx:      ctx,
-		mixCoord: mockCoord,
-	}
+	task := NewCreateAliasTask(ctx, &mockAliasNode{metaCache: cache}, &milvuspb.CreateAliasRequest{
+		Base:           &commonpb.MsgBase{},
+		DbName:         "default",
+		CollectionName: "existing_alias",
+		Alias:          "new_alias",
+	})
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -377,20 +374,12 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 
 	paramtable.Init()
 
-	task := &AlterAliasTask{
-		baseTask: baseTask{
-			MetaCache: cache,
-		},
-		Condition: NewTaskCondition(ctx),
-		AlterAliasRequest: &milvuspb.AlterAliasRequest{
-			Base:           &commonpb.MsgBase{},
-			DbName:         "default",
-			CollectionName: "existing_alias",
-			Alias:          "some_alias",
-		},
-		ctx:      ctx,
-		mixCoord: mockCoord,
-	}
+	task := NewAlterAliasTask(ctx, &mockAliasNode{metaCache: cache}, &milvuspb.AlterAliasRequest{
+		Base:           &commonpb.MsgBase{},
+		DbName:         "default",
+		CollectionName: "existing_alias",
+		Alias:          "some_alias",
+	})
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -414,20 +403,12 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 	paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
 	defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
 
-	task := &CreateAliasTask{
-		baseTask: baseTask{
-			MetaCache: cache,
-		},
-		Condition: NewTaskCondition(ctx),
-		CreateAliasRequest: &milvuspb.CreateAliasRequest{
-			Base:           &commonpb.MsgBase{},
-			DbName:         "default",
-			CollectionName: "existing_alias",
-			Alias:          "new_alias",
-		},
-		ctx:      ctx,
-		mixCoord: mockCoord,
-	}
+	task := NewCreateAliasTask(ctx, &mockAliasNode{metaCache: cache}, &milvuspb.CreateAliasRequest{
+		Base:           &commonpb.MsgBase{},
+		DbName:         "default",
+		CollectionName: "existing_alias",
+		Alias:          "new_alias",
+	})
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -448,19 +429,11 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 
 	paramtable.Init()
 
-	task := &ListAliasesTask{
-		baseTask: baseTask{
-			MetaCache: cache,
-		},
-		Condition: NewTaskCondition(ctx),
-		ListAliasesRequest: &milvuspb.ListAliasesRequest{
-			Base:           &commonpb.MsgBase{},
-			DbName:         "default",
-			CollectionName: "existing_alias",
-		},
-		ctx:      ctx,
-		mixCoord: mockCoord,
-	}
+	task := NewListAliasesTask(ctx, &mockAliasNode{metaCache: cache}, 0, &milvuspb.ListAliasesRequest{
+		Base:           &commonpb.MsgBase{},
+		DbName:         "default",
+		CollectionName: "existing_alias",
+	})
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -476,22 +449,37 @@ func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
 
 	paramtable.Init()
 
-	task := &ListAliasesTask{
-		baseTask: baseTask{
-			MetaCache: cache,
-		},
-		Condition: NewTaskCondition(ctx),
-		ListAliasesRequest: &milvuspb.ListAliasesRequest{
-			Base:   &commonpb.MsgBase{},
-			DbName: "default",
-		},
-		ctx:      ctx,
-		mixCoord: mockCoord,
-	}
+	task := NewListAliasesTask(ctx, &mockAliasNode{metaCache: cache}, 0, &milvuspb.ListAliasesRequest{
+		Base:   &commonpb.MsgBase{},
+		DbName: "default",
+	})
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
 	// CollectionName should remain empty
 	assert.Equal(t, "", task.CollectionName)
 	mockCoord.AssertNotCalled(t, "DescribeCollection")
+}
+
+// mockAliasNode is a taskmodel.TaskNode stub for the alias-resolution tests:
+// only the meta cache is exercised, the remaining contract methods are inert.
+type mockAliasNode struct {
+	metaCache metacache.Cache
+	mixCoord  types.MixCoordClient
+}
+
+func (n *mockAliasNode) GetMetaCache() metacache.Cache        { return n.metaCache }
+func (n *mockAliasNode) MixCoord() types.MixCoordClient       { return n.mixCoord }
+func (n *mockAliasNode) LBPolicy() shardclient.LBPolicy       { return nil }
+func (n *mockAliasNode) ShardMgr() shardclient.ShardClientMgr { return nil }
+func (n *mockAliasNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
+func (n *mockAliasNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
+func (n *mockAliasNode) ResolveRLSEnforcement(_ context.Context, _ metacache.Cache, rlsEnabled, _, _ bool, _, _, _ string) (bool, error) {
+	return rlsEnabled, nil
+}
+func (n *mockAliasNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
+	return nil
+}
+func (n *mockAliasNode) CheckClusterPrivilege(_ context.Context, _ interface{}, _, _ string) error {
+	return nil
 }

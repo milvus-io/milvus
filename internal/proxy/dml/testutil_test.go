@@ -199,6 +199,14 @@ func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, cache metacach
 	return false, nil
 }
 
+func (n *mockTaskNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
+	return nil
+}
+
+func (n *mockTaskNode) CheckClusterPrivilege(_ context.Context, _ interface{}, _, _ string) error {
+	return nil
+}
+
 // mockUpsertNode is a test double for the proxy composition root that the
 // UpsertTask holds as its node. It exposes a writable tsoAllocator and a
 // query method that tests can mockey-patch, mirroring the old *Proxy assertions.

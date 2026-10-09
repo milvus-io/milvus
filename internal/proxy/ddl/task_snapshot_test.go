@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -36,7 +36,7 @@ import (
 // =========================== CreateSnapshotTask Tests ===========================
 
 func TestCreateSnapshotTask_OnEnqueue_Success(t *testing.T) {
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
 			CollectionName: "test_collection",
@@ -57,7 +57,7 @@ func TestCreateSnapshotTask_OnEnqueue_BaseAlreadyExists(t *testing.T) {
 		SourceID: 123,
 	}
 
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Base:           existingBase,
 			Name:           "test_snapshot",
@@ -74,7 +74,7 @@ func TestCreateSnapshotTask_OnEnqueue_BaseAlreadyExists(t *testing.T) {
 
 func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
@@ -95,7 +95,7 @@ func TestCreateSnapshotTask_PreExecute_Success(t *testing.T) {
 
 func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
@@ -116,7 +116,7 @@ func TestCreateSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_ProtectionNegative(t *testing.T) {
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
 			DbName:                      "default",
@@ -131,7 +131,7 @@ func TestCreateSnapshotTask_PreExecute_ProtectionNegative(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PreExecute_ProtectionExceedsMax(t *testing.T) {
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
 			DbName:                      "default",
@@ -147,7 +147,7 @@ func TestCreateSnapshotTask_PreExecute_ProtectionExceedsMax(t *testing.T) {
 
 func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
@@ -166,7 +166,7 @@ func TestCreateSnapshotTask_PreExecute_ProtectionZero(t *testing.T) {
 
 func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:                        "test_snapshot",
@@ -186,7 +186,7 @@ func TestCreateSnapshotTask_PreExecute_ProtectionValid(t *testing.T) {
 
 func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:        "test_snapshot",
 			Description: "test description",
@@ -208,7 +208,7 @@ func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 
 func TestCreateSnapshotTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:        "test_snapshot",
 			Description: "test description",
@@ -228,7 +228,7 @@ func TestCreateSnapshotTask_Execute_MixCoordError(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_PostExecute(t *testing.T) {
-	task := &createSnapshotTask{}
+	task := &CreateSnapshotTask{}
 
 	err := task.PostExecute(context.Background())
 
@@ -236,7 +236,7 @@ func TestCreateSnapshotTask_PostExecute(t *testing.T) {
 }
 
 func TestCreateSnapshotTask_TaskInterface(t *testing.T) {
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		req: &milvuspb.CreateSnapshotRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:     123,
@@ -268,7 +268,7 @@ func TestCreateSnapshotTask_TaskInterface(t *testing.T) {
 // =========================== DropSnapshotTask Tests ===========================
 
 func TestDropSnapshotTask_OnEnqueue_Success(t *testing.T) {
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -284,7 +284,7 @@ func TestDropSnapshotTask_OnEnqueue_Success(t *testing.T) {
 
 func TestDropSnapshotTask_PreExecute(t *testing.T) {
 	cache := &MetaCache{}
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DropSnapshotRequest{
 			Name:           "test_snapshot",
@@ -303,7 +303,7 @@ func TestDropSnapshotTask_PreExecute(t *testing.T) {
 }
 
 func TestDropSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -317,7 +317,7 @@ func TestDropSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
 
 func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 	cache := &MetaCache{}
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DropSnapshotRequest{
 			Name:           "test_snapshot",
@@ -338,7 +338,7 @@ func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
 
 func TestDropSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -357,7 +357,7 @@ func TestDropSnapshotTask_Execute_Success(t *testing.T) {
 
 func TestDropSnapshotTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &dropSnapshotTask{
+	task := &DropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -377,7 +377,7 @@ func TestDropSnapshotTask_Execute_MixCoordError(t *testing.T) {
 // =========================== DescribeSnapshotTask Tests ===========================
 
 func TestDescribeSnapshotTask_OnEnqueue_Success(t *testing.T) {
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -394,7 +394,7 @@ func TestDescribeSnapshotTask_OnEnqueue_Success(t *testing.T) {
 func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
@@ -445,7 +445,7 @@ func TestDescribeSnapshotTask_Execute_Success(t *testing.T) {
 
 func TestDescribeSnapshotTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
 		},
@@ -467,7 +467,7 @@ func TestDescribeSnapshotTask_Execute_MixCoordError(t *testing.T) {
 func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
@@ -502,7 +502,7 @@ func TestDescribeSnapshotTask_Execute_CollectionNameResolutionError(t *testing.T
 func TestDescribeSnapshotTask_Execute_PartitionNameResolutionError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name: "test_snapshot",
@@ -544,7 +544,7 @@ func TestDescribeSnapshotTask_Execute_PartitionNameResolutionError(t *testing.T)
 // =========================== ListSnapshotsTask Tests ===========================
 
 func TestListSnapshotsTask_OnEnqueue_Success(t *testing.T) {
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		req: &milvuspb.ListSnapshotsRequest{
 			CollectionName: "test_collection",
 		},
@@ -560,7 +560,7 @@ func TestListSnapshotsTask_OnEnqueue_Success(t *testing.T) {
 
 func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
@@ -582,7 +582,7 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 
 func TestListSnapshotsTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		req: &milvuspb.ListSnapshotsRequest{
 			CollectionName: "test_collection",
 		},
@@ -609,7 +609,7 @@ func TestListSnapshotsTask_Execute_Success(t *testing.T) {
 // =========================== RestoreSnapshotTask Tests ===========================
 
 func TestRestoreSnapshotTask_OnEnqueue_Success(t *testing.T) {
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:           "test_snapshot",
 			CollectionName: "restored_collection",
@@ -626,7 +626,7 @@ func TestRestoreSnapshotTask_OnEnqueue_Success(t *testing.T) {
 
 func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:           "test_snapshot",
 			CollectionName: "restored_collection",
@@ -652,7 +652,7 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 
 func TestRestoreSnapshotTask_Execute_DataCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:           "test_snapshot",
 			CollectionName: "restored_collection",
@@ -675,7 +675,7 @@ func TestRestoreSnapshotTask_Execute_DataCoordError(t *testing.T) {
 
 func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:           "test_snapshot",
 			CollectionName: "restored_collection",
@@ -701,7 +701,7 @@ func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
 func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			DbName:         "default",
@@ -747,7 +747,7 @@ func TestCreateSnapshotTask_FullLifecycle(t *testing.T) {
 
 func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 	cache := &MetaCache{}
-	task := &createSnapshotTask{
+	task := &CreateSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.CreateSnapshotRequest{
 			Name:           "test_snapshot",
@@ -796,7 +796,7 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 	t.Run("CreateSnapshotTask", func(t *testing.T) {
 		for _, tc := range invalidSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
-				task := &createSnapshotTask{
+				task := &CreateSnapshotTask{
 					req: &milvuspb.CreateSnapshotRequest{
 						Name:           tc.snapshotName,
 						DbName:         "default",
@@ -816,7 +816,7 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 	t.Run("DropSnapshotTask", func(t *testing.T) {
 		for _, tc := range invalidSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
-				task := &dropSnapshotTask{
+				task := &DropSnapshotTask{
 					req: &milvuspb.DropSnapshotRequest{
 						Name: tc.snapshotName,
 					},
@@ -834,7 +834,7 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 	t.Run("DescribeSnapshotTask", func(t *testing.T) {
 		for _, tc := range invalidSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
-				task := &describeSnapshotTask{
+				task := &DescribeSnapshotTask{
 					req: &milvuspb.DescribeSnapshotRequest{
 						Name: tc.snapshotName,
 					},
@@ -852,7 +852,7 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 	t.Run("RestoreSnapshotTask/SnapshotName", func(t *testing.T) {
 		for _, tc := range invalidSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
-				task := &restoreSnapshotTask{
+				task := &RestoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
 						Name:           tc.snapshotName,
 						CollectionName: "valid_collection",
@@ -883,7 +883,7 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 
 		for _, tc := range invalidCollectionNames {
 			t.Run(tc.name, func(t *testing.T) {
-				task := &restoreSnapshotTask{
+				task := &RestoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
 						Name:                 "valid_snapshot",
 						CollectionName:       "source_collection",
@@ -919,7 +919,7 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
 				cache := &MetaCache{}
-				task := &createSnapshotTask{
+				task := &CreateSnapshotTask{
 					baseTask: baseTask{MetaCache: cache},
 					req: &milvuspb.CreateSnapshotRequest{
 						Name:           tc.snapshotName,
@@ -944,7 +944,7 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
 				cache := &MetaCache{}
-				task := &dropSnapshotTask{
+				task := &DropSnapshotTask{
 					baseTask: baseTask{MetaCache: cache},
 					req: &milvuspb.DropSnapshotRequest{
 						Name:           tc.snapshotName,
@@ -968,7 +968,7 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 		for _, tc := range validSnapshotNames {
 			t.Run(tc.name, func(t *testing.T) {
 				cache := &MetaCache{}
-				task := &describeSnapshotTask{
+				task := &DescribeSnapshotTask{
 					baseTask: baseTask{MetaCache: cache},
 					req: &milvuspb.DescribeSnapshotRequest{
 						Name:           tc.snapshotName,
@@ -1003,7 +1003,7 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				cache := &MetaCache{}
-				task := &restoreSnapshotTask{
+				task := &RestoreSnapshotTask{
 					baseTask: baseTask{MetaCache: cache},
 					req: &milvuspb.RestoreSnapshotRequest{
 						Name:                 tc.snapshotName,
@@ -1027,7 +1027,7 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 
 func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
@@ -1081,10 +1081,10 @@ func TestResolveCollectionNames_Success(t *testing.T) {
 	assert.Equal(t, "test_collection", collName)
 }
 
-// =========================== restoreSnapshotTask.PreExecute Additional Tests ===========================
+// =========================== RestoreSnapshotTask.PreExecute Additional Tests ===========================
 
 func TestRestoreSnapshotTask_PreExecute_MissingSourceCollectionName(t *testing.T) {
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:                 "valid_snapshot",
 			CollectionName:       "", // empty source collection name
@@ -1099,7 +1099,7 @@ func TestRestoreSnapshotTask_PreExecute_MissingSourceCollectionName(t *testing.T
 }
 
 func TestRestoreSnapshotTask_PreExecute_MissingTargetCollectionName(t *testing.T) {
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:                 "valid_snapshot",
 			CollectionName:       "source_collection",
@@ -1115,7 +1115,7 @@ func TestRestoreSnapshotTask_PreExecute_MissingTargetCollectionName(t *testing.T
 
 func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &restoreSnapshotTask{
+	task := &RestoreSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.RestoreSnapshotRequest{
 			Name:                 "valid_snapshot",
@@ -1135,10 +1135,10 @@ func TestRestoreSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	assert.Contains(t, err.Error(), "source collection not found")
 }
 
-// =========================== describeSnapshotTask.PreExecute Additional Tests ===========================
+// =========================== DescribeSnapshotTask.PreExecute Additional Tests ===========================
 
 func TestDescribeSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name:           "valid_snapshot",
 			CollectionName: "", // empty collection name
@@ -1153,7 +1153,7 @@ func TestDescribeSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
 
 func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &describeSnapshotTask{
+	task := &DescribeSnapshotTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.DescribeSnapshotRequest{
 			Name:           "valid_snapshot",
@@ -1172,11 +1172,11 @@ func TestDescribeSnapshotTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection not found")
 }
 
-// =========================== listSnapshotsTask.PreExecute Additional Tests ===========================
+// =========================== ListSnapshotsTask.PreExecute Additional Tests ===========================
 
 func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName: "nonexistent_db",
@@ -1195,7 +1195,7 @@ func TestListSnapshotsTask_PreExecute_GetDatabaseInfoError(t *testing.T) {
 
 func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listSnapshotsTask{
+	task := &ListSnapshotsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListSnapshotsRequest{
 			DbName:         "default",
@@ -1216,10 +1216,10 @@ func TestListSnapshotsTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection not found")
 }
 
-// =========================== getRestoreSnapshotStateTask Tests ===========================
+// =========================== GetRestoreSnapshotStateTask Tests ===========================
 
 func TestGetRestoreSnapshotStateTask_OnEnqueue(t *testing.T) {
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
 		},
@@ -1234,7 +1234,7 @@ func TestGetRestoreSnapshotStateTask_OnEnqueue(t *testing.T) {
 }
 
 func TestGetRestoreSnapshotStateTask_PreExecute(t *testing.T) {
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
 		},
@@ -1248,7 +1248,7 @@ func TestGetRestoreSnapshotStateTask_PreExecute(t *testing.T) {
 func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
@@ -1300,7 +1300,7 @@ func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 
 func TestGetRestoreSnapshotStateTask_Execute_NilInfo(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
 		},
@@ -1326,7 +1326,7 @@ func TestGetRestoreSnapshotStateTask_Execute_NilInfo(t *testing.T) {
 
 func TestGetRestoreSnapshotStateTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			JobId: 1,
 		},
@@ -1347,7 +1347,7 @@ func TestGetRestoreSnapshotStateTask_Execute_MixCoordError(t *testing.T) {
 }
 
 func TestGetRestoreSnapshotStateTask_TaskInterface(t *testing.T) {
-	task := &getRestoreSnapshotStateTask{
+	task := &GetRestoreSnapshotStateTask{
 		req: &milvuspb.GetRestoreSnapshotStateRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:     123,
@@ -1376,10 +1376,10 @@ func TestGetRestoreSnapshotStateTask_TaskInterface(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// =========================== listRestoreSnapshotJobsTask Tests ===========================
+// =========================== ListRestoreSnapshotJobsTask Tests ===========================
 
 func TestListRestoreSnapshotJobsTask_OnEnqueue(t *testing.T) {
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{},
 	}
 
@@ -1393,7 +1393,7 @@ func TestListRestoreSnapshotJobsTask_OnEnqueue(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName: "nonexistent_db",
@@ -1412,7 +1412,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_DbNameError(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName:         "default",
@@ -1435,7 +1435,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_CollectionNameError(t *testing.T
 
 func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName:         "default",
@@ -1459,7 +1459,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_BothDbAndCollectionSuccess(t *te
 
 func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
 	cache := &MetaCache{}
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			DbName: "default",
@@ -1478,7 +1478,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_OnlyDbName(t *testing.T) {
 }
 
 func TestListRestoreSnapshotJobsTask_PreExecute_Empty(t *testing.T) {
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{},
 	}
 
@@ -1492,7 +1492,7 @@ func TestListRestoreSnapshotJobsTask_PreExecute_Empty(t *testing.T) {
 func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	cache := &MetaCache{}
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		baseTask:     baseTask{MetaCache: cache},
 		req:          &milvuspb.ListRestoreSnapshotJobsRequest{},
 		mixCoord:     mockMixCoord,
@@ -1574,7 +1574,7 @@ func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_Execute_EmptyJobs(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
 		mixCoord: mockMixCoord,
 	}
@@ -1597,7 +1597,7 @@ func TestListRestoreSnapshotJobsTask_Execute_EmptyJobs(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
 		mixCoord: mockMixCoord,
 	}
@@ -1617,7 +1617,7 @@ func TestListRestoreSnapshotJobsTask_Execute_MixCoordError(t *testing.T) {
 
 func TestListRestoreSnapshotJobsTask_Execute_ResolveCollectionNamesFallback(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req:      &milvuspb.ListRestoreSnapshotJobsRequest{},
 		mixCoord: mockMixCoord,
 	}
@@ -1647,7 +1647,7 @@ func TestListRestoreSnapshotJobsTask_Execute_ResolveCollectionNamesFallback(t *t
 }
 
 func TestListRestoreSnapshotJobsTask_TaskInterface(t *testing.T) {
-	task := &listRestoreSnapshotJobsTask{
+	task := &ListRestoreSnapshotJobsTask{
 		req: &milvuspb.ListRestoreSnapshotJobsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID:     123,
@@ -1679,7 +1679,7 @@ func TestListRestoreSnapshotJobsTask_TaskInterface(t *testing.T) {
 
 func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
 	cache := &MetaCache{}
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
@@ -1698,7 +1698,7 @@ func TestPinSnapshotDataTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestPinSnapshotDataTask_PreExecute_EmptyCollectionName(t *testing.T) {
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			CollectionName: "",
@@ -1712,7 +1712,7 @@ func TestPinSnapshotDataTask_PreExecute_EmptyCollectionName(t *testing.T) {
 }
 
 func TestPinSnapshotDataTask_PreExecute_EmptyName(t *testing.T) {
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "",
 			CollectionName: "test_collection",
@@ -1725,7 +1725,7 @@ func TestPinSnapshotDataTask_PreExecute_EmptyName(t *testing.T) {
 }
 
 func TestPinSnapshotDataTask_PreExecute_NegativeTTL(t *testing.T) {
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			CollectionName: "test_collection",
@@ -1740,7 +1740,7 @@ func TestPinSnapshotDataTask_PreExecute_NegativeTTL(t *testing.T) {
 }
 
 func TestPinSnapshotDataTask_PreExecute_TTLExceedsMax(t *testing.T) {
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			CollectionName: "test_collection",
@@ -1756,7 +1756,7 @@ func TestPinSnapshotDataTask_PreExecute_TTLExceedsMax(t *testing.T) {
 
 func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
 	cache := &MetaCache{}
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		baseTask: baseTask{MetaCache: cache},
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
@@ -1777,7 +1777,7 @@ func TestPinSnapshotDataTask_PreExecute_TTLAtMaxBoundary(t *testing.T) {
 
 func TestPinSnapshotDataTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			CollectionName: "test_collection",
@@ -1803,7 +1803,7 @@ func TestPinSnapshotDataTask_Execute_Success(t *testing.T) {
 
 func TestPinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &pinSnapshotDataTask{
+	task := &PinSnapshotDataTask{
 		req: &milvuspb.PinSnapshotDataRequest{
 			Name:           "test_snapshot",
 			CollectionName: "test_collection",
@@ -1825,7 +1825,7 @@ func TestPinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
 // =========================== UnpinSnapshotDataTask Tests ===========================
 
 func TestUnpinSnapshotDataTask_PreExecute_Success(t *testing.T) {
-	task := &unpinSnapshotDataTask{
+	task := &UnpinSnapshotDataTask{
 		req: &milvuspb.UnpinSnapshotDataRequest{
 			PinId: 5001,
 		},
@@ -1836,7 +1836,7 @@ func TestUnpinSnapshotDataTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUnpinSnapshotDataTask_PreExecute_ZeroPinID(t *testing.T) {
-	task := &unpinSnapshotDataTask{
+	task := &UnpinSnapshotDataTask{
 		req: &milvuspb.UnpinSnapshotDataRequest{
 			PinId: 0,
 		},
@@ -1849,7 +1849,7 @@ func TestUnpinSnapshotDataTask_PreExecute_ZeroPinID(t *testing.T) {
 
 func TestUnpinSnapshotDataTask_Execute_Success(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &unpinSnapshotDataTask{
+	task := &UnpinSnapshotDataTask{
 		req: &milvuspb.UnpinSnapshotDataRequest{
 			PinId: 5001,
 		},
@@ -1868,7 +1868,7 @@ func TestUnpinSnapshotDataTask_Execute_Success(t *testing.T) {
 
 func TestUnpinSnapshotDataTask_Execute_MixCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
-	task := &unpinSnapshotDataTask{
+	task := &UnpinSnapshotDataTask{
 		req: &milvuspb.UnpinSnapshotDataRequest{
 			PinId: 5001,
 		},

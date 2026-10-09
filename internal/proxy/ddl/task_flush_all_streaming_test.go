@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func TestFlushAllTask_Success(t *testing.T) {
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		baseTask: baseTask{},
 		ctx:      ctx,
 		mixCoord: mixCoord,
@@ -74,7 +74,7 @@ func TestFlushAllTask_Failed(t *testing.T) {
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 
-	task := &flushAllTask{
+	task := &FlushAllTask{
 		baseTask: baseTask{},
 		ctx:      ctx,
 		mixCoord: mixCoord,
