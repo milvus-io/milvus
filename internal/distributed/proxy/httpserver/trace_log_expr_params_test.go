@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 )
 
@@ -31,18 +32,26 @@ import (
 // bound, never the values (a membership filter ships a multi-MiB blob there).
 func TestTraceLogRedactsExprParams(t *testing.T) {
 	const secret = "918273645546372819"
+	secretJSON, err := json.Marshal(secret)
+	require.NoError(t, err)
+	secretRaw := json.RawMessage(secretJSON)
 
 	redact := func(req any) any {
 		return getTraceLogRequestFieldWithoutSensitiveInfo(req).Interface
 	}
-	assertAllRedacted := func(t *testing.T, params ...map[string]interface{}) {
+	assertAllRedacted := func(t *testing.T, params ...map[string]json.RawMessage) {
 		t.Helper()
 		seen := 0
 		for _, m := range params {
 			for name, v := range m {
-				assert.Equal(t, proxy.RedactedValue, v, "exprParams[%s]", name)
+				var decoded string
+				require.NoError(t, json.Unmarshal(v, &decoded))
+				assert.Equal(t, proxy.RedactedValue, decoded, "exprParams[%s]", name)
 				seen++
 			}
+			encoded, err := json.Marshal(m)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), secret)
 		}
 		assert.Positive(t, seen, "expected at least one redacted parameter")
 	}
@@ -51,7 +60,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		out := redact(&QueryReqV2{
 			CollectionName: "c",
 			Filter:         "membership_match(id, {ids}, type=roaring)",
-			ExprParams:     map[string]interface{}{"ids": secret},
+			ExprParams:     map[string]json.RawMessage{"ids": secretRaw},
 		}).(*QueryReqV2)
 		assertAllRedacted(t, out.ExprParams)
 		// The placeholder name and the expression text stay visible.
@@ -63,7 +72,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		out := redact(&CollectionFilterReq{
 			CollectionName: "c",
 			Filter:         "membership_match(id, {ids}, type=roaring)",
-			ExprParams:     map[string]interface{}{"ids": secret},
+			ExprParams:     map[string]json.RawMessage{"ids": secretRaw},
 		}).(*CollectionFilterReq)
 		assertAllRedacted(t, out.ExprParams)
 	})
@@ -72,7 +81,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		out := redact(&SearchReqV2{
 			CollectionName: "c",
 			Filter:         "membership_match(id, {ids}, type=roaring)",
-			ExprParams:     map[string]interface{}{"ids": secret},
+			ExprParams:     map[string]json.RawMessage{"ids": secretRaw},
 		}).(*SearchReqV2)
 		assertAllRedacted(t, out.ExprParams)
 	})
@@ -81,7 +90,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		out := redact(&HybridSearchReq{
 			CollectionName: "c",
 			Search: []SubSearchReq{
-				{Filter: "membership_match(id, {ids}, type=roaring)", ExprParams: map[string]interface{}{"ids": secret}},
+				{Filter: "membership_match(id, {ids}, type=roaring)", ExprParams: map[string]json.RawMessage{"ids": secretRaw}},
 				{Filter: "id > 0"},
 			},
 		}).(*HybridSearchReq)
@@ -95,14 +104,14 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 	// handled, and the handler still needs the real values.
 	t.Run("the original request is not modified", func(t *testing.T) {
 		hybrid := &HybridSearchReq{
-			Search: []SubSearchReq{{Filter: "f", ExprParams: map[string]interface{}{"ids": secret}}},
+			Search: []SubSearchReq{{Filter: "f", ExprParams: map[string]json.RawMessage{"ids": secretRaw}}},
 		}
 		_ = redact(hybrid)
-		require.Equal(t, secret, hybrid.Search[0].ExprParams["ids"])
+		require.Equal(t, secretRaw, hybrid.Search[0].ExprParams["ids"])
 
-		q := &QueryReqV2{ExprParams: map[string]interface{}{"ids": secret}}
+		q := &QueryReqV2{ExprParams: map[string]json.RawMessage{"ids": secretRaw}}
 		_ = redact(q)
-		require.Equal(t, secret, q.ExprParams["ids"])
+		require.Equal(t, secretRaw, q.ExprParams["ids"])
 	})
 
 	t.Run("a request without exprParams is unaffected", func(t *testing.T) {
