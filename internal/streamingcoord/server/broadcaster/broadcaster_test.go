@@ -223,6 +223,12 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 	return appended
 }
 
+func registerDropCollectionNoopCallbacks() {
+	registry.RegisterDropCollectionV1AckCallback(func(context.Context, message.BroadcastResultDropCollectionMessageV1) error {
+		return nil
+	})
+}
+
 func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) message.BroadcastMutableMessage {
 	msg, err := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&messagespb.DropCollectionMessageHeader{}).

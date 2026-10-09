@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
@@ -295,8 +296,13 @@ func TestDropTombstonesValidatesAndDeduplicatesIDs(t *testing.T) {
 
 func TestTombstoneGCRetiresIdempotencyOnlyAfterCatalogSuccess(t *testing.T) {
 	s := newBatchGCTestScheduler(t, 1)
-	msg := createNewBroadcastMsg([]string{"v1"}).WithBroadcastID(1).
-		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(1, "gc-retry"))
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(1, "gc-retry")).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast().
+		WithBroadcastID(1)
 	task := newBroadcastTaskFromProto(createNewWaitAckBroadcastTaskFromMessage(
 		msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{1}), newBroadcasterMetrics(), nil)
 	task.SetLogger(mlog.With())
