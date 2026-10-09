@@ -1143,6 +1143,73 @@ func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
 		windowGrowths, positiveWindows, measurementWindows)
 }
 
+// allocatorNoiseCeiling is the largest C-heap growth this suite has measured
+// with no leak present, rounded up. Repeated probing of the loops below (both
+// payload sizes, 400 to 16000 iterations) produced growth between -17MiB and
+// +41MiB with the buffers correctly freed, because jemalloc arenas and
+// segcore's own caches fill and are purged independently of what one call
+// retains. Crucially that spread barely moves with the iteration count --
+// quadrupling the work grew the worst case from 30MiB to 41MiB -- while a real
+// leak grows in proportion. That is what makes the budget below separable.
+const allocatorNoiseCeiling = 48 << 20
+
+// assertNoCHeapLeak fails when the C heap keeps what runOnce allocates.
+//
+// The guarded failure is a buffer that C allocates on every call and Go must
+// free; leaking it costs retainedPerCall bytes per iteration, so the pass/fail
+// line is a fraction of iterations*retainedPerCall rather than a fixed byte
+// count. That scales with the payload and, as long as the caller uses a payload
+// large enough for the sizing check below, sits far above allocator noise on
+// one side and far below a real leak on the other.
+//
+// Do not replace this with a per-window growth counter: allocator noise here is
+// hundreds of KiB to several MiB per window and changes sign, so such a counter
+// reports a leak on runs where total allocated fell by megabytes.
+func assertNoCHeapLeak(t *testing.T, retainedPerCall int64, runOnce func()) {
+	t.Helper()
+
+	const (
+		warmupIterations = 50
+		iterations       = 1600
+	)
+
+	if stats := segcore.GetJemallocStats(); !stats.Success {
+		t.Skip("jemalloc stats unavailable; C heap growth cannot be measured " +
+			"(preload internal/core/output/lib/libjemalloc.so to run this locally)")
+	}
+
+	require.Positive(t, retainedPerCall, "caller must report what one call retains")
+	leakIfUnfreed := int64(iterations) * retainedPerCall
+	budget := leakIfUnfreed / 2
+	require.GreaterOrEqual(t, budget, int64(2*allocatorNoiseCeiling),
+		"measurement is not sized to separate a leak from allocator noise: "+
+			"leaking every call would add only %d bytes over %d iterations. "+
+			"Raise NQ/TopK, the output fields, or the iteration count.",
+		leakIfUnfreed, iterations)
+
+	for i := 0; i < warmupIterations; i++ {
+		runOnce()
+	}
+	runtime.GC()
+	baseline := segcore.GetJemallocStats()
+	require.True(t, baseline.Success)
+
+	for i := 0; i < iterations; i++ {
+		runOnce()
+	}
+	runtime.GC()
+	after := segcore.GetJemallocStats()
+	require.True(t, after.Success)
+
+	growth := int64(after.Allocated) - int64(baseline.Allocated)
+	t.Logf("C heap grew %d bytes over %d calls retaining %d bytes each "+
+		"(a full leak would be %d, budget %d)",
+		growth, iterations, retainedPerCall, leakIfUnfreed, budget)
+	assert.LessOrEqual(t, growth, budget,
+		"C heap grew %d bytes over %d calls; leaking every call would cost %d",
+		growth, iterations, leakIfUnfreed)
+}
+
 // TestFillOutputFieldsOrdered_NoCMemoryLeak verifies that calling
 // FillOutputFieldsOrdered in a loop does not leak C heap memory.
 // The C++ side allocates via malloc; the Go side must C.free it after use.
@@ -1150,7 +1217,10 @@ func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
 func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	outputFieldIDs := []int64{103, 104} // Int32, Float
 
-	ts := setupTestSegments(t, 2, 2000, setupOpts{NQ: 2, TopK: 10, OutputFieldIDs: outputFieldIDs})
+	// NQ*TopK is large on purpose: leaking one buffer must cost far more than
+	// the allocator noise assertNoCHeapLeak has to see through. At 2/10 the
+	// buffer is about 140 bytes and a full leak disappears into that noise.
+	ts := setupTestSegments(t, 2, 2000, setupOpts{NQ: 200, TopK: 200, OutputFieldIDs: outputFieldIDs})
 	defer ts.cleanup()
 
 	reduceResult, segDFs := runGoReducePipeline(t, ts)
@@ -1180,11 +1250,13 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	}
 
 	plan := ts.searchReq.Plan()
-	assertNoSustainedJemallocGrowth(t, func() {
+	call := func() int64 {
 		b, err := segcore.FillOutputFieldsOrdered(context.Background(), ts.searchResults, plan, segIndices, segOffsets)
 		require.NoError(t, err)
-		_ = b
-	})
+		return int64(len(b))
+	}
+	retained := call()
+	assertNoCHeapLeak(t, retained, func() { call() })
 }
 
 func TestExportSearchResultAsArrowRecordBatchWithInputPlan_NoCMemoryLeak(t *testing.T) {
