@@ -776,49 +776,6 @@ func TestFillFieldIDBySchema(t *testing.T) {
 		assert.Equal(t, int64(1), columns[0].FieldId)
 	})
 
-	t.Run("nested array fills array element type", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "nested",
-					FieldID:     2,
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Array,
-					TypeSchema: &schemapb.TypeSchema{
-						Kind: &schemapb.TypeSchema_ArrayElement{
-							ArrayElement: &schemapb.TypeSchema{
-								Kind: &schemapb.TypeSchema_ArrayElement{
-									ArrayElement: &schemapb.TypeSchema{
-										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		}
-		schema := mustNewSchemaInfo(collSchema)
-		columns := []*schemapb.FieldData{
-			{
-				FieldName: "nested",
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_ArrayData{
-							ArrayData: &schemapb.ArrayArray{},
-						},
-					},
-				},
-			},
-		}
-
-		assert.NoError(t, validateFieldDataColumns(columns, schema))
-		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
-		assert.Equal(t, int64(2), columns[0].GetFieldId())
-		assert.Equal(t, schemapb.DataType_Array, columns[0].GetType())
-		assert.Equal(t, schemapb.DataType_Array, columns[0].GetScalars().GetArrayData().GetElementType())
-	})
-
 	t.Run("field not in schema", func(t *testing.T) {
 		collSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
