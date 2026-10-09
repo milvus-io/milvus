@@ -294,7 +294,9 @@ After shared Transform visibility is reached, QN validates the selected pinned
 instances against their first failed ApplyTransform TimeTick. A Poisoned
 instance rejects transforming MVCC at or beyond that boundary; older MVCCs
 remain queryable. Validation failure releases every acquired handle and the
-view lease. Segments pruned out of the request do not fail that query.
+view lease. Segments pruned out of the request do not fail that query. Poison
+is local state and does not generate a Coordinator report for a Ready view;
+query failure alone does not promise automatic replacement of the instance.
 
 ## 8. Local Optimizer
 

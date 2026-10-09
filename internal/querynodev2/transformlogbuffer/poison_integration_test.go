@@ -25,7 +25,14 @@ type poisonPhysicalManager struct{ qnview.PhysicalSegmentManager }
 func (*poisonPhysicalManager) Acquire(qnview.AcquirePhysicalSegments) { panic("mock required") }
 func (*poisonPhysicalManager) Release(qnview.ReleaseSegments)         { panic("mock required") }
 
-func TestApplyFailureReportsPoisonAndGatesQueryMVCC(t *testing.T) {
+func TestApplyFailureStaysLocalAndGatesQueryMVCC(t *testing.T) {
+	for _, stage := range []string{"live", "catchup", "partial"} {
+		t.Run(stage, func(t *testing.T) { testLocalPoison(t, stage) })
+	}
+}
+
+func testLocalPoison(t *testing.T, stage string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	segment := &fakeSegment{id: 1000, partitionID: 10, vchannel: "p_1v0"}
@@ -45,6 +52,10 @@ func TestApplyFailureReportsPoisonAndGatesQueryMVCC(t *testing.T) {
 	h := qnview.NewQNQueryViewHandler(manager)
 	meta := &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 1, Vchannel: "p_1v0", State: viewpb.QueryViewState_QueryViewStatePreparing, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}
 	assignment := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
+	if stage == "partial" {
+		// The first segment becomes ready while this second segment is loading.
+		assignment.Partitions[0].SegmentIds = append(assignment.Partitions[0].SegmentIds, 2000)
+	}
 	view := qviews.NewQueryViewAtQueryNode(meta, assignment)
 	reports := make(chan qviews.QueryViewAtWorkNode, 16)
 	report := func(v qviews.QueryViewAtWorkNode) { reports <- v }
@@ -59,8 +70,31 @@ func TestApplyFailureReportsPoisonAndGatesQueryMVCC(t *testing.T) {
 	}
 	h.ApplyViews([]handler.ApplyView{{View: view, OnReport: report}})
 	stream := streams.stream("p")
+	if stage == "partial" {
+		stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 9}})
+		partial := nextReport()
+		require.Equal(t, qviews.QueryViewStatePreparing, partial.State())
+		require.Equal(t, []int64{1000}, partial.IntoProto().QueryNode[0].Partitions[0].ReadySegmentIds)
+	}
+	if stage != "live" {
+		stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", Entry: &streamingpb.TransformLogEntry{TimeTick: 10}})
+		stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 20}})
+		failed := nextReport()
+		require.Equal(t, qviews.QueryViewStateUnrecoverable, failed.State())
+		if stage == "catchup" {
+			require.Empty(t, failed.IntoProto().QueryNode[0].Partitions[0].ReadySegmentIds)
+		}
+		h.ApplyViews([]handler.ApplyView{{View: view, OnReport: report}})
+		require.True(t, proto.Equal(failed.IntoProto(), nextReport().IntoProto()))
+		dropped := proto.Clone(meta).(*viewpb.QueryViewMeta)
+		dropped.State = viewpb.QueryViewState_QueryViewStateDropped
+		h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtQueryNode(dropped, assignment), OnReport: report}})
+		require.Equal(t, qviews.QueryViewStateDropped, nextReport().State())
+		return
+	}
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 9}})
-	require.Equal(t, qviews.QueryViewStateReady, nextReport().State())
+	readyReport := nextReport()
+	require.Equal(t, qviews.QueryViewStateReady, readyReport.State())
 	// Start a query waiting for the failing entry; it must see Poison after wakeup.
 	waiting := make(chan error, 1)
 	go func() {
@@ -72,15 +106,7 @@ func TestApplyFailureReportsPoisonAndGatesQueryMVCC(t *testing.T) {
 	}()
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", Entry: &streamingpb.TransformLogEntry{TimeTick: 10}})
 	require.ErrorContains(t, <-waiting, "poisoned")
-	poisonReport := nextReport()
-	require.Equal(t, qviews.QueryViewStateReady, poisonReport.State())
-	wire, err := proto.Marshal(poisonReport.IntoProto())
-	require.NoError(t, err)
-	decoded := &viewpb.QueryViewOfShard{}
-	require.NoError(t, proto.Unmarshal(wire, decoded))
-	require.Len(t, decoded.QueryNode[0].PoisonedSegments, 1)
-	require.EqualValues(t, 10, decoded.QueryNode[0].PoisonedSegments[0].FailedTimetick)
-	require.NotZero(t, decoded.QueryNode[0].PoisonedSegments[0].Generation)
+	require.Empty(t, reports, "live Poison must not emit a Coordinator report")
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 20}})
 	for _, ts := range []uint64{9, 10, 20} {
 		mvcc := &viewpb.QueryPlanMVCC{TransformingTimetick: ts}
@@ -96,9 +122,10 @@ func TestApplyFailureReportsPoisonAndGatesQueryMVCC(t *testing.T) {
 			require.ErrorContains(t, serr, "poisoned")
 		}
 	}
-	// Replacing the report stream must replay the sticky Poison snapshot.
+	// Reconnection reports only ordinary view state; Poison remains local.
 	h.ApplyViews([]handler.ApplyView{{View: view, OnReport: report}})
-	require.Len(t, nextReport().IntoProto().QueryNode[0].PoisonedSegments, 1)
+	require.True(t, proto.Equal(readyReport.IntoProto(), nextReport().IntoProto()))
+	require.Empty(t, reports)
 	// A new view cannot treat the same poisoned physical instance as healthy.
 	nextMeta := proto.Clone(meta).(*viewpb.QueryViewMeta)
 	nextMeta.Version.QueryVersion = 2

@@ -86,7 +86,6 @@ type transformViewRef struct {
 	collectionGuard        CollectionRuntimeGuard
 	segments               map[int64]int64
 	onUnrecoverable        func()
-	onPoisoned             func(*viewpb.PoisonedSegment)
 	unrecoverable          bool
 	physicalAcquirePending bool
 	pendingReleases        []ReleaseSegments
@@ -97,8 +96,7 @@ type transformSegmentState struct {
 	replayStart   uint64
 	state         transformSegmentLoadState
 	generation    uint64
-	poison        *viewpb.PoisonedSegment
-	poisonErr     error
+	poison        *segmentPoison
 	segment       TransformSegment
 	reg           TransformRegistration
 	catchupCancel context.CancelFunc
@@ -239,7 +237,6 @@ func (m *QueryViewSegmentReadinessManager) recordPendingAcquire(req AcquireSegme
 		physicalReady:   make(map[int64]bool),
 		states:          make(map[int64]*transformSegmentState),
 		onUnrecoverable: req.OnUnrecoverable,
-		onPoisoned:      req.OnPoisoned,
 	}
 	m.views[req.Key] = ref
 	for segmentID, partitionID := range segmentPartitions {
@@ -310,13 +307,7 @@ func (m *QueryViewSegmentReadinessManager) activateAcquire(req AcquireSegments, 
 			onUnrecoverable: req.OnUnrecoverable,
 		}
 		if state.poison != nil {
-			poison := state.poison
-			go func() {
-				if req.OnPoisoned != nil {
-					req.OnPoisoned(poison)
-				}
-				m.notifyUnrecoverable(req.Key, req.OnUnrecoverable)
-			}()
+			go m.notifyUnrecoverable(req.Key, req.OnUnrecoverable)
 			continue
 		}
 

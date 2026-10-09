@@ -106,11 +106,10 @@ pendingSyncQueryViews
   disconnected consume memory proportional to pending keys rather than update
   count. Reconnection still re-pushes the authoritative `entries` snapshot.
 
-For QN Preparing targets, a Ready response keeps monitoring active until
-teardown, allowing subsequent Poison reports to reach Coord. Reconnects
-re-push the retained Preparing target so QN replaces the callback and reports
-its sticky Poison snapshot. Restoring a persisted Up view reinstalls these QN
-monitors; SN does not need another Up push for this purpose.
+For QN Preparing targets, a Ready response completes that node's preparation
+sync and removes its pending entry. Poison remains local to QueryNode and does
+not require continued monitoring or a re-push when Coordinator recovers an Up
+view. Ordinary outstanding syncs retain their existing reconnect behavior.
 
 ## 4. resumableSyncer
 

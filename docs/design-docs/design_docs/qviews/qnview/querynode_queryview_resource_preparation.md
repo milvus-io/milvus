@@ -368,8 +368,9 @@ from the beginning instead of reusing a partially registered segment.
 
 A registration applies each entry once. If `ApplyTransform` fails at TimeTick
 `T`, it synchronously marks that concrete readiness-state instance Poison,
-recording the first failed TimeTick, cause, and a process-local monotonically
-increasing generation. It stops applying later entries to that instance.
+recording the first failed TimeTick in local state. The existing instance
+identity/generation fences stale callbacks. It stops applying later entries to
+that instance; the apply failure is logged locally.
 Other segments continue consuming, and shared visibility advances only after
 Poison has been published. Cancellation/unregistration waits for any in-flight
 native Apply before the physical segment can be released.
@@ -388,15 +389,14 @@ Poison instance as healthy. Poison does not trigger same-instance retries or
 immediate resource release. Normal view/query reference teardown releases the
 instance. A fresh load has a new generation; old callbacks cannot poison it.
 
-Every affected view actively reports `QueryViewOfQueryNode.poisoned_segments`
-through the existing OnReport stream, retaining the snapshot for reconnects.
-Coord keeps monitoring Ready QNs until teardown and restores monitoring for
-persisted Up views on recovery. A Poison report makes an active Coord view
-Unrecoverable and publishes the existing recovery/placement signal. Coord
-excludes poisoned instances from reusable Ready placements, including after
-a stale Ready report. Replacement
-placement remains the QueryView manager/Balancer's responsibility; the report
-does not assert that reloading will repair the underlying failure.
+Poison is exclusively QueryNode-local state. It is not included in QueryView
+protobufs or reports, and Coordinator does not track poisoned segments or
+trigger a Poison-specific recovery/placement workflow. A Ready view keeps its
+state and emits no report merely because ApplyTransform failed. Preparing
+views, including a new view attempting to reuse a poisoned instance, report
+ordinary `Unrecoverable` preparation failure without Poison details. A poisoned
+instance is released through normal view/query reference teardown; this local
+marker does not itself guarantee automatic recovery of a Ready view.
 
 ## 9. Release Flow
 
@@ -442,7 +442,7 @@ removed or the segment is reset, preventing stale `ErrDelay` retries.
 | Physical loader fails | The segment load is treated as unrecoverable. |
 | Segment LoadInfo gRPC stream breaks | The shared stream reconnects and re-subscribes all live segments from their internally maintained delivered revisions. |
 | Transform registration fails | The loaded segment is released, physical state is reset, and waiting views are reported `Unrecoverable`. |
-| Transform entry Apply fails during catch-up or live delivery | Mark the instance Poison, stop later Applies, and report; fail only queries at or beyond the failed boundary. |
+| Transform entry Apply fails during catch-up or live delivery | Mark the instance Poison locally and stop later Applies. Preparing views report ordinary Unrecoverable; Ready views emit no Poison report and reject queries at or beyond the failed boundary. |
 | Transform catch-up fails for another reason | The registration is removed, the loaded segment is released, physical state is reset, and waiting views are reported `Unrecoverable`. |
 | Release races with load completion | Late callback is validated against current refs; unreferenced loaded segment is released and ignored. |
 | Repeated acquire for the same QueryView key | Not part of the current handler flow. If future same-key view replacement is needed, physical refs that existed only in the old view must be explicitly removed. |

@@ -1,9 +1,11 @@
 package qnview
 
-import (
-	"github.com/milvus-io/milvus/internal/views/viewerror"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-)
+import "github.com/milvus-io/milvus/internal/views/viewerror"
+
+// segmentPoison belongs only to one local segment instance.
+type segmentPoison struct {
+	failedTimeTick uint64
+}
 
 // This adapter binds transform failure to the same concrete state as catch-up.
 // A late failure must never affect a replacement with the same segment ID.
@@ -17,39 +19,34 @@ func (s *observedTransformSegment) UnwrapTransformSegment() TransformSegment {
 	return s.TransformSegment
 }
 
-func (s *observedTransformSegment) OnTransformFailed(timetick uint64, err error) {
-	s.manager.poisonSegment(s.ID(), s.state, timetick, err)
+func (s *observedTransformSegment) OnTransformFailed(timetick uint64, _ error) {
+	s.manager.poisonSegment(s.ID(), s.state, timetick)
 }
 
-func (m *QueryViewSegmentReadinessManager) poisonSegment(id int64, expected *transformSegmentState, timetick uint64, err error) {
+func (m *QueryViewSegmentReadinessManager) poisonSegment(id int64, expected *transformSegmentState, timetick uint64) {
 	m.mu.Lock()
 	state := m.segments[id]
 	if state != expected || state.poison != nil {
 		m.mu.Unlock()
 		return
 	}
-	poison := &viewpb.PoisonedSegment{SegmentId: id, Generation: state.generation, FailedTimetick: timetick}
-	state.poison, state.poisonErr = poison, err
-	callbacks := make([]func(*viewpb.PoisonedSegment), 0, len(state.refs))
-	waiters := make([]transformSegmentWaiter, 0, len(state.waiters))
-	for _, waiter := range state.waiters {
-		waiters = append(waiters, waiter)
-	}
+	state.poison = &segmentPoison{failedTimeTick: timetick}
+	callbacks := make([]func(), 0, len(state.refs))
 	for key := range state.refs {
-		if ref := m.views[key]; ref != nil && ref.onPoisoned != nil {
-			callbacks = append(callbacks, ref.onPoisoned)
+		if ref := m.views[key]; ref != nil {
+			callbacks = append(callbacks, ref.onUnrecoverable)
 		}
 	}
 	m.mu.Unlock()
 	// Shard callbacks acquire the shard mutex, which may be held by Release
 	// waiting for this ApplyTransform. Local publication must be synchronous;
-	// reports must run independently of transform consumption and unregistration.
+	// preparation failure callbacks run independently of transform consumption.
+	// Notify all referencing views, including those waiting on other segments.
+	// Their state machines ignore the failure if already Ready; do not mark the
+	// readiness ref unrecoverable, which would also reject historical queries.
 	go func() {
 		for _, callback := range callbacks {
-			callback(poison)
-		}
-		for _, waiter := range waiters {
-			m.notifyUnrecoverable(waiter.key, waiter.onUnrecoverable)
+			invokeUnrecoverable(callback)
 		}
 	}()
 }
@@ -59,8 +56,8 @@ func (m *QueryViewSegmentReadinessManager) poisonSegment(id int64, expected *tra
 func (h *sealedSegmentHandle) CheckTransformReadable(timetick uint64) error {
 	h.manager.mu.Lock()
 	defer h.manager.mu.Unlock()
-	if poison := h.state.poison; poison != nil && timetick >= poison.FailedTimetick {
-		return viewerror.NewViewInvalidated("segment %d generation %d is poisoned from timetick %d", h.ID(), poison.Generation, poison.FailedTimetick)
+	if poison := h.state.poison; poison != nil && timetick >= poison.failedTimeTick {
+		return viewerror.NewViewInvalidated("segment %d generation %d is poisoned from timetick %d", h.ID(), h.state.generation, poison.failedTimeTick)
 	}
 	return nil
 }
