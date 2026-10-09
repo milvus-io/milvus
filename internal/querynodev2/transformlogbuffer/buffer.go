@@ -278,8 +278,9 @@ func newVChannelBuffer(owner *Buffer, pchannel string, vchannel string, startFro
 }
 
 type subscribeAttempt struct {
-	done chan struct{}
-	err  error
+	done   chan struct{}
+	cancel context.CancelFunc
+	err    error
 }
 
 func (b *vchannelBuffer) ensureSubscribed(ctx context.Context, stream wal.TransformLogStream) error {
@@ -299,11 +300,14 @@ func (b *vchannelBuffer) ensureSubscribed(ctx context.Context, stream wal.Transf
 		return b.waitSubscribe(ctx, attempt)
 	}
 
-	attempt := &subscribeAttempt{done: make(chan struct{})}
+	// The VChannel's references own this work; each caller only owns its wait.
+	subscribeCtx, cancel := context.WithCancel(context.WithoutCancel(ctx)) //nolint:gosec // canceled on attempt completion or final guard release
+	attempt := &subscribeAttempt{done: make(chan struct{}), cancel: cancel}
 	b.subscribeAttempt = attempt
 	startAfter := b.retentionStart
 	b.mu.Unlock()
-	return b.subscribe(ctx, stream, attempt, startAfter)
+	go b.subscribe(subscribeCtx, stream, attempt, startAfter) //nolint:gosec // shared work must outlive individual request contexts
+	return b.waitSubscribe(ctx, attempt)
 }
 
 func (b *vchannelBuffer) waitSubscribe(ctx context.Context, attempt *subscribeAttempt) error {
@@ -315,7 +319,8 @@ func (b *vchannelBuffer) waitSubscribe(ctx context.Context, attempt *subscribeAt
 	}
 }
 
-func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogStream, attempt *subscribeAttempt, startAfter uint64) error {
+func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogStream, attempt *subscribeAttempt, startAfter uint64) {
+	defer attempt.cancel()
 	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           b.vchannel,
 		StartAfterTimeTick: startAfter,
@@ -328,13 +333,17 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 		b.mu.Lock()
 		b.completeSubscribeLocked(attempt, err)
 		b.mu.Unlock()
-		return err
+		return
 	}
 
 	closeSub := false
 	b.mu.Lock()
-	if b.err != nil {
-		err = b.err
+	err = b.err
+	if len(b.guards) == 0 {
+		// Subscribe can succeed concurrently with the final reference release.
+		err = context.Canceled
+	}
+	if err != nil {
 		closeSub = true
 		b.completeSubscribeLocked(attempt, err)
 	} else {
@@ -344,7 +353,7 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 	b.mu.Unlock()
 	if closeSub {
 		_ = sub.Close()
-		return err
+		return
 	}
 	mlog.Debug(context.TODO(), "querynode transform log buffer subscribed vchannel",
 		mlog.FieldPChannel(b.pchannel),
@@ -352,7 +361,6 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 		mlog.Uint64("startAfterTimeTick", startAfter),
 		mlog.Int64("subscriptionID", sub.ID()),
 	)
-	return nil
 }
 
 func (b *vchannelBuffer) completeSubscribeLocked(attempt *subscribeAttempt, err error) {
@@ -563,9 +571,13 @@ func (b *vchannelBuffer) releaseGuard(startFrom uint64) {
 	delete(b.guards, startFrom)
 	if len(b.guards) == 0 {
 		sub := b.sub
+		attempt := b.subscribeAttempt
 		stream := b.owner.removeLocked(b.vchannel, b)
 		b.mu.Unlock()
 		b.owner.mu.Unlock()
+		if attempt != nil {
+			attempt.cancel()
+		}
 		if sub != nil {
 			_ = sub.Close()
 		}
