@@ -1725,7 +1725,15 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Doc:          "Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.",
 		Export:       true,
 	}
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		p.EnableFastPB.RegisterCallback(updateFastPBEnabled)
+	}
 	p.EnableFastPB.Init(base.mgr)
+	if p == &params.CommonCfg {
+		storeFastPBEnabled(p.EnableFastPB.GetAsBool())
+	}
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",

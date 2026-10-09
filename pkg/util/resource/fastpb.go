@@ -27,8 +27,7 @@ import (
 // fastPBEnabled preserves the default fast decoder before configuration is ready.
 // A codec used during startup must not initialize configuration itself.
 func fastPBEnabled() bool {
-	params := paramtable.GetIfInitialized()
-	return params == nil || params.CommonCfg.EnableFastPB.GetAsBool()
+	return paramtable.FastPBEnabled()
 }
 
 // UnmarshalSearchResultData decodes search results with the currently configured

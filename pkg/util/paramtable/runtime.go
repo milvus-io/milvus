@@ -33,10 +33,11 @@ const (
 )
 
 var (
-	once         sync.Once
-	initialized  atomic.Bool
-	params       ComponentParam
-	runtimeParam = runtimeConfig{
+	once               sync.Once
+	initialized        atomic.Bool
+	params             ComponentParam
+	fastPBEnabledState atomic.Bool
+	runtimeParam       = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
 	}
 	hookParams   hookConfig
@@ -83,6 +84,24 @@ func GetIfInitialized() *ComponentParam {
 		return nil
 	}
 	return &params
+}
+
+// FastPBEnabled returns the lock-free snapshot of common.enableFastPB. Before
+// paramtable finishes initialization, fast protobuf decoding remains enabled.
+func FastPBEnabled() bool {
+	if GetIfInitialized() == nil {
+		return true
+	}
+	return fastPBEnabledState.Load()
+}
+
+func storeFastPBEnabled(enabled bool) {
+	fastPBEnabledState.Store(enabled)
+}
+
+func updateFastPBEnabled(_ context.Context, _, _, value string) error {
+	storeFastPBEnabled(getAsBool(value))
+	return nil
 }
 
 // RefreshRemoteConfigsLinearizable makes the etcd config source re-read every key with a
