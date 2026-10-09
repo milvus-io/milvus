@@ -56,6 +56,14 @@ parameters still require finite numbers. Scalar FLOAT/DOUBLE payloads accept NaN
 and infinities, matching floating array elements; vector data retains its finite
 validation policy. The query grammar gains no reserved NaN identifier.
 
+REST represents non-finite FLOAT/DOUBLE field values, including floating Array
+and Struct members, as the JSON strings "NaN", "Infinity" and "-Infinity".
+Finite values remain JSON numbers and NULL remains null. Typed floating fields
+and arrays accept these strings on input; ordinary string fields and dynamic
+JSON retain their string values. This keeps non-finite scalar results valid JSON
+without losing NaN as NULL. Scalar/Array writes and bulk imports do not reject
+floating NaN or infinities; vector validation retains its finite-value checks.
+
 Integer columns and integer Array elements retain their typed-query constraints:
 NaN and infinities cannot be represented as integers and are rejected during
 query compilation, including nested whole-array values. FLOAT/DOUBLE and dynamic
@@ -171,6 +179,13 @@ before relying on indexed performance. Downgrading to old binaries after writing
 v6 NaN indexes requires rebuilding for the old version and reverts query semantics.
 No compatibility is promised for intermediate, unpublished skip-NaN formats from
 this PR's earlier revisions.
+
+Current implementation gaps: the Go RLS write-policy evaluator still uses IEEE
+floating equality and raw floating map keys, so NaN policy literals can disagree
+with native read filtering. Segment resource estimates also still use index
+metadata before the reader excludes legacy floating indexes; their estimates
+must be aligned with raw fallback. These are outstanding follow-ups, not behavior
+established by the scalar comparison and REST changes.
 
 ## Test plan
 

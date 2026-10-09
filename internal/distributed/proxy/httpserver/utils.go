@@ -422,7 +422,7 @@ func printFieldDetail(field *schemapb.FieldSchema, oldVersion bool) gin.H {
 		HTTPReturnFieldNullable:      field.Nullable,
 	}
 	if field.DefaultValue != nil {
-		fieldDetail[HTTPRequestDefaultValue] = field.DefaultValue
+		fieldDetail[HTTPRequestDefaultValue], _ = restDefaultValue(field.DefaultValue)
 	}
 	if field.GetIsFunctionOutput() {
 		fieldDetail[HTTPReturnFieldIsFunctionOutput] = true
@@ -2039,24 +2039,15 @@ func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result
 				if err != nil {
 					return nil, elementErr(idx, v, "expect float in the float32 range")
 				}
-				// Verified after the cast, which is where a magnitude past the
-				// float32 range turns into an infinity.
-				value := float32(parsed)
-				if typeutil.VerifyFloat(float64(value)) != nil {
+				if math.IsInf(float64(float32(parsed)), 0) {
 					return nil, elementErr(idx, v, "expect float in the float32 range")
 				}
-				arr = append(arr, value)
+				arr = append(arr, float32(parsed))
 			case v.Type == gjson.String:
-				// cast.ToFloat32E is what a plain Float column falls back to, but
-				// it reads "NaN", "Inf" and "Infinity" -- case-insensitively --
-				// without an error, and an array element has no later check that
-				// would catch them: checkArrayElement compares the element's type
-				// and never calls VerifyFloats32 the way a plain column does. One
-				// of those stored is a row that cannot be served, since the
-				// encoder fails on it after the status and part of the body are
-				// already written.
+				// Typed floating strings include NaN and infinities, matching
+				// plain FLOAT columns and the REST response representation.
 				parsed, err := cast.ToFloat32E(v.String())
-				if err != nil || typeutil.VerifyFloat(float64(parsed)) != nil {
+				if err != nil {
 					return nil, elementErr(idx, v, "expect float in the float32 range")
 				}
 				arr = append(arr, parsed)
@@ -2077,14 +2068,14 @@ func parseScalarArrayElements(elementType schemapb.DataType, vals []gjson.Result
 				// gjson reads a magnitude past float64 as +Inf, a value no
 				// caller sent and one the decode this falls back from refuses.
 				parsed, err := strconv.ParseFloat(v.Raw, 64)
-				if err != nil || typeutil.VerifyFloat(parsed) != nil {
+				if err != nil {
 					return nil, elementErr(idx, v, "expect double in the float64 range")
 				}
 				arr = append(arr, parsed)
 			case v.Type == gjson.String:
 				// strconv reads NaN, Inf and Infinity without an error.
 				parsed, err := cast.ToFloat64E(v.String())
-				if err != nil || typeutil.VerifyFloat(parsed) != nil {
+				if err != nil {
 					return nil, elementErr(idx, v, "expect double in the float64 range")
 				}
 				arr = append(arr, parsed)
@@ -2763,14 +2754,14 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField, enableInt64 bool) []inter
 		src := sf.GetFloatData().GetData()
 		out := make([]interface{}, len(src))
 		for i, v := range src {
-			out[i] = v
+			out[i] = restFloatValue(v)
 		}
 		return out
 	case *schemapb.ScalarField_DoubleData:
 		src := sf.GetDoubleData().GetData()
 		out := make([]interface{}, len(src))
 		for i, v := range src {
-			out[i] = v
+			out[i] = restFloatValue(v)
 		}
 		return out
 	case *schemapb.ScalarField_StringData:
@@ -2778,6 +2769,20 @@ func scalarArrayToInterfaces(sf *schemapb.ScalarField, enableInt64 bool) []inter
 		out := make([]interface{}, len(src))
 		for i, v := range src {
 			out[i] = v
+		}
+		return out
+	case *schemapb.ScalarField_ArrayData:
+		src := sf.GetArrayData().GetData()
+		out := make([]interface{}, len(src))
+		for i, element := range src {
+			if element == nil {
+				continue
+			}
+			if element.GetData() == nil {
+				out[i] = []any{}
+			} else {
+				out[i] = scalarArrayToInterfaces(element, enableInt64)
+			}
 		}
 		return out
 	default:
@@ -3986,7 +3991,8 @@ func resultErrMessage(err error) string {
 // the message as it stands, byte for byte.
 func legacyArrayValue(row *schemapb.ScalarField, enableInt64 bool) any {
 	if enableInt64 || !holdsInt64(row) {
-		return row
+		value, _ := restLegacyScalarField(row)
+		return value
 	}
 
 	switch data := row.GetData().(type) {
@@ -4062,9 +4068,11 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 		}
 		return formatInt64(values), nil
 	case *schemapb.ScalarField_FloatData:
-		return nonNilSlice(data.FloatData.GetData()), nil
+		values, _ := restFloatSlice(nonNilSlice(data.FloatData.GetData()))
+		return values, nil
 	case *schemapb.ScalarField_DoubleData:
-		return nonNilSlice(data.DoubleData.GetData()), nil
+		values, _ := restFloatSlice(nonNilSlice(data.DoubleData.GetData()))
+		return values, nil
 	case *schemapb.ScalarField_StringData:
 		return nonNilSlice(data.StringData.GetData()), nil
 	case *schemapb.ScalarField_ArrayData:
@@ -4176,9 +4184,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						row[fieldDataList[j].GetFieldName()] = strconv.FormatInt(fieldDataList[j].GetScalars().GetLongData().GetData()[dataIdx], 10)
 					}
 				case schemapb.DataType_Float:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetFloatData().GetData()[dataIdx]
+					row[fieldDataList[j].GetFieldName()] = restFloatValue(fieldDataList[j].GetScalars().GetFloatData().GetData()[dataIdx])
 				case schemapb.DataType_Double:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[dataIdx]
+					row[fieldDataList[j].GetFieldName()] = restFloatValue(fieldDataList[j].GetScalars().GetDoubleData().GetData()[dataIdx])
 				case schemapb.DataType_Timestamptz:
 					if fieldDataList[j].GetScalars().GetTimestamptzData() != nil {
 						row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[dataIdx]
@@ -4531,7 +4539,7 @@ func metricValueToRESTAny(pb *schemapb.MetricValue, enableInt64 bool) interface{
 	case *schemapb.MetricValue_IntVal:
 		return formatRESTInt64(v.IntVal, enableInt64)
 	case *schemapb.MetricValue_DoubleVal:
-		return v.DoubleVal
+		return restFloatValue(v.DoubleVal)
 	case *schemapb.MetricValue_StringVal:
 		return v.StringVal
 	case *schemapb.MetricValue_BoolVal:
@@ -4581,9 +4589,9 @@ func aggHitFieldValueToRESTAny(pb *schemapb.AggHitField, enableInt64 bool) inter
 	case *schemapb.AggHitField_BoolVal:
 		return v.BoolVal
 	case *schemapb.AggHitField_FloatVal:
-		return v.FloatVal
+		return restFloatValue(v.FloatVal)
 	case *schemapb.AggHitField_DoubleVal:
-		return v.DoubleVal
+		return restFloatValue(v.DoubleVal)
 	case *schemapb.AggHitField_StringVal:
 		return v.StringVal
 	case *schemapb.AggHitField_BytesVal:

@@ -240,7 +240,7 @@ func readIntegerOrFloatListLikeData[T constraints.Integer | constraints.Float](f
 			if float64Reader.IsNull(i) {
 				return 0, WrapNullElementErr(field)
 			}
-			return T(float64Reader.Value(i)), nil
+			return convertFloat64Value[T](float64Reader.Value(i), field)
 		}, outputArray)
 	default:
 		return WrapTypeErr(field, valueReader.DataType().Name())

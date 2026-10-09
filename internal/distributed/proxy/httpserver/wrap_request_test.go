@@ -17,6 +17,8 @@
 package httpserver
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -675,4 +677,46 @@ func TestLowLevelAPIRejectsNull(t *testing.T) {
 
 		assert.NoError(t, json.Unmarshal([]byte(`{"dim": 2, "vectors": [0.1, 0.2]}`), &v))
 	})
+}
+
+func TestWrappedInsertNonFiniteScalarFloats(t *testing.T) {
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		raw := fmt.Sprintf(`{"collection_name":"floats","num_rows":4,"fields_data":[{"type":%d,"field_name":"value","field":[1,"NaN","Infinity","-Infinity"]}]}`, dtype)
+		var wrapped WrappedInsertRequest
+		require.NoError(t, json.Unmarshal([]byte(raw), &wrapped))
+		request, err := wrapped.AsInsertRequest()
+		require.NoError(t, err)
+		scalar := request.GetFieldsData()[0].GetScalars()
+		values := scalar.GetDoubleData().GetData()
+		if dtype == schemapb.DataType_Float {
+			for _, value := range scalar.GetFloatData().GetData() {
+				values = append(values, float64(value))
+			}
+		}
+		require.Len(t, values, 4)
+		assert.Equal(t, 1.0, values[0])
+		assert.True(t, math.IsNaN(values[1]))
+		assert.True(t, math.IsInf(values[2], 1))
+		assert.True(t, math.IsInf(values[3], -1))
+		for _, invalid := range []string{`["NaN",null]`, `["1.5"]`, `["NaN",true]`, `["NaN",{}]`, `["invalid"]`} {
+			field := &FieldData{Type: dtype, Field: []byte(invalid)}
+			_, err := field.AsSchemapb()
+			assert.Error(t, err)
+		}
+	}
+	vector := &FieldData{Type: schemapb.DataType_FloatVector, Field: []byte(`[["NaN",1]]`)}
+	_, err := vector.AsSchemapb()
+	assert.Error(t, err)
+	paramtable.Get().Save(key, "true")
+	compatible := &FieldData{Type: schemapb.DataType_Float, Field: []byte(`["NaN",null]`)}
+	result, err := compatible.AsSchemapb()
+	require.NoError(t, err)
+	values := result.GetScalars().GetFloatData().GetData()
+	require.Len(t, values, 2)
+	assert.True(t, math.IsNaN(float64(values[0])))
+	assert.Equal(t, float32(0), values[1]) // Existing compatibility-mode null behavior.
 }

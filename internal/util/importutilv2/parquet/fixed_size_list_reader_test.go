@@ -279,10 +279,16 @@ func writeFixedSizeListParquet(t *testing.T, schema *schemapb.CollectionSchema, 
 	defer pk.Release()
 	defer fixedSizeList.Release()
 
+	var fieldName string
+	if len(schema.GetFields()) > 1 {
+		fieldName = schema.Fields[1].GetName()
+	} else {
+		fieldName = schema.GetStructArrayFields()[0].GetName()
+	}
 	arrowSchema := arrow.NewSchema([]arrow.Field{
 		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
 		{
-			Name:     schema.Fields[1].GetName(),
+			Name:     fieldName,
 			Type:     fixedSizeList.DataType(),
 			Nullable: true,
 		},
@@ -300,12 +306,12 @@ func writeFixedSizeListParquet(t *testing.T, schema *schemapb.CollectionSchema, 
 	require.NoError(t, writer.Write(record))
 	require.NoError(t, writer.Close())
 
-	assertFixedSizeListParquetSchema(t, file.Name(), schema.Fields[1].GetName())
+	assertParquetColumnType(t, file.Name(), fieldName, fixedSizeList.DataType().ID())
 
 	return file.Name()
 }
 
-func assertFixedSizeListParquetSchema(t *testing.T, filePath string, columnName string) {
+func assertParquetColumnType(t *testing.T, filePath string, columnName string, expectedType arrow.Type) {
 	t.Helper()
 
 	rf, err := os.Open(filePath)
@@ -324,7 +330,7 @@ func assertFixedSizeListParquetSchema(t *testing.T, filePath string, columnName 
 	fields, ok := readSchema.FieldsByName(columnName)
 	require.True(t, ok)
 	require.Len(t, fields, 1)
-	require.Equal(t, arrow.FIXED_SIZE_LIST, fields[0].Type.ID())
+	require.Equal(t, expectedType, fields[0].Type.ID())
 }
 
 func fixedSizeListArraySchema(elementType schemapb.DataType, maxCapacity int, nullable bool) *schemapb.CollectionSchema {
