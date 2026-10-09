@@ -85,12 +85,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -137,18 +137,20 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
-			DbName:          "db_test",
+			DbName:          "default",
 			CollectionNames: []string{"col1"},
 		})
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 
-		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
+		// fooo holds Global-All only on "default"; a request explicitly targeting
+		// another db must be denied regardless of the connection-context db.
+		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "default"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
