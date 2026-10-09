@@ -114,11 +114,11 @@ func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
 	require.Len(t, result.Plans, 2)
 }
 
-func TestLegacyClientPlainANNUsesBatchWhenStreamingEnabled(t *testing.T) {
+func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableSearchStreaming: true},
+		ViewQueryClientConfig{MaxRetries: 1, EnableSearchStreaming: true, SearchStreamChunkBytes: 20},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
@@ -136,11 +136,27 @@ func TestLegacyClientPlainANNUsesBatchWhenStreamingEnabled(t *testing.T) {
 		Nq:               1,
 		Topk:             2,
 		MetricType:       "IP",
+		SearchType:       internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER,
 	}})
 	require.NoError(t, err)
-	require.Nil(t, result.Stream)
-	require.Len(t, result.Results, 1)
-	require.Equal(t, []int64{10, 20}, result.Results[0].GetResultData().GetIds().GetIntId().GetData())
+	require.NotNil(t, result.Stream)
+	chunk, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, result.Stream.Close())
+}
+
+func TestSupportsSearchStream(t *testing.T) {
+	require.True(t, supportsSearchStream(&internalpb.SearchRequest{IsIterator: true}))
+	require.True(t, supportsSearchStream(&internalpb.SearchRequest{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}))
+	require.True(t, supportsSearchStream(&internalpb.SearchRequest{SearchType: internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER}))
+	require.False(t, supportsSearchStream(&internalpb.SearchRequest{SearchType: internalpb.SearchType_DEFAULT}))
+	require.False(t, supportsSearchStream(&internalpb.SearchRequest{
+		SearchType:     internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER,
+		GroupByFieldId: 1,
+	}))
 }
 
 func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
