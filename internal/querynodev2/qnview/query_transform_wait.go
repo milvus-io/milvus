@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 )
 
-func (m *QueryViewSegmentReadinessManager) WaitTransformVisible(ctx context.Context, key qviews.QueryViewKey, timetick uint64) error {
+func (m *QueryViewSegmentManager) WaitTransformVisible(ctx context.Context, key qviews.QueryViewKey, timetick uint64) error {
 	if timetick == 0 {
 		return nil
 	}

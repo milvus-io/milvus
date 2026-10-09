@@ -30,10 +30,23 @@ func pinnedCollectionForTest(t *testing.T) (*queryViewCollectionRuntimeManager, 
 	return manager, runtime
 }
 
-type lifetimePhysicalManager struct{ qnview.PhysicalSegmentManager }
+type lifetimeLoadInfoStream struct{ qnview.SegmentLoadInfoStream }
 
-func (*lifetimePhysicalManager) Acquire(qnview.AcquirePhysicalSegments) { panic("mockey") }
-func (*lifetimePhysicalManager) Release(qnview.ReleaseSegments)         { panic("mockey") }
+func (*lifetimeLoadInfoStream) Subscribe(qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
+	panic("mockey")
+}
+
+type lifetimeLoadInfoSubscription struct {
+	qnview.SegmentLoadInfoSubscription
+}
+
+func (*lifetimeLoadInfoSubscription) Close() {}
+
+type lifetimePhysicalLoader struct{ qnview.PhysicalSegmentLoader }
+
+func (*lifetimePhysicalLoader) Load(context.Context, *querypb.SegmentLoadInfo, qnview.CollectionRuntime) (qnview.TransformSegment, error) {
+	panic("mockey")
+}
 
 type lifetimeCollectionManager struct {
 	qnview.QueryViewCollectionRuntimeManager
@@ -73,23 +86,25 @@ func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, loaded.Release(context.Background())) })
 	segment := newQueryViewTransformSegment(loaded, "p_1v0", 0)
-	patchCollectionLifetime(t, mockey.Mock((*lifetimePhysicalManager).Acquire).To(func(_ *lifetimePhysicalManager, req qnview.AcquirePhysicalSegments) {
-		req.OnLoaded([]qnview.TransformSegment{segment})
-	}).Build())
-	patchCollectionLifetime(t, mockey.Mock((*lifetimePhysicalManager).Release).To(func(_ *lifetimePhysicalManager, req qnview.ReleaseSegments) { req.OnDropped() }).Build())
+	patchCollectionLifetime(t, mockey.Mock((*lifetimePhysicalLoader).Load).Return(segment, nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeCollectionManager).Acquire).Return(runtime, false, nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformBuffer).Acquire).Return(&lifetimeTransformGuard{}, nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformGuard).Release).Return().Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformBuffer).RegisterSegment).Return(&lifetimeTransformRegistration{}, nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformRegistration).WaitCatchup).Return(nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformRegistration).Unregister).Return().Build())
+	streamPatch := mockey.Mock((*lifetimeLoadInfoStream).Subscribe).To(func(_ *lifetimeLoadInfoStream, opt qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
+		require.NoError(t, opt.Handler.Handle(qnview.SegmentLoadInfoSnapshot{CollectionID: opt.CollectionID, SegmentID: opt.SegmentID, DataVersion: opt.DataVersion, Revision: qnview.SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: opt.SegmentID}}))
+		return &lifetimeLoadInfoSubscription{}
+	}).Build()
+	defer streamPatch.UnPatch()
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	manager := qnview.NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, &lifetimePhysicalManager{}, &lifetimeTransformBuffer{}, 1, &lifetimeCollectionManager{})
+	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: &lifetimePhysicalLoader{}, LoadInfoStream: &lifetimeLoadInfoStream{}, Buffer: &lifetimeTransformBuffer{}, CatchupConcurrency: 1, Collections: &lifetimeCollectionManager{}})
 	meta := &viewpb.QueryViewMeta{
 		CollectionId: 1,
 		Vchannel:     "p_1v0",
-		Version:      &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, QueryVersion: 1},
+		Version:      &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 0, CompactVersion: 0}, QueryVersion: 1},
 	}
 	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 100, SegmentIds: []int64{10}}}}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()

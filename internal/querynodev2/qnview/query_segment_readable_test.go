@@ -16,7 +16,7 @@ func TestSealedHandleReadsWithItsViewCollection(t *testing.T) {
 	patch := mockey.Mock((*fakeCollectionRuntimeGuard).CCollection).Return(viewCollection).Build()
 	defer patch.UnPatch()
 	segment := &fakeReadableTransformSegment{collection: reopenedCollection}
-	handle := &sealedSegmentHandle{view: &transformViewRef{collectionGuard: guard}, segment: segment}
+	handle := &sealedSegmentHandle{view: &queryViewRef{collectionGuard: guard}, segment: segment}
 	read := handle.ReadView()
 	require.Same(t, viewCollection, read.Collection)
 	require.Equal(t, "view-db", read.DatabaseName)

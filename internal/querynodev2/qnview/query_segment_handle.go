@@ -16,11 +16,11 @@ type SealedSegmentHandle interface {
 }
 
 type sealedSegmentHandle struct {
-	view      *transformViewRef
-	manager   *QueryViewSegmentReadinessManager
+	view      *queryViewRef
+	manager   *QueryViewSegmentManager
 	segmentID int64
 	segment   TransformSegment
-	state     *transformSegmentState
+	state     *segmentState
 }
 
 func (h *sealedSegmentHandle) ID() int64 {
@@ -45,7 +45,7 @@ func (h *sealedSegmentHandle) Release() {
 	manager.releaseViewQueryRef(h.view)
 }
 
-func (m *QueryViewSegmentReadinessManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error) {
+func (m *QueryViewSegmentManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode) ([]SealedSegmentHandle, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -85,23 +85,19 @@ func (m *QueryViewSegmentReadinessManager) AcquireSealedSegmentHandles(ctx conte
 	return handles, nil
 }
 
-func (m *QueryViewSegmentReadinessManager) releaseSealedSegmentHandle(segmentID int64, state *transformSegmentState) {
-	var segment TransformSegment
+func (m *QueryViewSegmentManager) releaseSealedSegmentHandle(segmentID int64, state *segmentState) {
 	m.mu.Lock()
 	if state.queryRefs > 0 {
 		state.queryRefs--
-		if state.queryRefs == 0 && len(state.refs) == 0 {
-			segment = state.segment
-			if m.segments[segmentID] == state {
-				delete(m.segments, segmentID)
-			}
-		}
+	}
+	if state.queryRefs == 0 && len(state.refs) == 0 && m.segments[segmentID] == state {
+		delete(m.segments, segmentID)
 	}
 	m.mu.Unlock()
-	m.releaseDetachedSegment(segment)
+	m.releaseSegmentState(state)
 }
 
-func (m *QueryViewSegmentReadinessManager) releaseViewQueryRef(ref *transformViewRef) {
+func (m *QueryViewSegmentManager) releaseViewQueryRef(ref *queryViewRef) {
 	var releases []ReleaseSegments
 	m.mu.Lock()
 	ref.queryRefs--

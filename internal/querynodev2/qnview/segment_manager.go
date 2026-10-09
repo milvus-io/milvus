@@ -64,12 +64,14 @@ type ReleaseSegments struct {
 // All callbacks MUST be invoked asynchronously (not during the Acquire /
 // Release call itself) to avoid deadlocking the caller's mutex.
 type SegmentManager interface {
-	// Acquire creates a view-scoped segment reference, starts missing segment
-	// loads, and reports readiness for all assigned segments.
+	// Acquire synchronously creates one view-scoped reference. Preparation and
+	// readiness reporting run asynchronously; failure retains this reference
+	// until Release. A key already held by the manager is not acquired twice.
 	Acquire(req AcquireSegments)
 
 	// Release decrements reference counts for all segments held by this view.
-	// Segments whose count reaches zero will be unloaded.
+	// The last reference retires the instance; query handles and unfinished
+	// preparation tasks keep their resources until they finish.
 	Release(req ReleaseSegments)
 
 	// AcquireSealedSegmentHandles acquires query lifecycle refs for selected

@@ -26,20 +26,37 @@ func TestPreparationRetainsEarlierFrontierAndReleasesAbandonedRange(t *testing.T
 			}
 		}
 	}).Build())
-	manager := &QueryViewSegmentReadinessManager{views: make(map[qviews.QueryViewKey]*transformViewRef), segments: make(map[int64]*transformSegmentState)}
+	manager := &QueryViewSegmentManager{views: make(map[qviews.QueryViewKey]*queryViewRef), segments: make(map[int64]*segmentState)}
 	view := &viewpb.QueryViewOfQueryNode{Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
-	var refs []*transformViewRef
+	var refs []*queryViewRef
 	var keys []qviews.QueryViewKey
 	for i, frontier := range []uint64{100, 40} {
 		meta := buildHandlerTestMeta(int64(i + 1))
 		meta.TransformStartAfterTimetick = frontier
 		req := AcquireSegments{Key: qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey(), Meta: meta, View: view}
-		ref, ok := manager.recordPendingAcquire(req, func() {}, guards[i])
+		ref, ok := manager.recordPendingAcquire(context.Background(), req, func() {})
 		require.True(t, ok)
+		if ref.transformGuard != nil {
+			ref.transformGuard.Release()
+		}
+		ref.transformGuard = newRetainedTransformGuard(guards[i], frontier)
 		_, _, ok = manager.activateAcquire(req, ref, nil)
 		require.True(t, ok)
 		refs, keys = append(refs, ref), append(keys, req.Key)
 	}
+	// A new async acquisition must bridge the minimum retained frontier, even
+	// when another live view already has a later frontier.
+	meta := buildHandlerTestMeta(3)
+	meta.TransformStartAfterTimetick = 80
+	req := AcquireSegments{Key: qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey(), Meta: meta, View: view}
+	pending, ok := manager.recordPendingAcquire(context.Background(), req, func() {})
+	require.True(t, ok)
+	require.Same(t, refs[1].transformGuard, pending.transformGuard)
+	manager.mu.Lock()
+	detachedPending := manager.detachViewLocked(req.Key)
+	manager.mu.Unlock()
+	detachedPending.releaseTransform()
+	detachedPending.unregister()
 	state := manager.segments[1000]
 	require.EqualValues(t, 40, state.replayStart)
 	require.Same(t, refs[1].transformGuard, state.replayGuard)
@@ -48,8 +65,9 @@ func TestPreparationRetainsEarlierFrontierAndReleasesAbandonedRange(t *testing.T
 	require.EqualValues(t, 1, refs[0].transformGuard.refs.Load())
 	require.EqualValues(t, 2, refs[1].transformGuard.refs.Load())
 	for i := 1; i >= 0; i-- {
-		detached, ok := manager.detachViewIfCurrent(keys[i], refs[i])
-		require.True(t, ok)
+		manager.mu.Lock()
+		detached := manager.detachViewLocked(keys[i])
+		manager.mu.Unlock()
 		detached.releaseTransform()
 		detached.unregister()
 		if i == 1 {
@@ -116,8 +134,8 @@ func TestQueuedLoadRetainsReplayRangeAfterOriginatingViewDrops(t *testing.T) {
 			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Unregister).Return().Build())
 			scheduler := nodescheduler.New(3)
 			t.Cleanup(scheduler.Close)
-			physical := NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, &plannedTestLoader{}, &fakeSegmentLoadInfoStream{})
-			manager := NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, &fakeTransformLogBuffer{}, 1, &fakeQueryViewCollectionRuntimeManager{})
+			physical := newTestSegmentPreparerWithStream(scheduler, &plannedTestLoader{}, &fakeSegmentLoadInfoStream{})
+			manager := newTestManagerWithPreparation(t, scheduler, physical, &fakeTransformLogBuffer{}, 1, &fakeQueryViewCollectionRuntimeManager{})
 			view := &viewpb.QueryViewOfQueryNode{Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 			finished := make(chan bool, 2)
 			acquire := func(version int64, frontier uint64) qviews.QueryViewKey {

@@ -14,9 +14,9 @@ import (
 
 func TestLocalPoisonBoundaryPinsInstance(t *testing.T) {
 	key := qviews.NewQueryViewAtQueryNode(buildTestMeta(), buildTestQNView()).QueryViewKey()
-	state := &transformSegmentState{state: transformSegmentLoaded, generation: 7, segment: &fakeTransformSegment{id: 1000, partitionID: 10}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
-	healthy := &transformSegmentState{state: transformSegmentLoaded, generation: 8, segment: &fakeTransformSegment{id: 2000, partitionID: 20}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
-	m := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state, 2000: healthy}, views: map[qviews.QueryViewKey]*transformViewRef{key: {physicalReady: map[int64]bool{1000: true, 2000: true}}}}
+	state := &segmentState{state: transformSegmentLoaded, generation: 7, segment: &fakeTransformSegment{id: 1000, partitionID: 10}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
+	healthy := &segmentState{state: transformSegmentLoaded, generation: 8, segment: &fakeTransformSegment{id: 2000, partitionID: 20}, refs: map[qviews.QueryViewKey]struct{}{key: {}}}
+	m := &QueryViewSegmentManager{segments: map[int64]*segmentState{1000: state, 2000: healthy}, views: map[qviews.QueryViewKey]*queryViewRef{key: {physicalReady: map[int64]bool{1000: true, 2000: true}}}}
 	s := &observedTransformSegment{TransformSegment: state.segment, manager: m, state: state}
 	s.OnTransformFailed(100, merr.WrapErrServiceUnavailableMsg("delete failed"))
 	require.EqualValues(t, 100, state.poison.failedTimeTick)
@@ -40,7 +40,7 @@ func TestLocalPoisonBoundaryPinsInstance(t *testing.T) {
 	handles[0].Release()
 	s.OnTransformFailed(101, merr.WrapErrServiceUnavailableMsg("second failure"))
 	require.EqualValues(t, 100, state.poison.failedTimeTick)
-	replacement := &transformSegmentState{generation: 9}
+	replacement := &segmentState{generation: 9}
 	m.segments[1000] = replacement
 	s.OnTransformFailed(102, merr.WrapErrServiceUnavailableMsg("late failure"))
 	require.Nil(t, replacement.poison)
@@ -52,8 +52,8 @@ func TestCatchupPoisonFailsPreparationWithoutReadiness(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	waiter := transformSegmentWaiter{key: key, onUnrecoverable: func() { failed <- struct{}{} }}
-	state := &transformSegmentState{state: transformSegmentCatchingUp, generation: 1, catchupCancel: cancel, segment: &fakeTransformSegment{id: 1000}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, waiters: map[qviews.QueryViewKey]transformSegmentWaiter{key: waiter}}
-	m := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state}, views: map[qviews.QueryViewKey]*transformViewRef{key: {onUnrecoverable: waiter.onUnrecoverable}}}
+	state := &segmentState{state: transformSegmentCatchingUp, generation: 1, catchupCancel: cancel, segment: &fakeTransformSegment{id: 1000}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, waiters: map[qviews.QueryViewKey]transformSegmentWaiter{key: waiter}}
+	m := &QueryViewSegmentManager{segments: map[int64]*segmentState{1000: state}, views: map[qviews.QueryViewKey]*queryViewRef{key: {onUnrecoverable: waiter.onUnrecoverable}}}
 	m.poisonSegment(1000, state, 100)
 	require.Empty(t, m.markSegmentReady(segmentCatchupTask{ctx: ctx, segment: state.segment, state: state}))
 	select {

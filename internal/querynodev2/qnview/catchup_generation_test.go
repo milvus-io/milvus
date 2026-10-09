@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func acquireGenerationView(m *QueryViewSegmentReadinessManager, version int64) (qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode, chan struct{}) {
+func acquireGenerationView(m *QueryViewSegmentManager, version int64) (qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode, chan struct{}) {
 	meta := buildHandlerTestMeta(version)
 	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
@@ -75,16 +75,15 @@ func TestCatchupCallbackKeepsReplacementGeneration(t *testing.T) {
 				}
 				return ctx.Err()
 			}).Build())
-			patchLifetime(t, mockey.Mock(fakePhysicalSegmentManager.Acquire).To(func(_ fakePhysicalSegmentManager, req AcquirePhysicalSegments) {
+			patchLifetime(t, mockey.Mock(preparationStub.Acquire).To(func(_ preparationStub, req segmentPreparationRequest) {
 				s := newSegment
 				if req.Key.QueryViewVersion.QueryVersion == 1 {
 					s = oldSegment
 				}
 				req.OnLoaded([]TransformSegment{s})
 			}).Build())
-			patchLifetime(t, mockey.Mock(fakePhysicalSegmentManager.Release).To(func(_ fakePhysicalSegmentManager, req ReleaseSegments) { req.OnDropped() }).Build())
-			var origin func(*QueryViewSegmentReadinessManager, segmentCatchupTask)
-			patchLifetime(t, mockey.Mock((*QueryViewSegmentReadinessManager).registerAndCatchup).To(func(m *QueryViewSegmentReadinessManager, task segmentCatchupTask) {
+			var origin func(*QueryViewSegmentManager, segmentCatchupTask)
+			patchLifetime(t, mockey.Mock((*QueryViewSegmentManager).registerAndCatchup).To(func(m *QueryViewSegmentManager, task segmentCatchupTask) {
 				origin(m, task)
 				if task.segment == oldSegment {
 					close(oldFinished)
@@ -92,7 +91,7 @@ func TestCatchupCallbackKeepsReplacementGeneration(t *testing.T) {
 			}).Origin(&origin).Build())
 			sched := nodescheduler.New(4)
 			t.Cleanup(sched.Close)
-			mgr := NewQueryViewSegmentReadinessManagerWithScheduler(sched, fakePhysicalSegmentManager{}, &fakeTransformLogBuffer{}, 2)
+			mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{}, 2)
 			first, _, _ := acquireGenerationView(mgr, 1)
 			waitGenerationEvent(t, oldEntered)
 			releaseLifetimeView(t, mgr, first)
@@ -144,17 +143,16 @@ func TestFailedSegmentWaitsForItsOwnQueryHandles(t *testing.T) {
 	}).Build())
 	patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).Acquire).Return(instantTransformGuard{}, nil).Build())
 	patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(instantTransformRegistration{}, nil).Build())
-	patchLifetime(t, mockey.Mock(fakePhysicalSegmentManager.Acquire).To(func(_ fakePhysicalSegmentManager, req AcquirePhysicalSegments) {
+	patchLifetime(t, mockey.Mock(preparationStub.Acquire).To(func(_ preparationStub, req segmentPreparationRequest) {
 		s := newSegment
 		if req.Key.QueryViewVersion.QueryVersion == 1 {
 			s = oldSegment
 		}
 		req.OnLoaded([]TransformSegment{s})
 	}).Build())
-	patchLifetime(t, mockey.Mock(fakePhysicalSegmentManager.Release).To(func(_ fakePhysicalSegmentManager, req ReleaseSegments) { req.OnDropped() }).Build())
 	sched := nodescheduler.New(4)
 	t.Cleanup(sched.Close)
-	mgr := NewQueryViewSegmentReadinessManagerWithScheduler(sched, fakePhysicalSegmentManager{}, &fakeTransformLogBuffer{}, 2)
+	mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{}, 2)
 	first, view, ready := acquireGenerationView(mgr, 1)
 	waitGenerationEvent(t, ready)
 	handles, err := mgr.AcquireSealedSegmentHandles(context.Background(), first, view)
@@ -201,9 +199,9 @@ func TestFailedSegmentUnregistersBeforeLastHandleRelease(t *testing.T) {
 		close(entered)
 		<-resume
 	}).Build())
-	state := &transformSegmentState{state: transformSegmentLoaded, segment: segment, queryRefs: 1, reg: &lifetimeRegistration{}}
-	manager := &QueryViewSegmentReadinessManager{segments: map[int64]*transformSegmentState{1000: state}}
-	handle := &sealedSegmentHandle{view: &transformViewRef{queryRefs: 1}, manager: manager, segmentID: 1000, segment: segment, state: state}
+	state := &segmentState{state: transformSegmentLoaded, segment: segment, queryRefs: 1, reg: &lifetimeRegistration{}}
+	manager := &QueryViewSegmentManager{segments: map[int64]*segmentState{1000: state}}
+	handle := &sealedSegmentHandle{view: &queryViewRef{queryRefs: 1}, manager: manager, segmentID: 1000, segment: segment, state: state}
 	go func() {
 		manager.failSegment(1000, state, assert.AnError)
 		close(failed)

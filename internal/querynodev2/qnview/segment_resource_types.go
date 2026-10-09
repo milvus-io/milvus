@@ -102,21 +102,11 @@ func UnwrapTransformSegment(segment TransformSegment) TransformSegment {
 	}
 }
 
-// PhysicalSegmentManager owns metadata fetch, load planning, physical load, and
-// physical ref-counted release.
-type PhysicalSegmentManager interface {
-	Acquire(req AcquirePhysicalSegments)
-	Release(req ReleaseSegments)
-	ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot)
-}
-
-type PhysicalSegmentResetter interface {
-	ResetSegment(segmentID int64)
-}
-
-// AcquirePhysicalSegments is the physical manager request wrapped by
-// QueryViewSegmentReadinessManager.
-type AcquirePhysicalSegments struct {
+// segmentPreparationRequest installs a plan for an already owned View.
+// It creates no references and has no paired release operation.
+type segmentPreparationRequest struct {
+	expected   *queryViewRef
+	Context    context.Context
 	Key        qviews.QueryViewKey
 	Meta       *viewpb.QueryViewMeta
 	View       *viewpb.QueryViewOfQueryNode

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -228,20 +230,13 @@ func (g *fakeCollectionRuntimeGuard) UpdateIndexMeta(_ context.Context, indexes 
 	return g.updateErr
 }
 
-type fakePhysicalSegmentManager struct {
-	acquire func(AcquirePhysicalSegments)
-	release func(ReleaseSegments)
+type preparationStub struct {
+	acquire func(segmentPreparationRequest)
 }
 
-func (m fakePhysicalSegmentManager) Acquire(req AcquirePhysicalSegments) {
+func (m preparationStub) Acquire(req segmentPreparationRequest) {
 	m.acquire(req)
 }
-
-func (m fakePhysicalSegmentManager) Release(req ReleaseSegments) {
-	m.release(req)
-}
-
-func (m fakePhysicalSegmentManager) ApplyLoadInfoSnapshot(context.Context, SegmentLoadInfoSnapshot) {}
 
 type instantTransformRegistration struct{}
 
@@ -427,28 +422,74 @@ func (s *fakeNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHa
 	return noopNodeTaskHandle{}
 }
 
-func newTestQueryViewSegmentReadinessManager(t *testing.T, physical PhysicalSegmentManager, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentReadinessManager {
+// testSegmentPreparer exercises the physical preparation stage without running
+// Transform catch-up. Its registry is the production manager's sole registry.
+type testSegmentPreparer struct{ *QueryViewSegmentManager }
+
+func newTestSegmentPreparer(scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimators ...SegmentResourceEstimator) *testSegmentPreparer {
+	return newTestSegmentPreparerWithStream(scheduler, loader, nil, estimators...)
+}
+
+func newTestSegmentPreparerWithStream(scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, stream SegmentLoadInfoStream, estimators ...SegmentResourceEstimator) *testSegmentPreparer {
+	cfg := QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: loader, LoadInfoStream: stream, CatchupConcurrency: 1}
+	if len(estimators) > 0 {
+		cfg.Estimator = estimators[0]
+	}
+	return &testSegmentPreparer{NewQueryViewSegmentManager(cfg)}
+}
+
+func (m *testSegmentPreparer) Acquire(req segmentPreparationRequest) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ref, ok := m.recordPendingAcquire(ctx, AcquireSegments{Key: req.Key, Meta: req.Meta, View: req.View, OnUnrecoverable: req.OnUnrecoverable}, cancel)
+	if !ok {
+		cancel()
+		return
+	}
+	ref.collectionGuard, _ = req.Collection.(CollectionRuntimeGuard)
+	req.Context = ctx
+	req.expected = ref
+	m.preparePhysical(req)
+}
+
+func newTestManagerWithPreparation(t *testing.T, scheduler nodescheduler.Scheduler, preparation any, buffer TransformLogBuffer, concurrency int, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentManager {
+	t.Helper()
+	var m *QueryViewSegmentManager
+	if stage, ok := preparation.(*testSegmentPreparer); ok {
+		m = stage.QueryViewSegmentManager
+		m.buffer = buffer
+	} else {
+		m = NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: buffer, CatchupConcurrency: concurrency})
+		stub := preparation.(preparationStub)
+		patchLifetime(t, mockey.Mock((*QueryViewSegmentManager).preparePhysical).When(func(target *QueryViewSegmentManager, _ segmentPreparationRequest) bool { return target == m }).To(func(_ *QueryViewSegmentManager, req segmentPreparationRequest) { stub.Acquire(req) }).Build())
+	}
+	if len(collections) > 0 {
+		m.collections = collections[0]
+	}
+	return m
+}
+
+func newTestQueryViewSegmentManager(t *testing.T, physical any, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentManager {
 	t.Helper()
 	scheduler := nodescheduler.New(4)
 	t.Cleanup(scheduler.Close)
-	return NewQueryViewSegmentReadinessManagerWithScheduler(scheduler, physical, buffer, 4, collections...)
+	return newTestManagerWithPreparation(t, scheduler, physical, buffer, 4, collections...)
 }
 
-func newTestViewScopedPhysicalSegmentManager(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
+func newTestPreparation(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *testSegmentPreparer {
 	t.Helper()
 	if len(streams) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, &fakePhysicalLoader{}, streams[0])
+		return newTestSegmentPreparerWithStream(scheduler, &fakePhysicalLoader{}, streams[0])
 	}
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, &fakePhysicalLoader{})
+	return newTestSegmentPreparer(scheduler, &fakePhysicalLoader{})
 }
 
-func newTestViewScopedPhysicalSegmentManagerWithLoader(t *testing.T, loader PhysicalSegmentLoader, streams ...SegmentLoadInfoStream) *ViewScopedPhysicalSegmentManager {
+func newTestPreparationWithLoader(t *testing.T, loader PhysicalSegmentLoader, streams ...SegmentLoadInfoStream) *testSegmentPreparer {
 	t.Helper()
 	nodeScheduler := newTestNodeScheduler(t)
 	if len(streams) > 0 {
-		return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(nodeScheduler, loader, streams[0])
+		return newTestSegmentPreparerWithStream(nodeScheduler, loader, streams[0])
 	}
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler, loader)
+	return newTestSegmentPreparer(nodeScheduler, loader)
 }
 
 type fakeSegmentLoadInfoStream struct {
