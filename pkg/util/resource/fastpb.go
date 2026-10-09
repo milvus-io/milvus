@@ -25,8 +25,7 @@ import (
 )
 
 func fastPBEnabled() bool {
-	params := paramtable.GetIfInitialized()
-	return params == nil || params.CommonCfg.EnableFastPB.GetAsBool()
+	return paramtable.FastPBEnabled()
 }
 
 // UnmarshalSearchResultData decodes the internal result using the dynamically

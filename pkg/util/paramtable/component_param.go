@@ -450,7 +450,15 @@ func (p *commonConfig) init(base *BaseTable) {
 		Doc:          "Use fastPB for supported protobuf decoding paths. Set false for an immediate fallback to the official protobuf decoder.",
 		Export:       true,
 	}
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		p.EnableFastPB.RegisterCallback(updateFastPBEnabled)
+	}
 	p.EnableFastPB.Init(base.mgr)
+	if p == &params.CommonCfg {
+		storeFastPBEnabled(p.EnableFastPB.GetAsBool())
+	}
 
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
