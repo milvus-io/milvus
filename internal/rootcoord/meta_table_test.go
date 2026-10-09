@@ -464,6 +464,55 @@ func TestAlterCollectionLoadsDeferredRLSPoliciesBeforeEnable(t *testing.T) {
 	}
 }
 
+func TestAlterCollectionDeferredPoliciesUsePropertyPostImage(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		before     string
+		after      string
+		properties bool
+		load       bool
+	}{
+		{"unrelated disabled alter", "false", "true", false, false},
+		{"unrelated enabled alter", "true", "false", false, true},
+		{"disable", "true", "false", true, false},
+		{"remove enable property", "true", "", true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			meta, catalog := newRLSMetaTableForTest(t)
+			collection := meta.collID2Meta[20]
+			collection.Properties = common.NewKeyValuePairs(map[string]string{common.RLSEnabledKey: test.before})
+			collection.RLSPoliciesUnloaded = true
+			if test.load {
+				catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return(nil, nil).Once()
+			}
+			catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, uint64(2), false).Return(nil).Once()
+			paths := []string{message.FieldMaskCollectionDescription}
+			if test.properties {
+				paths = append(paths, message.FieldMaskCollectionProperties)
+			}
+			updates := &message.AlterCollectionMessageUpdates{Description: "updated"}
+			if test.after != "" {
+				updates.Properties = common.NewKeyValuePairs(map[string]string{common.RLSEnabledKey: test.after})
+			}
+			raw := message.NewAlterCollectionMessageBuilderV2().
+				WithHeader(&message.AlterCollectionMessageHeader{
+					CollectionId: 20,
+					UpdateMask:   &fieldmaskpb.FieldMask{Paths: paths},
+				}).
+				WithBody(&message.AlterCollectionMessageBody{Updates: updates}).
+				WithBroadcast([]string{"control"}).MustBuildBroadcast()
+			require.NoError(t, meta.AlterCollection(context.Background(), message.BroadcastResultAlterCollectionMessageV2{
+				Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+				Results: map[string]*message.AppendResult{"control": {TimeTick: 2}},
+			}))
+			require.Equal(t, !test.load, meta.collID2Meta[20].RLSPoliciesUnloaded)
+			enabled, err := common.IsRLSEnabled(meta.collID2Meta[20].Properties...)
+			require.NoError(t, err)
+			require.Equal(t, test.load, enabled)
+		})
+	}
+}
+
 func TestResolveRLSCollectionAllowsDisabledCollection(t *testing.T) {
 	meta, _ := newRLSMetaTableForTest(t)
 	for _, properties := range [][]*commonpb.KeyValuePair{

@@ -1138,23 +1138,23 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	// Load deferred policies before publishing enable, outside the metadata lock.
 	mt.ddLock.RLock()
 	original := mt.collID2Meta[header.CollectionId]
-	var recovered *model.Collection
+	loadPolicies := false
 	if original != nil && !original.RLSPoliciesCurrent() {
-		recovered = original.Clone()
-	}
-	mt.ddLock.RUnlock()
-	if recovered != nil {
-		recovered.ApplyUpdates(header, body)
-		enabled, err := common.IsRLSEnabled(recovered.Properties...)
+		properties := original.Properties
+		if slices.Contains(header.UpdateMask.GetPaths(), message.FieldMaskCollectionProperties) {
+			properties = body.Updates.Properties
+		}
+		enabled, err := common.IsRLSEnabled(properties...)
 		if err != nil {
+			mt.ddLock.RUnlock()
 			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", header.CollectionId)
 		}
-		if enabled {
-			if _, err := mt.loadRLSPolicies(ctx, recovered.CollectionID); err != nil {
-				return err
-			}
-		} else {
-			recovered = nil
+		loadPolicies = enabled
+	}
+	mt.ddLock.RUnlock()
+	if loadPolicies {
+		if _, err := mt.loadRLSPolicies(ctx, header.CollectionId); err != nil {
+			return err
 		}
 	}
 
@@ -1166,7 +1166,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		// collection not exists, return directly.
 		return errAlterCollectionNotFound
 	}
-	if recovered != nil && coll != original {
+	if loadPolicies && coll != original {
 		return merr.WrapErrServiceUnavailableMsg("collection %d changed while loading RLS policies", header.CollectionId)
 	}
 	oldColl := coll.Clone()
