@@ -1612,7 +1612,15 @@ The default matches the milvus-storage default.`,
 		Doc:          "Enable fast protobuf decoding for RPC and internal search results. Set false to use the official protobuf decoder.",
 		Export:       true,
 	}
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		p.EnableFastPB.RegisterCallback(updateFastPBEnabled)
+	}
 	p.EnableFastPB.Init(base.mgr)
+	if p == &params.CommonCfg {
+		storeFastPBEnabled(p.EnableFastPB.GetAsBool())
+	}
 
 	p.PreferIPv6LocalIP = ParamItem{
 		Key:          "common.preferIPv6",

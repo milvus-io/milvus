@@ -25,11 +25,7 @@ import (
 )
 
 func fastPBEnabled() bool {
-	params := paramtable.GetIfInitialized()
-	if params == nil {
-		return true
-	}
-	return params.CommonCfg.EnableFastPB.GetAsBool()
+	return paramtable.FastPBEnabled()
 }
 
 // UnmarshalSearchResultData decodes an internal search result using the current
