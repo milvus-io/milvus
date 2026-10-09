@@ -181,7 +181,7 @@ const (
 func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
 	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
 	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0 || len(s.planInfo.GetGroupByFieldIds()) > 0
-	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter || len(s.orderByFields) > 0 {
+	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
 		return internalpb.SearchType_DEFAULT
 	}
 	if hasFilter {
