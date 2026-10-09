@@ -516,6 +516,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->read_snapshot_ = query_context->get_read_snapshot();
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =
