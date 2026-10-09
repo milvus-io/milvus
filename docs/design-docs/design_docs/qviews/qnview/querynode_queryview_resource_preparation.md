@@ -405,6 +405,44 @@ A later View can create a fresh instance without reusing the failed one. Old
 View releases and callbacks retain the old instance identity and cannot affect
 that replacement. There is no physical reset interface or second ref table.
 
+### TODO: preparation fairness across PChannels
+
+Treat catch-up scheduling fairness as a follow-up optimization, not a required
+correctness fix in this PR. Waiting among VChannels on the same PChannel is
+acceptable: they share that PChannel's availability boundary. The optimization
+target is isolation between PChannels with different availability.
+
+Currently, each `QueryViewSegmentManager` has one shared `catchupTasks` queue
+and worker pool; its `TransformLogBuffer` has one shared `drainTasks` queue and
+worker pool. Neither pool is partitioned by PChannel. The configured worker
+counts (`queryNode.queryView.segmentCatchupConcurrency` and
+`queryNode.queryView.transformLogDrainConcurrency`, both defaulting to 4) bound
+tasks including their waits: catch-up workers wait in `WaitCatchup`, and drain
+workers wait for progress when buffered entries are exhausted before the first
+SyncUp.
+
+Consequently, PChannel A can establish subscriptions, start enough Segment
+catch-up tasks, then stall before its first SyncUp or lose its connection while
+resumption is pending. A's tasks can occupy the shared workers and delay
+Preparing views on a healthy PChannel B. Either pool can be the bottleneck. A
+PChannel that is unreachable before subscription establishment does not occupy
+these pools: initial subscription acquisition runs asynchronously before Segment
+loading. Terminal subscription errors end catch-up rather than waiting for
+recovery indefinitely.
+
+This scheduling contention delays preparation and Ready transitions; it does
+not directly stop queries or live Transform delivery for already-serving views.
+An underlying data-stream outage can separately delay those views' MVCC waits.
+Do not conflate that availability effect with catch-up scheduling contention.
+
+TODO: evaluate scheduling that limits active catch-up work without letting
+waiting PChannels monopolize execution capacity. Preserve per-Segment Apply
+ordering, cancellation, history retention and the atomic catch-up/live handoff.
+Validation must hold A before its first SyncUp with more tasks than the worker
+capacity, demonstrate B can still become Ready, then verify A can resume or be
+released without missed Deletes, stale callbacks or leaked references. No
+additional fairness guarantee within a PChannel is required by this TODO.
+
 ### ApplyTransform failure and Poison
 
 A registration applies each entry once. If `ApplyTransform` fails at TimeTick
