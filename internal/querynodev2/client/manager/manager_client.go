@@ -26,6 +26,10 @@ import (
 // It wraps etcd session service discovery, following the same pattern as
 // StreamingNode's ManagerClient.
 type ManagerClient interface {
+	// RegisterQueryNodeListener waits for discovery, then atomically replays and subscribes.
+	// Callbacks must not re-enter the client or perform I/O.
+	RegisterQueryNodeListener(context.Context, func(int64, *NodeInfo)) (func(), error)
+
 	// RegisterNodeChangedNotifier registers a callback for QueryNode membership changes.
 	// The notifier must be non-blocking.
 	RegisterNodeChangedNotifier(notifier func())

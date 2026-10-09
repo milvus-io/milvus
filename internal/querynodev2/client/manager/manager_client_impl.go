@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"maps"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -27,6 +29,10 @@ type managerClientImpl struct {
 	mu                   sync.RWMutex
 	nodeChangedNotifiers []func()
 	watchStarted         bool
+	nodeListeners        map[uint64]func(int64, *NodeInfo)
+	nextNodeListener     uint64
+	nodes                map[int64]*NodeInfo
+	discoveryReady       chan struct{}
 	watchCancel          context.CancelFunc
 	watchWG              sync.WaitGroup
 }
@@ -40,12 +46,17 @@ func (c *managerClientImpl) RegisterNodeChangedNotifier(notifier func()) {
 	defer c.mu.Unlock()
 
 	c.nodeChangedNotifiers = append(c.nodeChangedNotifiers, notifier)
+	c.startWatchLocked()
+}
+
+func (c *managerClientImpl) startWatchLocked() {
 	if c.watchStarted {
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.watchStarted = true
+	c.discoveryReady = make(chan struct{})
 	c.watchCancel = cancel
 	c.watchWG.Add(1)
 	go c.watchNodeChanged(ctx)
@@ -67,6 +78,7 @@ func (c *managerClientImpl) watchNodeChanged(ctx context.Context) {
 			return status.NewOnShutdownError("querynode manager client is closing")
 		default:
 		}
+		c.publishNodeState(state)
 		c.notifyNodeChanged()
 		return nil
 	})
@@ -159,4 +171,63 @@ func (c *routedViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ..
 
 func (c *routedViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
 	return c.client.SyncDataView(contextutil.WithPickServerID(ctx, c.queryNodeID), in, opts...)
+}
+
+func (c *managerClientImpl) RegisterQueryNodeListener(ctx context.Context, listener func(int64, *NodeInfo)) (func(), error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, merr.WrapErrServiceUnavailableMsg("querynode manager client is closing")
+	}
+	defer c.lifetime.Done()
+	c.mu.Lock()
+	c.startWatchLocked()
+	ready := c.discoveryReady
+	c.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.stopped:
+		return nil, merr.WrapErrServiceUnavailableMsg("querynode manager client is closing")
+	case <-ready:
+	}
+	c.mu.Lock()
+	if c.nodeListeners == nil {
+		c.nodeListeners = make(map[uint64]func(int64, *NodeInfo))
+	}
+	c.nextNodeListener++
+	id := c.nextNodeListener
+	c.nodeListeners[id] = listener
+	for nodeID, node := range c.nodes {
+		listener(nodeID, node)
+	}
+	c.mu.Unlock()
+	return func() { c.mu.Lock(); delete(c.nodeListeners, id); c.mu.Unlock() }, nil
+}
+
+func (c *managerClientImpl) publishNodeState(state resolver.VersionedState) {
+	next := make(map[int64]*NodeInfo)
+	for id, session := range state.Sessions() {
+		next[id] = &NodeInfo{ServerID: id, Address: session.Address, Stopping: session.Stopping, ServerLabels: copyServerLabels(session.ServerLabels)}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.nodes {
+		if _, ok := next[id]; !ok {
+			for _, listener := range c.nodeListeners {
+				listener(id, nil)
+			}
+		}
+	}
+	for id, node := range next {
+		old := c.nodes[id]
+		if old != nil && old.Address == node.Address && old.Stopping == node.Stopping && maps.Equal(old.ServerLabels, node.ServerLabels) {
+			continue
+		}
+		for _, listener := range c.nodeListeners {
+			listener(id, node)
+		}
+	}
+	if c.nodes == nil {
+		close(c.discoveryReady)
+	}
+	c.nodes = next
 }

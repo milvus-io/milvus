@@ -88,7 +88,7 @@ func TestProgress(t *testing.T) {
 		}
 	}
 	check(100)
-	for _, action := range []string{"update", "release", "release_reload"} {
+	for _, action := range []string{"update", "identical_update", "release", "release_reload"} {
 		t.Run(action, func(t *testing.T) {
 			require.NoError(t, store.Put(ctx, cfg))
 			version := store.GetConfigVersion(1)
@@ -98,8 +98,16 @@ func TestProgress(t *testing.T) {
 				}
 			}
 			duringSnapshot = func() {
-				if action != "update" {
+				if action == "release" || action == "release_reload" {
 					require.NoError(t, store.Remove(ctx, 1))
+				}
+				if action == "update" {
+					cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: 200})
+				}
+				if action == "release_reload" {
+					for _, r := range cfg.Replicas {
+						r.ReplicaID += 100
+					}
 				}
 				if action != "release" {
 					require.NoError(t, store.Put(ctx, cfg))
@@ -109,8 +117,13 @@ func TestProgress(t *testing.T) {
 			require.Equal(t, action == "release", p.Config == nil)
 			duringSnapshot = nil
 			if action != "release" {
-				require.Greater(t, store.GetConfigVersion(1), version)
-				check(0)
+				if action == "identical_update" {
+					require.Equal(t, version, store.GetConfigVersion(1))
+					check(100)
+				} else {
+					require.NotEqual(t, version, store.GetConfigVersion(1))
+					check(0)
+				}
 			}
 		})
 	}

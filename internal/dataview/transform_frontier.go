@@ -111,6 +111,7 @@ func (m *dataViewManager) acquireReadyRefLocked(ctx context.Context, state *coll
 			}
 			return nil, merr.WrapErrServiceNotReadyMsg("Transform frontier for collection %d is not ready", state.id)
 		}
+		m.publishDataViewLocked(state)
 	}
 	return acquireRefLocked(state, entry), nil
 }

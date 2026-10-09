@@ -2,15 +2,21 @@ package balancer
 
 import (
 	"sort"
+	"sync"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// DefaultBalancePolicy is the built-in three-phase policy described in
-// balancer_design.md. It is intentionally stateless; all mutable planning
-// state is scoped to a single Plan call.
-type DefaultBalancePolicy struct{}
+// DefaultBalancePolicy retains target layouts across batches. Actual facts and
+// row predictions remain in the cache and call-local planning context respectively.
+type DefaultBalancePolicy struct {
+	mu      sync.Mutex
+	layouts layoutManager
+	fanouts map[qviews.ShardID]int
+	search  map[qviews.ShardID]*searchCursor
+}
 
 // NewDefaultBalancePolicy creates the standard balance policy.
 func NewDefaultBalancePolicy() *DefaultBalancePolicy {
@@ -25,18 +31,22 @@ type balanceCandidate struct {
 // Plan classifies dirty shards, orders mandatory work before optional
 // optimization, and allocates each accepted shard against a shared
 // steady-state row tracker.
-func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.ShardID) *BalancePlan {
+func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	plan := &BalancePlan{
 		Prepares: make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder),
 	}
-	if snap == nil || len(dirty) == 0 {
+	if reader == nil || len(dirty) == 0 {
 		return plan
 	}
-	if snap.Config == nil {
-		snapCopy := *snap
-		snapCopy.Config = DefaultBalanceConfig()
-		snap = &snapCopy
+	snap := newPlanningContext(reader)
+	dirty = p.layouts.prepare(snap, dirty)
+	if p.fanouts == nil {
+		p.fanouts = make(map[qviews.ShardID]int)
+		p.search = make(map[qviews.ShardID]*searchCursor)
 	}
+	snap.fanouts, snap.search = p.fanouts, p.search
 
 	var mandatory, optional []balanceCandidate
 	seen := make(map[qviews.ShardID]struct{}, len(dirty))
@@ -56,6 +66,9 @@ func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.Shard
 				size:    shardTotalLoad(snap, shardID),
 			})
 		case actionMayOptimize:
+			if !snap.GetBalanceConfig().AutoBalance {
+				continue
+			}
 			optional = append(optional, balanceCandidate{
 				shardID: shardID,
 				size:    shardTotalLoad(snap, shardID),
@@ -66,30 +79,40 @@ func (p *DefaultBalancePolicy) Plan(snap *BalancerSnapshot, dirty []qviews.Shard
 	sortCandidates(mandatory)
 	sortCandidates(optional)
 
-	projectedRows := initialProjectedRows(snap.Nodes)
+	projectedRows := initialProjectedRows(snap.NodesMap())
 	for _, shardID := range plan.Releases {
 		projectedRows = withoutRows(projectedRows, currentShardRows(snap, shardID))
+		snap.acceptRows(shardID, nil)
+		delete(p.fanouts, shardID)
+		delete(p.search, shardID)
 	}
 
 	for _, candidate := range mandatory {
 		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows)
+		result := allocate(snap, candidate.shardID, baseRows, false)
 		if result == nil {
+			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
 		}
+		snap.acceptRows(candidate.shardID, result.rowsByNode)
 		plan.Prepares[candidate.shardID] = result.builder
 		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
 
 	for _, candidate := range optional {
 		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows)
+		result := allocate(snap, candidate.shardID, baseRows, true)
 		if result == nil {
+			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
+		}
+		if result.more {
+			plan.Continues = append(plan.Continues, candidate.shardID)
 		}
 		if assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
 			continue
 		}
+		snap.acceptRows(candidate.shardID, result.rowsByNode)
 		plan.Prepares[candidate.shardID] = result.builder
 		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
@@ -106,7 +129,7 @@ func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
 		if node == nil {
 			continue
 		}
-		rows := node.UpRowCount + node.PendingRowCount
+		rows := node.TargetRowCount
 		if rows < 0 {
 			rows = 0
 		}
@@ -115,16 +138,11 @@ func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
 	return projected
 }
 
-func currentShardRows(snap *BalancerSnapshot, shardID qviews.ShardID) map[int64]int64 {
-	rowsByNode := make(map[int64]int64)
+func currentShardRows(snap balanceInput, shardID qviews.ShardID) map[int64]int64 {
 	if snap == nil {
-		return rowsByNode
+		return nil
 	}
-	rowStats := snap.ShardRowStatsSnapshot[shardID]
-	for nodeID, rows := range rowStats {
-		rowsByNode[nodeID] = rows.UpRowCount + rows.PendingRowCount
-	}
-	return rowsByNode
+	return snap.CurrentRows(shardID)
 }
 
 func withoutRows(projected, remove map[int64]int64) map[int64]int64 {
@@ -185,18 +203,12 @@ func shardLess(a, b qviews.ShardID) bool {
 	return a.VChannel < b.VChannel
 }
 
-func shardTotalLoad(snap *BalancerSnapshot, shardID qviews.ShardID) int64 {
+func shardTotalLoad(snap balanceInput, shardID qviews.ShardID) int64 {
 	shard := snap.DataViewForShard(shardID)
 	if shard == nil {
 		return 0
 	}
-	var total int64
-	for _, p := range shard.GetPartitions() {
-		for _, segmentID := range p.GetSegmentIds() {
-			total += segmentRows(segmentInfoFor(snap, segmentID, p.GetPartitionId()))
-		}
-	}
-	return total
+	return shard.TotalRows
 }
 
 func flattenAssignments(view *viewpb.QueryViewOfShard) map[int64]int64 {

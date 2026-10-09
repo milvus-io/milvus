@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -36,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
@@ -51,6 +56,24 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 		{ID: 1000, CollectionID: 100, ResourceGroup: "rg1"},
 	}, nil).Once()
 
+	detached := 0
+	data := api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 100, DataVersion: qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, Shards: []*api.ShardDataView{{VChannel: "v0", TransformStartAfterTimetick: 10}}})
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock((*fakeRuntimeDataViewProvider).RegisterDataViewListener).To(func(_ *fakeRuntimeDataViewProvider, listener api.DataViewListener) func() {
+			listener(100, data)
+			return func() { detached++ }
+		}).Build(),
+		mockey.Mock((*fakeRuntimeQueryNodeClient).RegisterQueryNodeListener).To(func(_ *fakeRuntimeQueryNodeClient, _ context.Context, listener func(int64, *qnmanager.NodeInfo)) (func(), error) {
+			listener(10, &qnmanager.NodeInfo{ServerID: 10, ServerLabels: map[string]string{sessionutil.LabelResourceGroup: "rg1"}})
+			return func() { detached++ }, nil
+		}).Build(),
+		mockey.Mock((*fakeRuntimeResourceGroupManager).RegisterResourceGroupListener).To(func(_ *fakeRuntimeResourceGroupManager, listener func(string, []int64)) func() {
+			listener("rg1", []int64{10})
+			return func() { detached++ }
+		}).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
 	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: "v0"}
 	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
 		queryCoordCatalog: catalog,
@@ -60,7 +83,7 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 		viewSyncClient:       &fakeRuntimeViewSyncClient{},
 		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     &fakeRuntimeDataViewProvider{},
+		dataViewProvider:     newRuntimeDataViewProvider(t),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, runtime)
@@ -72,6 +95,11 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	assert.Equal(t, []int64{10}, configs[100].PartitionIDs)
 	require.NotNil(t, runtime.shardViewRegistry.Get(shardID))
 	assert.Contains(t, runtime.shardViewRegistry.Snapshot().StatsMap(), shardID)
+	require.NoError(t, runtime.balanceCache.WaitForReady(ctx))
+	require.Same(t, data, runtime.balanceCache.GetCollection(100).DataView())
+	require.Equal(t, "rg1", runtime.balanceCache.GetNode(10).Info().ResourceGroup)
+	runtime.stop()
+	require.Equal(t, 3, detached)
 }
 
 func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
@@ -89,8 +117,8 @@ func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
 		viewSyncClient:       &fakeRuntimeViewSyncClient{},
 		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     &fakeRuntimeDataViewProvider{},
-		balancerFactory: func(*balancer.SnapshotBuilder) qviewsBalancer {
+		dataViewProvider:     newRuntimeDataViewProvider(t),
+		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},
 	})
@@ -162,7 +190,7 @@ func (c *fakeRuntimeViewSyncClient) IsNodeAlive(context.Context, qviews.WorkNode
 }
 
 func (c *fakeRuntimeViewSyncClient) OpenSyncStream(context.Context, qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
-	return nil, nil
+	return nil, merr.WrapErrServiceUnavailableMsg("test stream is not connected")
 }
 func (c *fakeRuntimeViewSyncClient) Close() {}
 
@@ -185,16 +213,32 @@ func (m *fakeRuntimeResourceGroupManager) GetNodes(context.Context, string) ([]i
 
 type fakeRuntimeDataViewProvider struct{}
 
-func (p *fakeRuntimeDataViewProvider) DataViewSnapshot(context.Context) *balancer.DataViewSnapshot {
-	return balancer.NewDataViewSnapshot(0, nil, nil)
+func (p *fakeRuntimeDataViewProvider) RegisterDataViewListener(api.DataViewListener) func() {
+	return func() {}
 }
 
-func (p *fakeRuntimeDataViewProvider) DataViewSnapshotForCollections(context.Context, map[int64]struct{}) *balancer.DataViewSnapshot {
-	return balancer.NewDataViewSnapshot(0, nil, nil)
+func (p *fakeRuntimeDataViewProvider) Get(context.Context, int64, *viewpb.DataVersion) (qviews.DataViewRef, error) {
+	panic("patch using mockey")
 }
 
-func (p *fakeRuntimeDataViewProvider) SegmentSnapshot(context.Context, []int64) balancer.SegmentSnapshot {
-	return nil
+// Immutable reference fixture; persistence and GC ownership are tested with the
+// real DataView manager in coordview/dataview_integration_test.go.
+type runtimeDataViewRef struct{ view *viewpb.DataViewOfCollection }
+
+func (r *runtimeDataViewRef) DataView() *viewpb.DataViewOfCollection { return r.view }
+func (r *runtimeDataViewRef) Version() *viewpb.DataVersion           { return r.view.DataVersion }
+func (r *runtimeDataViewRef) Stats(int64) (qviews.SegmentStats, bool) {
+	return qviews.SegmentStats{}, false
+}
+func (r *runtimeDataViewRef) Deref() {}
+
+func newRuntimeDataViewProvider(t *testing.T) *fakeRuntimeDataViewProvider {
+	t.Helper()
+	patch := mockey.Mock((*fakeRuntimeDataViewProvider).Get).To(func(_ *fakeRuntimeDataViewProvider, _ context.Context, id int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return &runtimeDataViewRef{view: &viewpb.DataViewOfCollection{CollectionId: id, DataVersion: qviews.FromProtoDataVersion(version).IntoProto()}}, nil
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return &fakeRuntimeDataViewProvider{}
 }
 
 type fakeRuntimeBalancer struct {
@@ -220,3 +264,11 @@ var (
 	_ balancer.DataViewProvider       = (*fakeRuntimeDataViewProvider)(nil)
 	_ loadmgr.DirtyCollectionNotifier = func(int64) {}
 )
+
+func (c *fakeRuntimeQueryNodeClient) RegisterQueryNodeListener(context.Context, func(int64, *qnmanager.NodeInfo)) (func(), error) {
+	return func() {}, nil
+}
+
+func (m *fakeRuntimeResourceGroupManager) RegisterResourceGroupListener(func(string, []int64)) func() {
+	return func() {}
+}

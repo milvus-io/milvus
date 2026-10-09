@@ -32,12 +32,15 @@ type LoadConfigStore struct {
 	collectionLocks *lock.KeyLock[int64]
 	catalog         metastore.QueryCoordCatalog
 	version         uint64
+	listeners       map[uint64]LoadConfigListener
+	nextListener    uint64
 
 	// configs keeps the live in-memory snapshot per collection.
 	configs  map[int64]*LoadConfig
 	versions map[int64]uint64
 
-	// snapshot is the resident immutable view returned to Balancer.
+	// snapshot is the lazily built immutable compatibility/management view.
+	// The balancer receives per-collection publication events directly.
 	snapshot *LoadConfigSnapshot
 
 	observers []func(collectionID int64, released bool)
@@ -86,7 +89,7 @@ func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCat
 		collID := info.GetCollectionID()
 		cfg := buildFromPersisted(info, partitions[collID], replicasByColl[collID])
 		configs[collID] = cfg
-		versions[collID] = 1
+		versions[collID] = loadInfoVersion(cfg)
 	}
 
 	store := &LoadConfigStore{
@@ -150,7 +153,8 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	s.mu.Lock()
 	s.replaceInMemoryLocked(cfg)
 	s.version++
-	s.versions[collectionID] = s.version
+	s.versions[collectionID] = loadInfoVersion(s.configs[collectionID])
+	s.publishConfigLocked(collectionID)
 	s.mu.Unlock()
 	s.notifyObservers(collectionID, false)
 	return nil
@@ -182,6 +186,7 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 	delete(s.configs, collectionID)
 	s.version++
 	delete(s.versions, collectionID)
+	s.publishConfigLocked(collectionID)
 	s.mu.Unlock()
 	s.notifyObservers(collectionID, true)
 	return nil
@@ -232,8 +237,8 @@ func (s *LoadConfigStore) GetConfig(collectionID int64) *LoadConfig {
 	return s.configs[collectionID]
 }
 
-// GetConfigVersion returns the version of the live load config for a single
-// collection without materializing the full balancer snapshot. It is the
+// GetConfigVersion returns the stable content identity of one live config
+// without materializing the full management snapshot. It is the
 // O(1) counterpart of LoadConfigSnapshot.ConfigVersion. Use GetConfigWithVersion
 // when a caller needs a config and its version atomically.
 func (s *LoadConfigStore) GetConfigVersion(collectionID int64) uint64 {
@@ -309,4 +314,32 @@ func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.configs[collectionID], s.versions[collectionID]
+}
+
+// LoadConfigListener receives immutable committed configs and their stable content
+// identity (not an ordered revision); nil and version zero denote removal.
+// It runs under the store lock and must not re-enter the store or perform I/O.
+type LoadConfigListener func(collectionID int64, config *LoadConfig, version uint64)
+
+// RegisterLoadConfigListener installs a listener and replays state atomically
+// with respect to source publications. The return value unregisters it.
+func (s *LoadConfigStore) RegisterLoadConfigListener(listener LoadConfigListener) func() {
+	s.mu.Lock()
+	if s.listeners == nil {
+		s.listeners = make(map[uint64]LoadConfigListener)
+	}
+	s.nextListener++
+	id := s.nextListener
+	s.listeners[id] = listener
+	for collectionID, config := range s.configs {
+		listener(collectionID, config, s.versions[collectionID])
+	}
+	s.mu.Unlock()
+	return func() { s.mu.Lock(); delete(s.listeners, id); s.mu.Unlock() }
+}
+
+func (s *LoadConfigStore) publishConfigLocked(collectionID int64) {
+	for _, listener := range s.listeners {
+		listener(collectionID, s.configs[collectionID], s.versions[collectionID])
+	}
 }

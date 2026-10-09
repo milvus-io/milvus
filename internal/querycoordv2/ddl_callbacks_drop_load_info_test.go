@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -48,8 +49,8 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 		viewSyncClient:       &fakeRuntimeViewSyncClient{},
 		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
 		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     &fakeRuntimeDataViewProvider{},
-		balancerFactory: func(*balancer.SnapshotBuilder) qviewsBalancer {
+		dataViewProvider:     newRuntimeDataViewProvider(t),
+		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},
 	})

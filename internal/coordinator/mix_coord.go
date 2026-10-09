@@ -1616,30 +1616,18 @@ func (s *mixCoordImpl) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_W
 }
 
 func (s *mixCoordImpl) initDataAndQueryCoord() error {
-	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Recover them in parallel first.
-	g, _ := errgroup.WithContext(s.ctx)
-	g.Go(func() error {
-		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.datacoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	g.Go(func() error {
-		s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
-		if err := s.queryCoordServer.Init(); err != nil {
-			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
-			return err
-		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
+	// Recover DataViews before QueryViews acquire their exact-version references.
+	// Neither coordinator starts background GC/balancing until both have recovered.
+	s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.datacoordServer.Init(); err != nil {
 		return err
 	}
+	s.queryCoordServer.SetFileResourceObserver(s.fileResourceObserver)
+	if err := s.queryCoordServer.Init(); err != nil {
+		return err
+	}
+	g, _ := errgroup.WithContext(s.ctx)
 
-	g, _ = errgroup.WithContext(s.ctx)
 	g.Go(func() error {
 		if err := s.datacoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))

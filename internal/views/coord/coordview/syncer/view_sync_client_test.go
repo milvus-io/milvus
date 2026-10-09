@@ -134,3 +134,10 @@ func (c *capturingViewSyncServiceClient) SyncDataView(ctx context.Context, in *v
 	c.dataCtx = ctx
 	return &viewpb.SyncDataViewResponse{}, nil
 }
+
+func (c *fakeQueryNodeViewSyncClient) RegisterQueryNodeListener(_ context.Context, listener func(int64, *qnmanager.NodeInfo)) (func(), error) {
+	for id, node := range c.nodes {
+		listener(id, node)
+	}
+	return func() {}, nil
+}

@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"slices"
+
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -25,8 +27,8 @@ const (
 	actionMust
 
 	// actionMayOptimize: the current placement is valid; the Policy may
-	// emit a migration when the complete steady-state candidate differs
-	// from the current assignment.
+	// emit a migration when a changed candidate passes the net-gain and
+	// non-worsening RG-load checks.
 	actionMayOptimize
 )
 
@@ -41,12 +43,15 @@ const (
 //  5. Current view references an unavailable node → Must (node lost)
 //  6. LoadInfoVersion differs            → Must
 //  7. Otherwise                           → MayOptimize
-func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
+func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
-	stats := snap.ShardStatsMap()[shardID]
+	stats := snap.GetShardStats(shardID)
 	hasUpView := stats != nil && stats.UpVersion != nil
 	hasPreparing := stats != nil && stats.PreparingVersion != nil
 	hasAnyView := hasUpView || hasPreparing || (stats != nil && len(stats.Segments) > 0)
+	if entry := snap.ShardEntry(shardID); entry != nil && len(entry.ResidentNodes()) > 0 {
+		hasAnyView = true
+	}
 
 	// 1. Desired absent → release any residual views.
 	if desired == nil {
@@ -54,6 +59,31 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 			return actionRelease
 		}
 		return actionNone
+	}
+	if target, managed := snap.TargetNodes(shardID); managed && len(target) == 0 {
+		if !hasAnyView {
+			return actionNone
+		}
+		if !healthyUp(snap, shardID) {
+			return actionRelease
+		}
+		// Never retire the last healthy serving cover merely to reduce replicas.
+		for _, replica := range desired.Replicas {
+			sibling := qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shardID.VChannel}
+			if nodes, ok := snap.TargetNodes(sibling); ok && len(nodes) > 0 && healthyUp(snap, sibling) {
+				return actionRelease
+			}
+		}
+		return actionNone
+	}
+	if hasPreparing {
+		if entry := snap.ShardEntry(shardID); entry != nil {
+			for _, node := range entry.PreparingNodes() {
+				if !eligibleShardNode(snap, desired, shardID, node) {
+					return actionMust
+				}
+			}
+		}
 	}
 
 	// 2. Desired present but no Up view → must create.
@@ -77,7 +107,7 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 	}
 
 	// 5. Any node in the current Up view is unavailable?
-	if hasUnavailableNode(stats, snap.Nodes) {
+	if hasUnavailableNode(stats, snap.NodesMap()) {
 		return actionMust
 	}
 
@@ -85,9 +115,41 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 	if loadInfoDiffer(snap, desired, stats) {
 		return actionMust
 	}
+	if target, managed := snap.TargetNodes(shardID); managed {
+		if entry := snap.ShardEntry(shardID); entry != nil {
+			for _, node := range entry.UpNodes() {
+				if _, found := slices.BinarySearch(target, node); !found {
+					return actionMust
+				}
+			}
+		}
+	}
 
 	// 7. Steady-state — candidate for balance optimization.
 	return actionMayOptimize
+}
+
+func eligibleShardNode(snap balanceInput, cfg *loadmgr.LoadConfig, id qviews.ShardID, node int64) bool {
+	n := snap.NodesMap()[node]
+	r := findReplica(cfg, id.ReplicaID)
+	return n != nil && n.Alive && !n.Stopping && r != nil && n.ResourceGroup == r.ResourceGroup
+}
+
+func healthyUp(snap balanceInput, id qviews.ShardID) bool {
+	stats := snap.GetShardStats(id)
+	if stats == nil || stats.UpVersion == nil {
+		return false
+	}
+	entry := snap.ShardEntry(id)
+	if entry != nil {
+		for _, node := range entry.UpNodes() {
+			n := snap.NodesMap()[node]
+			if n == nil || !n.Alive || n.Stopping {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // dataViewVersionAdvanced returns true if the shard's current Up view was
@@ -95,7 +157,7 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 // Returns false when the snapshot has no DataVersion for the collection
 // (DataView Manager hasn't reported one yet); the next reconcile cycle will
 // pick up the change.
-func dataViewVersionAdvanced(snap *BalancerSnapshot, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
+func dataViewVersionAdvanced(snap balanceInput, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
 	if stats.UpVersion == nil {
 		return false
 	}
@@ -126,14 +188,14 @@ func hasUnavailableNode(stats *coordview.ShardStats, nodes map[int64]*BalanceNod
 	return false
 }
 
-func loadInfoDiffer(snap *BalancerSnapshot, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
+func loadInfoDiffer(snap balanceInput, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
 	if stats == nil {
 		return true
 	}
 	if stats.UpLoadInfoVersion == 0 {
 		return true
 	}
-	loadInfoVersion := snap.LoadConfigSnapshot.ConfigVersion(desired.CollectionID)
+	loadInfoVersion := snap.ConfigVersion(desired.CollectionID)
 	if loadInfoVersion == 0 {
 		return true
 	}

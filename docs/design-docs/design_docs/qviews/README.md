@@ -378,7 +378,7 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
 | DataCoord (inside MixCoord) | DataView Manager | Maintaining immutable Collection snapshots and DataViewRefs |
-| Coord | Sealed Segment Balancer | Gathering information from all Managers, generating and distributing QueryViews |
+| Coord | Sealed Segment Balancer | Consuming immutable event-published cache entries, assigning disjoint replica node sets, and distributing QueryViews |
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
 | Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
@@ -466,3 +466,14 @@ consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
 uses a QueryView handoff fence (QueryCoord target update in the legacy model).
 The MVCC extension and distributed delivery are outside the current SN query
 extraction PR; a progress barrier alone does not implement DDL visibility.
+
+## Balancer implementation
+
+See [Balancer design](balancer_design.md), [Balancer cache](balancer_cache.md),
+[Replica placement](replica_placement.md), and
+[Incremental scoring](balancer_scoring.md) for the current implementation.
+QueryCoord subscribes to DataView, LoadConfig, Registry, node-discovery, and
+resource-group publications. MixCoord recovers DataViews before QueryViews so
+exact-version references are restored before GC starts. Native publications
+retain the dynamically generated Transform frontier and segment Manifest/cursor
+metadata; the shard frontier is not persisted.

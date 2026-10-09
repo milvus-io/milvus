@@ -95,13 +95,13 @@ var Params = paramtable.Get()
 // handles Data Coordinator related jobs
 type Server struct {
 	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
-	queryViewBalanceVersion   atomic.Uint64
-	ctx                       context.Context
-	serverLoopCtx             context.Context
-	serverLoopCancel          context.CancelFunc
-	serverLoopWg              sync.WaitGroup
-	quitCh                    chan struct{}
-	stateCode                 atomic.Value
+
+	ctx              context.Context
+	serverLoopCtx    context.Context
+	serverLoopCancel context.CancelFunc
+	serverLoopWg     sync.WaitGroup
+	quitCh           chan struct{}
+	stateCode        atomic.Value
 
 	etcdCli                             *clientv3.Client
 	tikvCli                             *txnkv.Client

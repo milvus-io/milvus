@@ -95,7 +95,10 @@ An empty manager remains resident so later QueryViews for the same replica and
 shard continue using the same manager lifecycle. After `RequestRelease`, once
 the last QueryView completes durable removal, the released manager is removed
 together with its stats and reverse-index entries. An already-empty manager is
-removed immediately by `RequestRelease`.
+removed immediately by `RequestRelease`. A failed first `AddPreparing` also
+retires and removes its still-empty manager. Retirement is committed under
+`m.mu` before the registry callback; a previously returned manager pointer
+cannot accept new work after retirement. Balancer retries through `Ensure`.
 
 `Close` closes the flush scheduler before the QueryView runtime closes the
 underlying `ReliableSyncer`.
@@ -257,7 +260,9 @@ per versioned QueryView key; sync effects are latest-win per QueryView key and
 WorkNode key. It packs ready, non-inflight shard lanes according to the configured
 maximum ETCD transaction operation count. For each claimed batch it performs:
 
-1. Flatten all `persists` and call `catalog.SaveQueryViews` once.
+1. Flatten all `persists` and persist them. An oversized single-shard batch is
+   sorted by ascending view version and split into transactions bounded by
+   `maxTxnOps`, preserving a recoverable prefix if shutdown interrupts a chunk.
 2. After persistence succeeds, run the batch's post-persist callbacks, including
    durable removal of Dropped state machines.
 3. Group every `syncer.SyncView` by
@@ -307,15 +312,28 @@ Callbacks for an already removed view stop tracking without creating new work.
 
 ### 4.7 AddPreparing
 
-1. Validate the new DataVersion against all resident views.
-2. Preempt an existing Preparing or Ready view by entering Unrecoverable.
-3. Advance Unrecoverable views to Dropping so their Dropped sync can be batched
-   with the replacement Preparing sync.
-4. Assign `max(QueryVersion for the same DataVersion) + 1`, or 1 when the
-   DataVersion is new.
-5. Build and register the new state machine.
-6. Update in-memory pointers and stats.
-7. Emit and submit one shard event, then unlock.
+The implemented [balancing policy](balancer_scoring.md#5-target-load-residency-and-reuse)
+adds per-view target contributions and protected partial-resource reuse to this
+existing lifecycle. Failed target invalidation must not discard ready segments
+or release their references. New target acceptance must publish synchronously;
+the replacement's node-side Acquire must protect shared references before old
+teardown can unload them. ShardStats now publishes per-view assignments/rows and individual ready-resource
+evidence separately from merged segment statistics. Concrete node-side sharing
+remains an injected resource-manager contract.
+
+1. Under the manager lock, reject a released/closed manager or a DataVersion
+   older than any resident view.
+2. Unlock, build the view, and acquire its exact DataView reference. Acquisition
+   may wait for a collection mutation that is performing I/O; manager reads,
+   node callbacks and release must remain available during that wait.
+3. Re-lock and revalidate lifecycle and DataVersion, then check cancellation.
+   A rejected acquisition releases its reference after unlocking. A failed
+   first preparation retires the manager only if it is still empty.
+4. Assign `max(QueryVersion for the same DataVersion) + 1`, or 1 for a new
+   DataVersion, using the current state after acquisition.
+5. Preempt an existing Preparing/Ready view and advance Unrecoverable views to
+   Dropping. Register the replacement and collect both effects in one event.
+6. Update pointers and stats, submit the event under the lock, then unlock.
 
 ### 4.8 RequestRelease
 
@@ -338,7 +356,15 @@ state machines. Recovered Preparing and Down views create pending sync effects.
 Before committing the Begin/Commit window, the Registry installs manager
 observers and builds its collection/node indexes, so immediate recovery
 callbacks cannot be lost. It then waits for the Scheduler to become idle before
-recovery completes.
+recovery completes. Recovered Unrecoverable views with valid DataView references
+remain retained until replacement or explicit release; only views whose exact
+DataView is missing start terminal cleanup. Recovery failure first cancels and
+waits for flush work, then disables late manager callbacks and releases refs
+by detaching ownership under each manager lock and calling `Deref` after
+unlocking. Normal durable removal uses the same detach-then-release pattern.
+The provider's `Deref` may wait on a collection mutation, so it must not run
+while holding the shard-manager lock. Registry removal and stats publication
+complete before that wait; the extra reference only delays DataView GC.
 
 On shutdown, the owner closes the Registry and its flush scheduler, then closes
 `ReliableSyncer`. This prevents a flush task
@@ -346,12 +372,28 @@ from submitting new sync work after the syncer has closed.
 
 ## 6. Thread Safety
 
+The [Balancer Cache implementation](balancer_cache.md) uses
+`RegisterPublicationListener` for synchronous actual-state publication. At the
+manager's in-memory commit, its hook publishes immutable shard state and node
+contributions before returning. Registry initialization and final removal also
+publish, with source replay/readiness and manager-instance checks. The hook
+performs only in-memory cache updates and dirty-key notification, never I/O or
+re-entry into a manager. This publication does not wait for the separate
+persist-before-sync scheduler and does not change QueryView transitions.
+
+Cache readers retain immutable objects without manager locks. Node totals and
+their contribution indexes are maintained on publication, so Balancer no
+longer aggregates all placements while constructing a planning snapshot.
+The adapter shares the existing immutable `statsLocked()` result; it does not eliminate the cost of that full statistics rebuild.
+Incremental statistics publication remains a separate optimization.
+
 - `ShardViewManager.mu` protects its state machines, fast pointers, and atomic
   event creation.
 - `DirtyViewFlushScheduler.mu` protects pending events, inflight and held shard
-  lanes, queued task accounting, terminal error, and closed state.
-- No ETCD, RPC, task execution, or callback runs while a manager lock is held;
-  only the scheduler's non-blocking in-memory `Submit` runs under that lock.
+  lanes, queued task accounting, and closed state.
+- No ETCD, RPC, task execution, or re-entrant callback runs while a manager lock
+  is held. In-memory statistics/cache publication hooks may run under that
+  lock; they follow the upstream-to-cache lock order and never call upstream.
 - No Catalog or ReliableSyncer I/O runs while the Scheduler lock is held.
 - The shared `NodeScheduler` queue is unbounded and non-blocking, so submitting
   an event does not wait for a batch task to execute.
@@ -383,8 +425,9 @@ from submitting new sync work after the syncer has closed.
     `ShardID` cannot be flushed by concurrent tasks.
 12. **Cross-Shard Parallelism**: Different `ShardID` lanes may execute in
     different NodeScheduler tasks concurrently.
-13. **Registry Cleanup**: Only `RequestRelease` makes a manager eligible for
-    registry removal. After the released manager's last QueryView completes
+13. **Registry Cleanup**: Explicit `RequestRelease`, failed first preparation
+    of an empty manager, or terminal recovery of exclusively missing DataViews
+    makes a manager eligible for registry removal. After the released manager's last QueryView completes
     durable removal, the registry removes that exact empty manager, its stats,
     and its collection/node reverse-index entries. The manager owns the release
     and emptiness preconditions; the registry only rechecks manager identity
@@ -402,3 +445,16 @@ internal/views/coord/coordview/
     syncer/reliable_syncer.go     # Reliable node delivery
     shard_view_manager_test.go    # Manager lifecycle tests
 ```
+
+### Failure and construction contracts
+
+Non-shutdown flush errors are fatal: effects have already been consumed and
+must not be silently dropped. The scheduler fails loudly so recovery rebuilds
+from durable metadata. Expected task-context cancellation during shutdown is
+allowed. Ordinary transient catalog write failures retry in ReliableWriteMetaKv.
+
+The original `RecoverShardViewRegistry` entry point remains available for the
+standalone lifecycle without DataView reference ownership. Integrated runtimes
+must call `RecoverShardViewRegistryWithDataViews` with a non-nil provider before
+enabling DataView GC. State-machine constructors similarly retain the original
+API and expose explicit `WithRef` variants for reference-owning managers.

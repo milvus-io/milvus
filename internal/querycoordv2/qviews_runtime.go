@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -29,6 +28,7 @@ import (
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type qviewsBalancer interface {
@@ -52,6 +51,8 @@ type qviewsRuntime struct {
 	readyChanges      *readiness.Notifications
 	syncer            syncer.ReliableSyncer
 	balancer          qviewsBalancer
+	balanceCache      *cache.Cache
+	nodePublisher     *nodeview.QueryNodePublisher
 
 	queryNodeManager     qnmanager.ManagerClient
 	streamingCoordClient streamingcoordclient.Client
@@ -63,8 +64,8 @@ type qviewsRuntimeDependencies struct {
 	queryViewCatalog  queryview.QueryViewCatalog
 
 	viewSyncClient       syncer.ViewSyncClient
-	queryNodeClient      nodeview.QueryNodeClient
-	resourceGroupManager nodeview.ResourceGroupManager
+	queryNodeClient      nodeview.QueryNodeStatePublisher
+	resourceGroupManager nodeview.ResourceGroupStatePublisher
 	dataViewProvider     balancer.DataViewProvider
 
 	queryNodeManager            qnmanager.ManagerClient
@@ -72,7 +73,7 @@ type qviewsRuntimeDependencies struct {
 	streamingNodeHandler        snhandler.HandlerClient
 	streamingNodeViewSyncClient snhandler.QueryViewSyncClient
 
-	balancerFactory func(*balancer.SnapshotBuilder) qviewsBalancer
+	balancerFactory func(*cache.Cache) qviewsBalancer
 }
 
 func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
@@ -86,7 +87,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, merr.WrapErrServiceInternalMsg("resource group manager is nil")
 	}
 	if deps.dataViewProvider == nil {
-		deps.dataViewProvider = emptyDataViewProvider{}
+		return nil, merr.WrapErrServiceInternalMsg("DataView provider is not ready")
 	}
 
 	if deps.queryNodeClient == nil {
@@ -116,26 +117,22 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	if err != nil {
 		return nil, err
 	}
-	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
-	shardViewRegistry, err := coordview.RecoverShardViewRegistry(ctx, deps.queryViewCatalog, reliableSyncer)
+	nodePublisher, err := nodeview.NewQueryNodePublisher(ctx, deps.queryNodeClient, deps.resourceGroupManager)
 	if err != nil {
+		return nil, err
+	}
+	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
+	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider)
+	if err != nil {
+		nodePublisher.Close()
 		_ = reliableSyncer.Close()
 		return nil, err
 	}
 
-	nodeProvider := nodeview.NewQueryNodeProvider(ctx, deps.queryNodeClient, deps.resourceGroupManager)
-	balanceConfig := balancer.DefaultBalanceConfig()
-	balanceConfig.TickerInterval = paramtable.Get().QueryCoordCfg.QueryViewFullReconsileInterval.GetAsDuration(time.Second)
-	builder := balancer.NewSnapshotBuilder(
-		loadConfigStore,
-		shardViewRegistry,
-		nodeProvider,
-		deps.dataViewProvider,
-		balanceConfig,
-	)
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(builder, shardViewRegistry, nil))
+	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil))
 	if deps.balancerFactory != nil {
-		balancerController = deps.balancerFactory(builder)
+		balancerController = deps.balancerFactory(balanceCache)
 	}
 	loadManager := loadmgr.NewCollectionLoadManager(
 		loadConfigStore,
@@ -151,6 +148,8 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		readyChanges:         newCollectionReadiness(loadConfigStore, shardViewRegistry),
 		syncer:               reliableSyncer,
 		balancer:             balancerController,
+		balanceCache:         balanceCache,
+		nodePublisher:        nodePublisher,
 		queryNodeManager:     deps.queryNodeManager,
 		streamingCoordClient: deps.streamingCoordClient,
 		streamingNodeHandler: deps.streamingNodeHandler,
@@ -166,6 +165,12 @@ func (r *qviewsRuntime) stop() {
 		r.readyChanges.Close()
 	}
 	r.balancer.Stop()
+	if r.balanceCache != nil {
+		r.balanceCache.Close()
+	}
+	if r.nodePublisher != nil {
+		r.nodePublisher.Close()
+	}
 	if r.shardViewRegistry != nil {
 		r.shardViewRegistry.Close()
 	}
@@ -185,18 +190,22 @@ func newDefaultQViewsRuntimeDependencies(
 	metaKV kv.MetaKv,
 	etcdCli *clientv3.Client,
 	queryCoordCatalog metastore.QueryCoordCatalog,
-	resourceGroupManager nodeview.ResourceGroupManager,
+	resourceGroupManager nodeview.ResourceGroupStatePublisher,
 	mixCoord types.MixCoord,
 ) qviewsRuntimeDependencies {
 	queryNodeManager := qnmanager.NewManagerClient(etcdCli)
 	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
 	streamingNodeHandler := snhandler.NewHandlerClient(streamingCoordClient.Assignment())
+	var dataViewProvider balancer.DataViewProvider
+	if source, ok := mixCoord.(dataViewProviderSource); ok {
+		dataViewProvider = source.DataViewProvider()
+	}
 	deps := qviewsRuntimeDependencies{
 		queryCoordCatalog:           queryCoordCatalog,
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
 		queryNodeClient:             queryNodeManager,
 		resourceGroupManager:        resourceGroupManager,
-		dataViewProvider:            &mixCoordDataViewProvider{mixCoord: mixCoord},
+		dataViewProvider:            dataViewProvider,
 		queryNodeManager:            queryNodeManager,
 		streamingCoordClient:        streamingCoordClient,
 		streamingNodeHandler:        streamingNodeHandler,
@@ -207,54 +216,4 @@ func newDefaultQViewsRuntimeDependencies(
 
 type dataViewProviderSource interface {
 	DataViewProvider() balancer.DataViewProvider
-}
-
-type mixCoordDataViewProvider struct {
-	mixCoord types.MixCoord
-}
-
-func (p *mixCoordDataViewProvider) DataViewSnapshot(ctx context.Context) *balancer.DataViewSnapshot {
-	provider := p.provider()
-	if provider == nil {
-		return balancer.NewDataViewSnapshot(0, nil, nil)
-	}
-	return provider.DataViewSnapshot(ctx)
-}
-
-func (p *mixCoordDataViewProvider) DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *balancer.DataViewSnapshot {
-	provider := p.provider()
-	if provider == nil {
-		return balancer.NewDataViewSnapshot(0, nil, nil)
-	}
-	return provider.DataViewSnapshotForCollections(ctx, collectionIDs)
-}
-
-func (p *mixCoordDataViewProvider) SegmentSnapshot(ctx context.Context, segmentIDs []int64) balancer.SegmentSnapshot {
-	provider := p.provider()
-	if provider == nil {
-		return nil
-	}
-	return provider.SegmentSnapshot(ctx, segmentIDs)
-}
-
-func (p *mixCoordDataViewProvider) provider() balancer.DataViewProvider {
-	source, ok := p.mixCoord.(dataViewProviderSource)
-	if !ok {
-		return nil
-	}
-	return source.DataViewProvider()
-}
-
-type emptyDataViewProvider struct{}
-
-func (emptyDataViewProvider) DataViewSnapshot(context.Context) *balancer.DataViewSnapshot {
-	return balancer.NewDataViewSnapshot(0, nil, nil)
-}
-
-func (emptyDataViewProvider) DataViewSnapshotForCollections(context.Context, map[int64]struct{}) *balancer.DataViewSnapshot {
-	return balancer.NewDataViewSnapshot(0, nil, nil)
-}
-
-func (emptyDataViewProvider) SegmentSnapshot(context.Context, []int64) balancer.SegmentSnapshot {
-	return nil
 }

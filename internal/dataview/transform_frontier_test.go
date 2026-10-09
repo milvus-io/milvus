@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -114,12 +115,23 @@ func TestTransformFrontierRetriesRecoveryWithoutMutatingPublishedViews(t *testin
 	state.versions[protoVersionToStruct(latest.view.DataVersion)] = latest
 	state.latest = latest
 	manager.states[1] = state
+	var native *api.CollectionDataView
+	stop := manager.RegisterDataViewListener(func(_ int64, view *api.CollectionDataView) { native = view })
+	defer stop()
+	manager.publishDataViewLocked(state)
+	require.Nil(t, native, "unresolved transform frontier must not reach the balancer")
 	_, err := manager.Latest(ctx, 1)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	ready = true
 	ref, err := manager.Latest(ctx, 1)
 	require.NoError(t, err)
 	defer ref.Deref()
+	require.NotNil(t, native)
+	require.Equal(t, uint64(80), native.Shard("v1").TransformStartAfterTimetick)
+	segment, ok := native.Segment(10)
+	require.True(t, ok)
+	require.Equal(t, int64(1), segment.ManifestVersion)
+	require.Equal(t, uint64(80), segment.TransformStartAfterTimetick)
 	published := ref.DataView()
 	require.Equal(t, uint64(80), published.Shards[0].TransformStartAfterTimetick)
 	older, err := manager.Get(ctx, 1, old.view.DataVersion)

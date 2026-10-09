@@ -76,7 +76,7 @@ func TestLoadConfigGetPreservesConfigVersionDuringPut(t *testing.T) {
 reading:
 	for {
 		entry := store.Get(1)
-		assert.Equal(t, uint64(entry.Config.LoadFields[0].IndexId+1), entry.ConfigVersion)
+		assert.Equal(t, loadInfoVersion(entry.Config), entry.ConfigVersion)
 		select {
 		case <-done:
 			require.NoError(t, writeErr)
@@ -88,9 +88,9 @@ reading:
 		}
 	}
 	final := store.Get(1)
-	require.Greater(t, final.ConfigVersion, initialVersion)
+	require.NotEqual(t, initialVersion, final.ConfigVersion)
 	require.EqualValues(t, updates+1, final.Config.LoadFields[0].IndexId)
-	require.Equal(t, uint64(final.Config.LoadFields[0].IndexId+1), final.ConfigVersion)
+	require.Equal(t, loadInfoVersion(final.Config), final.ConfigVersion)
 
 	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(1)).Return(nil).Once()
 	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(1)).Return(nil).Once()
@@ -482,12 +482,12 @@ func TestSnapshot_TracksLoadInfoVersionPerCollection(t *testing.T) {
 
 	require.NoError(t, store.Put(context.Background(), cfg1))
 	first := store.Snapshot()
-	assert.Equal(t, uint64(2), first.ConfigVersion(cfg1.CollectionID))
+	assert.Equal(t, loadInfoVersion(cfg1), first.ConfigVersion(cfg1.CollectionID))
 
 	require.NoError(t, store.Put(context.Background(), cfg2))
 	second := store.Snapshot()
-	assert.Equal(t, uint64(2), second.ConfigVersion(cfg1.CollectionID))
-	assert.Equal(t, uint64(3), second.ConfigVersion(cfg2.CollectionID))
+	assert.Equal(t, loadInfoVersion(cfg1), second.ConfigVersion(cfg1.CollectionID))
+	assert.Equal(t, loadInfoVersion(cfg2), second.ConfigVersion(cfg2.CollectionID))
 }
 
 func TestRecoverLoadConfigStore_EmptyState(t *testing.T) {

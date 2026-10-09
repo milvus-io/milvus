@@ -68,10 +68,10 @@ func (s *Server) queryViewCollectionSegmentInfo(ctx context.Context, collectionI
 			// MixCoord dispatches this directly to its local DataCoord metadata.
 			metadata, _, err = s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, collectionID, ids)
 		}
-		_, currentVersion := store.GetConfigWithVersion(collectionID)
+		current, currentVersion := store.GetConfigWithVersion(collectionID)
 		// Stats are immutable publications. Compare scoped pointers, not the
 		// registry's global version, so unrelated collections cannot starve us.
-		if currentVersion != version || !maps.Equal(stats, snapshot()) {
+		if current != cfg || currentVersion != version || !maps.Equal(stats, snapshot()) {
 			continue
 		}
 		if err != nil {

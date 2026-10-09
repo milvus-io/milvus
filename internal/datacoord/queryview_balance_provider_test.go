@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/dataview"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 )
 
 func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
@@ -27,14 +28,23 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		})
 		require.NoError(t, err)
 		provider := (&Server{dataViewManager: manager}).DataViewProvider()
-		snapshot := provider.DataViewSnapshotForCollections(ctx, map[int64]struct{}{1: {}, 2: {}})
-		shard, ok := snapshot.ShardView(1, "p0_1v0")
-		require.True(t, ok)
-		require.Equal(t, []int64{10}, shard.GetPartitions()[0].GetSegmentIds())
-		require.Equal(t, []int64{3}, shard.GetPartitions()[0].GetSegmentManifestVersions())
-		stats, ok := snapshot.SegmentInfo(10)
+		var published *api.CollectionDataView
+		stop := provider.RegisterDataViewListener(func(id int64, view *api.CollectionDataView) {
+			if id == 1 {
+				published = view
+			}
+		})
+		defer stop()
+		require.NotNil(t, published)
+		snapshot := published
+		shard := snapshot.Shard("p0_1v0")
+		require.NotNil(t, shard)
+		require.Equal(t, int64(10), shard.Partitions[0].Segments[0].SegmentID)
+		require.Equal(t, int64(3), shard.Partitions[0].Segments[0].ManifestVersion)
+		stats, ok := snapshot.Segment(10)
 		require.True(t, ok)
 		require.Equal(t, int64(100), stats.RowNum)
+
 		_, err = manager.RecomputeNow(ctx, 1, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
 			return []dataview.LoadableSegment{{SegmentID: 11, PartitionID: 2, VChannel: "p0_1v0", RowNum: 200}}, nil
 		})
@@ -43,7 +53,7 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		ref, err := manager.Get(ctx, 1, firstVersion)
 		require.NoError(t, err)
 		require.Nil(t, ref, "snapshot adapter must release its manager reference")
-		require.Equal(t, []int64{10}, shard.GetPartitions()[0].GetSegmentIds())
+		require.Equal(t, int64(10), shard.Partitions[0].Segments[0].SegmentID)
 		require.Equal(t, int64(100), stats.RowNum)
 	})
 }

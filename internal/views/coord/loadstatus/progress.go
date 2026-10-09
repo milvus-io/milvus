@@ -46,11 +46,11 @@ func Get(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, 
 			progress.Loaded++
 		}
 	}
-	// Versions increase across both updates and release/reload, so an old Up
-	// view cannot confirm a newer load. A concurrent change is retried by the
-	// next status poll; never expose completion from the invalidated snapshot.
+	// Config identities survive recovery. Also compare the immutable config
+	// pointer to detect updates or release/reload with identical content while
+	// the registry snapshot was being read.
 	current, currentVersion := store.GetConfigWithVersion(collectionID)
-	if currentVersion != version {
+	if current != cfg || currentVersion != version {
 		return Progress{Config: current}
 	}
 	return progress

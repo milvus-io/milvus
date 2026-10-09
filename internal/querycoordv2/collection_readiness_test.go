@@ -91,6 +91,11 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	catalog.EXPECT().GetReplicas(mock.Anything).Return([]*querypb.Replica{{ID: 1000, CollectionID: 100}}, nil).Once()
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, catalog)
 	require.NoError(t, err)
+	// Seed Up views with the recovered configuration identity; an update below
+	// must still wait for a new matching Up acknowledgement.
+	for _, view := range views {
+		view.Meta.LoadInfoVersion = store.GetConfigVersion(view.GetMeta().GetCollectionId())
+	}
 	syncer := &readinessSyncer{sent: make(chan syncer.SyncView, 64)}
 	registry, err := coordview.RecoverShardViewRegistry(ctx, &readinessCatalog{views: views}, syncer)
 	require.NoError(t, err)
