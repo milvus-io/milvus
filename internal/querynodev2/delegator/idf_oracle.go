@@ -65,7 +65,8 @@ type IDFOracle interface {
 	// Internally handles: streaming download → local disk → optional parse → register.
 	// Idempotent: skips if segment already loaded.
 	LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
-	LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error
+	BeginReopen(segmentID int64, fieldIDs []int64)
+	LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
 	SyncFunctions(functions []*schemapb.FunctionSchema) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
@@ -385,6 +386,12 @@ type idfOracle struct {
 	sync.RWMutex // protect current and growing segment stats
 	current      bm25Stats
 	growing      map[int64]*growingBm25Stats
+	// activeSealed records the last target committed with current under the same lock.
+	// Reopen must use this state at commit time, not a distribution read made before I/O.
+	activeSealed map[int64]struct{}
+	// pendingReopen prevents searches from using a newly readable segment before
+	// the fields announced by its reopen have reached current.
+	pendingReopen map[int64]map[int64]struct{}
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
@@ -440,21 +447,75 @@ func (o *idfOracle) activateSealedStatsLocked(segStats *sealedBm25Stats, stats b
 	return true
 }
 
-func (o *idfOracle) activateExistingSealedStats(segmentID int64, stats bm25Stats) (bool, error) {
+// isSealedActiveLocked reports membership in the target already applied to current.
+// Caller must hold the oracle lock.
+func (o *idfOracle) isSealedActiveLocked(segmentID int64) bool {
+	_, ok := o.activeSealed[segmentID]
+	return ok
+}
+
+func (o *idfOracle) BeginReopen(segmentID int64, fieldIDs []int64) {
 	o.Lock()
 	defer o.Unlock()
-
-	segStats, existed := o.sealed.Get(segmentID)
-	if !existed {
-		return false, nil
+	segStats, exists := o.sealed.Get(segmentID)
+	for _, fieldID := range fieldIDs {
+		if exists && segStats.HasField(fieldID) {
+			continue
+		}
+		if o.pendingReopen[segmentID] == nil {
+			o.pendingReopen[segmentID] = make(map[int64]struct{})
+		}
+		o.pendingReopen[segmentID][fieldID] = struct{}{}
 	}
+}
 
-	segStats.Lock()
-	defer segStats.Unlock()
-	if segStats.removed {
-		return false, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+// clearReopenPendingLocked is called only after all listed fields are installed.
+func (o *idfOracle) clearReopenPendingLocked(segmentID int64, logpaths map[int64][]string) {
+	fields := o.pendingReopen[segmentID]
+	for fieldID := range logpaths {
+		delete(fields, fieldID)
 	}
-	return o.activateSealedStatsLocked(segStats, stats), nil
+	if len(fields) == 0 {
+		delete(o.pendingReopen, segmentID)
+	}
+}
+
+// obsoleteReopen reports a segment that has been removed from both the applied
+// target and the latest distribution while its stats were being downloaded.
+func (o *idfOracle) obsoleteReopen(segmentID int64) bool {
+	o.RLock()
+	active := o.isSealedActiveLocked(segmentID)
+	_, loaded := o.sealed.Get(segmentID)
+	o.RUnlock()
+	if active || loaded {
+		return false
+	}
+	next, _ := o.next.GetSnapshot()
+	if next == nil {
+		return false
+	}
+	sealed, _ := next.Peek()
+	for _, item := range sealed {
+		for _, segment := range item.Segments {
+			if segment.SegmentID == segmentID &&
+				(segment.TargetVersion == next.targetVersion || segment.TargetVersion == unreadableTargetVersion) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ignoreObsoleteReopenError only handles failures reading an existing entry;
+// download and installation failures must still reach the caller.
+func (o *idfOracle) ignoreObsoleteReopenError(segmentID int64, logpaths map[int64][]string, err error) error {
+	if !o.obsoleteReopen(segmentID) {
+		return err
+	}
+	o.Lock()
+	o.clearReopenPendingLocked(segmentID, logpaths)
+	o.Unlock()
+	return nil
 }
 
 func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
@@ -548,7 +609,7 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 	return err
 }
 
-func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error {
+func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
@@ -562,122 +623,166 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			return nil, nil
 		}
 
-		segStats, existedBeforeLoad := o.sealed.Get(segmentID)
+		// Prepare missing fields without changing the live segment directory.
+		segStats, existed := o.sealed.Get(segmentID)
 		missingPaths := make(map[int64][]string, len(logpaths))
 		for fieldID, paths := range logpaths {
-			if existedBeforeLoad && segStats.HasField(fieldID) {
+			if existed && segStats.HasField(fieldID) {
 				continue
 			}
 			missingPaths[fieldID] = paths
 		}
-		if len(missingPaths) == 0 {
-			if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
-				existingStats, err := segStats.FetchStats()
-				if err != nil {
-					return nil, err
-				}
-				activated, err := o.activateExistingSealedStats(segmentID, existingStats)
-				if err != nil {
-					return nil, err
-				}
-				if activated {
-					o.syncResource()
-				}
+		var result streamLoadResult
+		if len(missingPaths) > 0 {
+			if err := os.MkdirAll(o.dirPath, os.ModePerm); err != nil {
+				return nil, err
 			}
-			return nil, nil
-		}
-
-		installed := false
-		cleanup := func() {
-			if installed {
-				return
+			stagingDir, err := os.MkdirTemp(o.dirPath, fmt.Sprintf("reopen-%d-", segmentID))
+			if err != nil {
+				return nil, err
 			}
-			for fieldID := range missingPaths {
-				cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID), fmt.Sprintf("%d", fieldID))
-				if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
-					logger.Warn(ctx, "failed to cleanup reopened bm25 stats field dir", mlog.Err(rmErr), mlog.String("path", cleanupPath))
+			defer func() {
+				if rmErr := os.RemoveAll(stagingDir); rmErr != nil {
+					logger.Warn(ctx, "failed to cleanup staged bm25 stats", mlog.Err(rmErr), mlog.String("path", stagingDir))
 				}
-			}
-		}
-		defer cleanup()
-
-		result, err := o.streamLoad(ctx, segmentID, missingPaths, cm, true)
-		if err != nil {
-			return nil, err
-		}
-
-		var existingStats bm25Stats
-		if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
-			existingStats, err = segStats.FetchStats()
+			}()
+			result, err = o.streamLoadInDir(ctx, segmentID, missingPaths, cm, true, stagingDir)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		o.Lock()
-		segStats, existed := o.sealed.Get(segmentID)
-		if existed {
+		// All requests, including retries with no missing fields, commit here.
+		// Fetch old contributions only when activation needs them, then recheck
+		// their entry and field list after reacquiring the oracle lock.
+		var existingStats bm25Stats
+		var existingFor *sealedBm25Stats
+		for {
+			o.Lock()
+			segStats, existed := o.sealed.Get(segmentID)
+			if !existed {
+				if len(result.fieldList) == 0 {
+					o.clearReopenPendingLocked(segmentID, logpaths)
+					o.Unlock()
+					return nil, nil
+				}
+				segStats = &sealedBm25Stats{
+					ts:        time.Now(),
+					activate:  atomic.NewBool(false),
+					segmentID: segmentID,
+					localDir:  path.Join(o.dirPath, fmt.Sprintf("%d", segmentID)),
+				}
+			}
 			segStats.Lock()
 			if segStats.removed {
 				segStats.Unlock()
 				o.Unlock()
-				return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+				err := merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+				return nil, o.ignoreObsoleteReopenError(segmentID, logpaths, err)
 			}
 
 			wasActive := segStats.activate.Load()
+			inTarget := o.isSealedActiveLocked(segmentID)
+			if len(segStats.fieldList) == 0 {
+				// A replaced or pruned entry has no old contributions to restore.
+				existingStats = nil
+			}
+			if !wasActive && inTarget && len(segStats.fieldList) > 0 &&
+				(existingFor != segStats || !statsCoverFields(existingStats, segStats.fieldList)) {
+				segStats.Unlock()
+				o.Unlock()
+				existingStats, err = segStats.FetchStats()
+				if err != nil {
+					return nil, o.ignoreObsoleteReopenError(segmentID, logpaths, err)
+				}
+				existingFor = segStats
+				continue
+			}
+
 			installedFields := make([]int64, 0, len(result.fieldList))
 			installedStats := make(bm25Stats, len(result.fieldList))
 			for _, fieldID := range result.fieldList {
-				if segStats.hasFieldLocked(fieldID) {
-					continue
-				}
-				installedFields = append(installedFields, fieldID)
-				if result.stats != nil {
+				if !segStats.hasFieldLocked(fieldID) {
+					installedFields = append(installedFields, fieldID)
 					installedStats[fieldID] = result.stats[fieldID]
 				}
 			}
-			if len(installedFields) == 0 {
-				segStats.Unlock()
-				o.Unlock()
-				return nil, nil
+			if len(installedFields) > 0 {
+				installedDiskSize, err := o.installReopenedFields(segmentID, result, installedFields)
+				if err != nil {
+					segStats.Unlock()
+					o.Unlock()
+					return nil, err
+				}
+				segStats.addFieldsLocked(installedFields)
+				segStats.diskSize += installedDiskSize
+				o.sealedDiskSize.Add(installedDiskSize)
 			}
 
-			segStats.addFieldsLocked(installedFields)
-			segStats.diskSize += result.diskSize
 			switch {
 			case wasActive:
 				o.current.Merge(installedStats)
-			case activateIfReadable:
-				// Inactive entries have not contributed any field to current, so activation must merge the full segment.
-				if existingStats == nil {
-					existingStats = make(bm25Stats, len(installedStats))
-				}
-				existingStats.Merge(installedStats)
-				o.activateSealedStatsLocked(segStats, existingStats)
+			case inTarget:
+				// Inactive entries need both the old and newly installed fields.
+				o.current.Merge(existingStats)
+				o.activateSealedStatsLocked(segStats, installedStats)
 			}
+			if !existed {
+				o.sealed.Insert(segmentID, segStats)
+			}
+			o.clearReopenPendingLocked(segmentID, logpaths)
 			segStats.Unlock()
-		} else {
-			segStats = &sealedBm25Stats{
-				ts:        time.Now(),
-				activate:  atomic.NewBool(false),
-				segmentID: segmentID,
-				localDir:  result.localDir,
-				fieldList: result.fieldList,
-				diskSize:  result.diskSize,
-			}
-			if activateIfReadable {
-				o.activateSealedStatsLocked(segStats, result.stats)
-			}
-			o.sealed.Insert(segmentID, segStats)
-		}
-		o.sealedDiskSize.Add(result.diskSize)
-		installed = true
-		o.Unlock()
+			o.Unlock()
 
-		o.syncResource()
-		return nil, nil
+			o.syncResource()
+			return nil, nil
+		}
 	})
 	return err
+}
+
+// installReopenedFields moves fully downloaded fields into the segment directory.
+// The oracle lock prevents target removal and field-list changes during installation.
+func (o *idfOracle) installReopenedFields(segmentID int64, result streamLoadResult, fields []int64) (int64, error) {
+	segmentDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
+	if err := os.MkdirAll(segmentDir, os.ModePerm); err != nil {
+		return 0, err
+	}
+	installed := make([]string, 0, len(fields))
+	var diskSize int64
+	for _, fieldID := range fields {
+		fieldName := fmt.Sprintf("%d", fieldID)
+		destination := path.Join(segmentDir, fieldName)
+		if err := os.RemoveAll(destination); err != nil {
+			for _, dir := range installed {
+				_ = os.RemoveAll(dir)
+			}
+			return 0, err
+		}
+		fieldDir := path.Join(result.localDir, fieldName)
+		fieldSize := bm25FieldDirDiskSize(fieldDir)
+		if err := os.Rename(fieldDir, destination); err != nil {
+			for _, dir := range installed {
+				_ = os.RemoveAll(dir)
+			}
+			return 0, err
+		}
+		installed = append(installed, destination)
+		diskSize += fieldSize
+	}
+	return diskSize, nil
+}
+
+func statsCoverFields(stats bm25Stats, fields []int64) bool {
+	if len(stats) != len(fields) {
+		return false
+	}
+	for _, fieldID := range fields {
+		if _, ok := stats[fieldID]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 type streamLoadResult struct {
@@ -711,10 +816,13 @@ func bm25FieldDirDiskSize(fieldDir string) int64 {
 // streamLoad downloads BM25 stats from remote storage to local disk.
 // When needParse is true, also parses stats using TeeReader.
 func (o *idfOracle) streamLoad(ctx context.Context, segmentID int64, binlogPaths map[int64][]string, cm storage.ChunkManager, needParse bool) (streamLoadResult, error) {
+	return o.streamLoadInDir(ctx, segmentID, binlogPaths, cm, needParse, path.Join(o.dirPath, fmt.Sprintf("%d", segmentID)))
+}
+
+func (o *idfOracle) streamLoadInDir(ctx context.Context, segmentID int64, binlogPaths map[int64][]string, cm storage.ChunkManager, needParse bool, segDir string) (streamLoadResult, error) {
 	log := mlog.With(mlog.FieldSegmentID(segmentID))
 	startTs := time.Now()
 
-	segDir := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
 	var totalDiskSize int64
 	var stats map[int64]*storage.BM25Stats
 	fieldList := make([]int64, 0, len(binlogPaths))
@@ -962,7 +1070,10 @@ func (o *idfOracle) SetNext(snapshot *snapshot) {
 
 	// sync SyncDistibution when first load target
 	if o.targetVersion.Load() == 0 {
-		o.SyncDistribution()
+		if err := o.SyncDistribution(); err != nil {
+			mlog.Warn(context.TODO(), "initial idf oracle sync distribution failed", mlog.Err(err))
+			o.NotifySync()
+		}
 	} else {
 		o.NotifySync()
 	}
@@ -1109,6 +1220,12 @@ func (o *idfOracle) SyncDistribution() error {
 		return true
 	})
 
+	// Publish membership with the corresponding current stats, so a late reopen
+	// observes either the old target or the new one at its commit point.
+	o.activeSealed = make(map[int64]struct{}, targetMap.Len())
+	for segmentID := range targetMap {
+		o.activeSealed[segmentID] = struct{}{}
+	}
 	o.targetVersion.Store(snapshot.targetVersion)
 	numRow := o.current.NumRow()
 	growingLen := len(o.growing)
@@ -1123,6 +1240,16 @@ func (o *idfOracle) SyncDistribution() error {
 func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
 	o.RLock()
 	defer o.RUnlock()
+	if next, _ := o.next.GetSnapshot(); next != nil && next.targetVersion > o.targetVersion.Load() {
+		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 stats have not caught up with target version %d", next.targetVersion)
+	}
+	for segmentID, fields := range o.pendingReopen {
+		if _, active := o.activeSealed[segmentID]; active {
+			if _, pending := fields[fieldID]; pending {
+				return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 stats for segment %d field %d are still loading", segmentID, fieldID)
+			}
+		}
+	}
 
 	stats, err := o.current.GetStats(fieldID)
 	if err != nil {
@@ -1143,6 +1270,8 @@ func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracl
 		targetVersion:  atomic.NewInt64(0),
 		current:        newBm25Stats(functions),
 		growing:        make(map[int64]*growingBm25Stats),
+		activeSealed:   make(map[int64]struct{}),
+		pendingReopen:  make(map[int64]map[int64]struct{}),
 		sealed:         typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
 		sealedDiskSize: atomic.NewInt64(0),
 		dirPath:        path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
