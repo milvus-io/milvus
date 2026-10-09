@@ -1615,6 +1615,10 @@ func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, me
 	return -math.MaxFloat32
 }
 
+// appendFinalSearchChunk appends one already-reduced, ordered CHUNK to the final unary Search response.
+// It does not rank or reduce hits. It applies offset and limit per query across CHUNK boundaries,
+// copies the selected result data and metadata, restores scores for negatively related metrics,
+// and returns appended field-data bytes for maxOutputSize accounting.
 func appendFinalSearchChunk(
 	output *schemapb.SearchResultData,
 	chunk *schemapb.SearchResultData,
