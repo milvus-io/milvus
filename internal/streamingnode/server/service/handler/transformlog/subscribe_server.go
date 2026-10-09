@@ -169,6 +169,9 @@ func (s *SubscribeServer) createSubscription(req *streamingpb.CreateTransformSub
 			},
 		},
 	}); err != nil {
+		// Unblock callbacks before joining the worker: the failed response
+		// leaves the ready gate closed, including for cancellation events.
+		handler.Close()
 		_ = sub.Close()
 		return err
 	}

@@ -28,6 +28,13 @@ stream over the same summary reader used for SN preparation. Closing a client
 stream releases its subscriptions, without closing the manager's SN bootstrap
 stream or WALSummary. PChannel shutdown cancels acquired streams.
 
+The server gates subscription callbacks until the Create response is sent. If
+that send fails, it closes the callback handler before closing the subscription.
+Subscription Close waits for the reader worker, which may already be delivering
+an event or deliver a terminal error on cancellation; neither callback may wait
+for a Create response that will never succeed. The failed creation emits no
+subscription events, and RPC cleanup also closes the acquired stream.
+
 The handler client resolves the current PChannel assignment. Local consumers
 use the WAL adaptor; remote consumers use `SubscribeTransform`. Assignment
 changes invalidate the old stream and the client resumes against the new owner.
