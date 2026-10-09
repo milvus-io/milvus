@@ -52,19 +52,33 @@ func (s *eventSubscription) Error() error {
 }
 
 func (s *eventSubscription) Close() error {
+	select {
+	case <-s.done:
+		return s.Error()
+	default:
+	}
+	s.requestClose()
+	<-s.done
+	return s.Error()
+}
+
+// requestClose releases the server reader, including after a consumer failure
+// has already finished this subscription locally.
+func (s *eventSubscription) requestClose() {
 	s.closeOnce.Do(func() {
-		select {
-		case <-s.done:
-			return
-		default:
-		}
 		if err := s.stream.sendCloseSubscription(s.subscriptionID); err != nil {
 			s.stream.removeSubscription(s.subscriptionID)
 			s.finish(err)
 		}
 	})
-	<-s.done
-	return s.Error()
+}
+
+func (s *eventSubscription) reject(err error) {
+	s.setError(err)
+	s.stream.removeSubscription(s.subscriptionID)
+	// The receive callback must not wait for its own close acknowledgement.
+	go s.requestClose()
+	s.finish(err)
 }
 
 func (s *eventSubscription) handle(event wal.TransformLogStreamEvent) error {

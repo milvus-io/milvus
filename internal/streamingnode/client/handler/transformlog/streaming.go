@@ -295,8 +295,7 @@ func (s *EventStream) handleMessageBatch(resp *streamingpb.TransformMessageBatch
 			VChannel:       resp.GetVchannel(),
 			Entry:          entry,
 		}); err != nil {
-			s.removeSubscription(resp.GetSubscriptionId())
-			sub.finish(err)
+			sub.reject(err)
 			return
 		}
 	}
@@ -312,8 +311,8 @@ func (s *EventStream) handleSyncUp(resp *streamingpb.TransformSubscriptionSyncUp
 		VChannel:       resp.GetVchannel(),
 		SyncUp:         &wal.TransformLogSyncUp{TimeTick: resp.GetTimeTick()},
 	}); err != nil {
-		s.removeSubscription(resp.GetSubscriptionId())
-		sub.finish(err)
+		sub.reject(err)
+		return
 	}
 	if sub.endTimeTick != 0 && resp.GetTimeTick() >= sub.endTimeTick {
 		s.removeSubscription(sub.subscriptionID)

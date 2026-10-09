@@ -114,6 +114,11 @@ terminal error already reported by the local PChannel stream. Typed terminal
 physical errors stop client resumption; logical semantic errors remain attached
 to their subscriptions. Subscription handlers do not request physical reconnects
 or infer migration from UNKNOWN error text.
+Consumer rejection releases the corresponding remote reader even if the local
+subscription has already finished. Its close request is sent outside the receive
+callback without waiting for a close acknowledgement there. If rejection races
+with Subscribe returning, the recorded logical failure takes precedence over
+connection retry; it must not reconnect unrelated subscriptions.
 
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
 A caller recovering its own state must select a cursor consistent with that

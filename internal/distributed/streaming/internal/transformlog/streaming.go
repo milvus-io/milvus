@@ -210,6 +210,12 @@ func (s *resumableStream) subscribePending(ctx context.Context, underlying wal.T
 			continue
 		}
 		if err := s.subscribeRemote(ctx, underlying, sub); err != nil {
+			// Delivery can reject the logical subscription before Subscribe
+			// returns. Its recorded failure must not reconnect other consumers.
+			if subErr := sub.Error(); subErr != nil {
+				s.removeSubscription(sub, subErr)
+				continue
+			}
 			if ctx.Err() != nil || !terminalSubscriptionError(err) {
 				return err
 			}
@@ -255,7 +261,8 @@ func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.Tr
 	s.mu.Lock()
 	if s.subscriptions[sub.id] != sub {
 		s.mu.Unlock()
-		return remote.Close()
+		_ = remote.Close()
+		return nil
 	}
 	sub.remote = remote
 	s.mu.Unlock()
