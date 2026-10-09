@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -35,11 +36,6 @@
 #include "storage/Types.h"
 
 namespace milvus::clustering {
-
-std::map<int64_t, int64_t>
-AllocateSegmentSampleRows(const std::vector<int64_t>& segment_ids,
-                          const std::map<int64_t, int64_t>& segment_num_rows,
-                          int64_t target_sample_rows);
 
 // after clustering result uploaded, return result meta for golang usage
 struct ClusteringResultMeta {
@@ -114,6 +110,8 @@ class KmeansClustering {
     ~KmeansClustering() = default;
 
  private:
+    friend class KmeansSamplingTest;
+
     template <typename T>
     void
     StreamingAssignandUpload(
@@ -152,7 +150,8 @@ class KmeansClustering {
                             const int64_t dim,
                             int64_t& offset);
 
-    // given all possible segments, sample data to buffer
+    // Uniform reservoir sampling without replacement across all input rows.
+    // Full training preserves segment/row order for assignment buffer reuse.
     template <typename T>
     void
     SampleTrainData(
@@ -164,6 +163,7 @@ class KmeansClustering {
         const int64_t expected_train_size,
         const int64_t dim,
         const bool random_sample,
+        std::mt19937_64& rng,
         uint8_t* buf);
 
     // transform centroids result to PB format for future usage of golang side

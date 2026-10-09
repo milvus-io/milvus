@@ -20,7 +20,6 @@
 #include "common/FastMem.h"
 #include <cmath>
 #include <cstdint>
-#include <ctime>
 #include <numeric>
 #include <random>
 #include <type_traits>
@@ -55,63 +54,6 @@ KmeansClustering::KmeansClustering(
     int64_t partition_id = file_manager_context.fieldDataMeta.partition_id;
     msg_header_ = fmt::format(
         "collection: {}, partition: {} ", collection_id, partition_id);
-}
-
-std::map<int64_t, int64_t>
-AllocateSegmentSampleRows(const std::vector<int64_t>& segment_ids,
-                          const std::map<int64_t, int64_t>& segment_num_rows,
-                          int64_t target_sample_rows) {
-    AssertInfo(target_sample_rows >= 0,
-               "target sample rows must be non-negative");
-
-    std::map<int64_t, int64_t> result;
-    std::vector<int64_t> active;
-    int64_t total_rows = 0;
-    for (const auto segment_id : segment_ids) {
-        const auto rows = segment_num_rows.at(segment_id);
-        AssertInfo(
-            rows >= 0, "segment {} row count must be non-negative", segment_id);
-        result[segment_id] = 0;
-        if (rows > 0) {
-            active.push_back(segment_id);
-            AssertInfo(total_rows <= std::numeric_limits<int64_t>::max() - rows,
-                       "segment row count sum overflows");
-            total_rows += rows;
-        }
-    }
-
-    auto remaining = std::min(target_sample_rows, total_rows);
-    if (remaining > 0 && remaining < static_cast<int64_t>(active.size())) {
-        throw SegcoreError(
-            ErrorCode::ClusterSkip,
-            "sample row budget is too small to cover every non-empty segment");
-    }
-
-    while (remaining > 0) {
-        AssertInfo(!active.empty(), "no segment capacity remains for sampling");
-        const auto share = remaining / static_cast<int64_t>(active.size());
-        const auto extra = remaining % static_cast<int64_t>(active.size());
-        int64_t allocated = 0;
-        std::vector<int64_t> next;
-        next.reserve(active.size());
-        for (size_t index = 0; index < active.size(); ++index) {
-            const auto segment_id = active[index];
-            const auto capacity =
-                segment_num_rows.at(segment_id) - result.at(segment_id);
-            const auto requested =
-                share + (static_cast<int64_t>(index) < extra ? 1 : 0);
-            const auto rows = std::min(capacity, requested);
-            result[segment_id] += rows;
-            allocated += rows;
-            if (capacity > rows) {
-                next.push_back(segment_id);
-            }
-        }
-        AssertInfo(allocated > 0, "failed to allocate segment sample rows");
-        remaining -= allocated;
-        active = std::move(next);
-    }
-    return result;
 }
 
 // Copy at most max_bytes from field-data payloads into buf. source_offset
@@ -240,46 +182,138 @@ KmeansClustering::SampleTrainData(
     const int64_t expected_train_size,
     const int64_t dim,
     const bool random_sample,
+    std::mt19937_64& rng,
     uint8_t* buf) {
-    int64_t offset = 0;
-    const auto bytes_per_row = dim * sizeof(T);
-    AssertInfo(bytes_per_row > 0 && expected_train_size % bytes_per_row == 0,
-               "training size must contain complete vectors");
+    AssertInfo(
+        dim > 0 && dim <= std::numeric_limits<int64_t>::max() / sizeof(T),
+        "invalid vector dimension");
+    const int64_t bytes_per_row = dim * sizeof(T);
+    AssertInfo(
+        expected_train_size >= 0 && expected_train_size % bytes_per_row == 0,
+        "training size must contain complete vectors");
     const auto target_sample_rows = expected_train_size / bytes_per_row;
-    const auto sample_rows = AllocateSegmentSampleRows(
-        segment_ids, segment_num_rows, target_sample_rows);
-    std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+    int64_t total_rows = 0;
+    for (const auto segment_id : segment_ids) {
+        const auto rows = segment_num_rows.at(segment_id);
+        AssertInfo(rows >= 0 &&
+                       total_rows <= std::numeric_limits<int64_t>::max() - rows,
+                   "invalid segment row count");
+        total_rows += rows;
+    }
+    AssertInfo(target_sample_rows <= total_rows,
+               "training budget exceeds input row count");
+    AssertInfo(random_sample || target_sample_rows == total_rows,
+               "full training must include every input row");
+    if (target_sample_rows == 0) {
+        return;
+    }
+
+    int64_t offset = 0;
+    int64_t seen_rows = 0;
+    // A single reservoir spans every segment and every decoded batch. After
+    // N rows, each source row has probability target_sample_rows / N of being
+    // retained. Segment size and physical file boundaries do not affect it.
+    auto sample_batch = [&](std::vector<FieldDataPtr>& field_datas) {
+        int64_t batch_rows = 0;
+        for (auto& data : field_datas) {
+            const auto data_size = static_cast<int64_t>(data->Size());
+            if (data_size % bytes_per_row != 0) {
+                ThrowInfo(ErrorCode::FileReadFailed,
+                          "sample input does not contain complete vectors");
+            }
+            const auto rows = data_size / bytes_per_row;
+            if (rows > total_rows - seen_rows) {
+                ThrowInfo(ErrorCode::FileReadFailed,
+                          "sample input exceeds expected row count");
+            }
+            const auto* source = reinterpret_cast<const uint8_t*>(data->Data());
+            for (int64_t row = 0; row < rows; ++row, ++seen_rows) {
+                int64_t slot = seen_rows;
+                if (seen_rows >= target_sample_rows) {
+                    slot = std::uniform_int_distribution<int64_t>(
+                        0, seen_rows)(rng);
+                }
+                if (slot < target_sample_rows) {
+                    milvus::fastmem::FastMemcpy(buf + slot * bytes_per_row,
+                                                source + row * bytes_per_row,
+                                                bytes_per_row);
+                }
+            }
+            batch_rows += rows;
+            data.reset();
+        }
+        return batch_rows;
+    };
 
     for (const auto cur_segment_id : segment_ids) {
-        const auto rows = sample_rows.at(cur_segment_id);
+        const auto rows = segment_num_rows.at(cur_segment_id);
         if (rows == 0) {
             continue;
         }
-        const auto segment_rows = segment_num_rows.at(cur_segment_id);
-        int64_t row_offset = 0;
-        if (random_sample && rows < segment_rows) {
-            std::uniform_int_distribution<int64_t> distribution(
-                0, segment_rows - rows);
-            row_offset = distribution(rng);
-        }
 
         auto mit = manifest_paths.find(cur_segment_id);
+        int64_t fetched_rows = 0;
         if (mit != manifest_paths.end() && !mit->second.empty()) {
-            FetchSegmentViaManifest<T>(
-                buf, rows, row_offset, mit->second, base_config, dim, offset);
-            continue;
+            if (!random_sample) {
+                FetchSegmentViaManifest<T>(
+                    buf, rows, 0, mit->second, base_config, dim, offset);
+                continue;
+            }
+            Config config = base_config;
+            config[SEGMENT_MANIFEST_KEY] = mit->second;
+            const auto rows_per_batch = std::max<int64_t>(
+                1, DEFAULT_FIELD_MAX_MEMORY_LIMIT / bytes_per_row);
+            while (fetched_rows < rows) {
+                const auto batch_rows =
+                    std::min(rows_per_batch, rows - fetched_rows);
+                config[NUM_ROWS_KEY] = batch_rows;
+                config[OFFSET_KEY] = fetched_rows;
+                auto field_datas = file_manager_->CacheRawDataToMemory(config);
+                const auto actual_rows = sample_batch(field_datas);
+                if (actual_rows != batch_rows) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "sample input row count inconsistent, expected: "
+                              "{}, actual: {}",
+                              batch_rows,
+                              actual_rows);
+                }
+                fetched_rows += actual_rows;
+            }
+        } else {
+            auto files = segment_file_paths.at(cur_segment_id);
+            std::sort(files.begin(),
+                      files.end(),
+                      [](const std::string& a, const std::string& b) {
+                          return std::stol(a.substr(a.find_last_of("/") + 1)) <
+                                 std::stol(b.substr(b.find_last_of("/") + 1));
+                      });
+            if (!random_sample) {
+                FetchDataFiles<T>(buf, rows, 0, files, dim, offset);
+                continue;
+            }
+            const auto batch =
+                size_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+            for (size_t start = 0; start < files.size(); start += batch) {
+                const auto end = std::min(files.size(), start + batch);
+                Config config;
+                config[INSERT_FILES_KEY] = std::vector<std::string>(
+                    files.begin() + start, files.begin() + end);
+                auto field_datas = file_manager_->CacheRawDataToMemory(config);
+                fetched_rows += sample_batch(field_datas);
+            }
         }
-        std::vector<std::string> files = segment_file_paths.at(cur_segment_id);
-        std::sort(files.begin(),
-                  files.end(),
-                  [](const std::string& a, const std::string& b) {
-                      return std::stol(a.substr(a.find_last_of("/") + 1)) <
-                             std::stol(b.substr(b.find_last_of("/") + 1));
-                  });
-        FetchDataFiles<T>(buf, rows, row_offset, files, dim, offset);
+        if (fetched_rows != rows) {
+            ThrowInfo(ErrorCode::FileReadFailed,
+                      "segment {} sample input row count inconsistent, "
+                      "expected: {}, actual: {}",
+                      cur_segment_id,
+                      rows,
+                      fetched_rows);
+        }
     }
-    AssertInfo(offset == expected_train_size,
-               "sampled data size differs from training budget");
+    AssertInfo(
+        random_sample ? seen_rows == total_rows : offset == expected_train_size,
+        "sampled data size differs from training budget");
 }
 
 template <typename T>
@@ -586,6 +620,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
              train_size_final / 1024.0 / 1024.0 / 1024.0,
              data_size / 1024.0 / 1024.0 / 1024.0);
     auto buf = std::make_unique<uint8_t[]>(train_size_final);
+    std::mt19937_64 rng(std::random_device{}());
     SampleTrainData<T>(segment_ids,
                        insert_files,
                        num_rows,
@@ -594,6 +629,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                        train_size_final,
                        dim,
                        random_sample,
+                       rng,
                        buf.get());
     rc.RecordSection("sample done");
 
@@ -706,6 +742,7 @@ KmeansClustering::SampleTrainData<float>(
     const int64_t expected_train_size,
     const int64_t dim,
     const bool random_sample,
+    std::mt19937_64& rng,
     uint8_t* buf);
 
 template void

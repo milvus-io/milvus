@@ -17,6 +17,7 @@
 #include <fstream>
 #include <boost/filesystem.hpp>
 #include <numeric>
+#include <string_view>
 #include <type_traits>
 #include <tuple>
 #include <unordered_set>
@@ -453,21 +454,272 @@ TEST(MajorCompaction, BFloat16) {
     test_run<bfloat16, DataType::VECTOR_BFLOAT16>();
 }
 
-TEST(KmeansClusteringTest, AllocateSampleRowsAcrossSegments) {
-    const std::vector<int64_t> segment_ids{1, 2, 3};
-    const std::map<int64_t, int64_t> segment_rows{{1, 100}, {2, 2}, {3, 100}};
+namespace milvus::clustering {
 
-    const auto allocation =
-        clustering::AllocateSegmentSampleRows(segment_ids, segment_rows, 102);
-    ASSERT_EQ(allocation.at(1), 50);
-    ASSERT_EQ(allocation.at(2), 2);
-    ASSERT_EQ(allocation.at(3), 50);
-    ASSERT_EQ(allocation.at(1) + allocation.at(2) + allocation.at(3), 102);
+// Exercise the production sampling readers without depending on Knowhere's
+// KMEANS Train/Assign registrations. Seeds make the statistical checks stable.
+class KmeansSamplingTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        const auto* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        root_path_ = std::string(TestLocalPath) + "kmeans_random_sampling/" +
+                     info->test_suite_name() + "/" + info->name() + "/";
+        storage_config_ = gen_local_storage_config(root_path_);
+        cm_ = storage::CreateChunkManager(storage_config_);
+        fs_ = storage::InitArrowFileSystem(storage_config_);
+    }
 
-    EXPECT_THROW(
-        clustering::AllocateSegmentSampleRows(segment_ids, segment_rows, 2),
-        SegcoreError);
+    void
+    TearDown() override {
+        std::filesystem::remove_all(root_path_);
+    }
+
+    storage::FileManagerContext
+    Context() {
+        return storage::FileManagerContext(gen_field_data_meta(1, 2, 1, 101),
+                                           gen_index_meta(1, 101, 1000, 1),
+                                           cm_,
+                                           fs_);
+    }
+
+    template <typename T>
+    std::vector<T>
+    Sample(KmeansClustering& job,
+           const std::map<int64_t, std::vector<std::string>>& files,
+           const std::map<int64_t, int64_t>& rows,
+           int64_t sample_rows,
+           int64_t dim,
+           bool random_sample,
+           uint64_t seed,
+           const std::map<int64_t, std::string>& manifests = {},
+           const Config& config = {}) {
+        std::vector<int64_t> segment_ids;
+        for (const auto& [id, count] : rows) {
+            segment_ids.push_back(id);
+        }
+        std::vector<T> result(sample_rows * dim);
+        std::mt19937_64 rng(seed);
+        job.SampleTrainData<T>(segment_ids,
+                               files,
+                               rows,
+                               manifests,
+                               config,
+                               result.size() * sizeof(T),
+                               dim,
+                               random_sample,
+                               rng,
+                               reinterpret_cast<uint8_t*>(result.data()));
+        return result;
+    }
+
+    template <typename T, DataType dtype>
+    std::map<int64_t, std::vector<std::string>>
+    WriteBinlogs() {
+        std::map<int64_t, std::vector<std::string>> files;
+        int64_t first_row = 0;
+        // Unequal segments and more files than a single fetch batch. Each
+        // vector encodes its global row number in all three components.
+        for (const auto& [id, count] :
+             std::map<int64_t, int64_t>{{1, 40}, {2, 2}}) {
+            for (int64_t start = 0; start < count; start += 4) {
+                const auto rows = std::min<int64_t>(4, count - start);
+                std::vector<T> vectors(rows * 3);
+                for (int64_t i = 0; i < rows * 3; ++i) {
+                    vectors[i] =
+                        T(static_cast<float>((first_row + start) * 3 + i));
+                }
+                auto data =
+                    storage::CreateFieldData(dtype, DataType::NONE, false, 3);
+                data->FillFieldData(vectors.data(), rows);
+                auto reader = std::make_shared<storage::PayloadReader>(data);
+                storage::InsertData insert(reader);
+                insert.SetFieldDataMeta(gen_field_data_meta(1, 2, id, 101));
+                insert.SetTimestamps(0, 100);
+                auto bytes = insert.Serialize(storage::Remote);
+                const auto path =
+                    fmt::format("{}{}/{}", root_path_, id, start / 4 + 1);
+                cm_->Write(path, bytes.data(), bytes.size());
+                files[id].push_back(path);
+            }
+            std::reverse(files[id].begin(), files[id].end());
+            first_row += count;
+        }
+        return files;
+    }
+
+    template <typename T, DataType dtype>
+    void
+    CheckBinlogSampling() {
+        const auto files = WriteBinlogs<T, dtype>();
+        const std::map<int64_t, int64_t> rows{{1, 40}, {2, 2}, {3, 0}};
+        KmeansClustering job(Context());
+        const auto sample = Sample<T>(job, files, rows, 8, 3, true, 42);
+        std::unordered_set<int64_t> selected;
+        for (int64_t i = 0; i < 8; ++i) {
+            const auto row = int64_t(float(sample[i * 3])) / 3;
+            ASSERT_GE(row, 0);
+            ASSERT_LT(row, 42);
+            ASSERT_TRUE(selected.insert(row).second);
+            for (int64_t d = 0; d < 3; ++d) {
+                ASSERT_EQ(float(sample[i * 3 + d]), row * 3 + d);
+            }
+        }
+        // A range sampler can only return one contiguous block per segment.
+        std::vector<int64_t> sorted(selected.begin(), selected.end());
+        std::sort(sorted.begin(), sorted.end());
+        ASSERT_GT(sorted.back() - sorted.front(), 8);
+
+        // A budget smaller than the number of non-empty segments is valid.
+        ASSERT_EQ(Sample<T>(job, files, rows, 1, 3, true, 42).size(), 3);
+        ASSERT_TRUE(Sample<T>(job, {}, rows, 0, 3, true, 42).empty());
+        const auto full = Sample<T>(job, files, rows, 42, 3, false, 42);
+        for (int64_t i = 0; i < full.size(); ++i) {
+            ASSERT_EQ(float(full[i]), i);
+        }
+
+        auto incorrect_rows = rows;
+        incorrect_rows[1] += 1;
+        EXPECT_THROW(Sample<T>(job, files, incorrect_rows, 8, 3, true, 42),
+                     SegcoreError);
+        incorrect_rows[1] -= 2;
+        EXPECT_THROW(Sample<T>(job, files, incorrect_rows, 8, 3, true, 42),
+                     SegcoreError);
+    }
+
+    std::string root_path_;
+    storage::StorageConfig storage_config_;
+    storage::ChunkManagerPtr cm_;
+    std::shared_ptr<arrow::fs::FileSystem> fs_;
+};
+
+TEST_F(KmeansSamplingTest, BinlogFloat) {
+    CheckBinlogSampling<float, DataType::VECTOR_FLOAT>();
 }
+
+TEST_F(KmeansSamplingTest, BinlogFloat16) {
+    CheckBinlogSampling<float16, DataType::VECTOR_FLOAT16>();
+}
+
+TEST_F(KmeansSamplingTest, BinlogBFloat16) {
+    CheckBinlogSampling<bfloat16, DataType::VECTOR_BFLOAT16>();
+}
+
+TEST_F(KmeansSamplingTest, EveryRowHasEqualInclusionProbability) {
+    const auto files = WriteBinlogs<float, DataType::VECTOR_FLOAT>();
+    const std::map<int64_t, int64_t> rows{{1, 40}, {2, 2}};
+    KmeansClustering job(Context());
+    std::vector<int64_t> occurrences(42);
+    for (uint64_t seed = 0; seed < 512; ++seed) {
+        const auto sample = Sample<float>(job, files, rows, 8, 3, true, seed);
+        std::unordered_set<int64_t> selected;
+        for (int64_t i = 0; i < 8; ++i) {
+            const auto row = int64_t(sample[i * 3]) / 3;
+            ASSERT_GE(row, 0);
+            ASSERT_LT(row, occurrences.size());
+            ASSERT_TRUE(selected.insert(row).second);
+            ++occurrences[row];
+        }
+    }
+    // Expected frequency is 512 * 8 / 42 ~= 97.5 for every row, including
+    // the two rows of the small segment. Fixed seeds avoid flaky randomness.
+    for (int64_t row = 0; row < occurrences.size(); ++row) {
+        EXPECT_GE(occurrences[row], 62) << "row " << row;
+        EXPECT_LE(occurrences[row], 134) << "row " << row;
+    }
+}
+
+class KmeansSamplingManifestTest
+    : public KmeansSamplingTest,
+      public ::testing::WithParamInterface<std::pair<int64_t, int64_t>> {};
+
+TEST_P(KmeansSamplingManifestTest, SamplingAndFullTrainingOrder) {
+    const auto [dim, per_batch] = GetParam();
+    constexpr int64_t batches = 3;
+    const int64_t total_rows = batches * per_batch;
+    // The large case crosses the 128 MiB decoded window. Sampling all but
+    // one row ensures the tail window is represented, catching lost offsets
+    // or a reservoir that is restarted at a batch boundary.
+    const int64_t sample_rows = dim == 8 ? 8 : total_rows - 1;
+    auto schema = std::make_shared<Schema>();
+    const auto fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    milvus::test::V3SegmentTestData v3(
+        schema, batches, per_batch, dim, root_path_, "manifest", "", per_batch);
+    milvus::proto::schema::FieldSchema field_schema;
+    field_schema.set_fieldid(fid.get());
+    field_schema.set_data_type(milvus::proto::schema::DataType::FloatVector);
+    storage::FileManagerContext ctx(
+        storage::FieldDataMeta{1, 2, 0, fid.get(), field_schema},
+        storage::IndexMeta{0, fid.get(), 1000, 1},
+        cm_,
+        fs_);
+    ctx.set_loon_ffi_properties(MakeInternalPropertiesFromStorageConfig(
+        ToCStorageConfig(storage_config_)));
+    KmeansClustering job(ctx);
+    Config config;
+    config[STORAGE_VERSION_KEY] = STORAGE_V3;
+    config[DATA_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    config[ELEMENT_TYPE_KEY] = DataType::NONE;
+    config[DIM_KEY] = dim;
+    const std::map<int64_t, int64_t> rows{{1, batches * per_batch}};
+    const std::map<int64_t, std::string> manifests{{1, v3.ManifestPathJson()}};
+    std::vector<float> original;
+    for (int64_t batch = 0; batch < batches; ++batch) {
+        const auto data =
+            milvus::segcore::DataGen(schema, per_batch, 42 + batch * per_batch);
+        const auto vectors = data.get_col<float>(fid);
+        original.insert(original.end(), vectors.begin(), vectors.end());
+    }
+    {
+        const auto full = Sample<float>(
+            job, {}, rows, total_rows, dim, false, 42, manifests, config);
+        ASSERT_EQ(full, original);
+    }
+    std::unordered_map<std::string_view, int64_t> source_rows;
+    for (int64_t row = 0; row < total_rows; ++row) {
+        ASSERT_TRUE(
+            source_rows
+                .emplace(std::string_view(reinterpret_cast<const char*>(
+                                              original.data() + row * dim),
+                                          dim * sizeof(float)),
+                         row)
+                .second);
+    }
+    const auto sample = Sample<float>(
+        job, {}, rows, sample_rows, dim, true, 42, manifests, config);
+    std::unordered_set<int64_t> selected;
+    for (int64_t i = 0; i < sample_rows; ++i) {
+        const auto found = source_rows.find(std::string_view(
+            reinterpret_cast<const char*>(sample.data() + i * dim),
+            dim * sizeof(float)));
+        ASSERT_NE(found, source_rows.end());
+        ASSERT_TRUE(selected.insert(found->second).second);
+    }
+    std::vector<int64_t> sorted(selected.begin(), selected.end());
+    std::sort(sorted.begin(), sorted.end());
+    ASSERT_GT(sorted.back() - sorted.front(), 8);
+    if (dim == 8) {
+        auto truncated_rows = rows;
+        truncated_rows[1] += 1;
+        EXPECT_THROW(
+            Sample<float>(
+                job, {}, truncated_rows, 8, dim, true, 42, manifests, config),
+            SegcoreError);
+    } else {
+        EXPECT_TRUE(selected.count(total_rows - 1) ||
+                    selected.count(total_rows - 2));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StorageV3,
+    KmeansSamplingManifestTest,
+    ::testing::Values(std::make_pair(int64_t(8), int64_t(7)),
+                      std::make_pair(int64_t(4096), int64_t(2732))));
+
+}  // namespace milvus::clustering
 
 // A StorageV3 segment carries its data in a loon manifest instead of insert
 // binlogs: it appears in AnalyzeInfo.manifest_paths and has NO insert_files
