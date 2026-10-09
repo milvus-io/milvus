@@ -1139,17 +1139,18 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	mt.ddLock.RLock()
 	original := mt.collID2Meta[header.CollectionId]
 	loadPolicies := false
-	if original != nil && !original.RLSPoliciesCurrent() {
-		properties := original.Properties
-		if slices.Contains(header.UpdateMask.GetPaths(), message.FieldMaskCollectionProperties) {
-			properties = body.Updates.Properties
-		}
-		enabled, err := common.IsRLSEnabled(properties...)
+	if original != nil && !original.RLSPoliciesCurrent() && slices.Contains(header.UpdateMask.GetPaths(), message.FieldMaskCollectionProperties) {
+		wasEnabled, err := common.IsRLSEnabled(original.Properties...)
 		if err != nil {
 			mt.ddLock.RUnlock()
 			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", header.CollectionId)
 		}
-		loadPolicies = enabled
+		enabled, err := common.IsRLSEnabled(body.Updates.Properties...)
+		if err != nil {
+			mt.ddLock.RUnlock()
+			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", header.CollectionId)
+		}
+		loadPolicies = !wasEnabled && enabled
 	}
 	mt.ddLock.RUnlock()
 	if loadPolicies {
@@ -3260,7 +3261,17 @@ func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kin
 		if err != nil {
 			return nil, err
 		}
-		metadata.Policies = model.RLSPolicyMapToSlice(snapshot.policies)
+		// The snapshot is already caller-owned and keyed by policy name.
+		if snapshot.policies != nil {
+			metadata.Policies = make([]*model.RLSPolicy, 0, len(snapshot.policies))
+			names := maps.Keys(snapshot.policies)
+			sort.Strings(names)
+			for _, name := range names {
+				if policy := snapshot.policies[name]; policy != nil {
+					metadata.Policies = append(metadata.Policies, policy)
+				}
+			}
+		}
 	}
 
 	var principals []*model.RLSPrincipal

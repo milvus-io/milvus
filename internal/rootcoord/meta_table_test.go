@@ -399,6 +399,24 @@ func TestDeferredRLSPoliciesLoadOnDemand(t *testing.T) {
 	require.Len(t, collection.RLSPolicies, 1)
 }
 
+func TestGetRLSMetadataOwnsSortedPolicySnapshot(t *testing.T) {
+	meta, _ := newRLSMetaTableForTest(t)
+	policies := map[string]*model.RLSPolicy{
+		"z": {PolicyName: "z", PolicyID: 100, Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}},
+		"a": {PolicyName: "a", PolicyID: 200, Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionQuery}},
+	}
+	meta.collID2Meta[20].RLSPolicies = policies
+	metadata, err := meta.GetRLSMetadata(context.Background(), 20, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, "")
+	require.NoError(t, err)
+	require.Len(t, metadata.Policies, 2)
+	require.Equal(t, "a", metadata.Policies[0].PolicyName)
+	require.Equal(t, "z", metadata.Policies[1].PolicyName)
+	metadata.Policies[0].PolicyName = "changed"
+	metadata.Policies[0].Actions[0] = rlsutil.PolicyActionInsert
+	require.Equal(t, "a", policies["a"].PolicyName)
+	require.Equal(t, rlsutil.PolicyActionQuery, policies["a"].Actions[0])
+}
+
 func TestAlterCollectionLoadsDeferredRLSPoliciesBeforeEnable(t *testing.T) {
 	for _, outcome := range []string{"success", "load fails", "persist fails", "collection changes"} {
 		t.Run(outcome, func(t *testing.T) {
@@ -473,7 +491,9 @@ func TestAlterCollectionDeferredPoliciesUsePropertyPostImage(t *testing.T) {
 		load       bool
 	}{
 		{"unrelated disabled alter", "false", "true", false, false},
-		{"unrelated enabled alter", "true", "false", false, true},
+		{"unrelated enabled alter", "true", "false", false, false},
+		{"enabled property unchanged", "true", "true", true, false},
+		{"enable", "false", "true", true, true},
 		{"disable", "true", "false", true, false},
 		{"remove enable property", "true", "", true, false},
 	} {
@@ -508,7 +528,11 @@ func TestAlterCollectionDeferredPoliciesUsePropertyPostImage(t *testing.T) {
 			require.Equal(t, !test.load, meta.collID2Meta[20].RLSPoliciesUnloaded)
 			enabled, err := common.IsRLSEnabled(meta.collID2Meta[20].Properties...)
 			require.NoError(t, err)
-			require.Equal(t, test.load, enabled)
+			expected := test.before
+			if test.properties {
+				expected = test.after
+			}
+			require.Equal(t, expected == "true", enabled)
 		})
 	}
 }
