@@ -283,10 +283,10 @@ VerifyNullableElementFullScanLogicalCount(
     ASSERT_EQ(struct_element_offsets->GetTotalElementCount(),
               expected_skipped_elements + expected_live_elements);
 
-    // DataGen keeps a physical payload for nullable ARRAY rows in growing
-    // storage even when the row validity bit is false. Sealed binlog
-    // serialization may discard that payload, but StructElementOffsets maps the NULL
-    // row to zero logical elements in either layout.
+    // DataGen keeps a physical payload for nullable ARRAY rows in the insert
+    // data even when the row validity bit is false. Storage does not keep it,
+    // but StructElementOffsets, which growing builds from the insert data,
+    // must still map the NULL row to zero logical elements.
     if (segment->type() == SegmentType::Sealed) {
         auto pw = segment->get_batch_views<ArrayView>(
             query_context->get_op_context(), array_fid, 0, 0, 2);
@@ -295,13 +295,12 @@ VerifyNullableElementFullScanLogicalCount(
         ASSERT_TRUE(valid);
         EXPECT_FALSE(valid[1]);
     } else {
-        auto pw = segment->chunk_data<Array>(
+        auto pw = segment->chunk_data<ArrayView>(
             query_context->get_op_context(), array_fid, 0);
         auto chunk = pw.get();
         ASSERT_EQ(chunk.row_count(), 2);
         ASSERT_TRUE(chunk.validity());
         EXPECT_FALSE(chunk.is_valid(1));
-        EXPECT_EQ(chunk.data()[1].length(), 2);
     }
     const auto null_row_range = struct_element_offsets->ElementIDRangeOfRow(1);
     EXPECT_EQ(null_row_range.first, null_row_range.second);

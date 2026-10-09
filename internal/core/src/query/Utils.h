@@ -28,6 +28,7 @@
 #include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "knowhere/array_store.h"
 
 namespace milvus::query {
@@ -38,12 +39,11 @@ struct FlattenedVectorArrayRows {
     std::vector<size_t> row_offsets;
 };
 
-// Both growing storage modes expose one row object per chunk slot. Flatten
-// their compact payloads for Knowhere, optionally retaining row boundaries
+// Growing VECTOR_ARRAY chunks hold one VectorArrayView per row. Flatten the
+// rows' compact payloads for Knowhere, optionally retaining row boundaries
 // for embedding-list search.
-template <typename Row>
-FlattenedVectorArrayRows
-FlattenVectorArrayRows(const Row* rows,
+inline FlattenedVectorArrayRows
+FlattenVectorArrayRows(const VectorArrayView* rows,
                        int64_t row_count,
                        bool include_row_offsets) {
     AssertInfo(row_count >= 0 && (row_count == 0 || rows != nullptr),

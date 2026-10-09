@@ -278,8 +278,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     AssertInfo(
         data_type != DataType::VECTOR_ARRAY || vector_array_column != nullptr,
         "VECTOR_ARRAY growing column has an unexpected storage type");
-    const bool mmap_vector_array =
-        vector_array_column != nullptr && vector_array_column->is_mmap();
 
     BitsetView search_bitset = bitset;
 
@@ -388,14 +386,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 size_per_chunk = id_view.count;
                 if (data_type == DataType::VECTOR_ARRAY) {
                     range_data =
-                        mmap_vector_array
-                            ? static_cast<const void*>(
-                                  static_cast<const VectorArrayView*>(
-                                      chunk_data) +
-                                  (range_begin - row_begin))
-                            : static_cast<const void*>(
-                                  static_cast<const VectorArray*>(chunk_data) +
-                                  (range_begin - row_begin));
+                        static_cast<const VectorArrayView*>(chunk_data) +
+                        (range_begin - row_begin);
                 } else {
                     range_data = AdvanceVectorDataPointer(
                         chunk_data, data_type, dim, range_begin - row_begin);
@@ -409,16 +401,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 sub_data = query::dataset::RawDataset{
                     range_begin, dim, size_per_chunk, range_data};
             } else {
-                auto flat =
-                    mmap_vector_array
-                        ? FlattenVectorArrayRows(
-                              static_cast<const VectorArrayView*>(range_data),
-                              size_per_chunk,
-                              !is_element_level_search)
-                        : FlattenVectorArrayRows(
-                              static_cast<const VectorArray*>(range_data),
-                              size_per_chunk,
-                              !is_element_level_search);
+                auto flat = FlattenVectorArrayRows(
+                    static_cast<const VectorArrayView*>(range_data),
+                    size_per_chunk,
+                    !is_element_level_search);
                 buf = std::move(flat.payload);
                 if (is_element_level_search) {
                     sub_data =
