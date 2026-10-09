@@ -132,14 +132,14 @@ func TestSharedSegmentReopenGatesNewViewAndPreservesOldView(t *testing.T) {
 				}
 				return nil
 			}).Build())
-			manager := NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, &fakePhysicalLoader{}, &fakeSegmentLoadInfoStream{})
+			manager := newTestSegmentPreparerWithStream(scheduler, &fakePhysicalLoader{}, &fakeSegmentLoadInfoStream{})
 			ready := make(chan int, 4)
 			failed := make(chan int, 4)
 			acquire := func(version int64, fields []*messagespb.LoadFieldConfig) qviews.QueryViewKey {
 				meta := buildHandlerTestMeta(version)
 				view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 				key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
-				manager.Acquire(AcquirePhysicalSegments{Key: key, Meta: meta, View: view, Collection: &fakeCollectionRuntimeGuard{}, LoadInfo: &QueryViewLoadInfo{CollectionID: testCollectionID, Version: QueryViewLoadInfoVersion(version), LoadFields: fields}, OnLoaded: func([]TransformSegment) { ready <- int(version) }, OnUnrecoverable: func() { failed <- int(version) }})
+				manager.Acquire(segmentPreparationRequest{Key: key, Meta: meta, View: view, Collection: &fakeCollectionRuntimeGuard{}, LoadInfo: &QueryViewLoadInfo{CollectionID: testCollectionID, Version: QueryViewLoadInfoVersion(version), LoadFields: fields}, OnLoaded: func([]TransformSegment) { ready <- int(version) }, OnUnrecoverable: func() { failed <- int(version) }})
 				return key
 			}
 			oldKey := acquire(1, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexId: 11}})
@@ -198,14 +198,14 @@ func TestSharedSegmentReopenGatesNewViewAndPreservesOldView(t *testing.T) {
 func TestDataVersionProofGatesReadyIndependentlyOfContentRevision(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
-	manager := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, nil)
+	manager := newTestSegmentPreparer(scheduler, nil)
 	key := qviews.QueryViewKey{QueryViewVersion: qviews.QueryViewVersion{QueryVersion: 2}}
 	old := qviews.DataVersion{StreamingVersion: 1, CompactVersion: 99}
 	target := qviews.DataVersion{StreamingVersion: 2}
 	ready := 0
-	ref := &viewRef{dataVersion: target, loaded: make(map[int64]bool), segments: map[int64]int64{1000: 10}, onLoaded: func([]TransformSegment) { ready++ }}
+	ref := &queryViewRef{dataVersion: target, loaded: make(map[int64]bool), segments: map[int64]int64{1000: 10}, onLoaded: func([]TransformSegment) { ready++ }}
 	manager.views[key] = ref
-	state := &physicalSegmentState{segment: &fakeTransformSegment{id: 1000}, dataVersion: old, acceptedVersion: old, revision: SegmentLoadInfoRevision{Revision: 10}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {}}}
+	state := &segmentState{segment: &fakeTransformSegment{id: 1000}, dataVersion: old, acceptedVersion: old, revision: SegmentLoadInfoRevision{Revision: 10}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {}}}
 	manager.segments[1000] = state
 	require.Empty(t, manager.loadedNotificationsLocked(state))
 	snapshot := testSegmentLoadSnapshot(1000, 10)
@@ -237,10 +237,11 @@ func TestReopenAdmissionCancellationReleasesAttemptReferences(t *testing.T) {
 		}
 		return nil, merr.WrapErrSegmentRequestResourceFailed("memory")
 	}).Build())
-	manager := NewViewScopedPhysicalSegmentManagerWithNodeScheduler(scheduler, nil, &fakeSegmentResourceEstimator{})
+	manager := newTestSegmentPreparer(scheduler, nil, &fakeSegmentResourceEstimator{})
 	key := qviews.QueryViewKey{QueryViewVersion: qviews.QueryViewVersion{QueryVersion: 1}}
-	manager.views[key] = &viewRef{key: key, segments: map[int64]int64{1000: 10}}
-	manager.segments[1000] = &physicalSegmentState{segment: &fakeTransformSegment{id: 1000}, revision: SegmentLoadInfoRevision{Revision: 1}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {}}}
+	manager.views[key] = &queryViewRef{segments: map[int64]int64{1000: 10}}
+	manager.segments[1000] = &segmentState{segment: &fakeTransformSegment{id: 1000}, revision: SegmentLoadInfoRevision{Revision: 1}, refs: map[qviews.QueryViewKey]struct{}{key: {}}, requests: map[qviews.QueryViewKey]segmentLoadRequest{key: {}}}
+	manager.views[key].states = map[int64]*segmentState{1000: manager.segments[1000]}
 	snapshot := testSegmentLoadSnapshot(1000, 10)
 	snapshot.Revision.Revision = 2
 	manager.ApplyLoadInfoSnapshot(context.Background(), snapshot)
@@ -250,7 +251,6 @@ func TestReopenAdmissionCancellationReleasesAttemptReferences(t *testing.T) {
 	waitGenerationEvent(t, dropped)
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	require.Empty(t, manager.dropping)
 	require.Empty(t, manager.views)
 	require.Empty(t, manager.segments)
 }
@@ -293,9 +293,9 @@ func TestTransformReadySegmentStillWaitsForViewPhysicalReadiness(t *testing.T) {
 	key := qviews.QueryViewKey{QueryViewVersion: qviews.QueryViewVersion{QueryVersion: 2}}
 	segment := &fakeTransformSegment{id: 1000, partitionID: 10}
 	ready := 0
-	state := &transformSegmentState{state: transformSegmentLoaded, segment: segment, refs: map[qviews.QueryViewKey]struct{}{key: {}}, waiters: map[qviews.QueryViewKey]transformSegmentWaiter{key: {partitionID: 10, segmentID: 1000, onReady: func(map[int64][]int64) { ready++ }}}}
-	ref := &transformViewRef{physicalReady: make(map[int64]bool), states: map[int64]*transformSegmentState{1000: state}}
-	manager := &QueryViewSegmentReadinessManager{views: map[qviews.QueryViewKey]*transformViewRef{key: ref}, segments: map[int64]*transformSegmentState{1000: state}}
+	state := &segmentState{state: transformSegmentLoaded, segment: segment, refs: map[qviews.QueryViewKey]struct{}{key: {}}, waiters: map[qviews.QueryViewKey]transformSegmentWaiter{key: {partitionID: 10, segmentID: 1000, onReady: func(map[int64][]int64) { ready++ }}}}
+	ref := &queryViewRef{physicalReady: make(map[int64]bool), states: map[int64]*segmentState{1000: state}}
+	manager := &QueryViewSegmentManager{views: map[qviews.QueryViewKey]*queryViewRef{key: ref}, segments: map[int64]*segmentState{1000: state}}
 	view := &viewpb.QueryViewOfQueryNode{Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 	manager.onPhysicalLoaded([]TransformSegment{segment}, ref.states)
 	require.Zero(t, ready)

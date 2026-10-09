@@ -6,63 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
-
-type ViewScopedPhysicalSegmentManager struct {
-	nodeScheduler nodescheduler.Scheduler
-	loader        PhysicalSegmentLoader
-	estimator     SegmentResourceEstimator
-	stream        SegmentLoadInfoStream
-
-	// Allocated under mu; never reset when a SegmentID is removed or recreated.
-	nextLoadGeneration uint64
-	mu                 sync.Mutex
-	views              map[qviews.QueryViewKey]*viewRef
-	dropping           map[qviews.QueryViewKey]*viewRef
-	segments           map[int64]*physicalSegmentState
-	cancels            map[qviews.QueryViewKey]context.CancelFunc
-}
-
-type viewRef struct {
-	key             qviews.QueryViewKey
-	dropped         bool
-	loadInfo        *QueryViewLoadInfo
-	onAvailable     func([]TransformSegment)
-	available       map[int64]bool
-	dataVersion     qviews.DataVersion
-	loaded          map[int64]bool
-	segments        map[int64]int64
-	pendingLoads    int
-	onDropped       func()
-	onLoaded        func([]TransformSegment)
-	onSegmentFailed func(segmentID int64, err error)
-	onUnrecoverable func()
-}
-
-type physicalSegmentState struct {
-	resources         *QueryViewLoadInfo
-	appliedResources  *QueryViewLoadInfo
-	lastSnapshot      *SegmentLoadInfoSnapshot
-	dataVersion       qviews.DataVersion
-	acceptedVersion   qviews.DataVersion
-	targetVersion     qviews.DataVersion
-	subscriptionEpoch uint64
-	segment           TransformSegment
-	collectionID      int64
-	loading           bool
-	loadGeneration    uint64
-	updating          bool
-	updateHandle      nodescheduler.TaskHandle
-	updateEpoch       uint64
-	loadCancel        context.CancelFunc
-	loadDone          func()
-	refs              map[qviews.QueryViewKey]struct{}
-	requests          map[qviews.QueryViewKey]segmentLoadRequest
-	revision          SegmentLoadInfoRevision
-	pendingSnapshot   *SegmentLoadInfoSnapshot
-	subscription      SegmentLoadInfoSubscription
-}
 
 type segmentLoadInfoSubscriptionRequest struct {
 	resources    *QueryViewLoadInfo
@@ -71,7 +15,7 @@ type segmentLoadInfoSubscriptionRequest struct {
 	collectionID int64
 	segmentID    int64
 	revision     SegmentLoadInfoRevision
-	state        *physicalSegmentState
+	state        *segmentState
 }
 
 type segmentLoadSubmission struct {
@@ -85,7 +29,7 @@ type segmentLoadSubmission struct {
 
 type segmentUpdateSubmission struct {
 	task  *SegmentUpdateTask
-	state *physicalSegmentState
+	state *segmentState
 	epoch uint64
 }
 
@@ -96,59 +40,24 @@ type segmentLoadRequest struct {
 	transformStartAfterTimeTick uint64
 }
 
-func NewViewScopedPhysicalSegmentManager(loader PhysicalSegmentLoader, estimators ...SegmentResourceEstimator) *ViewScopedPhysicalSegmentManager {
-	return NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodescheduler.Get(), loader, estimators...)
-}
-
-func NewViewScopedPhysicalSegmentManagerWithNodeScheduler(nodeScheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimators ...SegmentResourceEstimator) *ViewScopedPhysicalSegmentManager {
-	return NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(nodeScheduler, loader, nil, estimators...)
-}
-
-func NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(nodeScheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, stream SegmentLoadInfoStream, estimators ...SegmentResourceEstimator) *ViewScopedPhysicalSegmentManager {
-	var estimator SegmentResourceEstimator
-	if len(estimators) > 0 {
-		estimator = estimators[0]
-	}
-	return &ViewScopedPhysicalSegmentManager{
-		nodeScheduler: nodeScheduler,
-		loader:        loader,
-		estimator:     estimator,
-		stream:        stream,
-		views:         make(map[qviews.QueryViewKey]*viewRef),
-		dropping:      make(map[qviews.QueryViewKey]*viewRef),
-		segments:      make(map[int64]*physicalSegmentState),
-		cancels:       make(map[qviews.QueryViewKey]context.CancelFunc),
-	}
-}
-
-func (m *ViewScopedPhysicalSegmentManager) Acquire(req AcquirePhysicalSegments) {
+func (m *QueryViewSegmentManager) preparePhysical(req segmentPreparationRequest) {
 	if req.LoadInfo != nil {
 		info := CloneQueryViewLoadInfo(*req.LoadInfo)
 		req.LoadInfo = &info
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	toLoad, ok := m.recordView(req, cancel)
+	toLoad, ok := m.recordPreparation(req)
 	if !ok {
-		cancel()
 		return
 	}
-	m.nodeScheduler.Submit(schedulerTaskFunc(func(context.Context) error {
-		m.load(ctx, req, toLoad)
-		return nil
-	}))
+	ctx := req.Context
+	m.scheduler.Submit(schedulerTaskFunc(func(context.Context) error { m.load(ctx, req, toLoad); return nil }))
 }
 
-func (m *ViewScopedPhysicalSegmentManager) Release(req ReleaseSegments) {
-	toClose, onDropped := m.removeView(req)
-	m.closeSubscriptions(toClose)
-	m.submitCallback(onDropped)
-}
-
-func (m *ViewScopedPhysicalSegmentManager) ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot) {
+func (m *QueryViewSegmentManager) ApplyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot) {
 	m.applyLoadInfoSnapshot(ctx, snapshot, nil)
 }
 
-func (m *ViewScopedPhysicalSegmentManager) applyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot, expected *physicalSegmentState, subscriptionEpoch ...uint64) {
+func (m *QueryViewSegmentManager) applyLoadInfoSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot, expected *segmentState, subscriptionEpoch ...uint64) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -160,80 +69,47 @@ func (m *ViewScopedPhysicalSegmentManager) applyLoadInfoSnapshot(ctx context.Con
 		return
 	}
 	if load.segmentID != 0 {
-		m.submitSegmentLoad(load, nil)
+		m.submitSegmentLoad(load)
 		return
 	}
 	m.submitSegmentUpdate(update)
 }
 
-func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegments, cancel context.CancelFunc) ([]segmentLoadSubmission, bool) {
+func (m *QueryViewSegmentManager) recordPreparation(req segmentPreparationRequest) ([]segmentLoadSubmission, bool) {
 	segmentPartitions := segmentPartitionMap(req.View)
 	toLoad := make([]segmentLoadSubmission, 0, len(segmentPartitions))
 	toSubscribe := make([]segmentLoadInfoSubscriptionRequest, 0, len(segmentPartitions))
 	var toClose []SegmentLoadInfoSubscription
 	m.mu.Lock()
-	if m.views[req.Key] != nil {
+	ref := m.views[req.Key]
+	if ref == nil || ref != req.expected || ref.prepared || ref.unrecoverable {
 		m.mu.Unlock()
 		return nil, false
 	}
-	m.cancels[req.Key] = cancel
-	ref := &viewRef{
-		key:             req.Key,
-		dataVersion:     queryViewDataVersion(req.Meta),
-		loadInfo:        req.LoadInfo,
-		onAvailable:     req.OnAvailable,
-		available:       make(map[int64]bool),
-		loaded:          make(map[int64]bool),
-		segments:        segmentPartitions,
-		onLoaded:        req.OnLoaded,
-		onSegmentFailed: req.OnSegmentUnrecoverable,
-		onUnrecoverable: req.OnUnrecoverable,
-	}
-	m.views[req.Key] = ref
+	ref.prepared = true
+	ref.dataVersion = queryViewDataVersion(req.Meta)
+	ref.loadInfo = req.LoadInfo
+	ref.onAvailable = req.OnAvailable
+	ref.onLoaded = req.OnLoaded
+	ref.onSegmentFailed = req.OnSegmentUnrecoverable
+	// All ownership was registered by Acquire. Preparation only installs the plan.
 	for segmentID := range segmentPartitions {
-		state, ok := m.segments[segmentID]
-		if !ok {
-			state = &physicalSegmentState{
-				collectionID: req.Meta.GetCollectionId(),
-				refs:         make(map[qviews.QueryViewKey]struct{}),
-				requests:     make(map[qviews.QueryViewKey]segmentLoadRequest),
-			}
-			if m.stream == nil {
-				loadCtx, loadCancel := context.WithCancel(context.Background())
-				ref.pendingLoads++
-				loadDone := onceLoadDone(func() { m.completeLoadAttempts([]*viewRef{ref}) })
-				m.nextLoadGeneration++
-				state.loadGeneration = m.nextLoadGeneration
-				state.loading = true
-				state.loadCancel = loadCancel
-				state.loadDone = loadDone
-				toLoad = append(toLoad, segmentLoadSubmission{
-					generation: state.loadGeneration,
-					segmentID:  segmentID,
-					ctx:        loadCtx,
-					request:    newSegmentLoadRequest(req),
-					done:       chainLoadDone(loadDone, loadCancel),
-				})
-			}
-			m.segments[segmentID] = state
-		} else if state.segment == nil && !state.loading && m.stream == nil {
+		state := ref.states[segmentID]
+		if state == nil || m.segments[segmentID] != state {
+			continue
+		}
+		if state.segment == nil && !state.loading && m.stream == nil {
 			loadCtx, loadCancel := context.WithCancel(context.Background())
-			ref.pendingLoads++
-			loadDone := onceLoadDone(func() { m.completeLoadAttempts([]*viewRef{ref}) })
+			loadDone := onceLoadDone(m.trackPendingLoadAttemptLocked(state))
 			m.nextLoadGeneration++
 			state.loadGeneration = m.nextLoadGeneration
 			state.loading = true
 			state.loadCancel = loadCancel
-			state.loadDone = loadDone
 			toLoad = append(toLoad, segmentLoadSubmission{
-				generation: state.loadGeneration,
-				segmentID:  segmentID,
-				ctx:        loadCtx,
-				request:    newSegmentLoadRequest(req),
-				done:       chainLoadDone(loadDone, loadCancel),
+				generation: state.loadGeneration, segmentID: segmentID, ctx: loadCtx,
+				request: newSegmentLoadRequest(req), done: chainLoadDone(loadDone, loadCancel),
 			})
 		}
-		state.refs[req.Key] = struct{}{}
 		state.requests[req.Key] = newSegmentLoadRequest(req)
 		resources := unionLoadInfo(state.requests)
 		changed := !sameLoadRequirements(state.resources, resources)
@@ -264,14 +140,14 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 	return toLoad, true
 }
 
-func (m *ViewScopedPhysicalSegmentManager) load(ctx context.Context, req AcquirePhysicalSegments, toLoad []segmentLoadSubmission) {
+func (m *QueryViewSegmentManager) load(ctx context.Context, req segmentPreparationRequest, toLoad []segmentLoadSubmission) {
 	if len(toLoad) > 0 {
 		for _, submission := range toLoad {
 			if ctx.Err() != nil {
 				submission.done()
 				continue
 			}
-			m.submitSegmentLoad(submission, nil)
+			m.submitSegmentLoad(submission)
 		}
 		return
 	}
@@ -291,8 +167,8 @@ func (m *ViewScopedPhysicalSegmentManager) load(ctx context.Context, req Acquire
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentLoadSubmission, done func()) {
-	done = chainLoadDone(done, submission.done)
+func (m *QueryViewSegmentManager) submitSegmentLoad(submission segmentLoadSubmission) {
+	done := submission.done
 	if done == nil {
 		done = func() {}
 	}
@@ -306,16 +182,14 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		OnLoaded: func(segment TransformSegment) {
 			defer done()
 			if segment == nil {
-				notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission, nil)
-				m.submitSegmentLoadSubmissions(retries)
+				notifications, subscriptions := m.failPhysicalSegmentLoad(submission, nil)
 				m.closeSubscriptions(subscriptions)
 				for _, notify := range notifications {
 					notify()
 				}
 				return
 			}
-			notifications, retries, kept := m.completePhysicalSegmentLoad(submission, segment)
-			m.submitSegmentLoadSubmissions(retries)
+			notifications, kept := m.completePhysicalSegmentLoad(submission, segment)
 			if !kept {
 				_ = segment.Release(context.Background())
 				return
@@ -327,15 +201,14 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		},
 		OnUnrecoverable: func(err error) {
 			defer done()
-			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission, err)
-			m.submitSegmentLoadSubmissions(retries)
+			notifications, subscriptions := m.failPhysicalSegmentLoad(submission, err)
 			m.closeSubscriptions(subscriptions)
 			for _, notify := range notifications {
 				notify()
 			}
 		},
 	})
-	handle := m.nodeScheduler.Submit(task)
+	handle := m.scheduler.Submit(task)
 	go func() {
 		if handle.Wait(context.Background()) == nil {
 			done()
@@ -343,31 +216,29 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 	}()
 }
 
-func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(submission segmentLoadSubmission, segment TransformSegment) ([]func(), []segmentLoadSubmission, bool) {
+func (m *QueryViewSegmentManager) completePhysicalSegmentLoad(submission segmentLoadSubmission, segment TransformSegment) ([]func(), bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state := m.segments[submission.segmentID]
 	if state == nil || !state.loading || state.loadGeneration != submission.generation {
-		return nil, nil, false
+		return nil, false
 	}
 	state.segment = segment
 	state.dataVersion = submission.snapshot.DataVersion
 	state.appliedResources = submission.snapshot.resources
 	state.loading = false
 	state.loadCancel = nil
-	state.loadDone = nil
 	if !submission.snapshot.Revision.Empty() {
 		state.revision = submission.snapshot.Revision
 	}
 	if len(state.refs) == 0 {
-		delete(m.segments, segment.ID())
-		return nil, nil, false
+		return nil, false
 	}
 
-	return m.loadedNotificationsLocked(state), nil, true
+	return m.loadedNotificationsLocked(state), true
 }
 
-func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot, expected *physicalSegmentState, subscriptionEpoch ...uint64) (segmentLoadSubmission, segmentUpdateSubmission, bool) {
+func (m *QueryViewSegmentManager) recordSegmentSnapshot(ctx context.Context, snapshot SegmentLoadInfoSnapshot, expected *segmentState, subscriptionEpoch ...uint64) (segmentLoadSubmission, segmentUpdateSubmission, bool) {
 	if snapshot.Revision.Empty() {
 		return segmentLoadSubmission{}, segmentUpdateSubmission{}, false
 	}
@@ -408,7 +279,6 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Con
 		state.loadGeneration = m.nextLoadGeneration
 		state.loading = true
 		state.loadCancel = loadCancel
-		state.loadDone = loadDone
 		return segmentLoadSubmission{
 			generation: state.loadGeneration,
 			segmentID:  snapshot.SegmentID,
@@ -422,14 +292,14 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Con
 	return segmentLoadSubmission{}, task, ok
 }
 
-func (m *ViewScopedPhysicalSegmentManager) recordSegmentUpdate(ctx context.Context, snapshot SegmentLoadInfoSnapshot) (segmentUpdateSubmission, bool) {
+func (m *QueryViewSegmentManager) recordSegmentUpdate(ctx context.Context, snapshot SegmentLoadInfoSnapshot) (segmentUpdateSubmission, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state := m.segments[snapshot.SegmentID]
 	return m.recordSegmentUpdateLocked(ctx, snapshot, state)
 }
 
-func (m *ViewScopedPhysicalSegmentManager) recordSegmentUpdateLocked(ctx context.Context, snapshot SegmentLoadInfoSnapshot, state *physicalSegmentState) (segmentUpdateSubmission, bool) {
+func (m *QueryViewSegmentManager) recordSegmentUpdateLocked(ctx context.Context, snapshot SegmentLoadInfoSnapshot, state *segmentState) (segmentUpdateSubmission, bool) {
 	if state == nil || state.segment == nil || len(state.refs) == 0 || snapshot.Revision.Empty() {
 		return segmentUpdateSubmission{}, false
 	}
@@ -445,7 +315,7 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentUpdateLocked(ctx context
 	return m.nextSegmentUpdateLocked(ctx, snapshot.SegmentID)
 }
 
-func (m *ViewScopedPhysicalSegmentManager) nextSegmentUpdateLocked(ctx context.Context, segmentID int64) (segmentUpdateSubmission, bool) {
+func (m *QueryViewSegmentManager) nextSegmentUpdateLocked(ctx context.Context, segmentID int64) (segmentUpdateSubmission, bool) {
 	state := m.segments[segmentID]
 	if state == nil || state.segment == nil || state.updating || state.pendingSnapshot == nil || len(state.refs) == 0 {
 		return segmentUpdateSubmission{}, false
@@ -485,7 +355,7 @@ func (m *ViewScopedPhysicalSegmentManager) nextSegmentUpdateLocked(ctx context.C
 	return segmentUpdateSubmission{task: task, state: state, epoch: epoch}, true
 }
 
-func (m *ViewScopedPhysicalSegmentManager) submitPendingSegmentUpdate(segmentID int64) {
+func (m *QueryViewSegmentManager) submitPendingSegmentUpdate(segmentID int64) {
 	m.mu.Lock()
 	submission, ok := m.nextSegmentUpdateLocked(context.Background(), segmentID)
 	m.mu.Unlock()
@@ -494,8 +364,8 @@ func (m *ViewScopedPhysicalSegmentManager) submitPendingSegmentUpdate(segmentID 
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) submitSegmentUpdate(submission segmentUpdateSubmission) {
-	handle := m.nodeScheduler.Submit(submission.task)
+func (m *QueryViewSegmentManager) submitSegmentUpdate(submission segmentUpdateSubmission) {
+	handle := m.scheduler.Submit(submission.task)
 	go func() {
 		if handle.Wait(context.Background()) == nil {
 			submission.task.OnFinished()
@@ -512,7 +382,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentUpdate(submission segmen
 	m.mu.Unlock()
 }
 
-func (m *ViewScopedPhysicalSegmentManager) completeSegmentUpdate(segmentID int64, expected *physicalSegmentState, epoch uint64, revision SegmentLoadInfoRevision, snapshot SegmentLoadInfoSnapshot) {
+func (m *QueryViewSegmentManager) completeSegmentUpdate(segmentID int64, expected *segmentState, epoch uint64, revision SegmentLoadInfoRevision, snapshot SegmentLoadInfoSnapshot) {
 	var notifications []func()
 	var next segmentUpdateSubmission
 	var ok bool
@@ -536,7 +406,7 @@ func (m *ViewScopedPhysicalSegmentManager) completeSegmentUpdate(segmentID int64
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) failSegmentUpdate(segmentID int64, expected *physicalSegmentState, epoch uint64, attempted SegmentLoadInfoSnapshot) {
+func (m *QueryViewSegmentManager) failSegmentUpdate(segmentID int64, expected *segmentState, epoch uint64, attempted SegmentLoadInfoSnapshot) {
 	var notifications []func()
 	var next segmentUpdateSubmission
 	var ok bool
@@ -547,7 +417,7 @@ func (m *ViewScopedPhysicalSegmentManager) failSegmentUpdate(segmentID int64, ex
 		for key := range state.refs {
 			ref := m.views[key]
 			if ref != nil && (!state.dataVersion.GTE(ref.dataVersion) || !coversLoadRequirements(state.appliedResources, ref.loadInfo)) && attempted.DataVersion.GTE(ref.dataVersion) && coversLoadRequirements(attempted.resources, ref.loadInfo) && ref.onUnrecoverable != nil {
-				notifications = append(notifications, ref.onUnrecoverable)
+				notifications = append(notifications, func() { m.failView(key, ref) })
 			}
 		}
 		next, ok = m.nextSegmentUpdateLocked(context.Background(), segmentID)
@@ -561,7 +431,7 @@ func (m *ViewScopedPhysicalSegmentManager) failSegmentUpdate(segmentID int64, ex
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) cancelSegmentUpdateLocked(state *physicalSegmentState) {
+func (m *QueryViewSegmentManager) cancelSegmentUpdateLocked(state *segmentState) {
 	if state == nil {
 		return
 	}
@@ -574,22 +444,21 @@ func (m *ViewScopedPhysicalSegmentManager) cancelSegmentUpdateLocked(state *phys
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(submission segmentLoadSubmission, err error) ([]func(), []segmentLoadSubmission, []SegmentLoadInfoSubscription) {
+func (m *QueryViewSegmentManager) failPhysicalSegmentLoad(submission segmentLoadSubmission, err error) ([]func(), []SegmentLoadInfoSubscription) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	segmentID := submission.segmentID
 	state := m.segments[segmentID]
 	if state == nil || !state.loading || state.loadGeneration != submission.generation {
-		return nil, nil, nil
+		return nil, nil
 	}
 	state.loading = false
 	state.loadCancel = nil
-	state.loadDone = nil
 	if state.segment == nil && len(state.refs) == 0 {
 		subscription := m.detachSubscriptionLocked(state)
 		delete(m.segments, segmentID)
-		return nil, nil, subscription
+		return nil, subscription
 	}
 
 	notifications := make([]func(), 0, len(state.refs))
@@ -612,40 +481,14 @@ func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(submission se
 			})
 		}
 	}
-	state.refs = make(map[qviews.QueryViewKey]struct{})
-	state.requests = make(map[qviews.QueryViewKey]segmentLoadRequest)
-	state.loading = false
-	state.pendingSnapshot = nil
-	state.loadCancel = nil
-	state.loadDone = nil
 	subscription := m.detachSubscriptionLocked(state)
-	if state.segment == nil {
-		delete(m.segments, segmentID)
-	}
-	return notifications, nil, subscription
-}
 
-func (m *ViewScopedPhysicalSegmentManager) ResetSegment(segmentID int64) {
-	var subscriptions []SegmentLoadInfoSubscription
-	m.mu.Lock()
-	if state := m.segments[segmentID]; state != nil {
-		if state.loadCancel != nil {
-			state.loadCancel()
-		}
-		m.cancelSegmentUpdateLocked(state)
-		subscriptions = m.detachSubscriptionLocked(state)
-		delete(m.segments, segmentID)
-	}
-	for _, ref := range m.views {
-		delete(ref.segments, segmentID)
-	}
-	m.mu.Unlock()
-	m.closeSubscriptions(subscriptions)
+	return notifications, subscription
 }
 
 // Each view is notified once per segment, after its minimum data version is
 // physically available. Transform readiness is checked by the caller separately.
-func (m *ViewScopedPhysicalSegmentManager) loadedNotificationsLocked(state *physicalSegmentState) []func() {
+func (m *QueryViewSegmentManager) loadedNotificationsLocked(state *segmentState) []func() {
 	var notifications []func()
 	if state.segment == nil {
 		return nil
@@ -677,57 +520,7 @@ func queryViewDataVersion(meta *viewpb.QueryViewMeta) qviews.DataVersion {
 	return qviews.DataVersion{StreamingVersion: version.GetStreamingVersion(), CompactVersion: version.GetCompactVersion()}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) removeView(req ReleaseSegments) ([]SegmentLoadInfoSubscription, func()) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	key := req.Key
-	ref := m.views[key]
-	if ref == nil {
-		if cancel, ok := m.cancels[key]; ok {
-			cancel()
-			delete(m.cancels, key)
-		}
-		return nil, req.OnDropped
-	}
-	delete(m.views, key)
-	ref.onDropped = req.OnDropped
-	ref.dropped = true
-
-	toClose := make([]SegmentLoadInfoSubscription, 0, len(ref.segments))
-	for segmentID := range ref.segments {
-		state := m.segments[segmentID]
-		if state == nil {
-			continue
-		}
-		delete(state.refs, key)
-		delete(state.requests, key)
-		state.resources = unionLoadInfo(state.requests)
-		if len(state.refs) == 0 {
-			m.cancelSegmentUpdateLocked(state)
-			if state.segment == nil && state.loading {
-				if state.loadCancel != nil {
-					state.loadCancel()
-				}
-				state.loadCancel = nil
-				state.loadDone = nil
-			}
-			toClose = append(toClose, m.detachSubscriptionLocked(state)...)
-			delete(m.segments, segmentID)
-		}
-	}
-	if cancel, ok := m.cancels[key]; ok {
-		cancel()
-		delete(m.cancels, key)
-	}
-	if ref.pendingLoads == 0 {
-		return toClose, ref.onDropped
-	}
-	m.dropping[key] = ref
-	return toClose, nil
-}
-
-func newSegmentLoadRequest(req AcquirePhysicalSegments) segmentLoadRequest {
+func newSegmentLoadRequest(req segmentPreparationRequest) segmentLoadRequest {
 	return segmentLoadRequest{
 		loadInfo: req.LoadInfo, meta: req.Meta,
 		collection:                  req.Collection,
@@ -735,8 +528,9 @@ func newSegmentLoadRequest(req AcquirePhysicalSegments) segmentLoadRequest {
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) trackPendingLoadAttemptLocked(state *physicalSegmentState) func() {
-	refs := make([]*viewRef, 0, len(state.refs))
+func (m *QueryViewSegmentManager) trackPendingLoadAttemptLocked(state *segmentState) func() {
+	state.taskRefs++
+	refs := make([]*queryViewRef, 0, len(state.refs))
 	for key := range state.refs {
 		ref := m.views[key]
 		if ref == nil {
@@ -746,11 +540,15 @@ func (m *ViewScopedPhysicalSegmentManager) trackPendingLoadAttemptLocked(state *
 		refs = append(refs, ref)
 	}
 	return func() {
+		m.mu.Lock()
+		state.taskRefs--
+		m.mu.Unlock()
 		m.completeLoadAttempts(refs)
+		m.releaseSegmentState(state)
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) completeLoadAttempts(refs []*viewRef) {
+func (m *QueryViewSegmentManager) completeLoadAttempts(refs []*queryViewRef) {
 	callbacks := make([]func(), 0)
 	m.mu.Lock()
 	for _, ref := range refs {
@@ -758,10 +556,7 @@ func (m *ViewScopedPhysicalSegmentManager) completeLoadAttempts(refs []*viewRef)
 			continue
 		}
 		ref.pendingLoads--
-		if ref.pendingLoads == 0 && ref.dropped {
-			if m.dropping[ref.key] == ref {
-				delete(m.dropping, ref.key)
-			}
+		if ref.pendingLoads == 0 && ref.dropping && ref.releaseReady {
 			callbacks = append(callbacks, ref.onDropped)
 			ref.onDropped = nil
 		}
@@ -772,17 +567,7 @@ func (m *ViewScopedPhysicalSegmentManager) completeLoadAttempts(refs []*viewRef)
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) submitCallback(callback func()) {
-	if callback == nil {
-		return
-	}
-	m.nodeScheduler.Submit(schedulerTaskFunc(func(context.Context) error {
-		callback()
-		return nil
-	}))
-}
-
-func (s *physicalSegmentState) loadRequest() (segmentLoadRequest, bool) {
+func (s *segmentState) loadRequest() (segmentLoadRequest, bool) {
 	var selected segmentLoadRequest
 	var selectedKey qviews.QueryViewKey
 	var startAfter uint64
@@ -825,13 +610,7 @@ func preferSegmentLoadRequest(key qviews.QueryViewKey, request segmentLoadReques
 	return key.String() < currentKey.String()
 }
 
-func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoadSubmissions(submissions []segmentLoadSubmission) {
-	for _, submission := range submissions {
-		m.submitSegmentLoad(submission, nil)
-	}
-}
-
-func (m *ViewScopedPhysicalSegmentManager) detachSubscriptionLocked(state *physicalSegmentState) []SegmentLoadInfoSubscription {
+func (m *QueryViewSegmentManager) detachSubscriptionLocked(state *segmentState) []SegmentLoadInfoSubscription {
 	if state == nil || state.subscription == nil {
 		return nil
 	}
@@ -840,7 +619,7 @@ func (m *ViewScopedPhysicalSegmentManager) detachSubscriptionLocked(state *physi
 	return []SegmentLoadInfoSubscription{subscription}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) subscribeSegments(requests []segmentLoadInfoSubscriptionRequest) {
+func (m *QueryViewSegmentManager) subscribeSegments(requests []segmentLoadInfoSubscriptionRequest) {
 	if m.stream == nil {
 		return
 	}
@@ -877,7 +656,7 @@ func (m *ViewScopedPhysicalSegmentManager) subscribeSegments(requests []segmentL
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) closeSubscriptions(subscriptions []SegmentLoadInfoSubscription) {
+func (m *QueryViewSegmentManager) closeSubscriptions(subscriptions []SegmentLoadInfoSubscription) {
 	for _, subscription := range subscriptions {
 		subscription.Close()
 	}
@@ -885,8 +664,8 @@ func (m *ViewScopedPhysicalSegmentManager) closeSubscriptions(subscriptions []Se
 
 type physicalSegmentLoadInfoHandler struct {
 	epoch   uint64
-	manager *ViewScopedPhysicalSegmentManager
-	state   *physicalSegmentState
+	manager *QueryViewSegmentManager
+	state   *segmentState
 }
 
 func (h physicalSegmentLoadInfoHandler) Handle(snapshot SegmentLoadInfoSnapshot) error {

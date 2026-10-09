@@ -28,16 +28,16 @@ func TestSharedLoadPlanSelectionAndLifetime(t *testing.T) {
 			patchLifetime(t, mockey.Mock((*lifetimeSubscription).Close).Return().Build())
 			scheduler := nodescheduler.New(1)
 			t.Cleanup(scheduler.Close)
-			manager := NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(scheduler, nil, &fakeSegmentLoadInfoStream{})
+			manager := newTestSegmentPreparerWithStream(scheduler, nil, &fakeSegmentLoadInfoStream{})
 			view := &viewpb.QueryViewOfQueryNode{Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
-			var requests []AcquirePhysicalSegments
+			var requests []segmentPreparationRequest
 			// Schema wins over config version; within one schema config version
 			// wins. Equal versions are resolved by a stable view identity.
 			for i, versions := range [][3]uint64{{1, 9, 0}, {2, 1, 70}, {2, 2, 80}, {2, 2, 90}} {
 				meta := buildHandlerTestMeta(int64(i + 1))
 				meta.LoadInfoVersion = versions[1]
 				meta.TransformStartAfterTimetick = versions[2]
-				requests = append(requests, AcquirePhysicalSegments{
+				requests = append(requests, segmentPreparationRequest{
 					Key: qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey(), Meta: meta, View: view,
 					Collection: &fakeCollectionRuntimeGuard{schemaVersion: int64(versions[0])},
 					LoadInfo:   &QueryViewLoadInfo{Version: QueryViewLoadInfoVersion(versions[1]), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: int64(100 + i)}}},

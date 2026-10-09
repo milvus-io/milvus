@@ -11,8 +11,8 @@ type segmentPoison struct {
 // A late failure must never affect a replacement with the same segment ID.
 type observedTransformSegment struct {
 	TransformSegment
-	manager *QueryViewSegmentReadinessManager
-	state   *transformSegmentState
+	manager *QueryViewSegmentManager
+	state   *segmentState
 }
 
 func (s *observedTransformSegment) UnwrapTransformSegment() TransformSegment {
@@ -23,7 +23,7 @@ func (s *observedTransformSegment) OnTransformFailed(timetick uint64, _ error) {
 	s.manager.poisonSegment(s.ID(), s.state, timetick)
 }
 
-func (m *QueryViewSegmentReadinessManager) poisonSegment(id int64, expected *transformSegmentState, timetick uint64) {
+func (m *QueryViewSegmentManager) poisonSegment(id int64, expected *segmentState, timetick uint64) {
 	m.mu.Lock()
 	state := m.segments[id]
 	if state != expected || state.poison != nil {

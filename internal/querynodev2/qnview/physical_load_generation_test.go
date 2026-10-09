@@ -50,13 +50,13 @@ func TestPhysicalLoadCallbackKeepsReplacementGeneration(t *testing.T) {
 			patchLifetime(t, mockey.Mock((*lifetimeSubscription).Close).To(func(*lifetimeSubscription) { closes.Add(1) }).Build())
 			sched := nodescheduler.New(4)
 			t.Cleanup(sched.Close)
-			phys := NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(sched, &fakePhysicalLoader{}, &fakeSegmentLoadInfoStream{})
+			phys := newTestSegmentPreparerWithStream(sched, &fakePhysicalLoader{}, &fakeSegmentLoadInfoStream{})
 			acquire := func(version int64) (qviews.QueryViewKey, chan struct{}) {
 				meta := buildHandlerTestMeta(version)
 				view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 				key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 				ready := make(chan struct{}, 3)
-				phys.Acquire(AcquirePhysicalSegments{Key: key, Meta: meta, View: view, Collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID}, OnLoaded: func(segments []TransformSegment) {
+				phys.Acquire(segmentPreparationRequest{Key: key, Meta: meta, View: view, Collection: &fakeCollectionRuntimeGuard{collectionID: testCollectionID}, OnLoaded: func(segments []TransformSegment) {
 					for _, segment := range segments {
 						if version == 2 && segment == oldSegment {
 							staleNotifications.Add(1)

@@ -6,11 +6,12 @@ import "sync/atomic"
 // owner releases exactly once; registration takes over retention for a segment.
 type retainedTransformGuard struct {
 	TransformLogGuard
-	refs atomic.Int32
+	refs       atomic.Int32
+	startAfter uint64
 }
 
-func newRetainedTransformGuard(guard TransformLogGuard) *retainedTransformGuard {
-	g := &retainedTransformGuard{TransformLogGuard: guard}
+func newRetainedTransformGuard(guard TransformLogGuard, startAfter uint64) *retainedTransformGuard {
+	g := &retainedTransformGuard{TransformLogGuard: guard, startAfter: startAfter}
 	g.refs.Store(1)
 	return g
 }

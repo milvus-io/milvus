@@ -14,16 +14,30 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-type poisonPhysicalManager struct{ qnview.PhysicalSegmentManager }
+type poisonLoadInfoStream struct{ qnview.SegmentLoadInfoStream }
 
-func (*poisonPhysicalManager) Acquire(qnview.AcquirePhysicalSegments) { panic("mock required") }
-func (*poisonPhysicalManager) Release(qnview.ReleaseSegments)         { panic("mock required") }
+func (*poisonLoadInfoStream) Subscribe(qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
+	panic("mockey")
+}
+
+type poisonLoadInfoSubscription struct {
+	qnview.SegmentLoadInfoSubscription
+}
+
+func (*poisonLoadInfoSubscription) Close() {}
+
+type poisonPhysicalLoader struct{ qnview.PhysicalSegmentLoader }
+
+func (*poisonPhysicalLoader) Load(context.Context, *querypb.SegmentLoadInfo, qnview.CollectionRuntime) (qnview.TransformSegment, error) {
+	panic("mock required")
+}
 
 func TestApplyFailureStaysLocalAndGatesQueryMVCC(t *testing.T) {
 	for _, stage := range []string{"live", "catchup", "partial"} {
@@ -36,21 +50,28 @@ func testLocalPoison(t *testing.T, stage string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	segment := &fakeSegment{id: 1000, partitionID: 10, vchannel: "p_1v0"}
-	patch := mockey.Mock((*poisonPhysicalManager).Acquire).To(func(_ *poisonPhysicalManager, req qnview.AcquirePhysicalSegments) {
-		req.OnLoaded([]qnview.TransformSegment{segment})
+	patch := mockey.Mock((*poisonPhysicalLoader).Load).To(func(_ *poisonPhysicalLoader, ctx context.Context, info *querypb.SegmentLoadInfo, _ qnview.CollectionRuntime) (qnview.TransformSegment, error) {
+		if info.GetSegmentID() == 2000 {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return segment, nil
 	}).Build()
 	defer patch.UnPatch()
-	release := mockey.Mock((*poisonPhysicalManager).Release).To(func(_ *poisonPhysicalManager, req qnview.ReleaseSegments) { go req.OnDropped() }).Build()
-	defer release.UnPatch()
 	apply := mockey.Mock((*fakeSegment).ApplyTransform).Return(merr.WrapErrServiceUnavailableMsg("injected delete failure")).Build()
 	defer apply.UnPatch()
 	streams := newFakeStreamManager()
 	buffer := New(streams, 1)
+	streamPatch := mockey.Mock((*poisonLoadInfoStream).Subscribe).To(func(_ *poisonLoadInfoStream, opt qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
+		require.NoError(t, opt.Handler.Handle(qnview.SegmentLoadInfoSnapshot{CollectionID: opt.CollectionID, SegmentID: opt.SegmentID, DataVersion: opt.DataVersion, Revision: qnview.SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: opt.SegmentID}}))
+		return &poisonLoadInfoSubscription{}
+	}).Build()
+	defer streamPatch.UnPatch()
 	sched := nodescheduler.New(2)
 	defer sched.Close()
-	manager := qnview.NewQueryViewSegmentReadinessManagerWithScheduler(sched, &poisonPhysicalManager{}, buffer, 1)
+	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: sched, Loader: &poisonPhysicalLoader{}, LoadInfoStream: &poisonLoadInfoStream{}, Buffer: buffer, CatchupConcurrency: 1})
 	h := qnview.NewQNQueryViewHandler(manager)
-	meta := &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 1, Vchannel: "p_1v0", State: viewpb.QueryViewState_QueryViewStatePreparing, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 1, Vchannel: "p_1v0", State: viewpb.QueryViewState_QueryViewStatePreparing, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 0}, QueryVersion: 1}}
 	assignment := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 	if stage == "partial" {
 		// The first segment becomes ready while this second segment is loading.
@@ -69,6 +90,7 @@ func testLocalPoison(t *testing.T, stage string) {
 		}
 	}
 	h.ApplyViews([]handler.ApplyView{{View: view, OnReport: report}})
+	require.Eventually(t, func() bool { return streams.stream("p") != nil }, time.Second, time.Millisecond)
 	stream := streams.stream("p")
 	if stage == "partial" {
 		stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 9}})
