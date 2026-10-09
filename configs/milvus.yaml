@@ -1872,6 +1872,9 @@ function:
         tei:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable TEI rerank service
+        sglang:
+          credential:  # The name in the credential configuration item
+          enable: true # Whether to enable SGLang rerank service
         vllm:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable vllm rerank service
