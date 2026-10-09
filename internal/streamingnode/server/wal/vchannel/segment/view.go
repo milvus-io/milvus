@@ -90,8 +90,15 @@ func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bo
 }
 
 func newSegmentViewFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2, schema *schemapb.CollectionSchema, configs ...runtimeConfig) *SegmentView {
+	meta := newSegmentAssignmentMetaFromCreateSegmentMessage(msg)
+	// Older CreateSegment messages did not carry an encoding version. Preserve
+	// the schema selected by the WAL timetick in the first durable snapshot so
+	// subsequent native recovery does not reinterpret an absent version as zero.
+	if meta.GetSchemaVersion() == 0 && schema != nil {
+		meta.SchemaVersion = schema.GetVersion()
+	}
 	return newSegmentView(
-		newSegmentAssignmentMetaFromCreateSegmentMessage(msg),
+		meta,
 		0,
 		false,
 		writeOnlyInsertBuffer{},
