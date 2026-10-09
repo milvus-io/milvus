@@ -777,7 +777,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 				}
 			}
 		}
-
 	}
 
 	missing := entityFilter.GetMissingDeleteCount()

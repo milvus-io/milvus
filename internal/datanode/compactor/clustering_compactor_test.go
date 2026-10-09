@@ -857,10 +857,8 @@ func TestClusteringMappingRejectsInvalidTimestamp(t *testing.T) {
 			}
 			record := clusteringTestRecord(t, malformed, 0, 1)
 			defer record.Release()
-			var readerRecord storage.Record
-			readerRecord = record
 			patch := mockey.Mock(storage.NewBinlogRecordReader).
-				Return(&clusteringSliceReader{records: []storage.Record{readerRecord}}, nil).Build()
+				Return(&clusteringSliceReader{records: []storage.Record{record}}, nil).Build()
 			defer patch.UnPatch()
 			segment := &datapb.CompactionSegmentBinlogs{CollectionID: CollectionID, SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 1}}}}}
 			task := &clusteringCompactionTask{
