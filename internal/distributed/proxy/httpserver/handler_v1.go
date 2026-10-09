@@ -19,7 +19,6 @@ package httpserver
 import (
 	"context"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -214,7 +212,7 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 
 	resp, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.ShowCollections(reqCtx, req.(*milvuspb.ShowCollectionsRequest))
@@ -247,10 +245,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 		VectorField:        DefaultVectorFieldName,
 		EnableDynamicField: EnableDynamic,
 	}
-	if err := bindV1JSONRequest(c, &httpReq, false); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of create collection is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -311,7 +306,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 	}
 	req.Schema = schema
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
 	})
@@ -366,7 +361,7 @@ func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	}
 	dbName := c.DefaultQuery(HTTPDbName, DefaultDbName)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), dbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), dbName)
 
 	req := &milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
@@ -449,10 +444,7 @@ func (h *HandlersV1) dropCollection(c *gin.Context) {
 	httpReq := DropCollectionReq{
 		DbName: DefaultDbName,
 	}
-	if err := bindV1JSONRequest(c, &httpReq, false); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of drop collection is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -474,7 +466,7 @@ func (h *HandlersV1) dropCollection(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		has, err := h.hasCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil {
@@ -508,10 +500,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 		Limit:        100,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := bindV1JSONRequest(c, &httpReq, false); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of query is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -545,7 +534,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -585,10 +574,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 		DbName:       DefaultDbName,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := bindV1JSONRequest(c, &httpReq, true); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of get is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -614,7 +600,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
@@ -669,10 +655,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 	httpReq := DeleteReq{
 		DbName: DefaultDbName,
 	}
-	if err := bindV1JSONRequest(c, &httpReq, true); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of delete is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -696,7 +679,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
@@ -739,88 +722,15 @@ func (h *HandlersV1) delete(c *gin.Context) {
 	}
 }
 
-func bindV1DataRequest(c *gin.Context, req any, assignRows func([]map[string]any)) (error, bool) {
-	if !requestbudget.Active(c.Request.Context()) {
-		return c.ShouldBindBodyWith(req, binding.JSON), true
-	}
-	// V1 also accepts a single object in data. Keep its legacy fallback only
-	// when the entire call is at most one accepted JSON unit. Larger multi-row
-	// requests use cancellable batches; a larger single row is rejected.
-	err := bindBudgetBulkRows(c, req, requestbudget.MaxJSONUnitBytes, assignRows)
-	if err == nil {
-		return nil, false
-	}
-	if c.Request.Context().Err() != nil {
-		return err, false
-	}
-	if saved, ok := c.Get(gin.BodyBytesKey); ok {
-		if body, ok := saved.([]byte); ok && len(body) <= requestbudget.MaxJSONUnitBytes {
-			return err, true
-		}
-	}
-	return err, false
-}
-
-func writeV1BudgetBindError(c *gin.Context, err error) {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, os.ErrDeadlineExceeded) {
-		HTTPAbortReturn(c, http.StatusRequestTimeout, gin.H{
-			HTTPReturnCode:    merr.TimeoutCode,
-			HTTPReturnMessage: "request timeout",
-		})
-		return
-	}
-	if errors.Is(err, merr.ErrParameterInvalid) {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(err),
-			HTTPReturnMessage: err.Error(),
-		})
-		return
-	}
-	HTTPAbortReturn(c, http.StatusOK, gin.H{
-		HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-		HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-	})
-}
-
-func bindV1JSONRequest(c *gin.Context, req any, retainBody bool) error {
-	if requestbudget.Active(c.Request.Context()) {
-		return bindBudgetJSONUnit(c, req, requestbudget.MaxJSONUnitBytes)
-	}
-	if retainBody {
-		return c.ShouldBindBodyWith(req, binding.JSON)
-	}
-	return c.ShouldBindWith(req, binding.JSON)
-}
-
-func handleV1BudgetBindError(c *gin.Context, err error) bool {
-	if !requestbudget.Active(c.Request.Context()) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
-		errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, merr.ErrParameterInvalid) {
-		writeV1BudgetBindError(c, err)
-		return true
-	}
-	return false
-}
-
 func (h *HandlersV1) insert(c *gin.Context) {
 	httpReq := InsertReq{
 		DbName: DefaultDbName,
 	}
-	if err, allowSingle := bindV1DataRequest(c, &httpReq, func(rows []map[string]any) { httpReq.Data = rows }); err != nil {
-		if !allowSingle {
-			writeV1BudgetBindError(c, err)
-			return
-		}
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		singleInsertReq := SingleInsertReq{
 			DbName: DefaultDbName,
 		}
 		if err = c.ShouldBindBodyWith(&singleInsertReq, binding.JSON); err != nil {
-			if requestbudget.Active(c.Request.Context()) && c.Request.Context().Err() != nil {
-				writeV1BudgetBindError(c, c.Request.Context().Err())
-				return
-			}
 			mlog.Warn(c.Request.Context(), "high level restful api, the parameter of insert is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -833,10 +743,6 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		httpReq.RlsPrincipal = singleInsertReq.RlsPrincipal
 		httpReq.SkipRls = singleInsertReq.SkipRls
 		httpReq.Data = []map[string]interface{}{singleInsertReq.Data}
-	}
-	if requestbudget.Active(c.Request.Context()) && c.Request.Context().Err() != nil {
-		writeV1BudgetBindError(c, c.Request.Context().Err())
-		return
 	}
 	if httpReq.CollectionName == "" || httpReq.Data == nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, insert require parameter: [collectionName, data], but miss")
@@ -855,7 +761,7 @@ func (h *HandlersV1) insert(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
@@ -863,13 +769,8 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
 		var validDataMap map[string][]bool
-		httpReq.Data, validDataMap, err = checkAndSetDataWithContext(ctx, body.([]byte), collSchema, false)
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
 		if err != nil {
-			if requestbudget.Active(c.Request.Context()) &&
-				(errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, os.ErrDeadlineExceeded)) {
-				writeV1BudgetBindError(c, err)
-				return nil, RestRequestInterceptorErr
-			}
 			mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Any("body", body), mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
@@ -929,19 +830,11 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	httpReq := UpsertReq{
 		DbName: DefaultDbName,
 	}
-	if err, allowSingle := bindV1DataRequest(c, &httpReq, func(rows []map[string]any) { httpReq.Data = rows }); err != nil {
-		if !allowSingle {
-			writeV1BudgetBindError(c, err)
-			return
-		}
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		singleUpsertReq := SingleUpsertReq{
 			DbName: DefaultDbName,
 		}
 		if err = c.ShouldBindBodyWith(&singleUpsertReq, binding.JSON); err != nil {
-			if requestbudget.Active(c.Request.Context()) && c.Request.Context().Err() != nil {
-				writeV1BudgetBindError(c, c.Request.Context().Err())
-				return
-			}
 			mlog.Warn(c.Request.Context(), "high level restful api, the parameter of upsert is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -956,10 +849,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		httpReq.Data = []map[string]interface{}{singleUpsertReq.Data}
 		httpReq.PartialUpdate = singleUpsertReq.PartialUpdate
 		httpReq.FieldOps = singleUpsertReq.FieldOps
-	}
-	if requestbudget.Active(c.Request.Context()) && c.Request.Context().Err() != nil {
-		writeV1BudgetBindError(c, c.Request.Context().Err())
-		return
 	}
 	if httpReq.CollectionName == "" || httpReq.Data == nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, upsert require parameter: [collectionName, data], but miss")
@@ -988,7 +877,7 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	req.FieldOps = fieldOps
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
@@ -1003,13 +892,8 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
 		var validDataMap map[string][]bool
-		httpReq.Data, validDataMap, err = checkAndSetDataWithContext(ctx, body.([]byte), collSchema, httpReq.PartialUpdate)
+		httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 		if err != nil {
-			if requestbudget.Active(c.Request.Context()) &&
-				(errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, os.ErrDeadlineExceeded)) {
-				writeV1BudgetBindError(c, err)
-				return nil, RestRequestInterceptorErr
-			}
 			mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
@@ -1070,10 +954,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 		DbName: DefaultDbName,
 		Limit:  100,
 	}
-	if err := bindV1JSONRequest(c, &httpReq, false); err != nil {
-		if handleV1BudgetBindError(c, err) {
-			return
-		}
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of search is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
@@ -1143,7 +1024,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 	}
 
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{

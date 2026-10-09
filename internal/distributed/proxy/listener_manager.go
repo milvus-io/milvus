@@ -26,7 +26,6 @@ import (
 	"github.com/soheilhy/cmux"
 	"golang.org/x/net/http2"
 
-	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -98,8 +97,7 @@ func newHTTPListner(ctx context.Context, l *listenerManager) error {
 		}
 		mlog.Info(ctx, "Proxy server(http) and external grpc server share the same port")
 		l.portShareMode = true
-		l.cmux = cmux.New(requestbudget.CloseOnReadTimeout(l.externalGrpcListener))
-		l.cmux.SetReadTimeout(HTTPParams.ReadHeaderTimeout.GetAsDurationByParse())
+		l.cmux = cmux.New(l.externalGrpcListener)
 		l.cmuxClosed = make(chan struct{})
 		l.cmuxExternHTTP2Listener = l.cmux.Match(cmux.HTTP2())
 		l.cmuxExternHTTPListener = l.cmux.Match(cmux.Any())
