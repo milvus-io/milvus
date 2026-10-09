@@ -36,11 +36,22 @@ import (
 // It is registered globally via init() so any gRPC server or client that
 // imports this package (or any package that imports pkg/util/resource)
 // automatically uses it.
-type releaseCodec struct{}
+type releaseCodec struct {
+	// An optional pool lets tests compare the same codec with gRPC's default.
+	// Registered production codecs use the shared private pool.
+	bufferPool mem.BufferPool
+}
+
+func (c releaseCodec) pool() mem.BufferPool {
+	if c.bufferPool != nil {
+		return c.bufferPool
+	}
+	return releaseCodecBufferPool
+}
 
 func (releaseCodec) Name() string { return "proto" }
 
-func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
+func (c releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 	msg := messageV2Of(v)
 	if msg == nil {
 		return nil, merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
@@ -63,7 +74,7 @@ func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 		}
 		out = mem.BufferSlice{mem.SliceBuffer(buf)}
 	} else {
-		pool := mem.DefaultBufferPool()
+		pool := c.pool()
 		pbuf := pool.Get(size)
 		if buf, err := marshalOptions.MarshalAppend((*pbuf)[:0], msg); err != nil {
 			pool.Put(pbuf)
@@ -77,13 +88,13 @@ func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 	return out, nil
 }
 
-func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
+func (c releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 	msg := messageV2Of(v)
 	if msg == nil {
 		return merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
 	}
 
-	buf := data.MaterializeToBuffer(mem.DefaultBufferPool())
+	buf := data.MaterializeToBuffer(c.pool())
 	defer buf.Free()
 	return proto.Unmarshal(buf.ReadOnlyData(), msg)
 }
