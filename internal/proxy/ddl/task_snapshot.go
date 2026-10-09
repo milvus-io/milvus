@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -56,7 +56,7 @@ func resolveCollectionNames(ctx context.Context, metaCache Cache, collectionID i
 	return collInfo.DBName, collInfo.Schema.Name
 }
 
-type createSnapshotTask struct {
+type CreateSnapshotTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.CreateSnapshotRequest
@@ -67,39 +67,39 @@ type createSnapshotTask struct {
 	collectionID UniqueID
 }
 
-func (cst *createSnapshotTask) TraceCtx() context.Context {
+func (cst *CreateSnapshotTask) TraceCtx() context.Context {
 	return cst.ctx
 }
 
-func (cst *createSnapshotTask) ID() UniqueID {
+func (cst *CreateSnapshotTask) ID() UniqueID {
 	return cst.req.GetBase().GetMsgID()
 }
 
-func (cst *createSnapshotTask) SetID(uid UniqueID) {
+func (cst *CreateSnapshotTask) SetID(uid UniqueID) {
 	cst.req.GetBase().MsgID = uid
 }
 
-func (cst *createSnapshotTask) Name() string {
+func (cst *CreateSnapshotTask) Name() string {
 	return CreateSnapshotTaskName
 }
 
-func (cst *createSnapshotTask) Type() commonpb.MsgType {
+func (cst *CreateSnapshotTask) Type() commonpb.MsgType {
 	return cst.req.GetBase().GetMsgType()
 }
 
-func (cst *createSnapshotTask) BeginTs() Timestamp {
+func (cst *CreateSnapshotTask) BeginTs() Timestamp {
 	return cst.req.GetBase().GetTimestamp()
 }
 
-func (cst *createSnapshotTask) EndTs() Timestamp {
+func (cst *CreateSnapshotTask) EndTs() Timestamp {
 	return cst.req.GetBase().GetTimestamp()
 }
 
-func (cst *createSnapshotTask) SetTs(ts Timestamp) {
+func (cst *CreateSnapshotTask) SetTs(ts Timestamp) {
 	cst.req.Base.Timestamp = ts
 }
 
-func (cst *createSnapshotTask) OnEnqueue() error {
+func (cst *CreateSnapshotTask) OnEnqueue() error {
 	if cst.req.Base == nil {
 		cst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -108,7 +108,7 @@ func (cst *createSnapshotTask) OnEnqueue() error {
 	return nil
 }
 
-func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
+func (cst *CreateSnapshotTask) PreExecute(ctx context.Context) error {
 	// Validate snapshot_name using standard naming rules
 	if err := ValidateSnapshotName(cst.req.GetName()); err != nil {
 		return err
@@ -132,7 +132,7 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (cst *createSnapshotTask) Execute(ctx context.Context) error {
+func (cst *CreateSnapshotTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy create snapshot",
 		mlog.String("snapshotName", cst.req.GetName()),
 		mlog.FieldCollectionName(cst.req.GetCollectionName()),
@@ -155,11 +155,11 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (cst *createSnapshotTask) PostExecute(ctx context.Context) error {
+func (cst *CreateSnapshotTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type dropSnapshotTask struct {
+type DropSnapshotTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.DropSnapshotRequest
@@ -170,39 +170,39 @@ type dropSnapshotTask struct {
 	collectionID UniqueID
 }
 
-func (dst *dropSnapshotTask) TraceCtx() context.Context {
+func (dst *DropSnapshotTask) TraceCtx() context.Context {
 	return dst.ctx
 }
 
-func (dst *dropSnapshotTask) ID() UniqueID {
+func (dst *DropSnapshotTask) ID() UniqueID {
 	return dst.req.GetBase().GetMsgID()
 }
 
-func (dst *dropSnapshotTask) SetID(uid UniqueID) {
+func (dst *DropSnapshotTask) SetID(uid UniqueID) {
 	dst.req.GetBase().MsgID = uid
 }
 
-func (dst *dropSnapshotTask) Name() string {
+func (dst *DropSnapshotTask) Name() string {
 	return DropSnapshotTaskName
 }
 
-func (dst *dropSnapshotTask) Type() commonpb.MsgType {
+func (dst *DropSnapshotTask) Type() commonpb.MsgType {
 	return dst.req.GetBase().GetMsgType()
 }
 
-func (dst *dropSnapshotTask) BeginTs() Timestamp {
+func (dst *DropSnapshotTask) BeginTs() Timestamp {
 	return dst.req.GetBase().GetTimestamp()
 }
 
-func (dst *dropSnapshotTask) EndTs() Timestamp {
+func (dst *DropSnapshotTask) EndTs() Timestamp {
 	return dst.req.GetBase().GetTimestamp()
 }
 
-func (dst *dropSnapshotTask) SetTs(ts Timestamp) {
+func (dst *DropSnapshotTask) SetTs(ts Timestamp) {
 	dst.req.Base.Timestamp = ts
 }
 
-func (dst *dropSnapshotTask) OnEnqueue() error {
+func (dst *DropSnapshotTask) OnEnqueue() error {
 	if dst.req.Base == nil {
 		dst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -211,7 +211,7 @@ func (dst *dropSnapshotTask) OnEnqueue() error {
 	return nil
 }
 
-func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
+func (dst *DropSnapshotTask) PreExecute(ctx context.Context) error {
 	// Validate snapshot_name using standard naming rules
 	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
 		return err
@@ -229,7 +229,7 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
+func (dst *DropSnapshotTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy drop snapshot",
 		mlog.String("snapshotName", dst.req.GetName()),
 		mlog.FieldCollectionName(dst.req.GetCollectionName()),
@@ -250,11 +250,11 @@ func (dst *dropSnapshotTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (dst *dropSnapshotTask) PostExecute(ctx context.Context) error {
+func (dst *DropSnapshotTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type describeSnapshotTask struct {
+type DescribeSnapshotTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.DescribeSnapshotRequest
@@ -265,39 +265,39 @@ type describeSnapshotTask struct {
 	collectionID UniqueID
 }
 
-func (dst *describeSnapshotTask) TraceCtx() context.Context {
+func (dst *DescribeSnapshotTask) TraceCtx() context.Context {
 	return dst.ctx
 }
 
-func (dst *describeSnapshotTask) ID() UniqueID {
+func (dst *DescribeSnapshotTask) ID() UniqueID {
 	return dst.req.GetBase().GetMsgID()
 }
 
-func (dst *describeSnapshotTask) SetID(uid UniqueID) {
+func (dst *DescribeSnapshotTask) SetID(uid UniqueID) {
 	dst.req.GetBase().MsgID = uid
 }
 
-func (dst *describeSnapshotTask) Name() string {
+func (dst *DescribeSnapshotTask) Name() string {
 	return DescribeSnapshotTaskName
 }
 
-func (dst *describeSnapshotTask) Type() commonpb.MsgType {
+func (dst *DescribeSnapshotTask) Type() commonpb.MsgType {
 	return dst.req.GetBase().GetMsgType()
 }
 
-func (dst *describeSnapshotTask) BeginTs() Timestamp {
+func (dst *DescribeSnapshotTask) BeginTs() Timestamp {
 	return dst.req.GetBase().GetTimestamp()
 }
 
-func (dst *describeSnapshotTask) EndTs() Timestamp {
+func (dst *DescribeSnapshotTask) EndTs() Timestamp {
 	return dst.req.GetBase().GetTimestamp()
 }
 
-func (dst *describeSnapshotTask) SetTs(ts Timestamp) {
+func (dst *DescribeSnapshotTask) SetTs(ts Timestamp) {
 	dst.req.Base.Timestamp = ts
 }
 
-func (dst *describeSnapshotTask) OnEnqueue() error {
+func (dst *DescribeSnapshotTask) OnEnqueue() error {
 	if dst.req.Base == nil {
 		dst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -306,7 +306,7 @@ func (dst *describeSnapshotTask) OnEnqueue() error {
 	return nil
 }
 
-func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
+func (dst *DescribeSnapshotTask) PreExecute(ctx context.Context) error {
 	// Validate snapshot_name using standard naming rules
 	if err := ValidateSnapshotName(dst.req.GetName()); err != nil {
 		return err
@@ -324,7 +324,7 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
+func (dst *DescribeSnapshotTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy describe snapshot",
 		mlog.String("snapshotName", dst.req.GetName()),
 	)
@@ -376,11 +376,11 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (dst *describeSnapshotTask) PostExecute(ctx context.Context) error {
+func (dst *DescribeSnapshotTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type listSnapshotsTask struct {
+type ListSnapshotsTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.ListSnapshotsRequest
@@ -392,39 +392,39 @@ type listSnapshotsTask struct {
 	dbID         UniqueID
 }
 
-func (lst *listSnapshotsTask) TraceCtx() context.Context {
+func (lst *ListSnapshotsTask) TraceCtx() context.Context {
 	return lst.ctx
 }
 
-func (lst *listSnapshotsTask) ID() UniqueID {
+func (lst *ListSnapshotsTask) ID() UniqueID {
 	return lst.req.GetBase().GetMsgID()
 }
 
-func (lst *listSnapshotsTask) SetID(uid UniqueID) {
+func (lst *ListSnapshotsTask) SetID(uid UniqueID) {
 	lst.req.GetBase().MsgID = uid
 }
 
-func (lst *listSnapshotsTask) Name() string {
+func (lst *ListSnapshotsTask) Name() string {
 	return ListSnapshotsTaskName
 }
 
-func (lst *listSnapshotsTask) Type() commonpb.MsgType {
+func (lst *ListSnapshotsTask) Type() commonpb.MsgType {
 	return lst.req.GetBase().GetMsgType()
 }
 
-func (lst *listSnapshotsTask) BeginTs() Timestamp {
+func (lst *ListSnapshotsTask) BeginTs() Timestamp {
 	return lst.req.GetBase().GetTimestamp()
 }
 
-func (lst *listSnapshotsTask) EndTs() Timestamp {
+func (lst *ListSnapshotsTask) EndTs() Timestamp {
 	return lst.req.GetBase().GetTimestamp()
 }
 
-func (lst *listSnapshotsTask) SetTs(ts Timestamp) {
+func (lst *ListSnapshotsTask) SetTs(ts Timestamp) {
 	lst.req.Base.Timestamp = ts
 }
 
-func (lst *listSnapshotsTask) OnEnqueue() error {
+func (lst *ListSnapshotsTask) OnEnqueue() error {
 	if lst.req.Base == nil {
 		lst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -433,7 +433,7 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 	return nil
 }
 
-func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
+func (lst *ListSnapshotsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lst.req.GetDbName() != "" {
 		dbInfo, err := lst.GetMetaCache().GetDatabaseInfo(ctx, lst.req.GetDbName())
@@ -456,7 +456,7 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
+func (lst *ListSnapshotsTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy list snapshots",
 		mlog.FieldCollectionName(lst.req.GetCollectionName()),
 		mlog.FieldCollectionID(lst.collectionID),
@@ -484,11 +484,11 @@ func (lst *listSnapshotsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (lst *listSnapshotsTask) PostExecute(ctx context.Context) error {
+func (lst *ListSnapshotsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type restoreSnapshotTask struct {
+type RestoreSnapshotTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.RestoreSnapshotRequest
@@ -499,39 +499,39 @@ type restoreSnapshotTask struct {
 	collectionID UniqueID // source collection ID for per-collection snapshot lookup
 }
 
-func (rst *restoreSnapshotTask) TraceCtx() context.Context {
+func (rst *RestoreSnapshotTask) TraceCtx() context.Context {
 	return rst.ctx
 }
 
-func (rst *restoreSnapshotTask) ID() UniqueID {
+func (rst *RestoreSnapshotTask) ID() UniqueID {
 	return rst.req.GetBase().GetMsgID()
 }
 
-func (rst *restoreSnapshotTask) SetID(uid UniqueID) {
+func (rst *RestoreSnapshotTask) SetID(uid UniqueID) {
 	rst.req.GetBase().MsgID = uid
 }
 
-func (rst *restoreSnapshotTask) Name() string {
+func (rst *RestoreSnapshotTask) Name() string {
 	return RestoreSnapshotTaskName
 }
 
-func (rst *restoreSnapshotTask) Type() commonpb.MsgType {
+func (rst *RestoreSnapshotTask) Type() commonpb.MsgType {
 	return rst.req.GetBase().GetMsgType()
 }
 
-func (rst *restoreSnapshotTask) BeginTs() Timestamp {
+func (rst *RestoreSnapshotTask) BeginTs() Timestamp {
 	return rst.req.GetBase().GetTimestamp()
 }
 
-func (rst *restoreSnapshotTask) EndTs() Timestamp {
+func (rst *RestoreSnapshotTask) EndTs() Timestamp {
 	return rst.req.GetBase().GetTimestamp()
 }
 
-func (rst *restoreSnapshotTask) SetTs(ts Timestamp) {
+func (rst *RestoreSnapshotTask) SetTs(ts Timestamp) {
 	rst.req.Base.Timestamp = ts
 }
 
-func (rst *restoreSnapshotTask) OnEnqueue() error {
+func (rst *RestoreSnapshotTask) OnEnqueue() error {
 	if rst.req.Base == nil {
 		rst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -540,7 +540,7 @@ func (rst *restoreSnapshotTask) OnEnqueue() error {
 	return nil
 }
 
-func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
+func (rst *RestoreSnapshotTask) PreExecute(ctx context.Context) error {
 	// Validate snapshot_name using standard naming rules
 	if err := ValidateSnapshotName(rst.req.GetName()); err != nil {
 		return err
@@ -569,7 +569,7 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
+func (rst *RestoreSnapshotTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy restore snapshot",
 		mlog.String("snapshotName", rst.req.GetName()),
 		mlog.String("sourceCollection", rst.req.GetCollectionName()),
@@ -601,11 +601,11 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (rst *restoreSnapshotTask) PostExecute(ctx context.Context) error {
+func (rst *RestoreSnapshotTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type getRestoreSnapshotStateTask struct {
+type GetRestoreSnapshotStateTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.GetRestoreSnapshotStateRequest
@@ -614,39 +614,39 @@ type getRestoreSnapshotStateTask struct {
 	result   *milvuspb.GetRestoreSnapshotStateResponse
 }
 
-func (grst *getRestoreSnapshotStateTask) TraceCtx() context.Context {
+func (grst *GetRestoreSnapshotStateTask) TraceCtx() context.Context {
 	return grst.ctx
 }
 
-func (grst *getRestoreSnapshotStateTask) ID() UniqueID {
+func (grst *GetRestoreSnapshotStateTask) ID() UniqueID {
 	return grst.req.GetBase().GetMsgID()
 }
 
-func (grst *getRestoreSnapshotStateTask) SetID(uid UniqueID) {
+func (grst *GetRestoreSnapshotStateTask) SetID(uid UniqueID) {
 	grst.req.GetBase().MsgID = uid
 }
 
-func (grst *getRestoreSnapshotStateTask) Name() string {
+func (grst *GetRestoreSnapshotStateTask) Name() string {
 	return GetRestoreSnapshotStateTaskName
 }
 
-func (grst *getRestoreSnapshotStateTask) Type() commonpb.MsgType {
+func (grst *GetRestoreSnapshotStateTask) Type() commonpb.MsgType {
 	return grst.req.GetBase().GetMsgType()
 }
 
-func (grst *getRestoreSnapshotStateTask) BeginTs() Timestamp {
+func (grst *GetRestoreSnapshotStateTask) BeginTs() Timestamp {
 	return grst.req.GetBase().GetTimestamp()
 }
 
-func (grst *getRestoreSnapshotStateTask) EndTs() Timestamp {
+func (grst *GetRestoreSnapshotStateTask) EndTs() Timestamp {
 	return grst.req.GetBase().GetTimestamp()
 }
 
-func (grst *getRestoreSnapshotStateTask) SetTs(ts Timestamp) {
+func (grst *GetRestoreSnapshotStateTask) SetTs(ts Timestamp) {
 	grst.req.Base.Timestamp = ts
 }
 
-func (grst *getRestoreSnapshotStateTask) OnEnqueue() error {
+func (grst *GetRestoreSnapshotStateTask) OnEnqueue() error {
 	if grst.req.Base == nil {
 		grst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -655,12 +655,12 @@ func (grst *getRestoreSnapshotStateTask) OnEnqueue() error {
 	return nil
 }
 
-func (grst *getRestoreSnapshotStateTask) PreExecute(ctx context.Context) error {
+func (grst *GetRestoreSnapshotStateTask) PreExecute(ctx context.Context) error {
 	// No additional validation needed for get restore snapshot state
 	return nil
 }
 
-func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
+func (grst *GetRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy get restore snapshot state",
 		mlog.FieldJobID(grst.req.GetJobId()),
 	)
@@ -704,11 +704,11 @@ func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (grst *getRestoreSnapshotStateTask) PostExecute(ctx context.Context) error {
+func (grst *GetRestoreSnapshotStateTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type listRestoreSnapshotJobsTask struct {
+type ListRestoreSnapshotJobsTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.ListRestoreSnapshotJobsRequest
@@ -720,39 +720,39 @@ type listRestoreSnapshotJobsTask struct {
 	dbID         UniqueID
 }
 
-func (lrst *listRestoreSnapshotJobsTask) TraceCtx() context.Context {
+func (lrst *ListRestoreSnapshotJobsTask) TraceCtx() context.Context {
 	return lrst.ctx
 }
 
-func (lrst *listRestoreSnapshotJobsTask) ID() UniqueID {
+func (lrst *ListRestoreSnapshotJobsTask) ID() UniqueID {
 	return lrst.req.GetBase().GetMsgID()
 }
 
-func (lrst *listRestoreSnapshotJobsTask) SetID(uid UniqueID) {
+func (lrst *ListRestoreSnapshotJobsTask) SetID(uid UniqueID) {
 	lrst.req.GetBase().MsgID = uid
 }
 
-func (lrst *listRestoreSnapshotJobsTask) Name() string {
+func (lrst *ListRestoreSnapshotJobsTask) Name() string {
 	return ListRestoreSnapshotJobsTaskName
 }
 
-func (lrst *listRestoreSnapshotJobsTask) Type() commonpb.MsgType {
+func (lrst *ListRestoreSnapshotJobsTask) Type() commonpb.MsgType {
 	return lrst.req.GetBase().GetMsgType()
 }
 
-func (lrst *listRestoreSnapshotJobsTask) BeginTs() Timestamp {
+func (lrst *ListRestoreSnapshotJobsTask) BeginTs() Timestamp {
 	return lrst.req.GetBase().GetTimestamp()
 }
 
-func (lrst *listRestoreSnapshotJobsTask) EndTs() Timestamp {
+func (lrst *ListRestoreSnapshotJobsTask) EndTs() Timestamp {
 	return lrst.req.GetBase().GetTimestamp()
 }
 
-func (lrst *listRestoreSnapshotJobsTask) SetTs(ts Timestamp) {
+func (lrst *ListRestoreSnapshotJobsTask) SetTs(ts Timestamp) {
 	lrst.req.Base.Timestamp = ts
 }
 
-func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
+func (lrst *ListRestoreSnapshotJobsTask) OnEnqueue() error {
 	if lrst.req.Base == nil {
 		lrst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -761,7 +761,7 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 	return nil
 }
 
-func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
+func (lrst *ListRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lrst.req.GetDbName() != "" {
 		dbInfo, err := lrst.GetMetaCache().GetDatabaseInfo(ctx, lrst.req.GetDbName())
@@ -781,7 +781,7 @@ func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
+func (lrst *ListRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy list restore snapshot jobs",
 		mlog.FieldCollectionName(lrst.req.GetCollectionName()),
 		mlog.FieldCollectionID(lrst.collectionID),
@@ -827,14 +827,14 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (lrst *listRestoreSnapshotJobsTask) PostExecute(ctx context.Context) error {
+func (lrst *ListRestoreSnapshotJobsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-// pinSnapshotDataTask pins snapshot data to prevent GC from cleaning up segments
+// PinSnapshotDataTask pins snapshot data to prevent GC from cleaning up segments
 // referenced by a snapshot. Accepts milvuspb request from user, resolves
 // collection_name to collection_id, and forwards to DataCoord.
-type pinSnapshotDataTask struct {
+type PinSnapshotDataTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.PinSnapshotDataRequest
@@ -845,39 +845,39 @@ type pinSnapshotDataTask struct {
 	collectionID UniqueID
 }
 
-func (pst *pinSnapshotDataTask) TraceCtx() context.Context {
+func (pst *PinSnapshotDataTask) TraceCtx() context.Context {
 	return pst.ctx
 }
 
-func (pst *pinSnapshotDataTask) ID() UniqueID {
+func (pst *PinSnapshotDataTask) ID() UniqueID {
 	return pst.req.GetBase().GetMsgID()
 }
 
-func (pst *pinSnapshotDataTask) SetID(uid UniqueID) {
+func (pst *PinSnapshotDataTask) SetID(uid UniqueID) {
 	pst.req.GetBase().MsgID = uid
 }
 
-func (pst *pinSnapshotDataTask) Name() string {
+func (pst *PinSnapshotDataTask) Name() string {
 	return PinSnapshotDataTaskName
 }
 
-func (pst *pinSnapshotDataTask) Type() commonpb.MsgType {
+func (pst *PinSnapshotDataTask) Type() commonpb.MsgType {
 	return pst.req.GetBase().GetMsgType()
 }
 
-func (pst *pinSnapshotDataTask) BeginTs() Timestamp {
+func (pst *PinSnapshotDataTask) BeginTs() Timestamp {
 	return pst.req.GetBase().GetTimestamp()
 }
 
-func (pst *pinSnapshotDataTask) EndTs() Timestamp {
+func (pst *PinSnapshotDataTask) EndTs() Timestamp {
 	return pst.req.GetBase().GetTimestamp()
 }
 
-func (pst *pinSnapshotDataTask) SetTs(ts Timestamp) {
+func (pst *PinSnapshotDataTask) SetTs(ts Timestamp) {
 	pst.req.Base.Timestamp = ts
 }
 
-func (pst *pinSnapshotDataTask) OnEnqueue() error {
+func (pst *PinSnapshotDataTask) OnEnqueue() error {
 	if pst.req.Base == nil {
 		pst.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -888,7 +888,7 @@ func (pst *pinSnapshotDataTask) OnEnqueue() error {
 
 const maxPinTTLSeconds = 30 * 24 * 3600 // 30 days
 
-func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
+func (pst *PinSnapshotDataTask) PreExecute(ctx context.Context) error {
 	if err := ValidateSnapshotName(pst.req.GetName()); err != nil {
 		return err
 	}
@@ -913,7 +913,7 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (pst *pinSnapshotDataTask) Execute(ctx context.Context) error {
+func (pst *PinSnapshotDataTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy pin snapshot data",
 		mlog.String("snapshotName", pst.req.GetName()),
 		mlog.FieldCollectionName(pst.req.GetCollectionName()),
@@ -941,13 +941,13 @@ func (pst *pinSnapshotDataTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (pst *pinSnapshotDataTask) PostExecute(ctx context.Context) error {
+func (pst *PinSnapshotDataTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-// unpinSnapshotDataTask unpins previously pinned snapshot data, allowing GC
+// UnpinSnapshotDataTask unpins previously pinned snapshot data, allowing GC
 // to clean up segments if no other pins reference them.
-type unpinSnapshotDataTask struct {
+type UnpinSnapshotDataTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.UnpinSnapshotDataRequest
@@ -956,39 +956,39 @@ type unpinSnapshotDataTask struct {
 	result   *commonpb.Status
 }
 
-func (ust *unpinSnapshotDataTask) TraceCtx() context.Context {
+func (ust *UnpinSnapshotDataTask) TraceCtx() context.Context {
 	return ust.ctx
 }
 
-func (ust *unpinSnapshotDataTask) ID() UniqueID {
+func (ust *UnpinSnapshotDataTask) ID() UniqueID {
 	return ust.req.GetBase().GetMsgID()
 }
 
-func (ust *unpinSnapshotDataTask) SetID(uid UniqueID) {
+func (ust *UnpinSnapshotDataTask) SetID(uid UniqueID) {
 	ust.req.GetBase().MsgID = uid
 }
 
-func (ust *unpinSnapshotDataTask) Name() string {
+func (ust *UnpinSnapshotDataTask) Name() string {
 	return UnpinSnapshotDataTaskName
 }
 
-func (ust *unpinSnapshotDataTask) Type() commonpb.MsgType {
+func (ust *UnpinSnapshotDataTask) Type() commonpb.MsgType {
 	return ust.req.GetBase().GetMsgType()
 }
 
-func (ust *unpinSnapshotDataTask) BeginTs() Timestamp {
+func (ust *UnpinSnapshotDataTask) BeginTs() Timestamp {
 	return ust.req.GetBase().GetTimestamp()
 }
 
-func (ust *unpinSnapshotDataTask) EndTs() Timestamp {
+func (ust *UnpinSnapshotDataTask) EndTs() Timestamp {
 	return ust.req.GetBase().GetTimestamp()
 }
 
-func (ust *unpinSnapshotDataTask) SetTs(ts Timestamp) {
+func (ust *UnpinSnapshotDataTask) SetTs(ts Timestamp) {
 	ust.req.Base.Timestamp = ts
 }
 
-func (ust *unpinSnapshotDataTask) OnEnqueue() error {
+func (ust *UnpinSnapshotDataTask) OnEnqueue() error {
 	if ust.req.Base == nil {
 		ust.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -997,14 +997,14 @@ func (ust *unpinSnapshotDataTask) OnEnqueue() error {
 	return nil
 }
 
-func (ust *unpinSnapshotDataTask) PreExecute(ctx context.Context) error {
+func (ust *UnpinSnapshotDataTask) PreExecute(ctx context.Context) error {
 	if ust.req.GetPinId() == 0 {
 		return merr.WrapErrParameterMissingMsg("pin_id is required for unpin snapshot data")
 	}
 	return nil
 }
 
-func (ust *unpinSnapshotDataTask) Execute(ctx context.Context) error {
+func (ust *UnpinSnapshotDataTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy unpin snapshot data",
 		mlog.Int64("pinID", ust.req.GetPinId()),
 	)
@@ -1022,6 +1022,6 @@ func (ust *unpinSnapshotDataTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (ust *unpinSnapshotDataTask) PostExecute(ctx context.Context) error {
+func (ust *UnpinSnapshotDataTask) PostExecute(ctx context.Context) error {
 	return nil
 }
