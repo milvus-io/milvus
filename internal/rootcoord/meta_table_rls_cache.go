@@ -108,8 +108,10 @@ func (mt *MetaTable) loadRLSPolicies(ctx context.Context, collectionID int64) (r
 			return rlsPolicySnapshot{}, result.Err
 		}
 		snapshot := result.Val.(rlsPolicySnapshot)
-		// Each caller owns its copy, including callers sharing the same flight.
-		snapshot.policies = model.CloneRLSPolicyMap(snapshot.policies)
+		// A lone waiter already owns the detached result; shared waiters need copies.
+		if result.Shared {
+			snapshot.policies = model.CloneRLSPolicyMap(snapshot.policies)
+		}
 		return snapshot, nil
 	case <-ctx.Done():
 		return rlsPolicySnapshot{}, ctx.Err()

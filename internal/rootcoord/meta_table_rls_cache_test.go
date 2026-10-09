@@ -166,6 +166,65 @@ func TestRLSPolicyLoadsKeepEntryGeneration(t *testing.T) {
 	}
 }
 
+func TestRLSPolicyUnsharedLoadReturnsOwnedSnapshot(t *testing.T) {
+	meta, catalog := newRLSMetaTableForTest(t)
+	meta.collID2Meta[20].RLSPoliciesUnloaded = true
+	catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).Return([]*model.RLSPolicy{
+		{PolicyName: "tenant", PolicyID: 100},
+	}, nil).Once()
+	first, err := meta.loadRLSPolicies(context.Background(), 20)
+	require.NoError(t, err)
+	first.policies["tenant"].PolicyName = "caller mutation"
+	delete(first.policies, "tenant")
+	second, err := meta.loadRLSPolicies(context.Background(), 20)
+	require.NoError(t, err)
+	require.Equal(t, "tenant", second.policies["tenant"].PolicyName)
+	require.Equal(t, "tenant", meta.collID2Meta[20].RLSPolicies["tenant"].PolicyName)
+}
+
+func TestRemoveCollectionLoadsRLSPoliciesWithoutMetadataLock(t *testing.T) {
+	for _, outcome := range []string{"success", "load error", "removed", "replaced", "state changed", "generation changed"} {
+		t.Run(outcome, func(t *testing.T) {
+			meta, catalog := newRLSMetaTableForTest(t)
+			coll := meta.collID2Meta[20]
+			coll.State = pb.CollectionState_CollectionDropping
+			coll.RLSPoliciesUnloaded = true
+			catalog.EXPECT().ListRLSPolicies(mock.Anything, int64(20)).RunAndReturn(
+				func(context.Context, int64) ([]*model.RLSPolicy, error) {
+					require.True(t, meta.ddLock.TryLock(), "policy I/O must not hold the global metadata lock")
+					defer meta.ddLock.Unlock()
+					switch outcome {
+					case "load error":
+						return nil, merr.ErrServiceUnavailable
+					case "removed":
+						delete(meta.collID2Meta, 20)
+					case "replaced":
+						meta.collID2Meta[20] = coll.Clone()
+					case "state changed":
+						coll.State = pb.CollectionState_CollectionCreated
+					case "generation changed":
+						coll.RLSPolicyExpectedGeneration++
+					}
+					return []*model.RLSPolicy{{PolicyName: "tenant", PolicyID: 100}}, nil
+				}).Once()
+			if outcome == "success" {
+				catalog.EXPECT().DropCollection(mock.Anything, mock.MatchedBy(func(snapshot *model.Collection) bool {
+					return snapshot.CollectionID == 20 && snapshot.RLSPolicies["tenant"].PolicyID == 100
+				}), uint64(0)).Return(nil).Once()
+				catalog.EXPECT().DeleteGrantByCollectionName(mock.Anything, mock.Anything, coll.DBName, coll.Name).Return(nil).Once()
+			}
+			err := meta.RemoveCollection(context.Background(), 20, 0)
+			if outcome == "success" || outcome == "removed" {
+				require.NoError(t, err)
+				require.NotContains(t, meta.collID2Meta, int64(20))
+			} else {
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.Contains(t, meta.collID2Meta, int64(20))
+			}
+		})
+	}
+}
+
 func TestRLSPolicyGenerationAdvancesOnlyAfterPersist(t *testing.T) {
 	meta, catalog := newRLSMetaTableForTest(t)
 	coll := meta.collID2Meta[20]

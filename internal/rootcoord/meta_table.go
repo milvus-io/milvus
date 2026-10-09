@@ -786,7 +786,6 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	aliases := mt.listAliasesByID(collectionID)
 	newColl := &model.Collection{
 		CollectionID:        collectionID,
 		Partitions:          model.ClonePartitions(coll.Partitions),
@@ -795,14 +794,26 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Functions:           model.CloneFunctions(coll.Functions),
 		RLSPolicies:         model.CloneRLSPolicyMap(coll.RLSPolicies),
 		RLSPoliciesUnloaded: coll.RLSPoliciesUnloaded,
-		Aliases:             aliases,
 		DBID:                coll.DBID,
 	}
 	if !coll.RLSPoliciesCurrent() {
-		if err := mt.reloadCollectionRLSMetadata(ctx1, newColl); err != nil {
+		generation := coll.RLSPolicyExpectedGeneration
+		mt.ddLock.Unlock()
+		err := mt.reloadCollectionRLSMetadata(ctx1, newColl)
+		mt.ddLock.Lock()
+		if err != nil {
 			return err
 		}
+		current, ok := mt.collID2Meta[collectionID]
+		if !ok {
+			return nil
+		}
+		if current != coll || current.State != pb.CollectionState_CollectionDropping || current.RLSPolicyExpectedGeneration != generation {
+			return merr.WrapErrServiceUnavailableMsg("collection changed while loading RLS policies for removal, collectionID: %d", collectionID)
+		}
 	}
+	aliases := mt.listAliasesByID(collectionID)
+	newColl.Aliases = aliases
 	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
 		return err
 	}
