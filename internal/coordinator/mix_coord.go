@@ -480,7 +480,7 @@ func (s *mixCoordImpl) Stop() error {
 		s.fileResourceObserver.Stop()
 	}
 
-	// Cancel before stopping the session: on a standby, cancelling the session
+	// Cancel before stopping the session: on a standby, canceling the session
 	// makes ProcessActiveStandBy return context.Canceled, and the goroutine
 	// started in Register only treats that as a shutdown once s.ctx is done.
 	// The session context derives from s.ctx, and the lease is revoked with a
