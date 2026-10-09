@@ -177,12 +177,20 @@ func newLegacyClient(
 }
 
 func supportsSearchStream(req *internalpb.SearchRequest) bool {
-	return req != nil &&
-		req.GetIsIterator() &&
-		!req.GetIsAdvanced() &&
-		len(req.GetSubReqs()) == 0 &&
-		req.GetGroupByFieldId() <= 0 &&
-		len(req.GetGroupByFieldIds()) == 0
+	if req == nil ||
+		req.GetIsAdvanced() ||
+		len(req.GetSubReqs()) > 0 ||
+		req.GetGroupByFieldId() > 0 ||
+		len(req.GetGroupByFieldIds()) > 0 {
+		return false
+	}
+
+	if req.GetIsIterator() {
+		return true
+	}
+
+	return req.GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER ||
+		req.GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
 }
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
