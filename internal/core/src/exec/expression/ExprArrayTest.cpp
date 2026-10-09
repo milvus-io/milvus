@@ -23,6 +23,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -40,6 +41,7 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -94,6 +96,40 @@ SetInt64ArrayFieldData(GeneratedData& raw_data,
             auto* array_data = arrays->Add();
             array_data->mutable_long_data()->mutable_data()->Add(
                 row.data(), row.data() + row.size());
+        }
+        return;
+    }
+    FAIL() << "field id not found: " << field_id.get();
+}
+
+// Like SetInt64ArrayFieldData, but for a nullable field: std::nullopt marks a
+// NULL row (dense placeholder entry + valid_data bit cleared).
+void
+SetNullableInt64ArrayFieldData(
+    GeneratedData& raw_data,
+    FieldId field_id,
+    const std::vector<std::optional<std::vector<int64_t>>>& rows) {
+    ASSERT_EQ(raw_data.raw_->num_rows(), static_cast<int64_t>(rows.size()));
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+
+        auto* arrays =
+            field_data->mutable_scalars()->mutable_array_data()->mutable_data();
+        arrays->Clear();
+        // Row validity lives in ScalarField.valid_data for new payloads
+        // (see GetFieldDataRowValidData); replace what DataGen filled in.
+        auto* valid_data = MutableFieldDataRowValidData(field_data);
+        valid_data->Clear();
+        for (const auto& row : rows) {
+            auto* array_data = arrays->Add();
+            auto* long_data = array_data->mutable_long_data()->mutable_data();
+            if (row.has_value()) {
+                long_data->Add(row->data(), row->data() + row->size());
+            }
+            valid_data->Add(row.has_value());
         }
         return;
     }
@@ -1782,6 +1818,190 @@ TEST(Expr, TestVectorArrayLengthExpr) {
     }
 
     (void)fakevec_fid;
+}
+
+namespace {
+
+bool
+CompareArrayLength(proto::plan::OpType op, int64_t length, int64_t target) {
+    switch (op) {
+        case proto::plan::OpType::Equal:
+            return length == target;
+        case proto::plan::OpType::NotEqual:
+            return length != target;
+        case proto::plan::OpType::GreaterThan:
+            return length > target;
+        case proto::plan::OpType::GreaterEqual:
+            return length >= target;
+        case proto::plan::OpType::LessThan:
+            return length < target;
+        case proto::plan::OpType::LessEqual:
+            return length <= target;
+        default:
+            return false;
+    }
+}
+
+const std::vector<proto::plan::OpType> kArrayLengthOps = {
+    proto::plan::OpType::Equal,
+    proto::plan::OpType::NotEqual,
+    proto::plan::OpType::GreaterThan,
+    proto::plan::OpType::GreaterEqual,
+    proto::plan::OpType::LessThan,
+    proto::plan::OpType::LessEqual,
+};
+
+}  // namespace
+
+// array_length on a nullable scalar ARRAY field (and a struct sub-field
+// sharing the struct's offsets) is served straight from IArrayOffsets: the
+// result must be bit-identical to the raw-data semantics (NULL row ->
+// res=false/valid=false; empty [] is a valid length-0 array) over sealed AND
+// growing segments, all compare ops incl. the N=0 boundary, sequential
+// batches crossing the 8192-row batch boundary, and offset-input mode.
+TEST(Expr, TestArrayLengthExprServedFromChunks) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    auto struct_array_fid = schema->AddDebugField(
+        "structA[history]", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    // NULL, [], [1], [1,2], [1,2,3] repeating. N spans two default-size
+    // (8192) execution batches so the sequential fast path advances the
+    // data cursor across a batch boundary.
+    constexpr int N = 10000;
+    std::vector<std::optional<std::vector<int64_t>>> rows(N);
+    for (int i = 0; i < N; ++i) {
+        switch (i % 5) {
+            case 0:
+                rows[i] = std::nullopt;
+                break;
+            case 1:
+                rows[i] = std::vector<int64_t>{};
+                break;
+            case 2:
+                rows[i] = std::vector<int64_t>{1};
+                break;
+            case 3:
+                rows[i] = std::vector<int64_t>{1, 2};
+                break;
+            default:
+                rows[i] = std::vector<int64_t>{1, 2, 3};
+                break;
+        }
+    }
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 2);
+    SetNullableInt64ArrayFieldData(raw_data, long_array_fid, rows);
+    SetNullableInt64ArrayFieldData(raw_data, struct_array_fid, rows);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = growing->PreInsert(N);
+    growing->Insert(offset,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+    ASSERT_NE(growing_segment, nullptr);
+
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Unordered offset input covering NULL, empty and valued rows.
+    milvus::exec::OffsetVector offset_input;
+    for (int i = N - 1; i >= 0; i -= 3) {
+        offset_input.emplace_back(i);
+    }
+
+    const std::vector<int64_t> targets = {0, 2};
+    std::vector<std::pair<std::string, FieldId>> fields = {
+        {"long_array", long_array_fid},
+        {"struct_array", struct_array_fid},
+    };
+    for (const auto& [field_name, fid] : fields) {
+        for (auto op : kArrayLengthOps) {
+            for (auto target : targets) {
+                std::vector<bool> expected_bits(N);
+                std::vector<bool> expected_valid(N);
+                for (int i = 0; i < N; ++i) {
+                    bool valid = rows[i].has_value();
+                    expected_valid[i] = valid;
+                    expected_bits[i] =
+                        valid &&
+                        CompareArrayLength(
+                            op, static_cast<int64_t>(rows[i]->size()), target);
+                }
+
+                auto arith_expr =
+                    std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                        expr::ColumnInfo(
+                            fid, DataType::ARRAY, DataType::INT64, {}, true),
+                        op,
+                        proto::plan::ArithOpType::ArrayLength,
+                        Int64Value(target),
+                        Int64Value(0));
+                auto plan = std::make_shared<plan::FilterBitsNode>(
+                    DEFAULT_PLANNODE_ID, arith_expr);
+                std::string label = field_name + " op " +
+                                    std::to_string(static_cast<int>(op)) +
+                                    " target " + std::to_string(target);
+
+                std::array<const SegmentInternalInterface*, 2> segments = {
+                    static_cast<const SegmentInternalInterface*>(
+                        growing_segment),
+                    static_cast<const SegmentInternalInterface*>(
+                        sealed_segment.get())};
+                for (auto* segment : segments) {
+                    auto seg_label =
+                        label + " segment " +
+                        std::to_string(static_cast<int>(segment->type()));
+
+                    // gen_filter_res performs a single Eval, i.e. the first
+                    // execution batch; full-N coverage (incl. the cursor
+                    // advancing across the batch boundary) comes from
+                    // ExecuteQueryExpr below, which drives the batched loop.
+                    auto vec = milvus::test::gen_filter_res(
+                        plan.get(), segment, N, MAX_TIMESTAMP);
+                    ASSERT_GT(vec->size(), 0) << seg_label;
+                    ASSERT_LE(vec->size(), N) << seg_label;
+                    BitsetTypeView seq_bits(vec->GetRawData(), vec->size());
+                    BitsetTypeView seq_valid(vec->GetValidRawData(),
+                                             vec->size());
+                    for (size_t i = 0; i < vec->size(); ++i) {
+                        ASSERT_EQ(seq_bits[i], expected_bits[i])
+                            << seg_label << ", row " << i;
+                        ASSERT_EQ(seq_valid[i], expected_valid[i])
+                            << seg_label << ", row " << i;
+                    }
+
+                    auto final =
+                        ExecuteQueryExpr(plan, segment, N, MAX_TIMESTAMP);
+                    ASSERT_EQ(final.size(), N) << seg_label;
+                    for (int i = 0; i < N; ++i) {
+                        ASSERT_EQ(final[i], expected_bits[i])
+                            << seg_label << ", row " << i;
+                    }
+
+                    auto col_vec = milvus::test::gen_filter_res(
+                        plan.get(), segment, N, MAX_TIMESTAMP, &offset_input);
+                    BitsetTypeView bits(col_vec->GetRawData(), col_vec->size());
+                    BitsetTypeView valid(col_vec->GetValidRawData(),
+                                         col_vec->size());
+                    ASSERT_EQ(bits.size(), offset_input.size()) << seg_label;
+                    for (size_t j = 0; j < offset_input.size(); ++j) {
+                        ASSERT_EQ(bits[j], expected_bits[offset_input[j]])
+                            << seg_label << ", offset row " << offset_input[j];
+                        ASSERT_EQ(valid[j], expected_valid[offset_input[j]])
+                            << seg_label << ", offset row " << offset_input[j];
+                    }
+                }
+            }
+        }
+    }
 }
 
 TEST(Expr, PraseArrayContainsExpr) {
@@ -3761,4 +3981,124 @@ TEST(Expr, TestArrayContainsForStruct) {
                 << "Distances should be sorted in ascending order (with index)";
         }
     }
+}
+
+// A sealed segment with two chunks: the chunk-length path must resolve rows
+// across the chunk boundary for both the sequential and the offset-input
+// paths, and agree with the expected lengths row by row.
+TEST(Expr, TestArrayLengthExprAcrossChunks) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid = schema->AddDebugField(
+        "long_array", DataType::ARRAY, DataType::INT64, true);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int N = 5000;
+    auto make_rows = [](int shift) {
+        std::vector<std::optional<std::vector<int64_t>>> rows(N);
+        for (int i = 0; i < N; ++i) {
+            if ((i + shift) % 7 == 0) {
+                continue;  // NULL
+            }
+            rows[i] = std::vector<int64_t>((i + shift) % 4, 1);
+        }
+        return rows;
+    };
+    auto rows_a = make_rows(0);
+    auto rows_b = make_rows(3);
+    auto data_a = DataGen(schema, N, 42, 0, 1, 2);
+    auto data_b = DataGen(schema, N, 43, N, 1, 2);
+    SetNullableInt64ArrayFieldData(data_a, long_array_fid, rows_a);
+    SetNullableInt64ArrayFieldData(data_b, long_array_fid, rows_b);
+    auto segment = CreateTwoChunkSealed(schema, data_a, data_b);
+    ASSERT_EQ(segment->num_chunk_data(long_array_fid), 2);
+
+    std::vector<std::optional<std::vector<int64_t>>> rows(rows_a);
+    rows.insert(rows.end(), rows_b.begin(), rows_b.end());
+    const int64_t total = rows.size();
+
+    milvus::exec::OffsetVector offset_input;
+    for (int64_t i = total - 1; i >= 0; i -= 5) {
+        offset_input.emplace_back(i);
+    }
+
+    for (auto op : kArrayLengthOps) {
+        for (int64_t target : {0, 2}) {
+            auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                expr::ColumnInfo(
+                    long_array_fid, DataType::ARRAY, DataType::INT64, {}, true),
+                op,
+                proto::plan::ArithOpType::ArrayLength,
+                Int64Value(target),
+                Int64Value(0));
+            auto expected = [&](int64_t i) {
+                return rows[i].has_value() &&
+                       CompareArrayLength(
+                           op, static_cast<int64_t>(rows[i]->size()), target);
+            };
+            auto label = "op " + std::to_string(static_cast<int>(op)) +
+                         " target " + std::to_string(target);
+
+            auto batched =
+                milvus::test::EvalExprInBatches(expr, segment.get(), total);
+            ASSERT_EQ(batched.result->size(), total) << label;
+            BitsetTypeView bits(batched.result->GetRawData(), total);
+            BitsetTypeView valid(batched.result->GetValidRawData(), total);
+            for (int64_t i = 0; i < total; ++i) {
+                ASSERT_EQ(bits[i], expected(i)) << label << ", row " << i;
+                ASSERT_EQ(valid[i], rows[i].has_value())
+                    << label << ", row " << i;
+            }
+
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expr);
+            auto final =
+                ExecuteQueryExpr(plan, segment.get(), total, MAX_TIMESTAMP);
+            for (int64_t i = 0; i < total; ++i) {
+                ASSERT_EQ(final[i], expected(i)) << label << ", row " << i;
+            }
+
+            auto col_vec = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), total, MAX_TIMESTAMP, &offset_input);
+            BitsetTypeView obits(col_vec->GetRawData(), col_vec->size());
+            ASSERT_EQ(obits.size(), offset_input.size());
+            for (size_t k = 0; k < offset_input.size(); ++k) {
+                ASSERT_EQ(obits[k], expected(offset_input[k]))
+                    << label << ", offset row " << offset_input[k];
+            }
+        }
+    }
+}
+
+// An ARRAY length predicate on a sealed segment no longer forces the plan
+// out of single-pass execution.
+TEST(Expr, TestArrayLengthExprCanExecuteAllAtOnce) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto long_array_fid =
+        schema->AddDebugField("long_array", DataType::ARRAY, DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+    constexpr int N = 100;
+    auto raw_data = DataGen(schema, N, 42);
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    growing->PreInsert(N);
+    growing->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
+        proto::plan::OpType::Equal,
+        proto::plan::ArithOpType::ArrayLength,
+        Int64Value(0),
+        Int64Value(0));
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(expr, sealed.get(), N));
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(expr, growing.get(), N));
 }
