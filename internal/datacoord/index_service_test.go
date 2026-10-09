@@ -814,6 +814,7 @@ func TestServer_AlterIndex(t *testing.T) {
 							State:          commonpb.SegmentState_Flushed,
 							MaxRowNum:      65536,
 							LastExpireTime: createTS,
+							Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 							StartPosition: &msgpb.MsgPosition{
 								// timesamp > index start time, will be filtered out
 								Timestamp: createTS + 1,
@@ -829,6 +830,7 @@ func TestServer_AlterIndex(t *testing.T) {
 							State:          commonpb.SegmentState_Flushed,
 							MaxRowNum:      65536,
 							LastExpireTime: createTS,
+							Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 							StartPosition: &msgpb.MsgPosition{
 								Timestamp: createTS,
 							},
@@ -845,6 +847,7 @@ func TestServer_AlterIndex(t *testing.T) {
 							State:          commonpb.SegmentState_Dropped,
 							MaxRowNum:      65536,
 							LastExpireTime: createTS,
+							Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 							StartPosition: &msgpb.MsgPosition{
 								Timestamp: createTS,
 							},
@@ -1005,6 +1008,7 @@ func TestServer_GetIndexState(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS - 1,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS - 1, TimestampTo: createTS - 1},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS - 1,
 				},
@@ -1063,6 +1067,7 @@ func TestServer_GetIndexState(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS - 1,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS - 1, TimestampTo: createTS - 1},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS - 1,
 				},
@@ -1357,6 +1362,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS,
 				},
@@ -1403,6 +1409,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS,
 				},
@@ -1506,6 +1513,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					// timesamp > index start time, will be filtered out
 					Timestamp: createTS + 1,
@@ -1521,6 +1529,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS,
 				},
@@ -1537,6 +1546,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				State:          commonpb.SegmentState_Dropped,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS,
 				},
@@ -2066,6 +2076,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					// timesamp > index start time, will be filtered out
 					Timestamp: createTS + 1,
@@ -2081,6 +2092,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 				State:          commonpb.SegmentState_Flushed,
 				MaxRowNum:      65536,
 				LastExpireTime: createTS,
+				Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 				StartPosition: &msgpb.MsgPosition{
 					Timestamp: createTS,
 				},
@@ -2473,6 +2485,7 @@ func TestServer_DropIndex(t *testing.T) {
 			State:          commonpb.SegmentState_Flushed,
 			MaxRowNum:      65536,
 			LastExpireTime: createTS,
+			Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 		},
 	})
 
@@ -2721,6 +2734,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 			State:          commonpb.SegmentState_Flushed,
 			MaxRowNum:      65536,
 			LastExpireTime: createTS,
+			Stats:          &datapb.Statistics{TimestampFrom: createTS, TimestampTo: createTS},
 		},
 	})
 
