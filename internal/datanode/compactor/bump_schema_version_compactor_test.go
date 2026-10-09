@@ -1578,9 +1578,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestEmptySegmentWithDroppedFieldS
 
 	fullRewriteCalled := false
 	rewritePatch := mockey.Mock((*bumpSchemaVersionCompactionTask).runFullSchemaRewrite).To(
-		func(_ *bumpSchemaVersionCompactionTask, got map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
+		func(_ *bumpSchemaVersionCompactionTask, got *schemaBumpPhysicalDiff) (*datapb.CompactionPlanResult, error) {
 			fullRewriteCalled = true
-			s.Contains(got, droppedFieldID)
+			s.Contains(got.existingFields, droppedFieldID)
 			return &datapb.CompactionPlanResult{State: datapb.CompactionTaskState_completed}, nil
 		},
 	).Build()
@@ -1677,32 +1677,18 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionWi
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionInvalidInputField() {
 	s.prepareBumpSchemaVersionCompaction()
 
-	// Test with wrong input field type (Int64 instead of VarChar)
+	// A persisted function must not refer to a field absent from the schema.
 	s.task.plan.Schema.Functions = []*schemapb.FunctionSchema{{
 		Name:           "BM25",
 		Type:           schemapb.FunctionType_BM25,
-		InputFieldIds:  []int64{100}, // Int64 field instead of VarChar
+		InputFieldIds:  []int64{999},
 		OutputFieldIds: []int64{102},
 	}}
 
 	_, err := s.task.Compact()
 	s.Require().Error(err)
 	s.ErrorIs(err, merr.ErrDataIntegrity)
-	s.ErrorContains(err, "must be VarChar for schema-bump materialization")
-}
-
-// Schema-bump materialization reads persisted inputs, and a sealed StorageV3
-// Text column comes back as encoded LOB references that the runner cannot
-// decode, so the compaction-side contract admits only VarChar inputs even
-// though collection-creation validation admits Text.
-func (s *BumpSchemaVersionCompactionTaskSuite) TestValidateMaterializationInputFieldRejectsTextInput() {
-	textField := &schemapb.FieldSchema{FieldID: 101, Name: "content", DataType: schemapb.DataType_Text}
-	for _, functionType := range []schemapb.FunctionType{schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash} {
-		err := validateMaterializationInputField(&schemapb.FunctionSchema{Name: "f", Type: functionType}, textField)
-		s.Require().Error(err, functionType.String())
-		s.ErrorIs(err, merr.ErrDataIntegrity)
-		s.ErrorContains(err, "must be VarChar for schema-bump materialization")
-	}
+	s.ErrorContains(err, "input field 999 not found")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionInvalidOutputField() {

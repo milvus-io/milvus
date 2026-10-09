@@ -227,10 +227,6 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 		return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' not found", outputFieldName)
 	}
 
-	if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_String {
-		return merr.WrapErrParameterInvalidMsg("minhash function input field '%s' is not string type, is %s",
-			inputFieldName, inputField.GetDataType())
-	}
 	// check function params
 	numHashes := int(-1)
 	for _, param := range funSchema.GetParams() {

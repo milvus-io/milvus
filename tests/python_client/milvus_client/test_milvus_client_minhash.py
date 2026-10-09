@@ -119,6 +119,56 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         assert func["input_field_names"] == [default_text_field_name]
         assert func["output_field_names"] == [default_minhash_field_name]
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("token_level", ["word", "char"])
+    def test_minhash_text_lob_create_time_function(self, token_level):
+        """Create-time MinHash accepts TEXT and keeps long source values readable."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        long_text = "alpha beta gamma " * 5000
+        assert len(long_text.encode("utf-8")) > 65536
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("doc", DataType.TEXT)
+        schema.add_field("signature", DataType.BINARY_VECTOR, dim=512)
+        schema.add_function(
+            Function(
+                name="minhash_text_lob_create",
+                function_type=FunctionType.MINHASH,
+                input_field_names=["doc"],
+                output_field_names=["signature"],
+                params={"num_hashes": 16, "shingle_size": 3, "token_level": token_level},
+            )
+        )
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(
+            field_name="signature", index_type="MINHASH_LSH", metric_type="MHJACCARD",
+            params={"mh_lsh_band": 8},
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        self.insert(client, collection_name, [{"id": 0, "doc": long_text}, {"id": 1, "doc": "short text"}])
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        found = self.search(
+            client, collection_name, [long_text], anns_field="signature",
+            search_params={"metric_type": "MHJACCARD", "params": {}}, limit=2,
+        )[0]
+        assert found[0][0]["id"] == 0
+        assert found[0][0]["distance"] == 1.0
+        rows = client.query(collection_name, filter="id in [0, 1]", output_fields=["id", "doc"], limit=2)
+        assert {row["id"]: row["doc"] for row in rows} == {0: long_text, 1: "short text"}
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        found = self.search(
+            client, collection_name, [long_text], anns_field="signature",
+            search_params={"metric_type": "MHJACCARD", "params": {}}, limit=2,
+        )[0]
+        assert found[0][0]["id"] == 0
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_minhash_create_index_basic(self):
         """

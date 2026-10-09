@@ -19,6 +19,7 @@ package compactor
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	sio "io"
 	"math"
@@ -2326,6 +2327,163 @@ func TestBumpUTFullRewriteTextLOBRewritesAcrossPartitionNamespaces(t *testing.T)
 			require.Contains(t, lobFile.Path, "/insert_log/")
 		}
 	}
+}
+
+func TestBumpUTAdditiveBM25AndMinHashFromTextLOB(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID, sparseID, hashID = int64(105), int64(106), int64(107)
+	bm25 := &schemapb.FunctionSchema{
+		Name: "bm25_lob", Id: 1000, Type: schemapb.FunctionType_BM25,
+		InputFieldNames: []string{"big_text"}, InputFieldIds: []int64{textID},
+		OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{sparseID},
+	}
+	minhash := &schemapb.FunctionSchema{
+		Name: "minhash_lob", Id: 1001, Type: schemapb.FunctionType_MinHash,
+		InputFieldNames: []string{"big_text"}, InputFieldIds: []int64{textID},
+		OutputFieldNames: []string{"hash"}, OutputFieldIds: []int64{hashID},
+		Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: "16"}, {Key: "shingle_size", Value: "3"}},
+	}
+	fix := buildBumpFixture(t, withRows(4),
+		withSourceFields(&schemapb.FieldSchema{
+			FieldID: textID, Name: "big_text", DataType: schemapb.DataType_Text,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}},
+		}),
+		withFillValue(func(i int, _ uint64, v map[int64]any) { v[textID] = bumpFxLobText(i) }),
+		withTextLOBSource(textID),
+		withTargetAddedField(
+			&schemapb.FieldSchema{FieldID: sparseID, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			&schemapb.FieldSchema{FieldID: hashID, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "512"}}},
+		),
+		withTargetFunctions(bm25, minhash),
+	)
+	sourceRefs := readTextRefs(t, fix, fix.sourceManifest, textID)
+	sourceLOB := listLobFiles(t, fix)
+	require.NotEmpty(t, sourceLOB)
+
+	_, manifest := runAdditiveCompact(t, fix)
+	texts := make([]string, len(fix.rows))
+	for i := range texts {
+		texts[i] = bumpFxLobText(i)
+	}
+	requireSparseRows(t, fix, manifest, sparseID, len(texts), expectedBM25SparseRows(t, fix.targetSchema, bm25, texts))
+	requireBM25StatsBlob(t, fix, sparseID, len(texts))
+	gotHash, total := readAllColumns(t, fix.cfg, manifest, &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{typeutil.GetField(fix.targetSchema, hashID)},
+	})
+	require.Equal(t, len(texts), total)
+	for i, expected := range expectedMinHashRows(t, fix.targetSchema, minhash, texts) {
+		require.Equal(t, expected, gotHash[hashID][i])
+	}
+	require.Equal(t, sourceRefs, readTextRefs(t, fix, manifest, textID))
+	require.Equal(t, sourceLOB, listLobFiles(t, fix))
+}
+
+func TestBumpUTFullRewriteBM25FromTextLOB(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "same_partition_base"
+		if legacy {
+			name = "legacy_partition_base"
+		}
+		t.Run(name, func(t *testing.T) {
+			setupBumpUTEnv(t)
+			const textID, sparseID, droppedID = int64(105), int64(106), int64(108)
+			bm25 := &schemapb.FunctionSchema{
+				Name: "bm25_lob", Id: 1000, Type: schemapb.FunctionType_BM25,
+				InputFieldNames: []string{"big_text"}, InputFieldIds: []int64{textID},
+				OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{sparseID},
+			}
+			opts := []fixtureOpt{
+				withRows(6),
+				withSourceFields(
+					&schemapb.FieldSchema{FieldID: textID, Name: "big_text", DataType: schemapb.DataType_Text,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.EnableAnalyzerKey, Value: "true"}}},
+					&schemapb.FieldSchema{FieldID: droppedID, Name: "dropped", DataType: schemapb.DataType_Int64},
+				),
+				withFillValue(func(i int, _ uint64, v map[int64]any) {
+					v[textID] = bumpFxLobText(i)
+					v[droppedID] = int64(i)
+				}),
+				withTextLOBSource(textID),
+				withTargetAddedField(&schemapb.FieldSchema{FieldID: sparseID, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}),
+				withTargetFunctions(bm25),
+				withTargetDroppedField(droppedID),
+				withDeletedPKs(map[any]uint64{int64(1): bumpFxTS(1) + 1}),
+			}
+			if legacy {
+				opts = append(opts, withLegacySourceNamespace())
+			}
+			fix := buildBumpFixture(t, opts...)
+			sourceRefs := readTextRefs(t, fix, fix.sourceManifest, textID)
+			sourceLOB := listLobFiles(t, fix)
+			kept := fix.keptRows()
+			segment := runCompact(t, fix)
+			require.EqualValues(t, len(kept), segment.GetNumOfRows())
+			texts := make([]string, len(kept))
+			for i, row := range kept {
+				texts[i] = row.values[textID].(string)
+			}
+			requireSparseRows(t, fix, segment.GetManifest(), sparseID, len(kept),
+				expectedBM25SparseRows(t, fix.targetSchema, bm25, texts))
+			outputRefs := readTextRefs(t, fix, segment.GetManifest(), textID)
+			for _, row := range kept {
+				pk := row.pk.(int64)
+				if legacy {
+					require.NotEqual(t, sourceRefs[pk], outputRefs[pk])
+				} else {
+					require.Equal(t, sourceRefs[pk], outputRefs[pk])
+				}
+			}
+			if !legacy {
+				require.Equal(t, sourceLOB, listLobFiles(t, fix))
+			}
+		})
+	}
+}
+
+func TestBumpUTTextLOBDecoderRejectsOutOfRangeRowWithoutChangingSource(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID = int64(105)
+	fix := buildBumpFixture(t, withRows(2),
+		withSourceFields(&schemapb.FieldSchema{FieldID: textID, Name: "big_text", DataType: schemapb.DataType_Text}),
+		withFillValue(func(i int, _ uint64, v map[int64]any) { v[textID] = bumpFxLobText(i) }),
+		withTextLOBSource(textID),
+	)
+	sourceRefs := readTextRefs(t, fix, fix.sourceManifest, textID)
+	sourceFiles := listLobFiles(t, fix)
+	ref := append([]byte(nil), sourceRefs[0]...)
+	require.Len(t, ref, 24)
+	require.EqualValues(t, 1, ref[0])
+	binary.LittleEndian.PutUint32(ref[20:], 0x7fffffff)
+
+	segmentBase, _, err := packed.UnmarshalManifestPath(fix.sourceManifest)
+	require.NoError(t, err)
+	decoder, err := packed.NewTextLOBDecoder(textID,
+		path.Join(path.Dir(segmentBase), "lobs", strconv.FormatInt(textID, 10)), fix.cfg)
+	require.NoError(t, err)
+	defer decoder.Close()
+	decodeRef := func(encoded []byte) (*array.String, error) {
+		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		defer builder.Release()
+		builder.Append(encoded)
+		refs := builder.NewBinaryArray()
+		defer refs.Release()
+		return decoder.Decode(context.Background(), refs)
+	}
+	logical, err := decodeRef(ref)
+	require.Error(t, err)
+	require.Nil(t, logical)
+	require.True(t, merr.IsSegcoreDataFormatBroken(err), "expected corruption code, got %v", err)
+
+	missingFile := append([]byte(nil), sourceRefs[0]...)
+	for i := 4; i < 20; i++ {
+		missingFile[i] = 0xff
+	}
+	logical, err = decodeRef(missingFile)
+	require.Error(t, err)
+	require.Nil(t, logical)
+	require.Equal(t, sourceRefs, readTextRefs(t, fix, fix.sourceManifest, textID))
+	require.Equal(t, sourceFiles, listLobFiles(t, fix))
 }
 
 func mustManifestLobFiles(t *testing.T, fix *bumpFixture, manifest string) []packed.LobFileInfo {

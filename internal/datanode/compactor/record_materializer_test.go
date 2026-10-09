@@ -157,6 +157,65 @@ func TestRecordMaterializerWrapNoOpWhenAllFieldsExist(t *testing.T) {
 	require.Same(t, record, wrapped)
 }
 
+func TestRecordMaterializerWrapWithInputsPreservesPhysicalBase(t *testing.T) {
+	refs := newBinaryArray(t, [][]byte{[]byte("opaque-ref")})
+	defer refs.Release()
+	texts := newStringArray(t, []string{"alpha"})
+	defer texts.Release()
+	output := newBinaryArray(t, [][]byte{[]byte("computed")})
+	probe := &inputViewMaterializer{
+		inputFieldID: 100, outputFieldID: 101, output: output,
+	}
+	materializer := &RecordMaterializer{materializers: []FunctionMaterializer{probe}}
+	base := &materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: refs}}
+	inputs := &materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: texts}}
+
+	got, err := materializer.WrapWithInputs(base, inputs)
+	require.NoError(t, err)
+	require.Same(t, texts, probe.input)
+	require.Same(t, refs, got.Column(100))
+	require.Same(t, output, got.Column(101))
+	cleanupMaterializedRecord(got)
+	require.Zero(t, base.releaseCount)
+	require.Zero(t, inputs.releaseCount)
+}
+
+func TestRecordMaterializerSelectionPreservesDecodedText(t *testing.T) {
+	values := newNullableStringArray(t, []string{"a", "", "c", "d"}, []bool{true, false, true, true})
+	defer values.Release()
+	base := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{105: values}}
+	field := &schemapb.FieldSchema{FieldID: 105, Name: "doc", DataType: schemapb.DataType_Text, Nullable: true}
+	selected, err := buildSelectedColumn(base, field, &recordSelection{
+		ranges: []rowRange{{start: 0, end: 2}, {start: 3, end: 4}}, length: 3,
+	})
+	require.NoError(t, err)
+	defer selected.Release()
+	strings, ok := selected.(*array.String)
+	require.True(t, ok)
+	require.Equal(t, 3, strings.Len())
+	require.Equal(t, "a", strings.Value(0))
+	require.True(t, strings.IsNull(1))
+	require.Equal(t, "d", strings.Value(2))
+}
+
+func TestRecordMaterializerSelectionPreservesTextReferences(t *testing.T) {
+	refs := newBinaryArray(t, [][]byte{{1, 2}, {1, 3}, {1, 4}, {1, 5}})
+	defer refs.Release()
+	base := &materializerTestRecord{len: 4, columns: map[storage.FieldID]arrow.Array{105: refs}}
+	field := &schemapb.FieldSchema{FieldID: 105, Name: "doc", DataType: schemapb.DataType_Text}
+	selected, err := buildSelectedColumn(base, field, &recordSelection{
+		ranges: []rowRange{{start: 0, end: 1}, {start: 2, end: 4}}, length: 3,
+	})
+	require.NoError(t, err)
+	defer selected.Release()
+	physical, ok := selected.(*array.Binary)
+	require.True(t, ok)
+	require.Equal(t, []byte{1, 2}, physical.Value(0))
+	require.Equal(t, []byte{1, 4}, physical.Value(1))
+	require.Equal(t, []byte{1, 5}, physical.Value(2))
+	require.Equal(t, []byte{1, 3}, refs.Value(1))
+}
+
 func TestRecordMaterializerWrapLeavesAbsentOrdinaryToReader(t *testing.T) {
 	// Contract pin: absent ordinary fields are reader-filled before records
 	// reach the materializer, so with no functions to run Wrap must hand the
@@ -498,7 +557,7 @@ func TestBM25FunctionMaterializerMaterializesSparseOutput(t *testing.T) {
 	require.Equal(t, []any{[]string{"hello", "world"}}, runner.inputs)
 }
 
-func TestBM25FunctionMaterializerRejectsTextInputWithoutLOBDecoding(t *testing.T) {
+func TestBM25FunctionMaterializerAcceptsDecodedTextInput(t *testing.T) {
 	schema, functionSchema, inputField, outputField := materializerBM25Schema()
 	inputField.DataType = schemapb.DataType_Text
 	runner := &materializerTestFunctionRunner{
@@ -511,9 +570,15 @@ func TestBM25FunctionMaterializerRejectsTextInputWithoutLOBDecoding(t *testing.T
 		}},
 	}
 	materializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
-	require.Nil(t, materializer)
-	require.ErrorContains(t, err, "text input requires LOB decoding")
-	require.Nil(t, runner.inputs)
+	require.NoError(t, err)
+	defer materializer.Close()
+	input := newStringArray(t, []string{"hello"})
+	defer input.Release()
+	record := &materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}
+	arrays, err := materializer.Materialize(record)
+	require.NoError(t, err)
+	defer releaseArrowArrays(arrays)
+	require.Equal(t, []any{[]string{"hello"}}, runner.inputs)
 }
 
 func TestStringInputsFromRecordRejectsBinaryTextWithoutLOBDecoding(t *testing.T) {
@@ -522,7 +587,7 @@ func TestStringInputsFromRecordRejectsBinaryTextWithoutLOBDecoding(t *testing.T)
 
 	_, err := stringInputsFromRecord(
 		&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}, 100)
-	require.ErrorContains(t, err, "cannot materialize bm25 from text binary values without lob decoding")
+	require.ErrorContains(t, err, "requires decoded Arrow String values, got Binary LOB references")
 }
 
 func TestBM25FunctionMaterializerMaterializesNullableInputAsNonNullableOutput(t *testing.T) {

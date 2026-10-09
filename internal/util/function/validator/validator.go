@@ -191,9 +191,11 @@ func CheckFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25:
-		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
-			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be a VARCHAR/TEXT field, got %d field with type %s",
-				len(fields), fields[0].DataType.String())
+		if len(fields) != 1 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function requires one input field, got %d", len(fields))
+		}
+		if fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg("BM25 function input field must be VARCHAR/TEXT, got %s", fields[0].DataType.String())
 		}
 		h := typeutil.CreateFieldSchemaHelper(fields[0])
 		if !h.EnableAnalyzer() {
@@ -204,12 +206,11 @@ func CheckFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 			return err
 		}
 	case schemapb.FunctionType_MinHash:
-		// VarChar only: the MinHash runner has never accepted TEXT
-		// (ValidateMinHashFunction), so admitting it here produced
-		// collections whose every insert failed at the function executor.
-		if len(fields) != 1 || fields[0].DataType != schemapb.DataType_VarChar {
-			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be a VARCHAR field, got %d field with type %s",
-				len(fields), fields[0].DataType.String())
+		if len(fields) != 1 {
+			return merr.WrapErrParameterInvalidMsg("MinHash function requires one input field, got %d", len(fields))
+		}
+		if fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg("MinHash function input field must be VARCHAR/TEXT, got %s", fields[0].DataType.String())
 		}
 	default:
 		return merr.WrapErrParameterInvalidMsg("check input field with unknown function type")

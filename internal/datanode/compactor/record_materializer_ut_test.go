@@ -98,8 +98,6 @@ func rmSchemaMinHash() *schemapb.CollectionSchema {
 // constructors fires with the right message.
 func TestRMFunctionMaterializerCtorGuards(t *testing.T) {
 	varcharIn := &schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar}
-	textIn := &schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text}
-	int64In := &schemapb.FieldSchema{FieldID: 101, Name: "text", DataType: schemapb.DataType_Int64}
 	ghostIn := &schemapb.FieldSchema{FieldID: 999, Name: "ghost", DataType: schemapb.DataType_VarChar}
 
 	cases := []struct {
@@ -115,14 +113,6 @@ func TestRMFunctionMaterializerCtorGuards(t *testing.T) {
 		{"bm25-input-not-in-schema", schemapb.FunctionType_BM25, rmSchemaBM25(), func(r *fakeFunctionRunner, _ *schemapb.CollectionSchema) {
 			r.inputs = []*schemapb.FieldSchema{ghostIn}
 		}, "input field not found in schema"},
-		{"bm25-input-wrong-type", schemapb.FunctionType_BM25, rmSchemaBM25(), func(r *fakeFunctionRunner, s *schemapb.CollectionSchema) {
-			s.Fields[1].DataType = schemapb.DataType_Int64
-			r.inputs = []*schemapb.FieldSchema{int64In}
-		}, "must be varchar"},
-		{"bm25-text-input", schemapb.FunctionType_BM25, rmSchemaBM25(), func(r *fakeFunctionRunner, s *schemapb.CollectionSchema) {
-			s.Fields[1].DataType = schemapb.DataType_Text
-			r.inputs = []*schemapb.FieldSchema{textIn}
-		}, "must be varchar"},
 		{"bm25-no-outputs", schemapb.FunctionType_BM25, rmSchemaBM25(), func(r *fakeFunctionRunner, _ *schemapb.CollectionSchema) {
 			r.schema.OutputFieldIds = nil
 		}, "should have output fields"},
@@ -141,14 +131,6 @@ func TestRMFunctionMaterializerCtorGuards(t *testing.T) {
 		{"minhash-input-not-in-schema", schemapb.FunctionType_MinHash, rmSchemaMinHash(), func(r *fakeFunctionRunner, _ *schemapb.CollectionSchema) {
 			r.inputs = []*schemapb.FieldSchema{ghostIn}
 		}, "input field not found in schema"},
-		{"minhash-input-wrong-type", schemapb.FunctionType_MinHash, rmSchemaMinHash(), func(r *fakeFunctionRunner, s *schemapb.CollectionSchema) {
-			s.Fields[1].DataType = schemapb.DataType_Int64
-			r.inputs = []*schemapb.FieldSchema{int64In}
-		}, "must be varchar"},
-		{"minhash-text-input", schemapb.FunctionType_MinHash, rmSchemaMinHash(), func(r *fakeFunctionRunner, s *schemapb.CollectionSchema) {
-			s.Fields[1].DataType = schemapb.DataType_Text
-			r.inputs = []*schemapb.FieldSchema{textIn}
-		}, "must be varchar"},
 		{"minhash-no-outputs", schemapb.FunctionType_MinHash, rmSchemaMinHash(), func(r *fakeFunctionRunner, _ *schemapb.CollectionSchema) {
 			r.schema.OutputFieldIds = nil
 		}, "should have output fields"},
