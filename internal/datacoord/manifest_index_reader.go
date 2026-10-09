@@ -146,7 +146,7 @@ func (r *manifestIndexReader) scheduleRetry(result manifestIndexReadResult) bool
 	if result.err == nil || result.request.attempt >= 3 || !retry.IsRecoverable(result.err) || merr.GetErrorType(result.err) == merr.InputError {
 		return false
 	}
-	delay := 200 * time.Millisecond * time.Duration(1<<(result.request.attempt-1))
+	delay := 200 * time.Millisecond << (result.request.attempt - 1)
 	if deadline, ok := r.ctx.Deadline(); ok && time.Until(deadline) < delay {
 		return false
 	}

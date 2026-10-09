@@ -18,13 +18,13 @@ package packed
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -73,7 +73,7 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
-// Expose a deadline without signalling Go cancellation, so this test can only
+// Expose a deadline without signaling Go cancellation, so this test can only
 // pass when the caller-owned handle carries the timeout into the native queue.
 type manifestDeadlineOnlyContext struct {
 	context.Context
@@ -253,7 +253,7 @@ func TestAsyncManifestNativeCommitFailureIsUnknown(t *testing.T) {
 	io := NewManifestIOContext(1)
 	defer io.Close()
 	obstacle := path.Join(cfg.RootPath, "file")
-	require.NoError(t, os.WriteFile(obstacle, []byte("not a directory"), 0600))
+	require.NoError(t, os.WriteFile(obstacle, []byte("not a directory"), 0o600))
 	got, err := CommitManifestUpdatesAsync(context.Background(), io, path.Join(obstacle, "segment"), 0, cfg,
 		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}})
 	require.Empty(t, got)
@@ -363,11 +363,11 @@ func TestAsyncManifestSubmissionCancellationDrains(t *testing.T) {
 	case err := <-completed:
 		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(5 * time.Second):
-		t.Fatal("cancelled read never completed")
+		t.Fatal("canceled read never completed")
 	}
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not drain the cancelled read")
+		t.Fatal("Close did not drain the canceled read")
 	}
 }
