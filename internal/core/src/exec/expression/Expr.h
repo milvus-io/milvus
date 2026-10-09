@@ -1738,9 +1738,9 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
                     GetChunkByOffset(field_id_, offset);
-                // chunk_data<VectorArrayView> would read the wrong layout:
-                // storage holds VectorArray, and nullable rows may be compacted.
-                // Use chunk_view to build logical VectorArrayView rows.
+                // chunk_data<VectorArrayView> would address physical rows, and
+                // nullable rows may be compacted. Use chunk_view to build
+                // logical VectorArrayView rows.
                 auto pw = GetChunkView<VectorArrayView>(
                     field_id_,
                     chunk_id,
@@ -2220,7 +2220,7 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else {
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data(), chunk.validity(), [&](size_t i) {
                 return static_cast<size_t>(row_offsets[i]);
@@ -2292,8 +2292,8 @@ class SegmentExpr : public Expr {
                        length);
             emit_rows(rows.data(), valid_data);
         } else {
-            // Legacy ARRAY rows from a Growing segment's in-memory storage.
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            // Legacy ARRAY rows from a Growing segment, stored as views.
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
                       chunk.validity().Subview(start_offset));

@@ -138,6 +138,14 @@ class ArrayValue {
         return *storage_->type;
     }
 
+    // The type above as the shared, immutable object this value holds, for
+    // callers that keep it beyond the value's lifetime.
+    const std::shared_ptr<const proto::schema::TypeSchema>&
+    shared_type() const {
+        assert(storage_ != nullptr && storage_->type != nullptr);
+        return storage_->type;
+    }
+
     const Chunk&
     child() const {
         assert(storage_ != nullptr && storage_->child != nullptr);

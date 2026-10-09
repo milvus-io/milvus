@@ -3406,7 +3406,7 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = (*vec_ptr)[offset].output_data();
+            dst->at(i) = vec_ptr->view_element(offset).output_data();
         }
     }
 }
@@ -3597,7 +3597,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             for (int64_t i = 0; i < count; ++i) {
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET) {
-                    dst[i] = src[offset];
+                    src.view_element(offset).output_data(dst[i]);
                 } else {
                     dst[i] =
                         Array();  // Default-construct empty Array for invalid offsets
