@@ -3160,6 +3160,7 @@ func (p *pipeline) RunFromReduced(ctx context.Context, span trace.Span, reduced 
 	msg[reducedMsgKey] = []*milvuspb.SearchResults{reduced}
 	msg["metrics"] = []string{metricType}
 	msg[pipelineStorageCost] = storageCost
+	// ReduceStream already produced the output of nodes[0] (searchReduceOp), so continue with nodes[1].
 	return p.run(ctx, span, msg, 1)
 }
 
