@@ -49,6 +49,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 	}
 	return 0, nil
 }
+
 func (m *MetaCache) GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error) {
 	if m.pad(len(database)) > 0 {
 		return "", nil
@@ -58,6 +59,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 	}
 	return "", nil
 }
+
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*metacache.CollectionInfo, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
@@ -67,6 +69,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, collectionN
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error) {
 	if m.pad(len(database)) > 0 {
 		return 0, nil
@@ -76,6 +79,7 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName
 	}
 	return 0, nil
 }
+
 func (m *MetaCache) GetPartitionName(ctx context.Context, database, collectionName string, PartitionID int64) (string, error) {
 	if m.pad(len(database)) > 0 {
 		return "", nil
@@ -85,6 +89,7 @@ func (m *MetaCache) GetPartitionName(ctx context.Context, database, collectionNa
 	}
 	return "", nil
 }
+
 func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName string) (map[string]typeutil.UniqueID, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
@@ -94,6 +99,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*metacache.PartitionInfo, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
@@ -103,6 +109,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionNa
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
@@ -112,6 +119,7 @@ func (m *MetaCache) GetPartitionsIndex(ctx context.Context, database, collection
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectionName string) (*metacache.SchemaInfo, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
@@ -121,6 +129,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
 	if m.pad(len(database)) > 0 {
 		return nameOrAlias, nil
@@ -130,6 +139,7 @@ func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOr
 	}
 	return nameOrAlias, nil
 }
+
 func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string) {
 	if m.pad(len(database)) > 0 {
 		return
@@ -138,12 +148,14 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 		return
 	}
 }
+
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID typeutil.UniqueID) []string {
 	if m.pad(int(collectionID)) > 0 {
 		return nil
 	}
 	return nil
 }
+
 func (m *MetaCache) InvalidateCollectionMeta(ctx context.Context, database, collectionName string, collectionID typeutil.UniqueID, removeAlias bool) []string {
 	if m.pad(len(database)) > 0 {
 		return nil
@@ -153,6 +165,7 @@ func (m *MetaCache) InvalidateCollectionMeta(ctx context.Context, database, coll
 	}
 	return nil
 }
+
 func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
 	if m.pad(len(database)) > 0 {
 		return
@@ -161,6 +174,7 @@ func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
 		return
 	}
 }
+
 func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias string) {
 	if m.pad(len(database)) > 0 {
 		return
@@ -169,34 +183,40 @@ func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias stri
 		return
 	}
 }
+
 func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	if m.pad(len(database)) > 0 {
 		return
 	}
 }
+
 func (m *MetaCache) RemoveDatabaseInfo(ctx context.Context, database string) {
 	if m.pad(len(database)) > 0 {
 		return
 	}
 }
+
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	if m.pad(len(database)) > 0 {
 		return false
 	}
 	return false
 }
+
 func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*metacache.DatabaseInfo, error) {
 	if m.pad(len(database)) > 0 {
 		return nil, nil
 	}
 	return nil, nil
 }
+
 func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {
 	if m.pad(0) > 0 {
 		return 0, nil
 	}
 	return 0, nil
 }
+
 func (m *MetaCache) RemovePartition(ctx context.Context, database string, collectionID typeutil.UniqueID, collectionName string, partitionName string) {
 	if m.pad(len(database)) > 0 {
 		return
@@ -205,6 +225,7 @@ func (m *MetaCache) RemovePartition(ctx context.Context, database string, collec
 		return
 	}
 }
+
 func (m *MetaCache) Close() {
 	_ = m
 }

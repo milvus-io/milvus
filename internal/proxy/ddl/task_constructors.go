@@ -716,6 +716,7 @@ func (t *RestoreSnapshotTask) Result() *milvuspb.RestoreSnapshotResponse        
 func (t *GetRestoreSnapshotStateTask) Result() *milvuspb.GetRestoreSnapshotStateResponse {
 	return t.result
 }
+
 func (t *ListRestoreSnapshotJobsTask) Result() *milvuspb.ListRestoreSnapshotJobsResponse {
 	return t.result
 }
@@ -730,6 +731,7 @@ func (t *RestoreSnapshotTask) Request() *milvuspb.RestoreSnapshotRequest   { ret
 func (t *GetRestoreSnapshotStateTask) Request() *milvuspb.GetRestoreSnapshotStateRequest {
 	return t.req
 }
+
 func (t *ListRestoreSnapshotJobsTask) Request() *milvuspb.ListRestoreSnapshotJobsRequest {
 	return t.req
 }

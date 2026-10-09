@@ -61,6 +61,7 @@ func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, _ metacache.Ca
 	}
 	return false, nil
 }
+
 func (n *mockTaskNode) CheckManageRLSPrivilege(ctx context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
 	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
@@ -92,6 +93,7 @@ func (n *mockTaskNode) CheckManageRLSPrivilege(ctx context.Context, _ metacache.
 	}
 	return merr.WrapErrPrivilegeNotPermitted("%s is required", privilegeName)
 }
+
 func (n *mockTaskNode) CheckClusterPrivilege(ctx context.Context, _ interface{}, _ string, objectPrivilege string) error {
 	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
