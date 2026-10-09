@@ -38,6 +38,7 @@ import (
 // siblings in the same task. Their completed-worker output needs the durable
 // cleanup plan even though those segments never adopt a manifest pointer.
 func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	for _, legacyVersion := range []int64{storage.StorageV1, storage.StorageV2} {
 		t.Run(fmt.Sprintf("storage_%d", legacyVersion), func(t *testing.T) {
 			ctx := context.Background()

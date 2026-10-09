@@ -1416,76 +1416,84 @@ func (u *l0ManifestUpdate) prepare(modPack *updateSegmentPack) bool {
 	return true
 }
 
-func (u *l0ManifestUpdate) commitManifest(ctx context.Context, io *packed.ManifestIOContext) error {
-	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+// submitManifest advances this segment's private snapshot only on confirmed
+// success. Cached revisions and empty updates complete inline without I/O.
+func (u *l0ManifestUpdate) submitManifest(ctx context.Context, io *packed.ManifestIOContext, complete func(error)) error {
+	if u.manifestPath != "" || len(u.entries) == 0 {
+		complete(updateManifestPathIfNewer(u.segment, u.manifestPath))
 		return nil
 	}
-	manifestPath, err := packed.AddDeltaLogsToManifestOverwriteAsync(ctx, io, u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	base, version, err := packed.UnmarshalManifestPath(u.segment.GetManifestPath())
 	if err != nil {
 		return err
 	}
-	u.manifestPath = manifestPath
-	return nil
+	return packed.SubmitManifestUpdates(ctx, io, base, version, u.storageConfig,
+		&packed.ManifestUpdates{DeltaLogs: u.entries}, func(result packed.ManifestUpdateResult, err error) {
+			if err == nil {
+				u.manifestPath = result.ManifestPath
+				err = updateManifestPathIfNewer(u.segment, u.manifestPath)
+			}
+			complete(err)
+		})
 }
 
 func commitL0ManifestUpdates(ctx context.Context, executor *manifestCommitExecutor, updates []*l0ManifestUpdate) error {
-	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
-		return update.segment.GetManifestPath() != ""
-	})
-	if len(updates) == 0 {
-		return nil
-	}
-
 	groups := make(map[int64][]*l0ManifestUpdate)
 	for _, update := range updates {
-		groups[update.segmentID] = append(groups[update.segmentID], update)
+		if update.segment.GetManifestPath() != "" {
+			groups[update.segmentID] = append(groups[update.segmentID], update)
+		}
 	}
-
-	poolSize := min(executor.concurrency, len(groups))
-
+	if len(groups) == 0 {
+		return nil
+	}
 	io, releaseIO, err := executor.acquire(ctx)
 	if err != nil {
 		return err
 	}
 	defer releaseIO()
-	pool := conc.NewPool[struct{}](poolSize)
-	defer pool.Release()
 
-	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Each segment has at most one outstanding commit. A completion makes its
+	// remaining updates ready for the caller to submit, never the callback.
+	// One buffered slot per group lets callbacks finish even during admission.
+	ready := make(chan []*l0ManifestUpdate, len(groups))
 	for _, group := range groups {
-		group := group
-		futures = append(futures, pool.Submit(func() (struct{}, error) {
-			return struct{}{}, commitL0ManifestUpdateGroup(ctx, io, group)
-		}))
+		ready <- group
 	}
-	err = conc.BlockOnAll(futures...)
+	var failed sync.Once
+	var firstErr error
+	for remaining := len(groups); remaining > 0; {
+		group := <-ready
+		if len(group) == 0 || workCtx.Err() != nil {
+			remaining--
+			continue
+		}
+		complete := func(err error) {
+			if err != nil {
+				failed.Do(func() {
+					firstErr = err
+					cancel()
+				})
+			}
+			ready <- group[1:]
+		}
+		if err := group[0].submitManifest(workCtx, io, complete); err != nil {
+			complete(err) // Rejection has no callback.
+		}
+	}
+	// All accepted callbacks have finished before shared retry caches are updated
+	// or the caller can release its segment locks, including on partial failure.
 	for _, update := range updates {
 		if update.committedV3Manifests != nil && update.manifestPath != "" {
 			update.committedV3Manifests[update.segmentID] = update.manifestPath
 		}
 	}
-	return err
-}
-
-func commitL0ManifestUpdateGroup(ctx context.Context, io *packed.ManifestIOContext, updates []*l0ManifestUpdate) error {
-	for _, update := range updates {
-		if update.manifestPath != "" {
-			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(update.entries) == 0 {
-			continue
-		}
-		if err := update.commitManifest(ctx, io); err != nil {
-			return err
-		}
-		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
-			return err
-		}
+	if firstErr != nil {
+		return firstErr
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (u *l0ManifestUpdate) apply(modPack *updateSegmentPack) bool {

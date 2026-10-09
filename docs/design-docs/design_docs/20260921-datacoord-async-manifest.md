@@ -132,6 +132,18 @@ DataCoord does not reopen the final revision or run a second batch phase. Unchan
 index sections preserve the existing marker. Failures cancel peers and drain all
 accepted callbacks before releasing locks, without catalog publication.
 
+The legacy L0 batch follows the same direct-submission model. Updates for each
+segment form an ordered chain. Terminal callbacks enqueue that segment's next
+step; the batch caller submits it using the preceding committed revision. A
+buffered completion slot per segment permits callbacks to return while the caller
+waits for executor admission. Failure cancels peers, drains accepted commits, and
+retains only confirmed paths in the retry cache.
+
+Copy/restore source prefetch and copied-index ownership verification each own one
+read executor for the batch. They use callback submissions and drain before request
+assembly or segment publication; no additional pool waits on blocking async wrappers.
+The existing shared read budget still bounds concurrent recovery, restore and GC.
+
 Cancellation requests native cancellation and waits for the terminal result.
 The native timeout is a queue deadline: it prevents work from starting after
 expiry but cannot interrupt synchronous I/O already executing on a caller worker.

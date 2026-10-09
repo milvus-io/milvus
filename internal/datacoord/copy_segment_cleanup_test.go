@@ -186,6 +186,7 @@ func TestRejectedCopyCleanupLateCompletion(t *testing.T) {
 }
 
 func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copies, m := newCopySegmentTaskTestMeta(t, task)

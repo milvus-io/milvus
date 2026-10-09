@@ -561,15 +561,3 @@ func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base
 	result, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
 	return result.ManifestPath, err
 }
-
-// AddDeltaLogsToManifestOverwriteAsync serves the legacy L0 publication path.
-func AddDeltaLogsToManifestOverwriteAsync(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, entries []DeltaLogEntry) (string, error) {
-	if len(entries) == 0 {
-		return manifestPath, nil
-	}
-	base, version, err := UnmarshalManifestPath(manifestPath)
-	if err != nil {
-		return "", err
-	}
-	return CommitManifestUpdatesAsync(ctx, io, base, version, config, &ManifestUpdates{DeltaLogs: entries})
-}

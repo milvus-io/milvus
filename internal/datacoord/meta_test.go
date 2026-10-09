@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
@@ -3958,7 +3957,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			require.Equal(t, oldManifest, manifestPath)
 			require.NotNil(t, storageConfig)
@@ -3967,7 +3966,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 			require.EqualValues(t, 3, deltaLogs[0].NumEntries)
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := make(map[int64]string)
@@ -4030,11 +4029,11 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := make(map[int64]string)
@@ -4091,12 +4090,12 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	}}
 
 	var commitCalls int
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			commitCalls++
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	// First run: commits manifest, accumulates deltas.
@@ -4147,7 +4146,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 
 	entered := make(chan string, 2)
 	release := make(chan struct{})
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			entered <- manifestPath
 			<-release
@@ -4161,7 +4160,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 				return "", nil
 			}
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	errCh := make(chan error, 1)
@@ -4212,7 +4211,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 
 	var mu sync.Mutex
 	calls := make([]string, 0, 2)
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -4222,7 +4221,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 			}
 			return manifest9, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	makeDelta := func(logID int64) []*datapb.FieldBinlog {
@@ -4298,12 +4297,12 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 	})))
 
 	calls := 0
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwriteAsync).To(
+	patch := mockL0ManifestSubmissions(
 		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			calls++
 			return "", errors.New("should not be called")
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := map[int64]string{200: manifest8}

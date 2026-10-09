@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -1381,6 +1382,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+	mockManifestIndexSubmissions(s.T())
 	collectionID := int64(1)
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
@@ -1478,6 +1480,7 @@ func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTa
 // The pointer must be rejected before publication and surface as a hard task
 // failure, not silent metadata pollution.
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntryFailsTask() {
+	mockManifestIndexSubmissions(s.T())
 	ctx := context.Background()
 	task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
 
@@ -1511,6 +1514,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntry
 // A read-back that finds only target-owned entries (an upgraded worker that ran
 // the republication) publishes the pointer as before.
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPublishes() {
+	mockManifestIndexSubmissions(s.T())
 	ctx := context.Background()
 	task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
 
@@ -1533,6 +1537,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPubl
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBeforePublish() {
+	mockManifestIndexSubmissions(s.T())
 	ctx := context.Background()
 	task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
 	s.Require().NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskIndexWriteToManifest(true)))
@@ -1702,6 +1707,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdIndexes() {
+	mockManifestIndexSubmissions(s.T())
 	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
 		for _, enabled := range []bool{false, true} {
 			s.Run(strconv.FormatInt(version, 10)+"/manifest="+strconv.FormatBool(enabled), func() {
@@ -2486,6 +2492,7 @@ type embeddedAllocator struct{ allocator.Allocator }
 func assembleIndexPrecedenceFixture(t *testing.T, manifestIndexes []packed.ManifestIndexInfo,
 	mutateSegment ...func(*datapb.SegmentDescription),
 ) (*datapb.CopySegmentRequest, int) {
+	mockManifestIndexSubmissions(t)
 	t.Helper()
 
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/1", 3)
@@ -2666,6 +2673,7 @@ func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64
 }
 
 func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
 	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
@@ -2719,6 +2727,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing
 }
 
 func TestAssembleCopySegmentRequest_ManifestFallbackPreservesMappingOrder(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("3")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
 	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
@@ -2792,6 +2801,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackPreservesMappingOrder(t *tes
 }
 
 func TestAssembleCopySegmentRequest_ManifestFallbackDrainsAfterError(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
 	defer mockey.Mock(createStorageConfig).Return(nil).Build().UnPatch()
@@ -2810,6 +2820,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackDrainsAfterError(t *testing.
 			atomic.AddInt32(&active, 1)
 			defer atomic.AddInt32(&active, -1)
 			if manifestToSegment[manifestPath] == 1 {
+				<-blocked // Ensure the peer was accepted before failure cancels admission.
 				return nil, sentinel
 			}
 			close(blocked)
@@ -2839,6 +2850,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackDrainsAfterError(t *testing.
 }
 
 func TestAssembleCopySegmentRequest_ManifestFallbackPreCanceledSkipsRead(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	task, job := newManifestFallbackAssembleFixture(ctx, 1)
@@ -2938,6 +2950,7 @@ func copiedManifestReviewEntry() packed.ManifestIndexInfo {
 }
 
 func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths() {
+	mockManifestIndexSubmissions(s.T())
 	for _, acknowledged := range []bool{false, true} {
 		for _, scenario := range []string{"recreated", "parameters", "foreign path", "wrong files"} {
 			s.Run(strconv.FormatBool(acknowledged)+"/"+scenario, func() {
@@ -2979,8 +2992,7 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 	ctx := context.Background()
 	task, _, m, resp := s.newCopiedManifestReadBackFixture()
 	result := resp.GetSegmentResults()[0]
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{copiedManifestReviewEntry()}, nil).Build().UnPatch()
-	verified, err := verifyCopiedManifestIndexOwnership(ctx, result, task, m)
+	verified, err := verifyCopiedManifestIndexOwnership(result, task, m, m.GetSegment(ctx, result.GetSegmentId()), createStorageConfig().GetRootPath(), []packed.ManifestIndexInfo{copiedManifestReviewEntry()})
 	s.Require().NoError(err)
 	// Recreate after verification but before the in-memory record is installed.
 	s.Require().NoError(m.indexMeta.MarkIndexAsDeleted(ctx, 100, []int64{300}))
@@ -2995,6 +3007,7 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {
+	mockManifestIndexSubmissions(s.T())
 	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
 	task, copies, m, resp := s.newCopiedManifestReadBackFixture()
@@ -3057,4 +3070,30 @@ func (s *CopySegmentTaskSuite) TestQueryCompletedCopyRetriesCleanupIntentFailure
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
 	s.False(task.GetCleanupRequired())
+}
+
+func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
+	original := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("1")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(original)
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	defer mockey.Mock(createStorageConfig).Return(cfg).Build().UnPatch()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	task, job := newManifestFallbackAssembleFixture(ctx, 1, 2, 3)
+	for _, segment := range job.snapshotCache.data.Segments {
+		base := path.Join(cfg.RootPath, "insert_log/100/10", strconv.FormatInt(segment.GetSegmentId(), 10))
+		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+			DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}},
+		})
+		require.NoError(t, err)
+		segment.ManifestPath = manifest
+	}
+	request, err := AssembleCopySegmentRequest(task, job)
+	require.NoError(t, err)
+	require.Len(t, request.GetSources(), 3)
+	for i, source := range request.GetSources() {
+		require.EqualValues(t, i+1, source.GetSegmentId())
+		require.Equal(t, job.snapshotCache.data.Segments[i].GetManifestPath(), source.GetManifestPath())
+		require.Empty(t, source.GetIndexFiles())
+	}
 }

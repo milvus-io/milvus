@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -954,27 +953,16 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		concurrency := min(len(manifestReadMappings), segmentIndexManifestReadConcurrency())
-		pool := conc.NewPool[struct{}](concurrency)
-		futures := make([]*conc.Future[struct{}], 0, len(manifestReadMappings))
-		for _, mappingIndex := range manifestReadMappings {
-			mappingIndex := mappingIndex
-			futures = append(futures, pool.Submit(func() (struct{}, error) {
-				if err := ctx.Err(); err != nil {
-					return struct{}{}, err
-				}
-				source := preparedSources[mappingIndex]
-				manifestIndexes, err := t.meta.readManifestIndexes(ctx, source.GetManifestPath(), storageConfig)
-				if err != nil {
-					return struct{}{}, merr.Wrapf(err,
-						"failed to load source index metadata from manifest for segment %d", source.GetSegmentId())
-				}
-				manifestIndexesByMapping[mappingIndex] = manifestIndexes
-				return struct{}{}, ctx.Err()
-			}))
-		}
-		err := conc.BlockOnAll(futures...)
-		pool.Release()
+		io := packed.NewManifestIOContext(min(len(manifestReadMappings), segmentIndexManifestReadConcurrency()))
+		err := runManifestBatch(ctx, len(manifestReadMappings), func(ctx context.Context, i int, complete func(error)) error {
+			mappingIndex := manifestReadMappings[i]
+			source := preparedSources[mappingIndex]
+			return t.meta.submitManifestIndexRead(ctx, io, source.GetManifestPath(), storageConfig, func(entries []packed.ManifestIndexInfo, err error) {
+				manifestIndexesByMapping[mappingIndex] = entries
+				complete(merr.Wrapf(err, "failed to load source index metadata from manifest for segment %d", source.GetSegmentId()))
+			})
+		})
+		io.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -1180,21 +1168,18 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		}
 		results := resp.GetSegmentResults()
 		verified := make([]map[int64]int64, len(results))
-		verificationErrors := make([]error, len(results))
-		pool := conc.NewPool[struct{}](min(max(1, len(results)), segmentIndexManifestReadConcurrency()))
-		futures := make([]*conc.Future[struct{}], 0, len(results))
-		for i, result := range results {
-			futures = append(futures, pool.Submit(func() (struct{}, error) {
-				verified[i], verificationErrors[i] = verifyCopiedManifestIndexOwnership(ctx, result, task, meta)
-				return struct{}{}, nil
-			}))
+		io := packed.NewManifestIOContext(min(max(1, len(results)), segmentIndexManifestReadConcurrency()))
+		err := runManifestBatch(ctx, len(results), func(ctx context.Context, i int, complete func(error)) error {
+			return submitCopiedManifestIndexOwnership(ctx, io, results[i], task, meta, func(builds map[int64]int64, err error) {
+				verified[i] = builds
+				complete(err)
+			})
+		})
+		io.Close()
+		if err != nil {
+			return failCopySegmentSync(ctx, task, copyMeta, err)
 		}
-		_ = conc.BlockOnAll(futures...)
-		pool.Release()
 		for i, result := range results {
-			if verificationErrors[i] != nil {
-				return failCopySegmentSync(ctx, task, copyMeta, verificationErrors[i])
-			}
 			if err := validateCopiedManifestIndexPlacement(result, task, meta, verified[i]); err != nil {
 				return failCopySegmentSync(ctx, task, copyMeta, err)
 			}
@@ -1313,38 +1298,50 @@ func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta Cop
 	return err
 }
 
-// verifyCopiedManifestIndexOwnership binds each published build to its actual
+// submitCopiedManifestIndexOwnership binds each published build to its actual
 // target index ID. Build-ID acknowledgements alone cannot prove which definition
 // a worker used: that definition may have been dropped and recreated during the
 // copy. Read non-empty manifests back, including current-worker results, and
 // compare their identities and paths before the segment becomes visible.
-func verifyCopiedManifestIndexOwnership(ctx context.Context, result *datapb.CopySegmentResult,
-	task CopySegmentTask, meta *meta,
-) (map[int64]int64, error) {
+func submitCopiedManifestIndexOwnership(ctx context.Context, io *packed.ManifestIOContext, result *datapb.CopySegmentResult,
+	task CopySegmentTask, meta *meta, complete func(map[int64]int64, error),
+) error {
 	manifestPath := result.GetManifestPath()
 	if manifestPath == "" || meta == nil {
-		return nil, nil
+		complete(nil, nil)
+		return nil
 	}
 	segment := meta.GetSegment(ctx, result.GetSegmentId())
 	if segment == nil || segment.GetStorageVersion() < storage.StorageV3 {
-		return nil, nil
+		complete(nil, nil)
+		return nil
 	}
 	if result.ManifestIndexRewritten != nil {
 		if !result.GetManifestIndexRewritten() {
-			return nil, merr.WrapErrServiceInternalMsg(
+			return merr.WrapErrServiceInternalMsg(
 				"copied manifest index rewrite was not completed for segment %d", result.GetSegmentId())
 		}
 		if len(result.GetManifestIndexBuildIds()) == 0 {
 			// Current workers explicitly acknowledge an empty index section.
-			return nil, nil
+			complete(nil, nil)
+			return nil
 		}
 	}
 	storageConfig := createStorageConfig()
-	entries, err := meta.readManifestIndexes(ctx, manifestPath, storageConfig)
-	if err != nil {
-		return nil, merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId())
-	}
-	rootPath := storageConfig.GetRootPath()
+	return meta.submitManifestIndexRead(ctx, io, manifestPath, storageConfig, func(entries []packed.ManifestIndexInfo, err error) {
+		if err != nil {
+			complete(nil, merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId()))
+			return
+		}
+		builds, err := verifyCopiedManifestIndexOwnership(result, task, meta, segment, storageConfig.GetRootPath(), entries)
+		complete(builds, err)
+	})
+}
+
+// Verify the loaded entries without further I/O before publishing any segment.
+func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task CopySegmentTask, meta *meta,
+	segment *SegmentInfo, rootPath string, entries []packed.ManifestIndexInfo,
+) (map[int64]int64, error) {
 	if meta.chunkManager != nil {
 		rootPath = meta.chunkManager.RootPath()
 	}
