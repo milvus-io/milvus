@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type walManager interface {
@@ -83,6 +84,10 @@ func toRPCError(err error) error {
 	}
 	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
 		return err
+	}
+	if errors.Is(err, merr.ErrCollectionNotLoaded) {
+		// A view may outlive its load config during release. Retry against a fresh view.
+		err = viewerror.NewViewInvalidated("%s", err)
 	}
 	var viewErr *viewerror.ViewError
 	if errors.As(err, &viewErr) {
