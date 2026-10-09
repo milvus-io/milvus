@@ -1096,6 +1096,9 @@ func TestMetaCache_RLSProperties(t *testing.T) {
 			{Key: common.RLSForceKey, Value: "true"},
 		},
 	}, nil).Once()
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status: merr.Success(),
+	}, nil).Once()
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
