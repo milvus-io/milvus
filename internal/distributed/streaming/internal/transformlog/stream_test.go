@@ -305,11 +305,21 @@ func TestSubscriptionCancellationWhileFactoryUnavailable(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	})
 	defer stream.Close()
-	<-entered
 	request, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	result := make(chan error, 1)
+	go func() {
+		_, err := stream.Subscribe(request, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: newConsumer()})
+		result <- err
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("subscription did not start a connection attempt")
+	}
 	cancelRequest()
-	_, err := stream.Subscribe(request, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", Handler: newConsumer()})
-	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, <-result, context.Canceled)
+	requireLogicalStreamAlive(t, stream)
 }
 
 func TestRawSubscriptionProtocolValidation(t *testing.T) {

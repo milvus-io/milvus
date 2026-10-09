@@ -346,6 +346,20 @@ manager still checks physical preparation against this view's
 DataVersion and LoadInfo. Only then can it report Ready without re-registering
 the segment.
 
+TransformLogBuffer owns the logical streams returned by `AcquireStream` and
+closes each after its final buffer reference is released. Physical RPCs are
+on-demand inside the logical stream: no subscriptions means no connection;
+new subscriptions restart connection establishment without replacing the logical
+stream. A pending unsubscribe cancels only its physical attempt when demand
+reaches zero, never the owner-held logical stream.
+
+A terminated logical stream is removed from the cache for new VChannels even
+while old buffers retain references. Each buffer retains the concrete stream
+state it acquired, so releasing an old buffer cannot evict or close a newer
+stream for the same PChannel. Existing failed VChannel buffers keep their errors;
+this does not clear their errors or retry their subscriptions. A new acquisition
+still reports its own failure if the underlying cause remains.
+
 Continuous TransformLog subscriptions resume at PChannel scope across SN owner
 migration. The server ends the physical RPC on provider shutdown, fencing,
 stale ownership, or cancellation of an active provider operation. Explicit

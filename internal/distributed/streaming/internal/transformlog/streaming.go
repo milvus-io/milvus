@@ -42,6 +42,7 @@ type resumableStream struct {
 	closing       bool
 	err           error
 	underlying    wal.TransformLogStream
+	attemptCancel context.CancelFunc
 	subscriptions map[int64]*resumableSubscription
 
 	done       chan struct{}
@@ -137,41 +138,36 @@ func (s *resumableStream) resumeLoop() {
 	retryBackoff.Reset()
 
 	for {
-		if err := s.ctx.Err(); err != nil {
+		ctx, cancel, err := s.waitForDemand()
+		if err != nil {
 			finalErr = err
 			return
 		}
-		// Each physical connection owns its context; logical subscriptions
-		// survive until explicitly released, completed or failed.
-		ctx, cancel := context.WithCancel(s.ctx)
 		underlying, err := s.factory(ctx, s.pchannel)
 		if err != nil {
-			cancel()
-			if terminalSubscriptionError(err) {
-				finalErr = err
-				return
-			}
-			mlog.Debug(s.ctx, "resumable transform log stream create failed, retrying",
+			underlying = nil
+		} else {
+			mlog.Debug(s.ctx, "resumable transform log stream acquired underlying stream",
 				mlog.FieldPChannel(s.pchannel),
-				mlog.Err(err),
 			)
-			if waitErr := s.waitNextRetry(retryBackoff.NextBackOff()); waitErr != nil {
-				finalErr = waitErr
-				return
+			s.setUnderlying(underlying)
+			err = s.subscribePending(ctx, underlying)
+			if err == nil {
+				err = s.waitUntilUnavailable(ctx, underlying)
 			}
+		}
+		// Removing the last subscription cancels this attempt, not the logical
+		// stream. A new subscription may already be waiting for the next one.
+		interrupted := ctx.Err() != nil
+		cancel()
+		if underlying != nil {
+			_ = underlying.Close()
+			s.clearUnderlying(underlying)
+		}
+		if interrupted {
+			retryBackoff.Reset()
 			continue
 		}
-		mlog.Debug(s.ctx, "resumable transform log stream acquired underlying stream",
-			mlog.FieldPChannel(s.pchannel),
-		)
-		s.setUnderlying(underlying)
-		err = s.subscribePending(ctx, underlying)
-		if err == nil {
-			err = s.waitUntilUnavailable(ctx, underlying)
-		}
-		cancel()
-		_ = underlying.Close()
-		s.clearUnderlying(underlying)
 		if err != nil && terminalSubscriptionError(err) {
 			finalErr = err
 			return
@@ -183,6 +179,30 @@ func (s *resumableStream) resumeLoop() {
 		if waitErr := s.waitNextRetry(retryBackoff.NextBackOff()); waitErr != nil {
 			finalErr = waitErr
 			return
+		}
+	}
+}
+
+// waitForDemand leaves an owner-held logical stream idle without opening an
+// RPC. The demand check and attempt cancellation share the subscription lock,
+// so an unsubscribe can also interrupt an in-flight connection or Subscribe.
+func (s *resumableStream) waitForDemand() (context.Context, context.CancelFunc, error) {
+	for {
+		if err := s.ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		s.mu.Lock()
+		if len(s.subscriptions) > 0 {
+			ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // resumeLoop closes every attempt; last unsubscribe can cancel it early
+			s.attemptCancel = cancel
+			s.mu.Unlock()
+			return ctx, cancel, nil
+		}
+		s.mu.Unlock()
+		select {
+		case <-s.wake:
+		case <-s.ctx.Done():
+			return nil, nil, s.ctx.Err()
 		}
 	}
 }
@@ -294,24 +314,21 @@ func (s *resumableStream) waitUntilUnavailable(ctx context.Context, underlying w
 
 func (s *resumableStream) removeSubscription(sub *resumableSubscription, err error) {
 	var remote wal.TransformLogSubscription
-	shouldClose := false
 	s.mu.Lock()
 	if s.subscriptions[sub.id] == sub {
 		delete(s.subscriptions, sub.id)
 		remote = sub.remote
 		sub.remote = nil
-		shouldClose = len(s.subscriptions) == 0 && !s.closing
+		if len(s.subscriptions) == 0 && s.attemptCancel != nil {
+			s.attemptCancel()
+		}
 	}
 	s.mu.Unlock()
+	s.wakeResume()
 	if remote != nil {
 		_ = remote.Close()
 	}
 	sub.finish(err)
-	if shouldClose {
-		go func() {
-			_ = s.Close()
-		}()
-	}
 }
 
 func (s *resumableStream) wakeResume() {
