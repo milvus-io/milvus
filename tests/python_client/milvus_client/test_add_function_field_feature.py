@@ -417,8 +417,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         if function_type == "bm25":
             output_field = FieldSchema(name="derived", dtype=DataType.SPARSE_FLOAT_VECTOR)
             function = Function(
-                name="bm25_text_lob", function_type=FunctionType.BM25,
-                input_field_names=["doc"], output_field_names=["derived"],
+                name="bm25_text_lob",
+                function_type=FunctionType.BM25,
+                input_field_names=["doc"],
+                output_field_names=["derived"],
             )
             index_type, metric_type, index_extra = "SPARSE_INVERTED_INDEX", "BM25", {}
             old_query, new_query = "historicalanchortoken", "newanchortoken"
@@ -426,8 +428,10 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         else:
             output_field = FieldSchema(name="derived", dtype=DataType.BINARY_VECTOR, dim=512)
             function = Function(
-                name="minhash_text_lob", function_type=FunctionType.MINHASH,
-                input_field_names=["doc"], output_field_names=["derived"],
+                name="minhash_text_lob",
+                function_type=FunctionType.MINHASH,
+                input_field_names=["doc"],
+                output_field_names=["derived"],
                 params={"num_hashes": 16, "shingle_size": 3, "token_level": "word"},
             )
             index_type, metric_type, index_extra = "MINHASH_LSH", "MHJACCARD", {"mh_lsh_band": 8}
@@ -442,15 +446,27 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         client.load_collection(collection_name)
 
         self.wait_for_search_hit(
-            client, collection_name, data=[old_query], anns_field="derived", expected_id=0,
-            label=f"{function_type} historical TEXT LOB", search_params=search_params, output_fields=["id"],
+            client,
+            collection_name,
+            data=[old_query],
+            anns_field="derived",
+            expected_id=0,
+            label=f"{function_type} historical TEXT LOB",
+            search_params=search_params,
+            output_fields=["id"],
         )
         client.insert(collection_name, [{"id": 3, "doc": new_text, "vec": [0.0, 0.0, 1.0, 0.0]}])
         client.flush(collection_name)
         assert self.wait_for_index_ready(client, collection_name, index_name="derived", timeout=180)
         self.wait_for_search_hit(
-            client, collection_name, data=[new_query], anns_field="derived", expected_id=3,
-            label=f"{function_type} new TEXT row", search_params=search_params, output_fields=["id"],
+            client,
+            collection_name,
+            data=[new_query],
+            anns_field="derived",
+            expected_id=3,
+            label=f"{function_type} new TEXT row",
+            search_params=search_params,
+            output_fields=["id"],
         )
         rows = client.query(collection_name, filter="id in [0, 1, 2, 3]", output_fields=["id", "doc"], limit=4)
         assert {row["id"]: row["doc"] for row in rows} == {0: old_text, 1: "", 2: None, 3: new_text}
@@ -458,8 +474,14 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         client.load_collection(collection_name)
         self.wait_for_search_hit(
-            client, collection_name, data=[old_query], anns_field="derived", expected_id=0,
-            label=f"{function_type} TEXT LOB after reload", search_params=search_params, output_fields=["id"],
+            client,
+            collection_name,
+            data=[old_query],
+            anns_field="derived",
+            expected_id=0,
+            label=f"{function_type} TEXT LOB after reload",
+            search_params=search_params,
+            output_fields=["id"],
         )
         self.drop_collection(client, collection_name)
 

@@ -690,7 +690,7 @@ func TestBM25FunctionMaterializerRejectsBadRunnerOutput(t *testing.T) {
 		input := newInt64Array(t, []int64{1})
 		defer input.Release()
 		_, err := newMaterializer([]any{}).Materialize(&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}})
-		require.ErrorContains(t, err, "data type must be varchar or text")
+		require.ErrorContains(t, err, "requires Arrow String values")
 	})
 }
 

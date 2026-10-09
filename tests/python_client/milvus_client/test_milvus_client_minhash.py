@@ -143,7 +143,9 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         )
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name="signature", index_type="MINHASH_LSH", metric_type="MHJACCARD",
+            field_name="signature",
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
             params={"mh_lsh_band": 8},
         )
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
@@ -152,8 +154,12 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         found = self.search(
-            client, collection_name, [long_text], anns_field="signature",
-            search_params={"metric_type": "MHJACCARD", "params": {}}, limit=2,
+            client,
+            collection_name,
+            [long_text],
+            anns_field="signature",
+            search_params={"metric_type": "MHJACCARD", "params": {}},
+            limit=2,
         )[0]
         assert found[0][0]["id"] == 0
         assert found[0][0]["distance"] == 1.0
@@ -163,8 +169,12 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
         found = self.search(
-            client, collection_name, [long_text], anns_field="signature",
-            search_params={"metric_type": "MHJACCARD", "params": {}}, limit=2,
+            client,
+            collection_name,
+            [long_text],
+            anns_field="signature",
+            search_params={"metric_type": "MHJACCARD", "params": {}},
+            limit=2,
         )[0]
         assert found[0][0]["id"] == 0
         self.drop_collection(client, collection_name)
