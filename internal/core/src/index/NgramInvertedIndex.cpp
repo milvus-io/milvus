@@ -239,6 +239,53 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
              avg_row_size_);
 }
 
+IndexLoadPlan
+NgramInvertedIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
+                             const nlohmann::json& metadata,
+                             const Config& config) {
+    auto plan = InvertedIndexTantivy<std::string>::PlanLoad(
+        directory, metadata, config);
+    auto avg_row_size_bytes =
+        directory.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
+    if (!(avg_row_size_bytes == sizeof(size_t))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid ngram avg_row_size Entry size: expected {}, got {}",
+                  sizeof(size_t),
+                  avg_row_size_bytes);
+    }
+    auto avg_row_size = std::make_shared<size_t>(0);
+    plan.entries.push_back(storage::EntryLoadPlan{
+        NGRAM_AVG_ROW_SIZE_FILE_NAME,
+        storage::MemoryEntryTarget{
+            avg_row_size,
+            reinterpret_cast<uint8_t*>(avg_row_size.get()),
+            sizeof(size_t)}});
+    return plan;
+}
+
+folly::coro::Task<void>
+NgramInvertedIndex::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
+    const auto& avg_row_entry = plan.At(NGRAM_AVG_ROW_SIZE_FILE_NAME);
+    const auto& avg_row_target =
+        std::get<storage::MemoryEntryTarget>(avg_row_entry.target);
+    AssertInfo(avg_row_target.bytes == sizeof(size_t),
+               "invalid materialized ngram avg_row_size size: expected {}, "
+               "got {}",
+               sizeof(size_t),
+               avg_row_target.bytes);
+    size_t new_avg_row_size = 0;
+    milvus::fastmem::FastMemcpy(
+        &new_avg_row_size, avg_row_target.data, sizeof(size_t));
+
+    co_await InvertedIndexTantivy<std::string>::FinishLoadAsync(plan, config);
+    avg_row_size_ = new_avg_row_size;
+    LOG_INFO(
+        "FinishLoadAsync NgramInvertedIndex done, avg_row_size: "
+        "{} "
+        "bytes",
+        avg_row_size_);
+}
+
 void
 NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
                                    const Config& config) {
@@ -305,8 +352,9 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
-    AssertInfo(
-        tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
+    if (!(tantivy_index_exist(path_.c_str()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index not exist: {}", path_);
+    }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -969,9 +1017,13 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                                   TargetBitmap& candidates,
                                   int64_t segment_offset,
                                   int64_t batch_size) {
-    // InnerMatch with short literal doesn't need post-filter
+    // InnerMatch with a literal of at most max_gram chars needs no
+    // post-filter: the literal is itself an indexed gram and rust answers it
+    // with an exact term query. Count chars, as rust does; byte length would
+    // send every short multi-byte (e.g. CJK) literal through a redundant
+    // full post-filter.
     if (op_type == proto::plan::OpType::InnerMatch &&
-        literal.length() <= max_gram_) {
+        Utf8LiteralLength(literal) <= max_gram_) {
         return;
     }
 

@@ -70,9 +70,14 @@ enum MessageType {
     RollbackImport               = 46;
     AlterRLSMetadata             = 47;
     DropRLSMetadata              = 48;
+    UpdateImport                 = 49;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
+
+    // RecoveryBarrier is appended as the first WAL recovery write to fence the writer
+    // and establish recovered query-resource MVCC baselines.
+    RecoveryBarrier      = 701;
 
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
@@ -150,13 +155,21 @@ message TxnMessageBody {
 
 ///
 /// Message Header Definitions
-/// Used to fast handling at streaming node write ahead.
-/// The header should be simple and light enough to be parsed.
-/// Do not alter too much information in the header if unnecessary.
+/// Before you add a field to a header or a body, read the "Header vs Body"
+/// rules in docs/agent_guides/streaming-system/message/message.md.
+/// A header field must be one that the WAL infrastructure reads or writes
+/// without a body decode. It must have a small bounded size and must not
+/// contain secrets or user data, because the header is not encrypted.
 ///
 
 // TimeTickMessageHeader just nothing.
 message TimeTickMessageHeader {}
+
+// RecoveryBarrierMessageHeader just nothing.
+message RecoveryBarrierMessageHeader {}
+
+// RecoveryBarrierMessageBody just nothing.
+message RecoveryBarrierMessageBody {}
 
 // InsertMessageHeader is the header of insert message.
 message InsertMessageHeader {
@@ -164,6 +177,44 @@ message InsertMessageHeader {
     repeated PartitionSegmentAssignment partitions = 2;
     // optional so consumers can distinguish omitted (legacy producer) from explicit value.
     optional int32 schema_version                  = 3;
+    // The idempotency key of an idempotent insert is NOT carried here: it lives in
+    // the message property `_ik` (see pkg/streaming/util/message/properties.go), so
+    // it is readable uniformly across message types without decoding a header.
+    optional IdempotentInsertResult idempotent_result = 4;
+}
+
+// IdempotentInsertResult is what a duplicate idempotent insert replays back to
+// the client: the primary keys the FIRST attempt produced on this write unit,
+// and where each of them belongs in the client's original request.
+//
+// It has two roles. As a field of InsertMessageHeader it is what the streaming
+// node stores so the answer survives; as the payload of an append result's
+// `extra` it is what the proxy reads back to rebuild MutationResult. It is
+// defined here, next to the header, because the header is what makes it durable.
+//
+// THIS FIELD IS THE ONE EXCEPTION to the "keep the header light" rule above, and
+// the exception is deliberate:
+//
+//   - ids cannot be recovered from the body. For autoID the keys are
+//     server-allocated and a retry allocates different ones, so a duplicate must
+//     answer with the originals. They do sit in the body, but the streaming node
+//     never decodes an insert body on the append path -- segment assignment and
+//     size estimation all read the header -- and decoding would materialize every
+//     column including vectors to extract an 8-byte key per row, on the write hot
+//     path, without even holding the schema needed to locate the primary column.
+//   - row_offsets does not exist in the body at all. The mapping back to the
+//     client's row order is built in the proxy. It could be recomputed on retry
+//     since routing is deterministic, but only if the size-driven message split
+//     boundaries also matched between attempts; a maxMessageSize or schema change
+//     moves them, and a recomputed mapping would then scatter primary keys onto
+//     the wrong rows silently.
+//
+// The cost is real: for a large insert this is the dominant term in the message,
+// and it is stamped whether or not the collection uses autoID. Making the stamp
+// conditional on autoID is tracked as follow-up work.
+message IdempotentInsertResult {
+    repeated uint32 row_offsets = 1;
+    schema.IDs ids = 2;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.
@@ -273,7 +324,10 @@ message RollbackTxnMessageHeader {}
 // Just do nothing now.
 message TxnMessageHeader {}
 
-message ImportMessageHeader {}
+message ImportMessageHeader {
+    // Absent on legacy jobs, whose commit is completed by per-channel RPCs.
+    bool commit_by_coordinator = 1;
+}
 
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{
@@ -673,6 +727,7 @@ message RefreshExternalCollectionMessageBody {}
 message CommitImportMessageHeader {
     int64 collection_id = 1;
     int64 job_id        = 2;
+    bool commit_by_coordinator = 3; // Inherited from the Import job; false for legacy WAL messages.
 }
 
 // CommitImportMessageBody is the body of commit import message.
@@ -688,6 +743,21 @@ message RollbackImportMessageHeader {
 // RollbackImportMessageBody is the body of rollback import message.
 // Empty - all info is in header.
 message RollbackImportMessageBody {}
+
+// UpdateImportMessageHeader is the header of the update import message.
+message UpdateImportMessageHeader {
+    int64 collection_id = 1;
+    int64 job_id        = 2;
+}
+
+// UpdateImportMessageBody carries the per-file ID ranges allocated from the exact
+// post-preimport row counts. The map key is the file's zero-based position in
+// ImportMsg.Files / job.Files order. The range size is the primary's exact
+// post-preimport row count, so it doubles as the cross-cluster divergence authority
+// and no separate row count is carried.
+message UpdateImportMessageBody {
+    map<int64, common.IDRange> id_ranges = 1;
+}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {
@@ -874,10 +944,13 @@ message BatchUpdateManifestV2ColumnGroups {
 
 // AlterRLSMetadataMessageHeader identifies the collection whose RLS metadata
 // is being updated. The collection-scoped broadcaster resource key serializes
-// this mutation with collection DDL.
+// this mutation with collection DDL. Cache expirations are replayed by the ACK
+// callback so active Proxies invalidate their RLS state before the resource is
+// released.
 message AlterRLSMetadataMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2;
+    CacheExpirations cache_expirations = 3;
 }
 
 // AlterRLSMetadataMessageBody carries the complete post-image so replay does
@@ -906,10 +979,12 @@ message RLSPrincipalMetadata {
 }
 
 // DropRLSMetadataMessageHeader identifies the collection whose RLS metadata
-// is being removed.
+// is being removed and carries the Proxy RLS cache expiration applied by the
+// ACK callback.
 message DropRLSMetadataMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2;
+    CacheExpirations cache_expirations = 3;
 }
 
 // DropRLSMetadataMessageBody carries one stable logical identity. Replaying a

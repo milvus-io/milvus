@@ -27,11 +27,15 @@ func NewCAnalyzer(ptr C.CTokenizer) *CAnalyzer {
 	}
 }
 
-func (impl *CAnalyzer) NewTokenStream(text string) interfaces.TokenStream {
+func (impl *CAnalyzer) NewTokenStream(text string) (interfaces.TokenStream, error) {
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
-	ptr := C.create_token_stream(impl.ptr, cText, (C.uint32_t)(len(text)))
-	return NewCTokenStream(ptr)
+	var ptr C.CTokenStream
+	status := C.create_token_stream(impl.ptr, cText, (C.uint32_t)(len(text)), &ptr)
+	if err := HandleCStatus(&status, "failed to create token stream"); err != nil {
+		return nil, err
+	}
+	return NewCTokenStream(ptr), nil
 }
 
 func (impl *CAnalyzer) Clone() (interfaces.Analyzer, error) {

@@ -18,15 +18,14 @@ package replication
 
 import (
 	"context"
-	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -38,25 +37,19 @@ func TestForcePromote(t *testing.T) {
 	suite.Run(t, new(ForcePromoteSuite))
 }
 
-// getPChannelNames generates the correct pchannel names for the current cluster.
-// Pchannels are named <RootCoordDml>_<n> where n goes from 0 to DmlChannelNum-1.
-func (s *ForcePromoteSuite) getPChannelNames() []string {
-	rootCoordDml := paramtable.Get().CommonCfg.RootCoordDml.GetValue()
-	dmlChannelNum := paramtable.Get().RootCoordCfg.DmlChannelNum.GetAsInt()
-	pchannels := make([]string, dmlChannelNum)
-	for i := 0; i < dmlChannelNum; i++ {
-		pchannels[i] = fmt.Sprintf("%s_%d", rootCoordDml, i)
-	}
-	return pchannels
+// MiniClusterV3 configures two DML channels in the child processes.
+func replicationPChannels(clusterID string) []string {
+	return []string{clusterID + "-rootcoord-dml_0", clusterID + "-rootcoord-dml_1"}
 }
 
 // TestNormalUpdateReplicateConfiguration verifies that normal (non-force) updates
 // work correctly on a primary cluster.
 func (s *ForcePromoteSuite) TestNormalUpdateReplicateConfiguration() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	pchannels := s.getPChannelNames()
+	clusterID := s.Cluster.RootPath()
+	pchannels := replicationPChannels(clusterID)
 
 	// Create a valid single-cluster config (making current cluster primary)
 	config := &commonpb.ReplicateConfiguration{
@@ -91,10 +84,11 @@ func (s *ForcePromoteSuite) TestNormalUpdateReplicateConfiguration() {
 // TestUpdateReplicateConfigurationIdempotent verifies that calling
 // UpdateReplicateConfiguration with the same configuration is idempotent.
 func (s *ForcePromoteSuite) TestUpdateReplicateConfigurationIdempotent() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	pchannels := s.getPChannelNames()
+	clusterID := s.Cluster.RootPath()
+	pchannels := replicationPChannels(clusterID)
 
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{

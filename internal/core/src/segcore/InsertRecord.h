@@ -25,7 +25,7 @@
 
 #include "TimestampData.h"
 #include "TimestampIndex.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
@@ -283,7 +283,7 @@ class OffsetMap {
         find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
+            const IStructElementOffsets* struct_element_offsets,
             const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     virtual void
@@ -424,7 +424,7 @@ class OffsetOrderedMap : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
@@ -433,7 +433,7 @@ class OffsetOrderedMap : public OffsetMap {
         }
 
         return find_first_n_element_by_index(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     void
@@ -484,7 +484,7 @@ class OffsetOrderedMap : public OffsetMap {
     find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
@@ -542,7 +542,8 @@ class OffsetOrderedMap : public OffsetMap {
                 ++n;
                 --gather_idx;
             }
-            array_offsets->CopyRowElementRanges(batch_offsets, n, batch_ranges);
+            struct_element_offsets->CopyRowElementRanges(
+                batch_offsets, n, batch_ranges);
 
             for (int64_t k = 0; k < n && hit_num < limit; ++k) {
                 const auto* pk_entry = batch_pks[k];
@@ -751,7 +752,7 @@ class OffsetOrderedArray : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         check_search();
 
@@ -760,7 +761,7 @@ class OffsetOrderedArray : public OffsetMap {
         }
 
         return find_first_n_element_by_index(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     void
@@ -804,7 +805,7 @@ class OffsetOrderedArray : public OffsetMap {
     find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
@@ -834,7 +835,8 @@ class OffsetOrderedArray : public OffsetMap {
             for (int64_t k = 0; k < n; ++k) {
                 batch_rows[k] = array_[base + k].second;
             }
-            array_offsets->CopyRowElementRanges(batch_rows, n, batch_ranges);
+            struct_element_offsets->CopyRowElementRanges(
+                batch_rows, n, batch_ranges);
 
             for (int64_t k = 0; k < n && hit_num < limit; ++k) {
                 const auto& entry = array_[base + k];
@@ -1034,7 +1036,7 @@ class VirtualPKOffsetMap : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         // External tables don't support array fields, but implement
         // the interface for completeness.
@@ -1060,7 +1062,7 @@ class VirtualPKOffsetMap : public OffsetMap {
         for (int64_t base = 0; base < num_rows_ && hit_num < limit;
              base += kRowBatchSize) {
             const int64_t n = std::min(kRowBatchSize, num_rows_ - base);
-            array_offsets->CopyRowElementStarts(base, n, batch_starts);
+            struct_element_offsets->CopyRowElementStarts(base, n, batch_starts);
             for (int64_t i = 0; i < n && hit_num < limit; i++) {
                 const int64_t doc = base + i;
                 const int32_t first_elem = batch_starts[i];

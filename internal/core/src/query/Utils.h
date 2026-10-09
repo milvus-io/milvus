@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/OffsetMapping.h"
@@ -29,11 +29,66 @@
 
 namespace milvus::query {
 inline bool
-CanUseStrictGroupFilteredIterator(const SearchInfo& info, int64_t nq) {
-    return info.strict_group_acceptance_threshold_ > 0 &&
-           info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
-           nq == 1 && !info.element_level() &&
+CanUseStrictGroupControls(const SearchInfo& info, int64_t nq) {
+    return info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+           nq == 1 && info.struct_element_offsets_ == nullptr &&
            info.group_by_field_ids_.size() == 1;
+}
+
+// Zero disables truncation; saturation prevents overflow from causing an
+// unintended early cutoff.
+inline int64_t
+StrictGroupPhase1CandidateLimit(const SearchInfo& info) {
+    if (info.strict_group_phase1_candidate_weight_ <= 0 || info.topk_ <= 0 ||
+        info.group_size_ <= 0) {
+        return 0;
+    }
+    const auto max = std::numeric_limits<int64_t>::max();
+    int64_t limit = info.strict_group_phase1_candidate_weight_;
+    for (int64_t factor : {info.topk_, info.group_size_}) {
+        if (limit > max / factor) {
+            return max;
+        }
+        limit *= factor;
+    }
+    return limit;
+}
+
+inline void
+ApplyStrictGroupSkipRefine(const SearchInfo& info,
+                           int64_t nq,
+                           knowhere::Json& params) {
+    if (CanUseStrictGroupControls(info, nq)) {
+        params["skip_refine"] = info.strict_group_skip_refine_;
+    }
+}
+
+// Convert a group quota into ordinary vector Search without mutating phase one.
+inline SearchInfo
+StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
+    auto info = original;
+    // Inherit all query parameters. Only override per-group execution settings;
+    // backend-specific parameter interpretation and validation stay in Knowhere.
+    // Providers are registered only for nq=1. Set the backend parameter before
+    // converting per-group completion into an ordinary (non-grouped) Search.
+    ApplyStrictGroupSkipRefine(original, 1, info.search_params_);
+    info.topk_ = remaining_topk;
+    info.group_by_field_ids_.clear();
+    info.group_size_ = 1;
+    info.strict_group_size_ = false;
+    info.iterative_filter_execution = false;
+    info.iterator_v2_info_.reset();
+    // Group-by consumes unrounded iterator distances; preserve that here.
+    info.round_decimal_ = -1;
+    info.search_params_[knowhere::meta::TOPK] = remaining_topk;
+    return info;
+}
+
+inline bool
+CanUseStrictGroupSearch(const SearchInfo& search_info, int64_t num_queries) {
+    return search_info.strict_group_strategy_ ==
+               StrictGroupStrategy::PerGroup &&
+           CanUseStrictGroupControls(search_info, num_queries);
 }
 
 inline void
@@ -78,11 +133,12 @@ AdvanceVectorDataPointer(const void* data,
 }
 
 // Map VECTOR_ARRAY element IDs returned by Knowhere to (doc_id, elem_idx)
-// pairs via ArrayOffsets. This is element-space only; row-level nullable
+// pairs via StructElementOffsets. This is element-space only; row-level nullable
 // mapping is handled before or inside Knowhere search.
 inline std::pair<std::vector<int64_t>, std::vector<int32_t>>
-ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
-                      const milvus::IArrayOffsets& array_offsets) {
+ApplyElementIDMapping(
+    const std::vector<int64_t>& element_ids,
+    const milvus::IStructElementOffsets& struct_element_offsets) {
     std::vector<int64_t> doc_offsets;
     std::vector<int32_t> element_indices;
     doc_offsets.reserve(element_ids.size());
@@ -93,7 +149,7 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
             element_indices.push_back(-1);
         } else {
             auto [doc_id, elem_index] =
-                array_offsets.ElementIDToRowID(element_ids[i]);
+                struct_element_offsets.ElementIDToRowID(element_ids[i]);
             doc_offsets.push_back(doc_id);
             element_indices.push_back(elem_index);
         }
@@ -105,11 +161,12 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
 // search already receives logical IDs from Knowhere: indexed paths use IdMap,
 // raw BF paths pass physical->logical IDs through BitsetView.
 inline void
-FinalizeVectorSearchOffsets(SearchResult& result,
-                            const milvus::IArrayOffsets* array_offsets) {
-    if (array_offsets != nullptr) {
+FinalizeVectorSearchOffsets(
+    SearchResult& result,
+    const milvus::IStructElementOffsets* struct_element_offsets) {
+    if (struct_element_offsets != nullptr) {
         auto [doc_offsets, elem_indices] =
-            ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
+            ApplyElementIDMapping(result.seg_offsets_, *struct_element_offsets);
         result.seg_offsets_ = std::move(doc_offsets);
         result.element_indices_ = std::move(elem_indices);
         result.element_level_ = true;

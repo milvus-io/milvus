@@ -77,6 +77,25 @@ BsonInvertedIndex::AddRecord(const std::string& key,
 }
 
 void
+BsonInvertedIndex::AddRecords(const std::string& key,
+                              std::vector<int64_t> records) {
+    if (records.empty()) {
+        return;
+    }
+
+    auto& destination = inverted_index_map_[key];
+    if (destination.empty()) {
+        destination = std::move(records);
+        return;
+    }
+
+    // Let vector retain spare capacity from its geometric growth. Reserving
+    // exactly the required size for every chunk would reallocate and copy the
+    // entire accumulated postings list on nearly every merge.
+    destination.insert(destination.end(), records.begin(), records.end());
+}
+
+void
 BsonInvertedIndex::BuildIndex() {
     if (wrapper_ == nullptr) {
         if (tantivy_index_exist(path_.c_str())) {
@@ -116,9 +135,10 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         // index_files are absolute remote paths (basePath already prepended by caller)
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
-        AssertInfo(tantivy_index_exist(path_.c_str()),
-                   "index dir not exist: {}",
-                   path_);
+        if (!(tantivy_index_exist(path_.c_str()))) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
+        }
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
         if (!load_in_mmap) {
@@ -152,14 +172,17 @@ BsonInvertedIndex::UploadIndex() {
             LOG_WARN("{} is a directory", file_path);
         } else {
             LOG_INFO("trying to add bson inverted index file: {}", file_path);
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
-                       "failed to add bson inverted index file: {}",
-                       file_path);
+            if (!(disk_file_manager_->AddJsonSharedIndexLog(file_path))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add bson inverted index file: {}",
+                          file_path);
+            }
             LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());

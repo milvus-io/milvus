@@ -188,7 +188,10 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", data[i])
 		}
 		embeddingMap := map[uint32]float32{}
-		tokenStream := tokenizer.NewTokenStream(data[i])
+		tokenStream, err := tokenizer.NewTokenStream(data[i])
+		if err != nil {
+			return err
+		}
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
 			// TODO More Hash Option
@@ -262,7 +265,10 @@ func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerTo
 
 	for i := 0; i < len(data); i++ {
 		result := []*milvuspb.AnalyzerToken{}
-		tokenStream := tokenizer.NewTokenStream(data[i])
+		tokenStream, err := tokenizer.NewTokenStream(data[i])
+		if err != nil {
+			return err
+		}
 		for tokenStream.Advance() {
 			var token *milvuspb.AnalyzerToken
 			if withDetail {

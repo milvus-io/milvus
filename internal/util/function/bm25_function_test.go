@@ -168,8 +168,8 @@ func (s *BM25FunctionRunnerSuite) newCloneCountingAnalyzer(cloneCount *atomic.In
 		cloneCount.Add(1)
 		return tokenizer, nil
 	})
-	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
-		return &singleTokenStream{token: text}
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) (interfaces.TokenStream, error) {
+		return &singleTokenStream{token: text}, nil
 	})
 	tokenizer.EXPECT().Destroy().Return()
 	return tokenizer
@@ -178,8 +178,8 @@ func (s *BM25FunctionRunnerSuite) newCloneCountingAnalyzer(cloneCount *atomic.In
 func (s *BM25FunctionRunnerSuite) newTrackingAnalyzer(active *atomic.Int32, maxActive *atomic.Int32) *interfaces.MockAnalyzer {
 	tokenizer := interfaces.NewMockAnalyzer(s.T())
 	tokenizer.EXPECT().Clone().Return(tokenizer, nil)
-	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
-		return newTrackingTokenStream(text, active, maxActive)
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) (interfaces.TokenStream, error) {
+		return newTrackingTokenStream(text, active, maxActive), nil
 	})
 	tokenizer.EXPECT().Destroy().Return()
 	return tokenizer

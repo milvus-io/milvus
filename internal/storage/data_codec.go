@@ -417,10 +417,14 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			}
 		}
 	case schemapb.DataType_Array:
-		for i, singleArray := range singleData.(*ArrayFieldData).Data {
+		arrayData := singleData.(*ArrayFieldData)
+		if arrayData.GetElementNullable() {
+			return merr.WrapErrStorageMsg("element nullable Array is not supported in V1 storage format")
+		}
+		for i, singleArray := range arrayData.Data {
 			isValid := true
-			if len(singleData.(*ArrayFieldData).ValidData) != 0 {
-				isValid = singleData.(*ArrayFieldData).ValidData[i]
+			if len(arrayData.ValidData) != 0 {
+				isValid = arrayData.ValidData[i]
 			}
 			if err = eventWriter.AddOneArrayToPayload(singleArray, isValid); err != nil {
 				return err
@@ -472,6 +476,9 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 		}
 	case schemapb.DataType_ArrayOfVector:
 		vectorArrayData := singleData.(*VectorArrayFieldData)
+		if vectorArrayData.GetElementNullable() {
+			return merr.WrapErrStorageMsg("element nullable ArrayOfVector is not supported in V1 storage format")
+		}
 		if vectorArrayData.Nullable {
 			return merr.WrapErrStorageMsg("nullable ArrayOfVector is not supported in V1 storage format")
 		}

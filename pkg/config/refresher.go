@@ -72,7 +72,8 @@ func (r *refresher) refreshPeriodically(name string) {
 		case <-ticker.C:
 			err := r.fetchFunc()
 			if err != nil {
-				mlog.RatedWarn(ctx, rate.Limit(60), "can not pull configs", mlog.Err(err))
+				mlog.RatedWarn(ctx, rate.Limit(60), "can not pull configs",
+					mlog.String("source", name), mlog.String("error", RedactedValue))
 			}
 		case <-r.intervalDone:
 			mlog.Info(ctx, "stop refreshing configurations", mlog.String("source", name))

@@ -257,6 +257,13 @@ func TestParseFuncChainProto_RoundDecimalFunction(t *testing.T) {
 func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
 	repr, err := ProtoOpToRepr(&schemapb.FunctionChainOp{
 		Op: types.OpTypeMap,
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(
+				intParam(int64(schemapb.DataType_Float)),
+				intParam(int64(schemapb.DataType_VarChar)),
+				intParam(int64(schemapb.DataType_Float)),
+			),
+		},
 		Expr: &schemapb.FunctionChainExpr{
 			Name: "expr",
 			Args: []*schemapb.FunctionChainExprArg{
@@ -273,12 +280,75 @@ func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, repr)
-	assert.Equal(t, []string{"$score", "tag"}, repr.Inputs)
+	assert.Equal(t, []string{"$score", "tag", "$score"}, repr.Inputs)
+	assert.Equal(t, []schemapb.DataType{
+		schemapb.DataType_Float,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_Float,
+	}, repr.InputDataTypes)
+	assert.NotContains(t, repr.Params, types.InputDataTypesParam)
 	assert.Equal(t, []string{"new_score"}, repr.Outputs)
 	require.NotNil(t, repr.Function)
 	assert.Equal(t, "expr", repr.Function.Name)
 	require.Len(t, repr.Function.Args, 4)
 	assert.Equal(t, "($0 > $1) && ($2 != \"dog\")", repr.Function.Params["expr"].GetStringValue())
+}
+
+func TestProtoOpToReprInputDataTypes(t *testing.T) {
+	pb := &schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{`metadata["price"]`, "$id"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"desc": boolParam(true),
+			types.InputDataTypesParam: arrayParam(
+				intParam(int64(schemapb.DataType_Double)),
+				intParam(int64(schemapb.DataType_None)),
+			),
+		},
+	}
+
+	repr, err := ProtoOpToRepr(pb)
+	require.NoError(t, err)
+	assert.Equal(t, []schemapb.DataType{schemapb.DataType_Double, schemapb.DataType_None}, repr.InputDataTypes)
+	assert.NotContains(t, repr.Params, types.InputDataTypesParam)
+	assert.Contains(t, repr.Params, "desc")
+	assert.Contains(t, pb.GetParams(), types.InputDataTypesParam, "conversion must not mutate the request proto")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(),
+		},
+	})
+	assert.ErrorContains(t, err, "does not match input count")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: stringParam("Double"),
+		},
+	})
+	assert.ErrorContains(t, err, "must be an array")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(stringParam("Double")),
+		},
+	})
+	assert.ErrorContains(t, err, "must be an int64")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(intParam(9999)),
+		},
+	})
+	assert.ErrorContains(t, err, "unknown data type value")
 }
 
 func TestProtoChainToReprBuildsInfo(t *testing.T) {
@@ -353,6 +423,7 @@ func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
 			repr := &ChainRepr{Operators: []OperatorRepr{test.op}}
 			require.NoError(t, repr.RefreshInfo())
 			require.Len(t, repr.Info.Ops, 1)
+			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.op.Inputs))
 			assert.Equal(t, test.wantReads, repr.Info.Ops[0].ReadNames)
 			assert.Equal(t, test.wantWrites, repr.Info.Ops[0].WriteNames)
 			assert.Equal(t, test.wantRequired, repr.Info.RequiredInputs)
@@ -389,6 +460,9 @@ func TestProtoStageToReprStage(t *testing.T) {
 func TestIsFunctionChainSystemName(t *testing.T) {
 	assert.True(t, IsFunctionChainSystemName("$score"))
 	assert.True(t, IsFunctionChainSystemName("$id"))
+	assert.True(t, IsFunctionChainSystemName("$unknown"))
+	assert.False(t, IsFunctionChainSystemName("$meta"))
+	assert.False(t, IsFunctionChainSystemName(`$meta["value"]`))
 	assert.False(t, IsFunctionChainSystemName("score"))
 	assert.False(t, IsFunctionChainSystemName(""))
 }

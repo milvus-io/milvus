@@ -190,6 +190,8 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		return merr.WrapErrParameterInvalidMsg("cannot change the data type of field %q in place", name)
 	case oldField.GetElementType() != newField.GetElementType():
 		return merr.WrapErrParameterInvalidMsg("cannot change the element type of field %q in place", name)
+	case oldField.GetElementNullable() != newField.GetElementNullable():
+		return merr.WrapErrParameterInvalidMsg("cannot change the element nullability of field %q in place", name)
 	case oldField.GetNullable() != newField.GetNullable():
 		return merr.WrapErrParameterInvalidMsg("cannot change the nullability of field %q in place", name)
 	case !oldField.GetIsFunctionOutput() && newField.GetIsFunctionOutput():

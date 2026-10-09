@@ -26,6 +26,90 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
+func TestLOBSourcePartitionBaseMismatch(t *testing.T) {
+	outputPartitionBase := "/var/lib/milvus/data/insert_log/1/2"
+	tests := []struct {
+		name      string
+		manifests map[int64]string
+		want      bool
+		wantErr   bool
+	}{
+		{
+			name: "same canonical partition",
+			manifests: map[int64]string{
+				10: packed.MarshalManifestPath(outputPartitionBase+"/10", 1),
+				11: packed.MarshalManifestPath(outputPartitionBase+"/11", 2),
+			},
+		},
+		{
+			name: "legacy partition",
+			manifests: map[int64]string{
+				10: packed.MarshalManifestPath("/var/lib/milvus/data/files/insert_log/1/2/10", 1),
+			},
+			want: true,
+		},
+		{
+			name: "mixed partitions",
+			manifests: map[int64]string{
+				10: packed.MarshalManifestPath(outputPartitionBase+"/10", 1),
+				11: packed.MarshalManifestPath("/var/lib/milvus/data/files/insert_log/1/2/11", 1),
+			},
+			want: true,
+		},
+		{
+			name:      "invalid manifest",
+			manifests: map[int64]string{10: "not-json"},
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := LOBSourcePartitionBaseMismatch(tc.manifests, outputPartitionBase)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestLOBCompactionContext_ForceRewriteAll(t *testing.T) {
+	ctx := NewLOBCompactionContext()
+	ctx.SetCompactionType(datapb.CompactionType_SortCompaction, 1, 1)
+	ctx.ComputeStrategies([]int64{101, 102}, DefaultLOBHoleRatioThreshold)
+
+	ctx.ForceRewriteAll([]int64{101, 102})
+
+	assert.True(t, ctx.IsForced)
+	assert.Equal(t, LOBStrategyRewriteAll, ctx.ForcedStrategy)
+	assert.False(t, ctx.HasReuseAllFields())
+	assert.True(t, ctx.ShouldRewriteAnyField())
+	assert.Equal(t, LOBStrategyRewriteAll, ctx.GetStrategy(101))
+	assert.Equal(t, LOBStrategyRewriteAll, ctx.GetStrategy(102))
+}
+
+func TestLOBCompactionContext_CrossPartitionRewriteConfigs(t *testing.T) {
+	ctx := NewLOBCompactionContext()
+	ctx.SetCompactionType(datapb.CompactionType_SortCompaction, 1, 1)
+	ctx.ComputeStrategies([]int64{101}, DefaultLOBHoleRatioThreshold)
+	ctx.ForceRewriteAllAcrossPartitionBases([]int64{101})
+
+	sourceManifest := packed.MarshalManifestPath("/data/files/insert_log/1/2/10", 3)
+	sourceConfigs, err := ctx.GetSourceTextColumnConfigs(sourceManifest)
+	assert.NoError(t, err)
+	if assert.Len(t, sourceConfigs, 1) {
+		assert.Equal(t, "/data/files/insert_log/1/2/lobs/101", sourceConfigs[0].LobBasePath)
+	}
+	outputConfigs := ctx.GetTextColumnConfigs("/data/insert_log/1/2", 64, 1024, 512)
+	if assert.Len(t, outputConfigs, 1) {
+		assert.Equal(t, "/data/insert_log/1/2/lobs/101", outputConfigs[0].LobBasePath)
+		assert.False(t, outputConfigs[0].RewriteMode, "input is already decoded by the source reader")
+	}
+}
+
 func TestGetForcedStrategy_AllTypes(t *testing.T) {
 	tests := []struct {
 		name         string

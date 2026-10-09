@@ -85,6 +85,10 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         }
     }
 
+    if (active_count >= 0) {
+        search_bitset.set_require_id_boundary(true);
+    }
+
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
                                                       num_queries,
                                                       dataset,

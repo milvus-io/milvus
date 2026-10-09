@@ -82,6 +82,23 @@ func (s *BulkImportSuite) TestBulkImport() {
 	})
 }
 
+func (s *BulkImportSuite) TestBulkImportRLSOptions() {
+	request, err := NewBulkImportOption("http://localhost", "hello_milvus", [][]string{{"files/a.json"}}).
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		GetRequest()
+
+	s.NoError(err)
+	s.JSONEq(`{
+		"collectionName": "hello_milvus",
+		"files": [["files/a.json"]],
+		"options": {
+			"rls_principal": "alice",
+			"skip_rls": "true"
+		}
+	}`, string(request))
+}
+
 func (s *BulkImportSuite) TestListImportJobs() {
 	s.Run("normal_case", func() {
 		svr := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {

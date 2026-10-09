@@ -27,7 +27,19 @@ import (
 )
 
 const (
-	maxSupportedPolicyActions = 8
+	maxSupportedPolicyActions       = 8
+	maxJSONEscapeBytesPerByte int64 = int64(len(`\u0000`))
+	maxJSONNumberLength             = len(`-1.7976931348623157e+308`)
+	// maxRLSPrincipalMetadataBytes leaves headroom for one unchunked WAL
+	// message and one metastore record while bounding JSON decoding and plan
+	// template expansion.
+	maxRLSPrincipalMetadataBytes int64 = 1 << 20
+	// One array must fit the existing materialized-tag budget even before
+	// string payloads. This structural ceiling is not a refreshable quota.
+	maxRLSArrayTagElements = int(maxRLSPrincipalMetadataBytes/rlsTemplateValueSize) - 1
+	// Template expansion still materializes individual protobuf values. Keep
+	// its existing conservative charge independent of compact cache storage.
+	rlsTemplateValueSize int64 = 64
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -60,6 +72,26 @@ func ValidateRequestTarget(dbName, collectionName string) error {
 	return validateTransportIdentifier("collection name", collectionName)
 }
 
+// ValidatePolicyRoles rejects the deprecated role-scoped policy contract.
+// RLS principals, rather than Milvus RBAC roles, are the only runtime policy identity.
+func ValidatePolicyRoles(roles []string) error {
+	if len(roles) > 0 {
+		return merr.WrapErrParameterInvalidMsg("role-scoped RLS policies are not supported; roles must be empty")
+	}
+	return nil
+}
+
+// ValidatePolicyActionCount bounds the raw action list before conversion.
+func ValidatePolicyActionCount(actionCount int) error {
+	if actionCount == 0 {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
+	}
+	if actionCount > maxSupportedPolicyActions {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	}
+	return nil
+}
+
 // ValidatePolicyName validates the required policy name without applying the
 // creation limit, so existing policies remain addressable after a limit change.
 func ValidatePolicyName(policyName string) error {
@@ -83,17 +115,23 @@ func ValidatePolicyNameWithLimit(policyName string) error {
 
 // ValidatePolicy validates the structural fields of a policy definition for creation.
 func ValidatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
-	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyNameWithLimit)
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyNameWithLimit, true)
 }
 
 // ValidatePolicyForUpdate validates the structural fields of an existing policy.
 // The refreshable creation-name limit is intentionally not reapplied because
 // policy names are immutable and must remain addressable after the limit changes.
 func ValidatePolicyForUpdate(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
-	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName)
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName, true)
 }
 
-func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string, validateName func(string) error) error {
+// ValidateStoredPolicy validates persisted policy metadata without reapplying
+// refreshable write-admission limits.
+func ValidateStoredPolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName, false)
+}
+
+func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string, validateName func(string) error, enforceExpressionLength bool) error {
 	if err := validateName(policyName); err != nil {
 		return err
 	}
@@ -102,23 +140,22 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid RLS policy type: %s", policyType.String())
 	}
-	if len(actions) == 0 {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
-	}
-	if len(actions) > maxSupportedPolicyActions {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	if err := ValidatePolicyActionCount(len(actions)); err != nil {
+		return err
 	}
 	usingExprEmpty := strings.TrimSpace(usingExpr) == ""
 	checkExprEmpty := strings.TrimSpace(checkExpr) == ""
 	if usingExprEmpty && checkExprEmpty {
 		return merr.WrapErrParameterInvalidMsg("RLS policy must define using_expr or check_expr")
 	}
-	maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxExpressionLength.GetAsInt()
-	if len(usingExpr) > maxExpressionLength {
-		return merr.WrapErrParameterInvalidMsg("RLS using_expr exceeds max length %d", maxExpressionLength)
-	}
-	if len(checkExpr) > maxExpressionLength {
-		return merr.WrapErrParameterInvalidMsg("RLS check_expr exceeds max length %d", maxExpressionLength)
+	if enforceExpressionLength {
+		maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxExpressionLength.GetAsInt()
+		if len(usingExpr) > maxExpressionLength {
+			return merr.WrapErrParameterInvalidMsg("RLS using_expr exceeds max length %d", maxExpressionLength)
+		}
+		if len(checkExpr) > maxExpressionLength {
+			return merr.WrapErrParameterInvalidMsg("RLS check_expr exceeds max length %d", maxExpressionLength)
+		}
 	}
 
 	seen := make(map[PolicyAction]struct{}, len(actions))
@@ -180,6 +217,65 @@ func ValidatePrincipalName(principalName string) error {
 	return validateTransportIdentifier("principal name", principalName)
 }
 
+func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
+	maxPayloadBytes := maxRLSPrincipalMetadataBytes
+	if maxTags > 0 {
+		maxPayloadBytes = min(maxPrincipalTagsJSONLength(maxTags), maxPayloadBytes)
+	}
+	if int64(len(payload)) > maxPayloadBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal tags JSON exceeds transport max length %d",
+			maxPayloadBytes,
+		))
+	}
+	return nil
+}
+
+// ValidatePrincipalTagsRecordSize bounds the complete canonical principal
+// record after incremental tag updates have been merged.
+func ValidatePrincipalTagsRecordSize(principalName string, tags map[string]TagValue) error {
+	payload, err := TagsToJSON(tags)
+	if err != nil {
+		return err
+	}
+	payloadBytes := int64(len(payload))
+	if payloadBytes > maxRLSPrincipalMetadataBytes ||
+		int64(len(principalName)) > maxRLSPrincipalMetadataBytes-payloadBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal name and tags exceed max length %d",
+			maxRLSPrincipalMetadataBytes,
+		))
+	}
+	return nil
+}
+
+func maxPrincipalTagsJSONLength(maxTags int) int64 {
+	maxTagKeyLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt())
+	maxTagValueLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt())
+	maxArrayElements := int64(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt())
+	if maxTagKeyLength > math.MaxInt64/maxJSONEscapeBytesPerByte ||
+		maxTagValueLength > (math.MaxInt64-2)/maxJSONEscapeBytesPerByte {
+		return math.MaxInt64
+	}
+
+	maxKeyBytes := maxTagKeyLength * maxJSONEscapeBytesPerByte
+	maxScalarBytes := max(maxTagValueLength*maxJSONEscapeBytesPerByte+2, int64(maxJSONNumberLength))
+	if maxScalarBytes == math.MaxInt64 || maxArrayElements > (math.MaxInt64-2)/(maxScalarBytes+1) {
+		return math.MaxInt64
+	}
+	// Array elements use the scalar bound plus one conservative comma each.
+	maxValueBytes := max(maxScalarBytes, 2+maxArrayElements*(maxScalarBytes+1))
+	// Two key quotes, one colon, and one conservative comma per member.
+	if maxKeyBytes > math.MaxInt64-maxValueBytes-4 {
+		return math.MaxInt64
+	}
+	maxMemberBytes := maxKeyBytes + maxValueBytes + 4
+	if int64(maxTags) > (math.MaxInt64-2)/maxMemberBytes {
+		return math.MaxInt64
+	}
+	return 2 + int64(maxTags)*maxMemberBytes // object braces plus members
+}
+
 // ValidatePrincipalNameWithLimit validates a principal name for create or update.
 func ValidatePrincipalNameWithLimit(principalName string) error {
 	if err := ValidatePrincipalName(principalName); err != nil {
@@ -227,24 +323,49 @@ func ValidateTags(tags map[string]TagValue) error {
 	if len(tags) > paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt() {
 		return merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
 	}
+	maxKeyLength := paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
+	maxValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+	maxArrayElements := min(paramtable.Get().ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt(), maxRLSArrayTagElements)
 	for key, value := range tags {
-		if err := ValidateTagKeyWithLimit(key); err != nil {
+		if err := ValidateTagKey(key); err != nil {
 			return err
 		}
-		switch value.Kind {
-		case TagValueKindString:
-			maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
-			if len(value.StringValue) > maxTagValueLength {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
-			}
-		case TagValueKindInt64:
-		case TagValueKindDouble:
-			if math.IsNaN(value.DoubleValue) || math.IsInf(value.DoubleValue, 0) {
-				return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has a non-finite double value", key)
-			}
-		default:
-			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has unsupported value type", key)
+		if len(key) > maxKeyLength {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxKeyLength)
 		}
+		if err := validateTagValue(key, value, maxValueLength, maxArrayElements); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTagValue(key string, value TagValue, maxValueLength, maxArrayElements int) error {
+	switch value.Kind {
+	case TagValueKindString:
+		if len(value.StringValue) > maxValueLength {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxValueLength)
+		}
+	case TagValueKindInt64:
+	case TagValueKindDouble:
+		if math.IsNaN(value.DoubleValue) || math.IsInf(value.DoubleValue, 0) {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has a non-finite double value", key)
+		}
+	case TagValueKindArray:
+		if value.arrayValue == nil {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid array value", key)
+		}
+		if value.arrayValue.len() > maxArrayElements {
+			return merr.WrapErrParameterInvalidMsg("RLS principal tag %q exceeds max array elements %d", key, maxArrayElements)
+		}
+		for i := 0; i < value.arrayValue.len(); i++ {
+			element := value.arrayValue.at(i)
+			if err := validateTagValue(key, element, maxValueLength, maxArrayElements); err != nil {
+				return err
+			}
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("RLS principal tag %q has unsupported value type", key)
 	}
 	return nil
 }

@@ -452,6 +452,8 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	metrics.QueryCoordResourceGroupReplicaTotal.DeletePartialMatch(prometheus.Labels{
 		metrics.ResourceGroupLabelName: rgName,
 	})
+	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
+	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
 
 	mlog.Info(context.TODO(), "remove resource group",
 		mlog.String("rgName", rgName),
@@ -486,7 +488,7 @@ func (rm *ResourceManager) GetNodes(ctx context.Context, rgName string) ([]int64
 	return rm.groups[rgName].GetNodes(), nil
 }
 
-// GetResourceGroupByNodeID return whether resource group's node match required node count
+// VerifyNodeCount verifies that every required resource group has exactly the required number of nodes.
 func (rm *ResourceManager) VerifyNodeCount(ctx context.Context, requiredNodeCount map[string]int) error {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
@@ -529,6 +531,18 @@ func (rm *ResourceManager) getResourceGroupByNodeID(nodeID int64) *ResourceGroup
 		return rm.groups[rgName]
 	}
 	return nil
+}
+
+// GetResourceGroupByNodeID returns the name of the resource group a node currently belongs to,
+// or an empty string if the node is not in any resource group (e.g. it already left the session).
+// The caller must hold no lock on rm when calling this.
+func (rm *ResourceManager) GetResourceGroupByNodeID(nodeID int64) string {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	if rg := rm.getResourceGroupByNodeID(nodeID); rg != nil {
+		return rg.GetName()
+	}
+	return ""
 }
 
 // IsNodeSuspended checks whether a node is suspended.
@@ -1173,6 +1187,9 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 
 // setupInMemResourceGroup setup resource group in memory.
 func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
+	metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(r.GetName()).Add(0)
+	metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(r.GetName()).Add(0)
+
 	// clear old metrics and nodeIDMap entries.
 	// Use GetAllNodes (bypasses label filter) to ensure all physical nodes are cleaned up,
 	// even when the RG's label filter has changed.

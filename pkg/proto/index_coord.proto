@@ -251,6 +251,12 @@ message StorageConfig {
     uint32 max_connections = 16;
     string ssl_tls_min_version = 17;
     bool use_crc32c_checksum = 18;
+    uint32 talon_mode = 19;
+    uint32 talon_small_read_threshold = 20;
+    string talon_coordinator = 21;
+    uint32 talon_block_size = 22;
+    uint32 talon_max_idle_per_addr = 23;
+    bool talon_enable_for_external_table = 24;
 }
 
 // Synchronously modify OptionalFieldInfo in index_cgo_msg.proto file

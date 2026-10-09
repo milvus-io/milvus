@@ -43,7 +43,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "ValidConfig",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,
@@ -57,7 +56,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidMemoryWatermark",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       0,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,
@@ -71,7 +69,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidGrowingBytesHWM",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       0,
 				growingBytesLWM:       1024,
@@ -85,7 +82,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "GrowingBytesHWM_LessThan_LWM",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       1024,
 				growingBytesLWM:       2048,
@@ -99,7 +95,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidMaxLifetime",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,
@@ -113,7 +108,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidMaxIdleTime",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,
@@ -127,21 +121,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidMinSizeFromIdleTime",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
-				memoryThreshold:       1024,
-				growingBytesHWM:       2048,
-				growingBytesLWM:       1024,
-				l1MaxLifetime:         time.Hour,
-				l1MaxIdleTime:         time.Minute,
-				l1MinSizeFromIdleTime: 0,
-				l0MaxLifetime:         10 * time.Minute,
-			},
-			wantErr: true,
-		},
-		{
-			name: "InvalidMaxBinlogFileNum",
-			config: statsConfig{
-				maxBinlogFileNum:      0,
 				memoryThreshold:       1024,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,
@@ -155,7 +134,6 @@ func TestStatsConfig_Validate(t *testing.T) {
 		{
 			name: "InvalidL0MaxLifetime",
 			config: statsConfig{
-				maxBinlogFileNum:      100,
 				memoryThreshold:       1024,
 				growingBytesHWM:       2048,
 				growingBytesLWM:       1024,

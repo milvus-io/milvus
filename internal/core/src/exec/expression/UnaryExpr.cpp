@@ -457,7 +457,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
         value_arg_.SetValue<ValueType>(expr_->val_);
         arg_inited_ = true;
     }
-    ValueType val = value_arg_.GetValue<ValueType>();
+    const ValueType& val = value_arg_.GetValue<ValueType>();
     auto op_type = expr_->op_type_;
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -473,7 +473,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val,
+            const ValueType& val,
             int index) {
         if (data == nullptr) {
             processed_cursor += size;
@@ -711,7 +711,11 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // get all elements.
-    auto val = GetValueFromProto<proto::plan::Array>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<proto::plan::Array>(expr_->val_);
+        arg_inited_ = true;
+    }
+    const auto& val = value_arg_.GetValue<proto::plan::Array>();
     if (val.array_size() == 0) {
         // rollback to bruteforce. no candidates will be filtered out via index.
         return ExecRangeVisitorImplArray<proto::plan::Array>(context);
@@ -725,38 +729,41 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             for (auto const& element : val.array()) {
                 auto e = GetValueFromProto<IndexInnerType>(element);
                 if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                    elems.push_back(e);
+                    elems.push_back(std::move(e));
                 }
             }
 
-            std::shared_ptr<const IArrayOffsets> array_offsets;
+            std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
             if (index_ptr->IsNestedIndex()) {
-                array_offsets = segment_->GetArrayOffsets(field_id_);
-                AssertInfo(array_offsets != nullptr,
-                           "array offsets are required for nested ARRAY index");
+                struct_element_offsets =
+                    segment_->GetStructElementOffsets(field_id_);
+                AssertInfo(struct_element_offsets != nullptr,
+                           "struct element offsets are required for nested "
+                           "ARRAY index");
             }
 
-            auto to_row_offset = [&array_offsets](size_t offset) -> size_t {
-                if (array_offsets == nullptr) {
+            auto to_row_offset =
+                [&struct_element_offsets](size_t offset) -> size_t {
+                if (struct_element_offsets == nullptr) {
                     return offset;
                 }
-                auto [row_id, _] = array_offsets->ElementIDToRowID(
+                auto [row_id, _] = struct_element_offsets->ElementIDToRowID(
                     static_cast<int32_t>(offset));
                 return static_cast<size_t>(row_id);
             };
 
             // filtering by index, get candidates.
-            std::function<bool(milvus::proto::plan::Array& /*val*/,
+            std::function<bool(const milvus::proto::plan::Array& /*val*/,
                                int64_t /*offset*/)>
                 is_same;
 
             if (segment_->is_chunked()) {
-                is_same = [this, reverse](milvus::proto::plan::Array& val,
+                is_same = [this, reverse](const milvus::proto::plan::Array& val,
                                           int64_t offset) -> bool {
                     auto [chunk_idx, chunk_offset] =
                         GetChunkByOffset(field_id_, offset);
-                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
+                    auto pw =
+                        GetChunkView<milvus::ArrayView>(field_id_, chunk_idx);
                     auto chunk = pw.get();
                     return chunk.first[chunk_offset].is_same_array(val) ^
                            reverse;
@@ -764,12 +771,12 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
                 is_same = [this, size_per_chunk, reverse](
-                              milvus::proto::plan::Array& val,
+                              const milvus::proto::plan::Array& val,
                               int64_t offset) -> bool {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
-                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
+                    auto pw =
+                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
                     auto chunk = pw.get();
                     auto array_view = chunk.data() + chunk_offset;
                     return array_view->is_same_array(val) ^ reverse;
@@ -873,7 +880,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    ExprValueType val = value_arg_.GetValue<ExprValueType>();
+    const ExprValueType& val = value_arg_.GetValue<ExprValueType>();
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -922,7 +929,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ExprValueType val) {
+            const ExprValueType& val) {
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -1272,12 +1279,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 } else {
                     ShreddingExecutor<ColType, ValType> executor(
                         op_type, pointer, val);
-                    index->ExecutorForShreddingData<ColType>(op_ctx_,
-                                                             target_field,
-                                                             executor,
-                                                             nullptr,
-                                                             target_res_view,
-                                                             target_valid_view);
+                    index->ExecutorForShreddingData<ColType>(
+                        op_ctx_,
+                        target_field,
+                        std::move(executor),
+                        nullptr,
+                        target_res_view,
+                        target_valid_view);
                 }
                 res_view.inplace_or_with_count(target_res_view, active_count_);
                 valid_res_view.inplace_or_with_count(target_valid_view,
@@ -1628,7 +1636,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
     auto op_type = expr_->op_type_;
-    auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
+    auto execute_sub_batch = [op_type](Index* index_ptr,
+                                       const IndexInnerType& val) {
         TargetBitmap res;
         switch (op_type) {
             case proto::plan::GreaterThan: {
@@ -1694,7 +1703,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         }
         return res;
     };
-    IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
+    const IndexInnerType& val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -1998,12 +2007,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, expr_type, val](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipUnaryRange<T>(
-                op_ctx, field_id, chunk_id, expr_type, val);
+    SkipChunkFn skip_index_func;
+    if (CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        skip_index_func = [expr_type, val](const FieldSkipMetricsView& view,
+                                           int64_t chunk_id) {
+            return view.CanSkipUnaryRange<T>(chunk_id, expr_type, val);
         };
+    }
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -2012,8 +2022,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessElementLevelByOffsets<T>(
                 execute_sub_batch, skip_index_func, input, res, valid_res, val);
         } else {
-            processed_size = ProcessDataByOffsets<T>(
-                execute_sub_batch, skip_index_func, input, res, valid_res, val);
+            processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             bitmap_input,
+                                                             val);
         }
     } else {
         if (expr_->column_.element_level_) {
@@ -2021,8 +2036,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             processed_size = ProcessDataChunksForElementLevel<T>(
                 execute_sub_batch, skip_index_func, res, valid_res, val);
         } else {
-            processed_size = ProcessDataChunks<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, val);
+            processed_size = ProcessDataChunksWithMask<T>(execute_sub_batch,
+                                                          skip_index_func,
+                                                          res,
+                                                          valid_res,
+                                                          bitmap_input,
+                                                          val);
         }
     }
     AssertInfo(processed_size == real_batch_size,
@@ -2246,7 +2265,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
     }
-    auto query = value_arg_.GetValue<std::string>();
+    const auto& query = value_arg_.GetValue<std::string>();
 
     int64_t slop = 0;
     if (expr_->op_type_ == proto::plan::PhraseMatch) {
@@ -2302,9 +2321,14 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
+        // Growing text-index visibility can change after commit/reload without
+        // changing active_count_. Only sealed text results are safe to cache
+        // across requests; a null cache segment bypasses both reads and writes.
+        const auto* cache_segment =
+            segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
-            segment_,
-            this->ToString(),
+            cache_segment,
+            [this]() { return this->ToString(); },
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
                 auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
@@ -2379,7 +2403,7 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto index = pinned_ngram_index_.get();
     AssertInfo(index != nullptr,
                "ngram index should not be null, field_id: {}",
@@ -2397,7 +2421,7 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto index = pinned_ngram_index_.get();
     AssertInfo(index != nullptr,
                "ngram index should not be null, field_id: {}",
@@ -2442,7 +2466,7 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return std::nullopt;
@@ -2546,7 +2570,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return std::nullopt;
@@ -2657,21 +2681,55 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyUnaryRangeFilterExpr::PrefetchRawData() {
+    if (!CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        SegmentExpr::PrefetchRawData(field_id_);
+        return;
+    }
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+    using H =
+        std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           U>;
     auto op_type = expr_->op_type_;
-    auto skip_index = segment_->GetSkipIndex();
-    U val = GetValueFromProto<U>(expr_->val_);
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
-        if (skip_index->CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
-            continue;
+    auto prefetch = [&](const auto& val) {
+        using ValueType = std::decay_t<decltype(val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
+            const bool skip =
+                skip_view_.CanSkipUnaryRange<ValueType>(i, op_type, val);
+            if (skip) {
+                continue;
+            }
+            chunks_may_hit.push_back(i);
         }
-        chunks_may_hit.push_back(i);
-    }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    H val = GetValueWithCastNumber<H>(expr_->val_);
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Skip metrics use the field's physical type, so keep the literal wide
+        // for the bounds check and narrow it only when it is representable.
+        // An out-of-range literal must never reach CanSkipUnaryRange: the
+        // previous GetValueFromProto<U> truncated it to U{} without reporting
+        // the overflow, and the bounds comparison then pruned an arbitrary
+        // subset of cells. The scan never applies that value either --
+        // PreCheckOverflow<T> answers the whole predicate from the literal
+        // alone and touches the column only to materialize validity, which
+        // ApplyFieldValidData skips outright for a non-nullable field and
+        // which the element-level branch fills in without any read. Prefetch
+        // exactly what that path will read: all cells, or none.
+        if (query::out_of_range<U>(val)) {
+            if (is_nullable_ && !expr_->column_.element_level_) {
+                SegmentExpr::PrefetchRawData(field_id_);
+            }
+            return;
+        }
+        prefetch(static_cast<U>(val));
+    } else {
+        prefetch(val);
+    }
 }
 
 }  // namespace exec

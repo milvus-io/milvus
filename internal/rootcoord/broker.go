@@ -246,8 +246,8 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	}
 
 	partitionIDs := make([]int64, len(colMeta.Partitions))
-	for _, p := range colMeta.Partitions {
-		partitionIDs = append(partitionIDs, p.PartitionID)
+	for i, p := range colMeta.Partitions {
+		partitionIDs[i] = p.PartitionID
 	}
 	dcReq := &datapb.AlterCollectionRequest{
 		CollectionID:   collectionID,

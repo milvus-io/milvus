@@ -13,6 +13,7 @@
 #include <filesystem>
 #include "google/cloud/storage/retry_policy.h"
 #include "GcpNativeClientManager.h"
+#include "common/EasyAssert.h"
 
 namespace gcs = google::cloud::storage;
 
@@ -32,9 +33,12 @@ GcpNativeClientManager::GcpNativeClientManager(
         options.set<gcs::Oauth2CredentialsOption>(std::move(credentials));
     } else {
         if (gcp_credential_json.empty()) {
-            throw std::runtime_error(
-                "GCP native error: GCS service account credentials are "
-                "missing.");
+            ThrowInfo(
+                ErrorCode::ConfigInvalid,
+                "{}",
+                std::string(
+                    "GCP native error: GCS service account credentials are "
+                    "missing."));
         }
         auto credentials =
             google::cloud::MakeServiceAccountCredentials(gcp_credential_json);

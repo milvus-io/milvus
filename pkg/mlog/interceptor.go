@@ -11,12 +11,14 @@ import (
 )
 
 // MetadataPrefix is the prefix for mlog fields in gRPC metadata.
-// Type-encoded prefixes: "mlog-s-" for string, "mlog-i-" for int64.
+// Type-encoded prefixes: "mlog-s-" for string, "mlog-i-" for int64, and
+// "mlog-u-" for uint64.
 const MetadataPrefix = "mlog-"
 
 const (
 	metadataPrefixString = MetadataPrefix + "s-"
 	metadataPrefixInt64  = MetadataPrefix + "i-"
+	metadataPrefixUint64 = MetadataPrefix + "u-"
 )
 
 // UnaryServerInterceptor extracts propagated fields from incoming metadata
@@ -60,7 +62,8 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 	var fields []Field
 
 	// Extract propagated fields from gRPC metadata.
-	// Format: "mlog-{t}-{key}" where {t} is 's' (string) or 'i' (int64).
+	// Format: "mlog-{t}-{key}" where {t} is 's' (string), 'i' (int64), or
+	// 'u' (uint64).
 	// Legacy format "mlog-{key}" (no type tag) falls back to string.
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		for key, vals := range md {
@@ -74,6 +77,11 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 				case 'i':
 					if v, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
 						fields = append(fields, propagatedInt64Field(fieldKey, v))
+					}
+					continue
+				case 'u':
+					if v, err := strconv.ParseUint(vals[0], 10, 64); err == nil {
+						fields = append(fields, propagatedUint64Field(fieldKey, v))
 					}
 					continue
 				case 's':
@@ -96,7 +104,7 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 }
 
 // injectPropagated injects propagated fields into outgoing gRPC metadata.
-// Keys are type-encoded: "mlog-s-<key>" for string, "mlog-i-<key>" for int64.
+// Keys are type-encoded with a scalar tag, such as "mlog-s-<key>" for string.
 func injectPropagated(ctx context.Context) context.Context {
 	lc := getLogContext(ctx)
 	if len(lc.fields) == 0 {
@@ -112,6 +120,8 @@ func injectPropagated(ctx context.Context) context.Context {
 		switch f.Type {
 		case zapcore.Int64Type:
 			pairs = append(pairs, metadataPrefixInt64+f.Key, strconv.FormatInt(f.Integer, 10))
+		case zapcore.Uint64Type:
+			pairs = append(pairs, metadataPrefixUint64+f.Key, strconv.FormatUint(uint64(f.Integer), 10))
 		default:
 			pairs = append(pairs, metadataPrefixString+f.Key, getPropagatedValue(f))
 		}

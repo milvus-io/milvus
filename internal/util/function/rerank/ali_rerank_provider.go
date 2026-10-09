@@ -82,9 +82,7 @@ func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []st
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, rerankResult := range rerankResp.Output.Results {
-		scores[i] = rerankResult.RelevanceScore
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(rerankResp.Output.Results), func(i int) (int, float32) {
+		return rerankResp.Output.Results[i].Index, rerankResp.Output.Results[i].RelevanceScore
+	})
 }

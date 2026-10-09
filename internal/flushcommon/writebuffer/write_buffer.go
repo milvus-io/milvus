@@ -3,7 +3,6 @@ package writebuffer
 import (
 	"context"
 	"fmt"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -23,14 +22,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -1302,6 +1299,10 @@ func (id *InsertData) SetBM25Stats(bm25Stats map[int64]*storage.BM25Stats) {
 	id.bm25Stats = bm25Stats
 }
 
+func (id *InsertData) GetBM25Stats() map[int64]*storage.BM25Stats {
+	return id.bm25Stats
+}
+
 func (id *InsertData) GetDatas() []*storage.InsertData {
 	return id.data
 }
@@ -1407,8 +1408,7 @@ func (wb *writeBufferBase) newGrowingSegmentManifestPath(partitionID int64, segm
 	if storageVersion != storage.StorageV3 {
 		return ""
 	}
-	k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
-	basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+	basePath := storage.SegmentManifestBasePath(packed.CreateStorageConfig().GetRootPath(), wb.collectionID, partitionID, segmentID)
 	return packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 }
 

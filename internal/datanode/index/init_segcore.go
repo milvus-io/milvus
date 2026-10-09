@@ -70,6 +70,14 @@ func InitSegcore(nodeID int64) error {
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
+	if err := initcore.UpdateJSONStatsBuildExecutorPoolSize(
+		initcore.ResolveJSONStatsBuildExecutorPoolSize(paramtable.Get())); err != nil {
+		return err
+	}
+	if err := initcore.UpdateJSONStatsBuildMaxInflightBytes(
+		initcore.ResolveJSONStatsBuildMaxInflightBytes(paramtable.Get())); err != nil {
+		return err
+	}
 
 	cKnowhereThreadPoolSize := C.uint32_t(hardware.GetCPUNum() * paramtable.DefaultKnowhereThreadPoolNumRatioInBuild)
 	if paramtable.GetRole() == typeutil.StandaloneRole {
@@ -92,11 +100,8 @@ func InitSegcore(nodeID int64) error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
-	// Apply Arrow IO thread pool capacity from paramtable. Without this call the
-	// pool stays at Arrow's built-in default (kDefaultNumIoThreads = 8), which is
-	// almost always undersized for DataNode under concurrent storage v2 reads
-	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
-	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
+	// Apply Arrow IO thread pool capacity from paramtable.
+	initcore.ApplyArrowIOThreadPoolCapacity("datanode", "init")
 
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
@@ -124,6 +129,8 @@ func InitSegcore(nodeID int64) error {
 	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
 	initcore.RegisterLoonReaderConfigWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterJSONStatsBuildExecutorWatcher(paramtable.Get(), "datanode")
+	initcore.RegisterJSONStatsBuildMemoryBudgetWatcher(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

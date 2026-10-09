@@ -102,17 +102,6 @@ func CloneRLSPolicy(policy *RLSPolicy) *RLSPolicy {
 	}
 }
 
-func CloneRLSPolicies(policies []*RLSPolicy) []*RLSPolicy {
-	if policies == nil {
-		return nil
-	}
-	cloned := make([]*RLSPolicy, len(policies))
-	for i, policy := range policies {
-		cloned[i] = CloneRLSPolicy(policy)
-	}
-	return cloned
-}
-
 func CloneRLSPolicyMap(policies map[string]*RLSPolicy) map[string]*RLSPolicy {
 	if policies == nil {
 		return nil
@@ -122,19 +111,6 @@ func CloneRLSPolicyMap(policies map[string]*RLSPolicy) map[string]*RLSPolicy {
 		cloned[name] = CloneRLSPolicy(policy)
 	}
 	return cloned
-}
-
-func RLSPolicyMapFromSlice(policies []*RLSPolicy) map[string]*RLSPolicy {
-	if policies == nil {
-		return nil
-	}
-	policyMap := make(map[string]*RLSPolicy, len(policies))
-	for _, policy := range policies {
-		if policy != nil {
-			policyMap[policy.PolicyName] = CloneRLSPolicy(policy)
-		}
-	}
-	return policyMap
 }
 
 func RLSPolicyMapToSlice(policies map[string]*RLSPolicy) []*RLSPolicy {
@@ -161,6 +137,14 @@ type RLSPrincipal struct {
 	CollectionID  int64
 	PrincipalName string
 	Tags          map[string]rlsutil.TagValue
+}
+
+// RLSMetadata is a collection's RLS metadata view. Policies are detached from
+// MetaTable state, and principals are caller-owned records decoded by Catalog.
+type RLSMetadata struct {
+	CollectionID int64
+	Policies     []*RLSPolicy
+	Principals   []*RLSPrincipal
 }
 
 func MarshalRLSPrincipalModel(principal *RLSPrincipal) (*rootcoordpb.RLSPrincipalInfo, error) {
@@ -205,17 +189,6 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		PrincipalName: principal.PrincipalName,
 		Tags:          cloneRLSTags(principal.Tags),
 	}
-}
-
-func CloneRLSPrincipals(principals []*RLSPrincipal) []*RLSPrincipal {
-	if principals == nil {
-		return nil
-	}
-	cloned := make([]*RLSPrincipal, len(principals))
-	for i, principal := range principals {
-		cloned[i] = CloneRLSPrincipal(principal)
-	}
-	return cloned
 }
 
 func cloneRowPolicyActions(actions []rlsutil.PolicyAction) []rlsutil.PolicyAction {

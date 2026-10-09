@@ -1,8 +1,10 @@
 #include <arrow/type.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <new>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -13,9 +15,73 @@
 #include "index/json_stats/parquet_writer.h"
 #include "index/json_stats/utils.h"
 #include "segcore/default_fs.h"
+#include "storage/StatusToErrorCode.h"
 #include "test_utils/Constants.h"
 
 namespace milvus::index {
+namespace {
+
+class MockMemoryPool : public arrow::ProxyMemoryPool {
+ public:
+    MockMemoryPool() : arrow::ProxyMemoryPool(arrow::default_memory_pool()) {
+    }
+
+    using arrow::ProxyMemoryPool::Allocate;
+    MOCK_METHOD(arrow::Status,
+                Allocate,
+                (int64_t, int64_t, uint8_t**),
+                (override));
+};
+
+}  // namespace
+
+TEST(JsonStatsArrowBuilderTest, PreservesBadAlloc) {
+    MockMemoryPool pool;
+    auto builder = std::make_shared<arrow::StringBuilder>(&pool);
+    EXPECT_CALL(pool, Allocate).WillOnce(testing::Throw(std::bad_alloc{}));
+
+    EXPECT_THROW(AppendJsonStatsValueToBuilder("value", builder),
+                 std::bad_alloc);
+}
+
+TEST(JsonStatsArrowBuilderTest, PreservesTypedError) {
+    MockMemoryPool pool;
+    auto builder = std::make_shared<arrow::StringBuilder>(&pool);
+    EXPECT_CALL(pool, Allocate)
+        .WillOnce(testing::Throw(
+            SegcoreError(MemAllocateFailed, "injected allocation failure")));
+
+    try {
+        AppendJsonStatsValueToBuilder("value", builder);
+        FAIL() << "expected an allocation failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), MemAllocateFailed);
+        EXPECT_STREQ(error.what(), "injected allocation failure");
+    }
+}
+
+TEST(JsonStatsArrowBuilderTest, PreservesArrowOutOfMemory) {
+    MockMemoryPool pool;
+    auto builder = std::make_shared<arrow::StringBuilder>(&pool);
+    EXPECT_CALL(pool, Allocate)
+        .WillOnce(testing::Return(
+            arrow::Status::OutOfMemory("injected allocation failure")));
+
+    auto status = AppendJsonStatsValueToBuilder("value", builder);
+    EXPECT_TRUE(status.IsOutOfMemory());
+    EXPECT_EQ(storage::ArrowStatusToErrorCode(status), MemAllocateFailed);
+}
+
+TEST(JsonStatsArrowBuilderTest, PreservesUnsupportedType) {
+    auto builder = std::make_shared<arrow::Date32Builder>();
+    try {
+        AppendJsonStatsValueToBuilder("1", builder);
+        FAIL() << "expected an unsupported type error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), Unsupported);
+    }
+}
+
 class ParquetWriterFactoryTest : public ::testing::Test {
  protected:
     void
@@ -62,7 +128,7 @@ TEST_F(ParquetWriterFactoryTest, CreateContextBasicTest) {
     EXPECT_FALSE(context.builders.empty());
     EXPECT_FALSE(context.builders_map.empty());
     EXPECT_EQ(context.builders.size(), column_map_.size());
-    EXPECT_EQ(context.builders_map.size(), column_map_.size());
+    EXPECT_EQ(context.builders_map.size(), column_map_.size() - 1);
 
     // Verify metadata
     EXPECT_TRUE(context.kv_metadata.empty());
@@ -89,7 +155,7 @@ TEST_F(ParquetWriterFactoryTest, CreateContextWithSharedFields) {
     EXPECT_NE(context.schema, nullptr);
     EXPECT_EQ(context.schema->num_fields(), 2);
 
-    EXPECT_EQ(context.builders_map.size(), 3);
+    EXPECT_EQ(context.builders_map.size(), 1);
 }
 
 TEST_F(ParquetWriterFactoryTest, CreateContextWithColumnGroups) {
@@ -139,6 +205,65 @@ TEST_F(ParquetWriterFactoryTest, CloseReturnsStatusAndIsIdempotent) {
     EXPECT_TRUE(writer.Close().ok());
     EXPECT_FALSE(writer.GetPathsToSize().empty());
 
+    std::filesystem::remove_all(path_prefix);
+}
+
+TEST_F(ParquetWriterFactoryTest,
+       AppendRecordBatchDoesNotRematerializeIntoWriterBuilders) {
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto path_prefix = std::filesystem::path(TestLocalPath) /
+                       "json_stats_writer_direct_record_batch";
+    std::filesystem::remove_all(path_prefix);
+    ASSERT_TRUE(std::filesystem::create_directories(path_prefix));
+
+    std::map<JsonKey, JsonKeyLayoutType> column_map = {
+        {JsonKey("/int", JSONType::INT64), JsonKeyLayoutType::TYPED},
+        {JsonKey("/shared", JSONType::STRING), JsonKeyLayoutType::SHARED},
+    };
+    auto context =
+        ParquetWriterFactory::CreateContext(column_map, path_prefix.string());
+    auto schema = context.schema;
+    auto writer_builders = context.builders;
+
+    milvus_storage::StorageConfig storage_config;
+    JsonStatsParquetWriter writer(fs, storage_config, 16 * 1024 * 1024, 1024);
+    writer.Init(std::move(context));
+
+    writer.AppendValue(JsonKey("/int", JSONType::INT64).ToColumnName(), "5");
+    writer.AppendSharedRow(nullptr, 0);
+    writer.AddCurrentRow();
+    for (const auto& builder : writer_builders) {
+        ASSERT_EQ(builder->length(), 1);
+    }
+
+    auto input_builders = CreateArrowBuilders(column_map).first;
+    auto int_builder =
+        std::static_pointer_cast<arrow::Int64Builder>(input_builders.front());
+    auto shared_builder =
+        std::static_pointer_cast<arrow::BinaryBuilder>(input_builders.back());
+    for (int64_t value : {int64_t{10}, int64_t{20}, int64_t{30}}) {
+        ASSERT_TRUE(int_builder->Append(value).ok());
+        ASSERT_TRUE(shared_builder->AppendNull().ok());
+    }
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(input_builders.size());
+    for (auto& builder : input_builders) {
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder->Finish(&array).ok());
+        arrays.push_back(std::move(array));
+    }
+    auto batch = arrow::RecordBatch::Make(schema, 3, std::move(arrays));
+
+    auto status = writer.AppendRecordBatch(batch);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    for (const auto& builder : writer_builders) {
+        EXPECT_EQ(builder->length(), 0);
+    }
+    EXPECT_FALSE(writer.GetPathsToSize().empty());
+
+    status = writer.Close();
+    ASSERT_TRUE(status.ok()) << status.ToString();
     std::filesystem::remove_all(path_prefix);
 }
 

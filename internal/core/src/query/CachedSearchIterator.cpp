@@ -72,8 +72,12 @@ CachedSearchIterator::CachedSearchIterator(
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to create iterators from index");
+        // Route the knowhere status through the shared mapper so the
+        // retriability verdict survives (e.g. malloc_error -> retriable
+        // MemAllocateFailed) instead of collapsing to UnexpectedError.
+        ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+                  "Failed to create iterators from index: {}",
+                  expected_iterators.what());
     }
 }
 
@@ -95,8 +99,12 @@ CachedSearchIterator::AppendChunkIterators(
         ++num_chunks_;
         return;
     }
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "Failed to create iterators from index");
+    // Route the knowhere status through the shared mapper so the retriability
+    // verdict survives (e.g. malloc_error -> retriable MemAllocateFailed)
+    // instead of collapsing to UnexpectedError.
+    ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+              "Failed to create brute-force iterators: {}",
+              expected_iterators.what());
 }
 
 void
@@ -152,10 +160,11 @@ CachedSearchIterator::CachedSearchIterator(
     // VECTOR_ARRAY element-level search: growing stores each row as a
     // separate VectorArray with its own backing allocation, so we must
     // flatten per-chunk into a contiguous buffer that knowhere can read.
-    // array_offsets_ != nullptr is the element-level signal (multi-search-
+    // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
-    const bool is_element_level = search_info.array_offsets_ != nullptr;
+    const bool is_element_level =
+        search_info.struct_element_offsets_ != nullptr;
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
@@ -206,7 +215,7 @@ CachedSearchIterator::CachedSearchIterator(
                 int64_t total_elements = 0;
                 for (int64_t i = 0; i < chunk_size; ++i) {
                     total_bytes += va_ptr[i].byte_size();
-                    total_elements += va_ptr[i].length();
+                    total_elements += va_ptr[i].physical_length();
                 }
                 auto buf = std::make_unique<uint8_t[]>(total_bytes);
                 auto* ptr = buf.get();
@@ -268,13 +277,13 @@ CachedSearchIterator::CachedSearchIterator(
             const auto& offset_mapping = column->GetOffsetMapping();
             const bool has_offset_mapping =
                 offset_mapping.IsEnabled() &&
-                search_info.array_offsets_ == nullptr;
+                search_info.struct_element_offsets_ == nullptr;
             if (has_offset_mapping) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
-            if (search_info.array_offsets_ != nullptr) {
+            if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
                     column->VectorArrayOffsets(nullptr, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];
@@ -347,15 +356,23 @@ CachedSearchIterator::GetNextValidResult(
     auto& iterator = iterators_[iterator_idx];
     while (true) {
         auto has_next = iterator->HasNext();
-        AssertInfo(has_next.has_value(),
-                   "knowhere iterator HasNext failed: {}",
-                   has_next.what());
+        if (!has_next.has_value()) {
+            // knowhere already classified this (OOM, disk read); route it
+            // through the mapper so a transient failure stays retriable
+            // instead of collapsing into UnexpectedError(2001).
+            ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                      "knowhere iterator HasNext failed: {}",
+                      has_next.what());
+        }
         if (!has_next.value()) {
             break;
         }
         auto next = iterator->Next();
-        AssertInfo(
-            next.has_value(), "knowhere iterator Next failed: {}", next.what());
+        if (!next.has_value()) {
+            ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                      "knowhere iterator Next failed: {}",
+                      next.what());
+        }
         auto result = ConvertIteratorResult(next.value());
         if (IsValid(result, last_bound, radius, range_filter)) {
             return result;
@@ -421,16 +438,20 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
         auto& iterator = iterators_[query_idx];
         while (rst.size() < batch_size_) {
             auto has_next = iterator->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
+            if (!has_next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                          "knowhere iterator HasNext failed: {}",
+                          has_next.what());
+            }
             if (!has_next.value()) {
                 break;
             }
             auto next = iterator->Next();
-            AssertInfo(next.has_value(),
-                       "knowhere iterator Next failed: {}",
-                       next.what());
+            if (!next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                          "knowhere iterator Next failed: {}",
+                          next.what());
+            }
             auto result = ConvertIteratorResult(next.value());
             if (IsValid(result, last_bound, radius, range_filter)) {
                 rst.emplace_back(result);

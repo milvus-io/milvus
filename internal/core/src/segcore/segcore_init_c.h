@@ -45,6 +45,9 @@ void
 SegcoreSetEnableGISSplitFusion(const bool);
 
 void
+SegcoreSetScanCursorOwnsPin(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 // FM-index count-first guard threshold (queryNode.fmindexCostRatio).
@@ -113,10 +116,10 @@ void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
 
 void
-SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
+SegcoreSetLazyColumnGroupEnabled(const bool value);
 
-int64_t
-SegcoreGetTakeForOutputResultCountLimit();
+bool
+SegcoreGetLazyColumnGroupEnabled();
 
 void
 SegcoreCloseGlog();

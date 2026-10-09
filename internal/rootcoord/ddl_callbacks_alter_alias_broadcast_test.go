@@ -63,7 +63,6 @@ func TestBroadcastCreateAlias_MarksNoOldTargetSentinel(t *testing.T) {
 		mockey.Mock(startBroadcastWithDatabaseLock).Return(broadcastAPI, nil).Build()
 
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
 		streaming.SetWALForTest(wal)
 		defer streaming.SetWALForTest(nil)
 
@@ -105,7 +104,6 @@ func TestBroadcastAlterAlias_ForwardsResolvedOldTarget(t *testing.T) {
 		mockey.Mock(startBroadcastWithDatabaseLock).Return(broadcastAPI, nil).Build()
 
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
 		streaming.SetWALForTest(wal)
 		defer streaming.SetWALForTest(nil)
 
@@ -147,7 +145,6 @@ func TestBroadcastAlterAlias_LeavesZeroWhenOldTargetUnresolvable(t *testing.T) {
 		mockey.Mock(startBroadcastWithDatabaseLock).Return(broadcastAPI, nil).Build()
 
 		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Once()
 		streaming.SetWALForTest(wal)
 		defer streaming.SetWALForTest(nil)
 

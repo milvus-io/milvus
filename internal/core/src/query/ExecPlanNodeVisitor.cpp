@@ -336,11 +336,12 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             tmp_retrieve_result.element_level_ = true;
             tracer::AutoSpan _(
                 "Element Level Find", tracer::GetRootSpan(), true);
-            auto array_offsets = query_context->get_array_offsets();
+            auto struct_element_offsets =
+                query_context->get_struct_element_offsets();
             auto [doc_offsets, element_indices, has_more] =
                 segment->find_first_n_element(node.limit_,
                                               view,
-                                              array_offsets.get(),
+                                              struct_element_offsets.get(),
                                               node.query_iterator_cursor_);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
@@ -516,6 +517,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->read_snapshot_ = query_context->get_read_snapshot();
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =

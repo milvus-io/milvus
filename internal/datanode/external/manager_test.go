@@ -18,6 +18,7 @@ package external
 
 import (
 	"context"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -187,6 +189,56 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	assert.NotNil(t, info)
 	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
 	assert.Equal(t, expectedError.Error(), info.FailReason)
+}
+
+func TestExternalCollectionManager_MissingExploreManifestFailsTask(t *testing.T) {
+	for _, name := range []string{"legacy_relative", "absolute"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			root := t.TempDir()
+			manifest := filepath.Join("__explore_temp__", filepath.Base(filepath.Dir(root)), "_metadata", "manifest-1.avro")
+			if name == "absolute" {
+				manifest = filepath.Join(root, manifest)
+			}
+			req := &datapb.RefreshExternalCollectionTaskRequest{
+				TaskID:                 1,
+				CollectionID:           100,
+				Schema:                 &schemapb.CollectionSchema{},
+				StorageConfig:          &indexpb.StorageConfig{StorageType: "local", RootPath: root},
+				ExternalSource:         filepath.Join(root, "input"),
+				ExternalSpec:           `{"format":"parquet"}`,
+				ExploreManifestPath:    manifest,
+				PreAllocatedSegmentIds: &datapb.IDRange{Begin: 1000, End: 1010},
+				TargetRowsPerSegment:   100,
+			}
+			manager := NewExternalCollectionManager(ctx, 1)
+			defer manager.Close()
+			err := manager.SubmitTask("test-cluster", req, func(taskCtx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+				task := NewRefreshExternalCollectionTask(taskCtx, req)
+				if err := task.PreExecute(taskCtx); err != nil {
+					return nil, err
+				}
+				if err := task.Execute(taskCtx); err != nil {
+					return nil, err
+				}
+				return &datapb.RefreshExternalCollectionTaskResponse{State: indexpb.JobState_JobStateFinished}, nil
+			})
+			require.NoError(t, err)
+
+			// Exercise the real manifest reader: even if the native not-found
+			// error is classified as transient, this task must terminate.
+			require.Eventually(t, func() bool {
+				info := manager.Get("test-cluster", req.GetTaskID())
+				return info != nil && info.State == indexpb.JobState_JobStateFailed
+			}, 5*time.Second, 10*time.Millisecond)
+			info := manager.Get("test-cluster", req.GetTaskID())
+			assert.Contains(t, info.FailReason, "failed to fetch fragments")
+			assert.Contains(t, info.FailReason, "failed to read explore manifest")
+			assert.Contains(t, info.FailReason, "manifest-1.avro")
+			assert.Contains(t, info.FailReason, "File not found")
+			assert.Empty(t, info.UpdatedSegments)
+		})
+	}
 }
 
 // Regression for #49225: a panic inside taskFunc (e.g. divide-by-zero from a

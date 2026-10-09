@@ -32,6 +32,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "common/type_c.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -86,7 +87,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     int64_t segment_id = 3;
     int64_t index_version = 4000;
 
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(3);
+    milvus::test::ExprBatchSizeGuard batch_size_guard(3);
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
@@ -94,8 +95,9 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     auto content_fid = schema->AddDebugField("content", DataType::VARCHAR);
     schema->set_primary_field_id(pk_fid);
 
-    // Use TestLocalPath to match LocalChunkManagerSingleton initialized in init_gtest.cpp
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    // AppendIndexV2 loads through RemoteChunkManagerSingleton, so build the
+    // index under the same TestRemotePath root.
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -202,13 +204,14 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             insert_data.SetTimestamps(0, 100);
             auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-            auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                        TestLocalPath,
-                                        collection_id,
-                                        partition_id,
-                                        segment_id,
-                                        field_id.get(),
-                                        0);
+            auto log_path =
+                fmt::format("{}insert_log/like_conjunct/{}/{}/{}/{}/{}",
+                            storage_config.root_path,
+                            collection_id,
+                            partition_id,
+                            segment_id,
+                            field_id.get(),
+                            0);
             cm_w.Write(
                 log_path, serialized_bytes.data(), serialized_bytes.size());
 
@@ -358,6 +361,4 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
     }
 
     EXPECT_EQ(actual_pks, expected_pks);
-
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 }

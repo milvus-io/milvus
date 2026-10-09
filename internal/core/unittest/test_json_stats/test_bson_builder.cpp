@@ -173,6 +173,43 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+// The build scheduler decides retry-vs-fail from the SegcoreError code, so these
+// assertions pin the code itself, not just "something was thrown". A generic
+// catch(std::exception) inserted ahead of a SegcoreError guard would silently
+// send these back to UnexpectedError and to an unbounded retry loop. A document
+// simdjson cannot parse is DataFormatBroken through the shared
+// SimdjsonParseErrorToErrorCode mapping (permanent), not a caller-input error.
+TEST_F(BsonBuilderTest, MalformedJsonArrayIsDataFormatBroken) {
+    auto code_of = [](const std::string& input) {
+        try {
+            BuildBsonArrayBytesFromJsonString(input);
+        } catch (const SegcoreError& e) {
+            return e.get_error_code();
+        }
+        return ErrorCode::Success;
+    };
+
+    // A parseable document that is not an array is an internal inconsistency
+    // between the collected key type and the value, and keeps the generic code;
+    // the SegcoreError guard must let it through unchanged.
+    EXPECT_EQ(code_of("{\"a\": 1}"), ErrorCode::UnexpectedError);
+    // Malformed document: simdjson raises a content error.
+    EXPECT_EQ(code_of("[1, 2"), ErrorCode::DataFormatBroken);
+    EXPECT_EQ(code_of("[tru]"), ErrorCode::DataFormatBroken);
+    // A valid array still builds.
+    EXPECT_EQ(code_of("[1, \"a\", null]"), ErrorCode::Success);
+}
+
+TEST_F(BsonBuilderTest, UnescapeJsonStringIsDataFormatBroken) {
+    try {
+        // A backslash escape that does not decode to a JSON string.
+        UnescapeJsonString("\\uZZZZ");
+        FAIL() << "expected UnescapeJsonString to throw";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);

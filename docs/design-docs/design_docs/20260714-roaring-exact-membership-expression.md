@@ -390,7 +390,7 @@ The rejection is a fail-closed stopgap, not a statement that the combination is
 meaningless. Broadcast semantics are well defined — an element takes the
 value of the row that owns it, so it matches if and only if its row matches —
 and the element-to-row mapping already exists
-(`IArrayOffsets::ElementIDToRowInfo`).
+(`IStructElementOffsets::ElementIDToRowInfo`).
 What is missing is the lowering that applies it on every read path. That gap is
 not specific to `roaring_match`: any top-level field reference inside an
 element expression has it today, including ordinary range and `IN` predicates,

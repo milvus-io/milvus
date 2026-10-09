@@ -1,74 +1,113 @@
 # MEP: Local Format for Storage V3 Scalar Fields
 
+- **Feature DRI:** TBD
+- **Primary Approver:** TBD
+- **Independent Approver:** TBD
+- **Design Review:** TBD
 - **Created:** 2026-03-05
 - **Author(s):** @zhicheng
 - **Status:** Under Review
-- **Component:** QueryNode | DataNode | Storage
-- **Related Issues:** milvus-io/milvus#50304
-- **Released:** TBD
+- **Component:** RootCoord | DataNode | QueryNode | Storage
+- **Related Issue:** [milvus-io/milvus#50304](https://github.com/milvus-io/milvus/issues/50304)
+- **Target Release:** TBD
 
 ## Summary
 
-Add a field-level `local_format` type parameter for sealed segment scalar data
-loaded through Storage V3. The default value is `raw`, which keeps the existing
-Milvus on-node raw chunk layout. The first alternate value is `vortex`, which
-loads Vortex column group files through a cell-based local format path.
+`local_format` selects how a Storage V3 sealed scalar field is represented and
+accessed locally by QueryNode. It does not select the format written to object
+storage.
 
-The proposal keeps the public field schema model small:
+The initial choices are:
 
-- `local_format=raw`: existing behavior.
-- `local_format=vortex`: use Vortex local format when the Storage V3 manifest
-  also points to a Vortex physical column group for that field.
+- `raw` (default): materialize the existing Milvus Raw column representation.
+- `vortex`: retain a Vortex physical column group and read its Cells on demand.
 
-Vortex local format is a read-path feature for sealed scalar fields. It does not
-change growing segment execution, vector index execution, or the public query
-language. It changes how QueryNode loads and scans sealed scalar column data.
+The choice is recorded as field schema intent. At segment load time, QueryNode
+combines that intent with the physical format recorded in the Storage V3
+manifest and resolves one effective local backend for the complete physical
+column group. Raw and Vortex then expose the same column-level Scan and Take
+contract to sealed-segment consumers.
 
-## Motivation
+This document is primarily the design of local-format selection, loading,
+configuration, and behavior. The column Scan/Take API is included only where it
+defines the common boundary needed to hide Raw and Vortex storage details.
 
-Raw scalar chunks are simple and fast when fully resident, but they require
-Milvus to materialize the field data in its raw on-node layout. This is costly
-for large VARCHAR, JSON, ARRAY, and other scalar fields when a query only needs a
-subset of rows or only needs a predicate result.
+## Problem
 
-Vortex provides compressed, columnar files with row-group metadata and optional
-zone maps. Local format support lets Milvus keep Vortex data in its native file
-layout and materialize only the cells needed by scan or take operations.
+The existing Raw backend is simple and fast once resident, but loading it
+requires materializing scalar data into Milvus-owned chunks. Large VARCHAR,
+JSON, ARRAY, and other scalar fields can therefore consume memory and I/O even
+when a query reads only part of a segment.
 
-The design goals are:
+Storage V3 may persist the same logical fields in Vortex columnar files. Vortex
+has its own file layout, metadata, and decoding model, so exposing it as Raw
+chunks would discard its ability to prune and load data at its native Cell
+granularity. Milvus needs an explicit local-format choice and a common read
+boundary that does not expose either backend's physical representation.
 
-- Reduce sealed scalar field load memory for Storage V3 segments.
-- Keep the existing raw path as the default and avoid adding copies to it.
-- Let expression evaluation consume scalar data through a scan cursor instead
-  of repeatedly materializing chunks.
-- Pin Vortex data at a well-defined cell granularity in the Milvus cache layer.
-- Keep the common `FormatReader` interface stable; Vortex-specific operations
-  are exposed as Vortex extensions.
-- Support normal filter, offset-input filter, and retrieve/requery output paths
-  with clear and separate execution plans.
+## Goals and Non-goals
 
-The non-goals for the initial implementation are:
+Goals:
 
-- Vortex local format for vector fields.
-- Vortex local format for primary-key fields.
+- Keep Raw as the default and preserve its existing data-access behavior.
+- Allow eligible Storage V3 sealed scalar fields to use Vortex locally.
+- Resolve a physical column group to one unambiguous local backend.
+- Share Vortex footer, planner, cache, and Cell state among all columns in the
+  same physical column group.
+- Let QueryNode cache and evict Vortex data at Cell granularity.
+- Keep nullability, filtering, ordering, and ownership semantics identical from
+  the caller's perspective.
+- Make configuration, fallback, failure, rollout, and recovery behavior
+  explicit.
+
+Non-goals:
+
+- Changing the physical writer format through `local_format`.
+- Vortex local format for primary-key, vector, system, or growing-segment data.
 - Changing the query expression language.
-- Full predicate pushdown for every scalar expression.
-- Bitmap/selection pushdown for offset-input execution.
+- Supporting every scalar predicate as Vortex pushdown.
+- Replacing every legacy Chunk consumer in the first implementation phase.
+- Changing WAL, streaming, replication, or CDC behavior.
 
-## Public Interfaces
+## Terminology and Core Invariants
 
-### Field Type Parameter
+- **Schema intent** is the field's `local_format` type parameter.
+- **Physical format** is the column-group format recorded in the Storage V3
+  manifest. It is selected by the writer, not by `local_format`.
+- **Effective local backend** is the Raw or Vortex representation selected by
+  QueryNode when loading a sealed segment.
+- **Column group** is a physical group of fields stored in the same set of
+  files.
+- **Cell** is the Vortex cache/loading unit. For Raw it corresponds to the
+  existing chunk boundary used by the column planner.
 
-`local_format` is a field type parameter.
+The following invariants are mandatory:
 
-Valid values:
+1. Every physical column group has exactly one effective local backend in one
+   loaded segment generation.
+2. A mixed or ambiguous group never partially loads as Vortex.
+3. All Vortex fields in one physical group share one `VortexColumnGroup` and
+   therefore the same files, footer metadata, Cell geometry, and cache slots.
+4. A Cell pin protects every borrowed byte or view returned from that Cell for
+   the documented result lifetime; owned decoded output is independent of the
+   pin.
+5. Filtering may suppress data construction, but it never changes row
+   alignment or stored validity.
+6. Scan positions and Take offsets are absolute segment offsets. File- and
+   Cell-local coordinates remain backend-private.
+7. Corrupt or incompatible Vortex input fails segment loading or the operation;
+   it does not silently switch an already selected Vortex group to Raw.
+
+## User-visible Schema Setting
+
+`local_format` is stored in field type parameters.
 
 | Value | Meaning |
-|-------|---------|
-| `raw` | Default. Load sealed scalar data into the existing raw local format. |
-| `vortex` | Prefer Vortex local format for this field when the physical Storage V3 column group is Vortex. |
+|---|---|
+| absent or `raw` | Use the Raw local backend. `raw` is the initial server default. |
+| `vortex` | Request Vortex local access when the Storage V3 physical group is also Vortex and the complete group is eligible. |
 
-Example schema intent:
+Example:
 
 ```python
 schema.add_field(
@@ -79,468 +118,378 @@ schema.add_field(
 )
 ```
 
-SDKs may expose this as a direct field option, but the Milvus server stores and
-validates it as a field type parameter.
+Validation occurs during schema creation and alteration:
+
+- unknown values are rejected;
+- `vortex` is rejected for primary-key and vector fields;
+- omitted values parse as `raw`;
+- non-default values are preserved when the schema is serialized.
+
+SDKs may later expose a typed option, but the server contract remains the field
+type parameter.
 
-Validation rules:
+## End-to-end Local-format Resolution
 
-- Missing `local_format` uses the server default, which initially resolves to
-  `raw`.
-- `local_format=vortex` is accepted for non-primary-key, non-vector fields.
-- Primary-key fields reject `local_format=vortex`.
-- Vector fields reject `local_format=vortex`.
-- Unknown values are rejected. The supported values are `raw` and `vortex`.
+### 1. Write-time column-group planning
+
+The Storage V3 split policy partitions fields by the exact schema intent:
+absent/default, explicit `raw`, and explicit `vortex` remain separate. Later
+system, vector, text, size, and remanent split policies operate inside those
+partitions.
+
+Keeping absent and explicit `raw` separate allows a future default to change
+without reinterpreting fields that explicitly selected Raw. The split policy
+does not set the writer format; normal writer configuration determines the
+physical format stored in the manifest.
 
-### Storage V3 Relationship
+### 2. Manifest persistence
+
+The manifest remains the authority for physical files, their ordered segment
+row ranges, columns, sizes, and format. `local_format` remains schema metadata.
+It propagates through the existing collection schema and AlterCollection path;
+no new WAL record, streaming message type, acknowledgement, or CDC contract is
+introduced.
 
-`local_format` is only effective for Storage V3 sealed segments.
+Vortex files in one group must form an ordered, gap-free partition of
+`[0, segment_row_count)`. This is validated when the segment is loaded. Each
+file is opened independently and may use a different Arrow representation as
+long as the field can be normalized to the caller-selected target type.
 
-For write-time column group planning, fields with a default (empty), `raw`, or
-`vortex` local format are partitioned away from each other. The default value
-remains a separate partition so a future server-level default can be changed
-without mixing fields that explicitly requested `raw` or `vortex`.
+### 3. QueryNode load-time decision
 
-Local format does not select the physical writer format. New column groups use
-the writer's configured format, and existing column groups preserve the format
-recorded in the Storage V3 manifest.
+QueryNode resolves the backend for the complete physical group:
 
-For read-time loading, Vortex local format is used only when both conditions are
-true:
+| Physical group | Schema intent for all mapped fields | Effective backend |
+|---|---|---|
+| non-Vortex | any supported intent | Raw materialization |
+| Vortex | every mapped logical field requests `vortex` | Vortex |
+| Vortex | mixed, missing, unknown mapping, or any non-Vortex intent | current group default, which is Raw |
+| any group containing the primary key | any | Raw |
 
-- all fields in the physical column group have `local_format=vortex`;
-- the Storage V3 manifest says the physical column group file is Vortex.
+Multiple logical fields may map to one physical external column. That physical
+column is eligible only when every mapping requests Vortex. This prevents one
+field's preference from changing another field's representation.
 
-If either condition is false, the segment uses the existing raw loading path for
-that column group.
+The Vortex path additionally requires Storage V3, scalar non-system fields,
+non-empty file metadata, compatible schemas, aligned Cells across fields, and a
+row count matching the segment manifest.
 
-## Design Details
+### 4. Publication and replacement
 
-### High-Level Architecture
+Load constructs the complete backend off to the side and publishes it as one
+segment generation. A Vortex group creates one shared `VortexColumnGroup` and
+one field-level `VortexColumn` proxy per logical field. Reopen/add-field
+replacement publishes a new generation; existing operations continue using
+their captured generation and immutable planner/statistics state.
 
-The design extends `ChunkedColumnInterface` with column-oriented scan and
-positional access for sealed scalar fields. This is the main interface shift for
-local format: Vortex data is not naturally owned as Milvus raw chunks, so the
-new path moves callers from `ChunkedBase` chunk access to column-level
-operations.
+Creating or altering a schema uses the normal collection metadata lifecycle.
+Renaming a collection does not change field intent or persisted files. Dropping
+or unloading a collection destroys the loaded ColumnGroups and their ephemeral
+local cache files; durable object-storage cleanup remains the existing segment
+lifecycle's responsibility.
 
-`Scan` is one operation under `ChunkedColumnInterface`, used by expression
-evaluation. Positional take/output operations are also part of the same
-column-based abstraction and are used by retrieve and requery. The Vortex reader
-consumes a sparse local file view behind these column-level operations.
+## Raw Backend Behavior
 
-Milvus is in a transition state where two access families coexist:
+Raw remains the compatibility and default path:
 
-- `ChunkedBase` remains the raw chunk-oriented path for the existing raw local
-  format and existing chunk consumers.
-- `ChunkedColumnInterface` is the local-format-aware path used by Vortex and by
-  scan/take code that should not depend on physical chunk ownership.
+- the generic Storage V3 reader materializes the requested fields into the
+  existing Raw representation;
+- fixed-width access returns values directly from pinned chunks;
+- variable-width access returns views whose lifetime is protected by the
+  corresponding pin;
+- Raw Scan stops at a chunk boundary so it can return a zero-copy batch;
+- Raw Take resolves input offsets lazily and reuses the current chunk pin while
+  consecutive accesses remain in that chunk;
+- statistics that require loaded Raw payload remain an execution-time filter.
+  They may skip comparison/value construction, but are not used to avoid the
+  preceding load or pin.
 
-Filter scan path:
+Introducing the common column contract must not add full-range pinning,
+unnecessary value construction, or forced offset sorting to the Raw hot path.
 
-```text
-Expr
-  -> ChunkedColumnInterface::Scan(...)
-  -> VortexColumn
-  -> VortexPlanner
-  -> VortexColumnGroup cache slot pin
-  -> VortexFormatReader::read_with_plan / read_row_ids_with_plan
-  -> Vortex scan builder
-```
+## Vortex Backend Behavior
 
-Retrieve/requery output path:
+### Shared column-group state
 
-```text
-Retrieve output / bulk_subscript
-  -> ChunkedColumnInterface positional take
-  -> VortexColumn::Take...
-  -> VortexPlanner::PlanForOffsets
-  -> VortexColumnGroup cache slot pin
-  -> VortexFormatReader::read_with_plan(row indices)
-```
+`VortexColumnGroup` owns the state shared by all fields in one physical group.
+For every file it owns:
 
-The key ownership split is:
+- the validated absolute segment row range;
+- a sparse local filesystem view;
+- one footer reader;
+- immutable footer-backed planners for the projected fields;
+- one cache slot and Cell translator;
+- metadata memory accounting.
 
-- `milvus-storage` understands the Vortex file layout and maps row ranges,
-  offsets, and predicates to Vortex read plans.
-- Milvus QueryNode owns cache pinning, sparse-file lifecycle, expression cursor
-  consumption, and output conversion.
+Footer and optional zone-map bytes are loaded when the group is initialized,
+not once per field or query. Field-level `VortexColumn` objects reuse this group
+state and select only their projected logical column.
 
-### Column Group Splitting
+### Cells, planning, and pinning
 
-Column group splitting partitions fields by the default (empty), `raw`, or
-`vortex` `local_format` value before subsequent split policies finalize physical
-groups. This gives each physical group an unambiguous local-format intent while
-keeping physical writer-format selection independent.
+For Vortex V2 a Cell is one complete row group and its physical segments. For
+V1, which lacks stable row-group boundaries, a Cell is the complete flat
+physical unit. Cell row ranges are ordered, non-overlapping, and complete;
+fields in the same group must agree on them.
 
-The split policy behavior is:
-
-1. Partition pending fields by the exact `local_format` value, keeping default
-   (empty), `raw`, and `vortex` separate.
-2. Keep the partition boundary through later split policies.
-3. Leave the resulting column group's writer `Format` unset so normal writer
-   configuration or existing manifest metadata determines the physical format.
-
-System, vector, text, average-size, and remanent-short split policies still
-apply after the local-format partitioning. They split within the current local
-format partition instead of mixing formats.
-
-### Cell Semantics
-
-A cell is the cache and loading unit for Vortex local format. Cells are defined
-by the Vortex file layout and exposed through `VortexPlanner`.
-
-Vortex V1:
-
-- There is no stable row-group boundary.
-- A cell corresponds to a full flat physical unit.
-
-Vortex V2:
-
-- Row groups are available.
-- A cell corresponds to a complete row group and its physical segments.
-- Row-group boundaries must align for fields in the same physical column group.
-
-General cell invariants:
-
-- Cell ids are contiguous and start at zero within a file.
-- Cell row ranges are contiguous and cover the file.
-- Cells do not share physical segments.
-- All fields in the same physical column group share a `VortexColumnGroup`; pinning
-  a cell loads the underlying bytes once for all fields in that group.
-
-### Storage-Side Vortex Interfaces
-
-#### `VortexFooterReader`
-
-`VortexFooterReader` reads Vortex file metadata. It is not responsible for data
-scan, take, Milvus cache pinning, or cache lifetime.
-
-Responsibilities:
-
-- Open a Vortex file through a filesystem.
-- Materialize the footer into the sparse local file.
-- Optionally materialize V1/V2 zone-map segments.
-- Expose schema, row count, footer size, field layout, row-group ranges, and
-  physical byte ranges.
-- Prune row groups using zone maps when they are loaded.
-
-Lifecycle:
-
-- `Open(fs, load_zonemap)` succeeds at most once per reader instance.
-- `Open(false)` loads footer metadata only; pruning conservatively keeps all
-  candidate row groups.
-- `Open(true)` loads footer metadata, materializes zone-map bytes, and then
-  reopens the final Vortex file view so Vortex's internal initial-read cache
-  cannot retain sparse zero-filled zone-map bytes.
-
-#### `VortexPlanner`
-
-`VortexPlanner` converts logical Milvus access requests into two outputs:
-
-```cpp
-struct VortexPlan {
-    std::vector<uint64_t> cell_ids;
-    VortexReadPlan read_plan;
-};
-```
-
-- `cell_ids` are used by Milvus to pin Vortex cells through the cache layer.
-- `read_plan` is passed to `VortexFormatReader` for execution.
-
-Supported planning modes:
-
-- `PlanForRowRange(row_start, row_end, predicate)`
-- `PlanForOffsets(offsets)`
-
-For V2 row-group cells and supported predicates, the planner may use zone maps
-to prune cells. For V1 files or unsupported predicates, it returns all candidate
-cells conservatively.
-
-#### `VortexFormatReader`
-
-The common `FormatReader` interface remains compatible with existing callers.
-Vortex local format uses Vortex-specific extensions:
-
-- `read_with_plan(const VortexReadPlan&)`
-- `read_row_ids_with_plan(const VortexReadPlan&)`
-
-`read_with_plan` returns data as an Arrow stream. `read_row_ids_with_plan`
-returns file-local row ids satisfying the predicate in the plan. Predicate state
-is carried by `VortexReadPlan`, not by long-lived reader state. Existing
-`set_predicate` behavior remains for compatibility but is not the local format
-path.
-
-### Milvus-Side Components
-
-#### `FieldMeta`
-
-`FieldMeta` parses `type_params["local_format"]` and defaults to `raw`. It also
-serializes non-default local format back to the field schema.
-
-#### `ChunkedColumnInterface`
-
-`ChunkedColumnInterface` is the shared access contract for column-oriented scalar
-data. It lets callers express the operation they need without assuming the data
-is backed by raw Milvus chunks.
-
-The interface covers two operation groups:
-
-- scan operations for expression evaluation;
-- positional take/output operations for retrieve, requery, and bulk_subscript.
-
-`Scan` returns a cursor of `ScanBatch` values.
-
-Scan outputs:
-
-| Output | Payload |
-|--------|---------|
-| `ScanOutput::RowIds` | Sparse row ids that satisfy, or may satisfy, a pushed predicate. |
-| `ScanOutput::Data` | Dense values over a row range, plus validity when needed. |
-
-Data scan supports:
-
-- row range;
-- value kind (`FixedWidth`, `StringView`, `JsonView`, `ArrayView`);
-- validity;
-- validity-only projection.
-
-Row-id scan supports:
-
-- unary predicates;
-- binary range predicates;
-- sparse row-id batches.
-
-If a column implementation cannot support a scan mode, it falls back to the
-raw-compatible behavior through the existing chunked path.
-
-#### `VortexColumnGroup`
-
-`VortexColumnGroup` owns shared state for one physical Vortex column group.
-
-Each file state contains:
-
-- source filesystem and resolved source path;
-- sparse filesystem and sparse path;
-- `VortexFooterReader`;
-- group-level `VortexPlanner`;
-- cache slot and translator;
-- row count and memory accounting.
-
-All fields in the same physical group share the same `VortexColumnGroup`.
-
-#### `VortexColumn`
-
-`VortexColumn` is a field-level `ChunkedColumnInterface` implementation over a
-shared `VortexColumnGroup`.
-
-Responsibilities:
-
-- Resolve the Vortex field name. External fields use the external column name;
-  internal fields use the field id string.
-- Build a field-level projected Arrow schema.
-- Create field-level planner/reader state.
-- Implement `Scan`.
-- Implement positional take helpers for retrieve output.
-
-### Filter Scan
-
-#### Predicate Pushdown
-
-For supported unary and binary range expressions, expression execution requests
-`ScanOutput::RowIds`.
-
-Example:
-
-```text
-UnaryExpr / BinaryRangeExpr
-  -> ChunkedColumnInterface::Scan(ScanOutput::RowIds)
-  -> VortexColumn::Scan
-  -> VortexRowIdScanCursor
-  -> VortexPlanner::PlanForRowRange(predicate)
-  -> pin planned cells
-  -> VortexFormatReader::read_row_ids_with_plan
-  -> bitmap assembly in expression execution
-```
-
-The initial implementation supports a narrow set of predicate strings that can
-be represented safely for the Vortex reader. Unsupported expressions fall back
-to data scan. This keeps correctness independent of pushdown coverage.
-
-#### Data Scan
-
-Unsupported predicates, complex expressions, and expressions that need raw value
-inspection use `ScanOutput::Data`.
-
-Example:
-
-```text
-Expr data path
-  -> ChunkedColumnInterface::Scan(ScanOutput::Data)
-  -> VortexDataScanCursor
-  -> VortexPlanner::PlanForRowRange(no predicate)
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan
-  -> expression layer evaluates predicate
-```
-
-This is the current path for examples such as `LIKE`, `IN`, JSON path
-expressions, and array predicates when they cannot be represented as a Vortex
-predicate.
-
-### Offset Input Execution
-
-Offset-input execution is used when expression evaluation is restricted to a
-known set of segment offsets.
-
-The initial Vortex local format implementation handles dense sorted offsets by
-scanning one continuous range:
-
-```text
-ProcessDataByOffsets
-  -> ProcessSortedDataByOffsetsByScan
-  -> scan [min_offset, max_offset + 1)
-  -> expression layer checks the offset bitmap
-```
-
-Bitmap or selection pushdown into `ChunkedColumnInterface::Scan` is left as
-future work. The current strategy avoids many small reads while keeping
-semantics simple.
-
-### Retrieve and Requery
-
-Retrieve/requery output is not filter scan. It reads requested output fields at
-selected row offsets.
-
-```text
-FillTargetEntry / Retrieve output
-  -> bulk_subscript
-  -> ChunkedColumnInterface positional take
-  -> VortexColumn::BulkPrimitiveValueAt / BulkRawStringAt / BulkArrayAt
-  -> TakeOwn / TakeStringLikeViews
-  -> VortexPlanner::PlanForOffsets
-  -> pin planned cells
-  -> VortexFormatReader::read_with_plan(row indices)
-  -> restore requested output order
-```
-
-The planner disables predicate semantics for take because retrieve output is
-positional. Random requery over long strings can still touch many cells; this is
-tracked as a separate performance area from filter pushdown.
-
-### Nullable and Validity
-
-The `ChunkedColumnInterface` scan API uses `ValidityView` to present nullability
-uniformly.
-
-Rules:
-
-- Non-nullable fields may return all-valid validity.
-- Nullable dense data scans must return validity aligned with the dense row
-  range.
-- Row-id scans may return validity aligned with sparse row ids.
-- Validity-only projection is part of the scan model so callers that only need
-  nullability do not need to materialize full values.
-
-The raw path may adapt its existing `bool*` validity representation into this
-model. Vortex uses Arrow bitmap/null-buffer semantics.
-
-### Sparse Local File and Cache Loading
-
-Vortex local format uses a sparse local file as the file view consumed by the
-Vortex reader.
-
-Flow:
-
-```text
-VortexFooterReader
-  -> materialize footer and optional zone-map bytes into sparse file
-
-VortexPlanner
-  -> choose cell ids and read plan
-
-Milvus cache layer
-  -> pin cells
-  -> Vortex translator loads cell byte ranges into sparse file
-
-VortexFormatReader
-  -> reads the sparse file as a normal file
-```
-
-Properties:
-
-- Loaded byte ranges are written to the sparse file.
-- Missing ranges remain sparse holes and read as zero-filled bytes if an
-  over-wide read crosses them.
-- Footer bytes are always materialized before planning.
-- Zone-map bytes are materialized when pruning is enabled.
-- Cell lifecycle remains controlled by Milvus cache pin/unpin.
-
-### Warmup and Eviction
-
-Vortex local format reuses Milvus cache warmup policy. Warmed scalar fields can
-load their cells during segment load, reducing the first-query penalty. Manual
-eviction and warmup cancellation are implemented at the `VortexColumnGroup`
-level so all field proxies in the same physical group share the same state.
-
-## Compatibility, Deprecation, and Migration Plan
-
-- Backward compatible by default: fields without `local_format` use the server
-  default, which initially behaves as `raw`.
-- Existing non-Vortex segments continue to load through the raw path.
-- A schema can contain default (empty), raw, and Vortex local format fields;
-  column group splitting keeps the three intents physically separate.
-- During the transition, QueryNode keeps both access paths: raw fields continue
-  to use the `ChunkedBase` chunk-oriented path, while Vortex fields use the
-  `ChunkedColumnInterface` column-oriented path.
-- Vortex local format is only used for Storage V3 sealed segments.
-- Rolling upgrades must ensure QueryNodes understand Vortex local format before
-  new Vortex column groups are loaded. Older readers cannot load Vortex physical
-  column groups.
-
-## Test Plan
-
-System and integration validation:
-
-- Create collections with raw fields, Vortex local format fields, and mixed
-  fields; verify insert, flush, load, search, query, and retrieve.
-- Verify `local_format=vortex` is rejected for primary-key and vector fields.
-- Verify Storage V3 manifests with Vortex physical column groups load as
-  `VortexColumnGroup + VortexColumn`.
-- Verify non-Vortex physical files continue to load through the raw path.
-- Run scalar filter benchmark cases for primitive predicates, complex
-  expressions, offset-input execution, and retrieve/requery output.
-
-Unit and component validation:
-
-- `FieldMeta` parse/serialize of `local_format`.
-- Column group split policy keeps raw and Vortex fields separate.
-- `ChunkedColumnInterface` scan and positional take behavior.
-- Raw `ChunkedBase` path and Vortex `ChunkedColumnInterface` path coexist without
-  changing raw field behavior.
-- `VortexColumn` row-id scan, data scan, validity, and take paths.
-- `VortexFooterReader` footer and optional zone-map lifecycle.
-- `VortexPlanner` row range, offset, and predicate pruning plans.
-- `VortexFormatReader::read_with_plan` and `read_row_ids_with_plan`.
-
-Performance validation:
-
-- Compare Vortex and raw local format for cold and hot retrieve.
-- Compare Vortex and raw local format for primitive filter scan.
-- Track complex data scan cases such as JSON, ARRAY, and `LIKE`.
-- Track random retrieve/requery over long VARCHAR because it exercises take and
-  output conversion rather than filter scan.
-
-## Future Work
-
-- Push offset bitmaps or row selections into `ChunkedColumnInterface::Scan`.
-- Expand Vortex predicate construction for more scalar types and expression
-  forms.
-- Optimize long string, JSON, and ARRAY retrieve/take conversion paths.
-- Use validity-only scan in paths that only need nullability.
+Before data access, the footer-backed planner maps the requested segment range
+or offsets to Cells and may use loaded zone maps to identify data that a filter
+cannot match. QueryNode then pins only the Cells required by the operation,
+subject to nullability:
+
+- a non-nullable skipped Cell need not be pinned for data;
+- a nullable field still needs authoritative validity, so the Cell remains
+  readable even when its value payload is skipped.
+
+Skip state means “do not construct/evaluate this data,” not “remove these rows.”
+A skipped nullable row still returns its actual validity. Data is unspecified
+when either the row is null or data is skipped; validity distinguishes a true
+NULL from a valid skipped value.
+
+### Sparse local backing and lifecycle
+
+Vortex presents a sparse local file to the reader. Footer and zone-map ranges
+are materialized first; a Cell translator fills data ranges on cache load.
+Missing ranges remain sparse holes until their Cell is loaded.
+
+The production backing is memory or mmap, selected by the normal scalar mmap
+settings. Mmap files are local ephemeral cache artifacts:
+
+- created with owner-only permissions;
+- truncated for a new column-group generation;
+- removed when the group is destroyed;
+- rebuilt from remote Storage V3 files after QueryNode restart;
+- punched or zeroed when cache eviction releases a Cell range.
+
+They are not durable segment state and are not part of backup, replication, or
+CDC.
+
+### Predicate pushdown
+
+Vortex can return matching row ids for the currently supported unary and binary
+STRING/VARCHAR predicate forms. Unsupported predicates use data Scan and are
+evaluated by the normal expression implementation. Disabling pushdown changes
+only the execution strategy, never the result.
+
+## Supporting Column Access Contract
+
+Raw and Vortex are hidden behind column-level Scan and Take. This is a support
+contract for local format, not a new user-visible query API.
+
+### Scan
+
+`Scan(options)` creates one cursor for one expression leaf. Options fix the
+initial absolute segment position, target value type, output/predicate form,
+filter, prefetch choice, and pin policy. The execution window and whether a
+nullable data batch needs values or validity only are supplied later through
+cursor positioning and bounded `Next` calls.
+
+The cursor exposes:
+
+- `Position()`: next unread absolute segment offset;
+- `Seek(position)`: move forward without returning intervening rows;
+- `Next(max_length, read_mode)`: return one batch starting exactly at the
+  current position and advance by the batch's actual row count.
+
+`max_length` is an upper bound. Raw may stop at a chunk boundary and Vortex may
+stop at a reader boundary. The expression node owns the cursor across execution
+windows, seeks when its window start differs from `Position()`, and consumes
+successive batches until the window is complete. A batch never crosses a
+skipped range silently: it carries aligned `data_skipped` state and, for a
+nullable field, authoritative validity.
+
+Pin policy is selected once at `Scan` creation:
+
+- `ResultOwned` (default) transfers the Cell pin to each returned batch. The
+  batch remains valid until its owner is released; the cursor holds no pin.
+- `CursorOwned` keeps the current physical Cell or planned Cell-set pin in the
+  cursor, reuses an identical pin plan, and releases it before pinning a
+  different plan. The batch is borrowed only until the next `Next` or `Seek`.
+
+The caller never pins Cells directly. Optional prefetch submits the remaining
+planned Scan Cells for parallel cache loading and immediately releases those
+prefetch pins; normal batch reads still acquire their configured pin owner. It
+is enabled only on paths that intentionally preserve prior prefetch behavior,
+not implicitly for validity-only reads.
+
+### Take
+
+`Take(options)` accepts a finite list of absolute segment offsets and returns
+one `TakeResult` with exactly one position per input offset. Input order and
+duplicates are preserved. Filtered positions stay aligned and carry
+`data_skipped`; nullable positions also retain authoritative validity.
+
+`Get(i)` returns the value, validity, and skip state for one position.
+`IsValid(i)` reads validity without constructing data. `GetOwn()` materializes
+an ordered, contiguous result independent of backend pins.
+
+Raw keeps at most the currently accessed Cell pinned and copies only when owned
+output is requested. Vortex may sort, group, and deduplicate offsets internally
+to reduce decode work, then restores input order in its already-owned result.
+Neither backend exposes Cell ids, chunk ids, or file-local offsets to callers.
+
+## Configuration
+
+| Setting | Default | Scope / refresh | Effect |
+|---|---:|---|---|
+| field type parameter `local_format` | `raw` | schema metadata; applied when a sealed segment generation loads | Requests Raw or Vortex local representation. It does not select the writer format. |
+| field/collection property `mmap.enabled` | unset | schema property; applied at load | Overrides the global scalar mmap setting for the affected physical group. If any field in a group explicitly enables mmap, the group uses mmap. |
+| `queryNode.mmap.scalarField` | `false` | QueryNode configuration | Selects mmap rather than memory backing when no field/collection override exists. Disabling it does not disable Vortex; it selects memory backing. |
+| `queryNode.mmap.populate` | `true` | QueryNode startup configuration | Controls `MAP_POPULATE` for the Vortex sparse mmap backing. No effect when mmap backing is not selected. |
+| `queryNode.segcore.tieredStorage.warmup.scalarField` | `sync` | QueryNode/collection warmup policy | `sync`, `async`, or `disable` controls proactive Cell loading. `disable` keeps on-demand loading. |
+| `queryNode.segcore.enableVortexScanPushdown` | `true` | refreshable QueryNode setting | When false, Vortex filters use data Scan and normal expression evaluation. |
+| `queryNode.segcore.scanCursorOwnsPin` | `false` | non-refreshable QueryNode setting | When false use `ResultOwned`; when true use experimental `CursorOwned` Scan pin lifetime. |
+
+Configuration changes do not rewrite existing segment files. Schema or mmap
+changes take effect when the affected segment generation is loaded or replaced;
+the pushdown setting is read dynamically by execution.
+
+## Failure, Concurrency, and Recovery
+
+Vortex initialization validates file ordering and coverage, manifest row count,
+field projection, schema compatibility, Cell geometry, and cross-field Cell
+alignment. Invalid storage data is reported as a data-format failure. File
+creation, remote reads, cache loading, cancellation, and memory failures retain
+their underlying error category. No catch-all conversion should turn a
+transient system error into an input error.
+
+Once load-time resolution selects Vortex, a footer, planner, sparse-file, or
+reader failure fails the load or operation. Falling back to Raw at that point
+could hide corruption and create unpredictable memory behavior, so it is not
+allowed.
+
+The shared ColumnGroup, file table, planners, and statistics snapshots are
+immutable after publication. Cache slots provide the synchronization for Cell
+load/eviction. Cursors and Take results are operation-local and are not shared
+concurrently. Borrowed Raw views also require the operation context and their
+documented pin owner to remain alive.
+
+On restart, QueryNode re-reads the manifest and footer, reconstructs the
+ColumnGroup, and refills sparse Cell ranges on demand or according to warmup
+policy. No local Vortex cache file is recovered as authoritative state.
+
+## Observability and Troubleshooting
+
+Segment loading logs the segment id, physical column-group index, field count,
+and file count when Vortex is selected. Sparse-file cleanup and range-eviction
+failures are logged as warnings. Existing segment-load, tiered-cache, mmap, and
+query latency telemetry continues to apply.
+
+There are currently no dedicated local-format metrics or traces. Operators can
+diagnose selection by checking schema `local_format`, manifest physical format,
+the Vortex load log, mmap/warmup settings, and cache/load failures. Dedicated
+backend-selection, Cell-pruning, decoded-byte, and pin-lifetime metrics are a
+follow-up before treating the feature as independently observable at scale.
+
+## Compatibility, Rollout, and Rollback
+
+- Existing schemas default to Raw; non-Vortex physical groups remain on Raw.
+- `local_format=vortex` affects only Storage V3 sealed scalar groups that pass
+  the complete-group eligibility check.
+- A binary that understands the physical Vortex reader but not Vortex local
+  format may ignore the local preference and materialize the group through its
+  generic Raw reader path.
+- A binary without support for the manifest's physical Vortex format cannot
+  load that group. Rolling upgrade and rollback must therefore keep all serving
+  QueryNodes at a version that can read the physical files before such files are
+  introduced.
+- Disabling Vortex pushdown is a safe execution fallback. Changing a field back
+  to Raw requires publishing/reloading the affected segment generation; it does
+  not rewrite object-storage files.
+- Growing segments and vector indexes are unchanged.
+
+## Alternatives Considered
+
+### Treat Vortex as another Chunk implementation
+
+Rejected because Vortex has no stable Raw chunk object to expose. Synthesizing
+chunks would force decoding and ownership conversions before the caller knows
+which rows it needs.
+
+### Let each field own its own footer, planner, and cache
+
+Rejected because fields in one physical column group share files and physical
+Cells. Independent state would duplicate metadata, loads, and pins and could
+observe inconsistent eviction lifetimes.
+
+### Let `local_format` select the physical writer
+
+Rejected because schema intent and persisted encoding have different lifecycle
+and compatibility constraints. The manifest must remain authoritative for the
+physical format.
+
+### Fall back to Raw after a selected Vortex reader fails
+
+Rejected because it hides corruption or infrastructure failures and can turn a
+bounded on-demand load into unexpected full materialization.
+
+## Verification and Acceptance
+
+Correctness coverage must include:
+
+- schema create/alter validation and `FieldMeta` round-trip;
+- column-group splitting for absent, Raw, Vortex, primary-key, and mixed fields;
+- load-time decision-table cases for Raw and Vortex physical groups;
+- multiple ordered Vortex files, mixed per-file Arrow representations, empty
+  Cells, malformed ranges, row-count mismatch, and cross-field misalignment;
+- nullable and all-valid data, validity-only access, skipped valid rows, skipped
+  NULL rows, and NOT/candidate-mask expression behavior;
+- sequential/seeked Scan and ordered, shuffled, duplicate-offset Take;
+- retrieve, requery, offset-input expression, temporary text-index build, and
+  virtual-primary-key callers;
+- cancellation, remote read failure, corrupt footer/data, local sparse-file
+  failure, cache eviction, segment replacement, and restart reconstruction;
+- memory and mmap backings with sync, async, and disabled warmup.
+
+Performance acceptance compares the new Raw Scan/Take path with the previous
+Chunk path on the same segment and workload. Benchmarks cover fixed-width and
+view types, single and multiple Cells, hot and cold cache, sequential Scan,
+ordered and shuffled Take, first-window latency, total throughput, peak pinned
+bytes, and pin counts. A repeatable Raw regression requires optimization or an
+explicit design decision before rollout; reduced pin calls alone are not
+sufficient evidence. Vortex benchmarks separately measure pruning, bytes read,
+decode cost, and memory reduction.
+
+Required repository builds, focused unit tests, integration tests, DCO, and CI
+must pass before merge.
+
+## Implementation Phases and Follow-ups
+
+Phase 1 introduces local-format selection and the common Scan/Take operations on
+`ChunkedColumnInterface`, then migrates sealed expression and retrieve/requery
+main paths. Legacy Chunk access remains only for consumers not yet migrated.
+
+Phase 2 removes external Chunk access from sealed columns, leaves Chunk-specific
+APIs only behind concrete Raw/Growing implementations, and renames the common
+abstraction to `ColumnInterface`.
+
+Known follow-ups:
+
+Unless explicitly reassigned, the Feature DRI and Primary Approver own these
+follow-ups:
+
+- complete exact target validation for recursively represented ARRAY values
+  after the storage representation stabilizes;
+- avoid decoding Vortex Take positions that a filter has already skipped;
+- decide whether `CursorOwned` should become the default from representative
+  benchmarks; `ResultOwned` remains the current default;
+- integrate sparse Vortex writes with the unified Milvus file-I/O controller
+  when that interface is available;
+- optimize random long VARCHAR/JSON/ARRAY Take and owned conversion;
+- add dedicated local-format selection, pruning, decode, and pin metrics;
+- expand safe predicate pushdown beyond the initial VARCHAR operators.
+
+## Design Review Status
+
+The technical document records the intended final state, but it is not ready to
+merge under the Milvus Feature Design Review process until the Feature DRI,
+Primary Approver, Independent Approver, and review date are filled in; the
+required meeting (including Liu Li) is held; its conclusions are reflected
+here; and both named approvers explicitly approve the Design Doc PR.
 
 ## References
 
-- [Milvus PR: support vortex local format](https://github.com/milvus-io/milvus/pull/49908)
-- [Milvus issue: vortex local format](https://github.com/milvus-io/milvus/issues/50304)
+- [Milvus PR: scalar local-format data-scan foundation](https://github.com/milvus-io/milvus/pull/51504)
+- [Milvus issue: Vortex local format](https://github.com/milvus-io/milvus/issues/50304)
 - [milvus-storage](https://github.com/milvus-io/milvus-storage)
-- [Vortex project](https://github.com/vortex-data/vortex)
+- [Vortex](https://github.com/vortex-data/vortex)

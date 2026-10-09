@@ -19,12 +19,14 @@
 #include <memory>
 #include <optional>
 
-#include "ArrayOffsets.h"
+#include "StructElementOffsets.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "knowhere/config.h"
 
 namespace milvus {
+
+enum class StrictGroupStrategy { Original, PerGroup };
 
 struct SearchIteratorV2Info {
     std::string token = "";
@@ -46,8 +48,10 @@ struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};
-    double strict_group_acceptance_threshold_{0.1};
-    int64_t strict_group_probe_candidates_{100};
+    StrictGroupStrategy strict_group_strategy_{StrictGroupStrategy::PerGroup};
+    int64_t strict_group_phase1_candidate_weight_{0};
+    bool strict_group_skip_refine_{false};
+
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
@@ -62,7 +66,7 @@ struct SearchInfo {
     std::optional<std::string> json_path_;
     std::optional<milvus::DataType> json_type_;
     bool strict_cast_{false};
-    std::shared_ptr<const IArrayOffsets> array_offsets_{
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
         nullptr};  // For element-level search
     bool global_refine_enable_{false};
     float search_topk_ratio_{0.0f};
@@ -86,7 +90,7 @@ struct SearchInfo {
 
     bool
     element_level() const {
-        return array_offsets_ != nullptr;
+        return struct_element_offsets_ != nullptr;
     }
 
     bool

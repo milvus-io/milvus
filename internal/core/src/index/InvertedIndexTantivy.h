@@ -346,6 +346,14 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
+
  protected:
     const TargetBitmap
     PatternQuery(const std::string& pattern) override;
@@ -385,7 +393,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual nlohmann::json
     BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
 
- protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
     std::string path_;

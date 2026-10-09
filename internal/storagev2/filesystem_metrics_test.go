@@ -60,46 +60,29 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	}
 }
 
+// Every local storage config maps to the single loon filesystem rooted at "/"
+// (see LoonFSRootPath), so two local configs with different root paths share
+// one metrics entry whose display key names that root.
 func TestListFilesystemMetrics(t *testing.T) {
-	metricsBefore, err := ListFilesystemMetrics()
-	require.NoError(t, err)
-	existingDisplayKeys := make(map[string]struct{}, len(metricsBefore))
-	for _, fsMetrics := range metricsBefore {
-		existingDisplayKeys[fsMetrics.DisplayKey] = struct{}{}
-	}
-
-	dirA := t.TempDir()
-	dirB := t.TempDir()
-	expectedDisplayPrefixes := map[string]struct{}{
-		"file://" + dirA + "#fs:": {},
-		"file://" + dirB + "#fs:": {},
-	}
-	for _, dir := range []string{dirA, dirB} {
-		_, err := GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
+	for _, dir := range []string{t.TempDir(), t.TempDir()} {
+		fsMetrics, err := GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
 			StorageType: "local",
 			RootPath:    dir,
 		})
 		require.NoError(t, err)
+		require.NotNil(t, fsMetrics)
 	}
 
 	metricsList, err := ListFilesystemMetrics()
 	require.NoError(t, err)
 
-	newFilesystemCount := 0
+	localPrefix := "file://" + LoonLocalFSRootPath + "#fs:"
+	localEntries := 0
 	for _, fsMetrics := range metricsList {
-		if _, ok := existingDisplayKeys[fsMetrics.DisplayKey]; ok {
+		if !strings.HasPrefix(fsMetrics.DisplayKey, localPrefix) {
 			continue
 		}
-		newFilesystemCount++
-		matched := false
-		for prefix := range expectedDisplayPrefixes {
-			if strings.HasPrefix(fsMetrics.DisplayKey, prefix) {
-				delete(expectedDisplayPrefixes, prefix)
-				matched = true
-				break
-			}
-		}
-		assert.True(t, matched, fsMetrics.DisplayKey)
+		localEntries++
 		assert.GreaterOrEqual(t, fsMetrics.ReadCount, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.WriteCount, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.ReadBytes, int64(0))
@@ -109,8 +92,7 @@ func TestListFilesystemMetrics(t *testing.T) {
 		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadCreated, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadFinished, int64(0))
 	}
-	require.Equal(t, 2, newFilesystemCount)
-	require.Empty(t, expectedDisplayPrefixes)
+	require.Equal(t, 1, localEntries, "local storage shares one loon filesystem rooted at /")
 }
 
 func TestNilConfig(t *testing.T) {

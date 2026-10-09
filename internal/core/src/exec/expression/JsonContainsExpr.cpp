@@ -421,8 +421,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             const auto& array = data[i];
             const auto array_size = GetArrayRowSize(array);
             for (size_t j = 0; j < array_size; ++j) {
-                if (elements.find(array.template get_data<GetType>(j)) !=
-                    elements.end()) {
+                if (elements.find(array.template get_data_unchecked<GetType>(
+                        j)) != elements.end()) {
                     return true;
                 }
             }
@@ -1058,7 +1058,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 uint64_t found = 0;
                 for (size_t j = 0; j < array_size; ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j), found)) {
+                            data[i].template get_data_unchecked<GetType>(j),
+                            found)) {
                         return true;
                     }
                 }
@@ -1068,7 +1069,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 size_t remaining = matcher.target_count();
                 for (size_t j = 0; j < array_size; ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j),
+                            data[i].template get_data_unchecked<GetType>(j),
                             found_large,
                             remaining)) {
                         return true;
@@ -2457,11 +2458,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
 
-    // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+    // Get struct element offsets for nested index (element-to-row conversion)
+    auto struct_element_offsets =
+        segment_->GetStructElementOffsets(expr_->column_.field_id_);
 
     auto execute_sub_batch =
-        [this, &array_offsets](
+        [this, &struct_element_offsets](
             Index* index_ptr,
             const boost::container::vector<GetType>& vals) -> TargetBitmap {
         // Query helper: for nested index, convert element-level to row-level
@@ -2470,10 +2472,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
             if (!index_ptr->IsNestedIndex()) {
                 return element_bitset;
             }
-            AssertInfo(array_offsets != nullptr,
-                       "array offsets not found for field {}",
+            AssertInfo(struct_element_offsets != nullptr,
+                       "struct element offsets not found for field {}",
                        expr_->column_.field_id_.get());
-            return array_offsets->ForEachRowElementRange(
+            return struct_element_offsets->ForEachRowElementRange(
                 [&element_bitset](int32_t elem_start, int32_t elem_end) {
                     for (int32_t i = elem_start; i < elem_end; ++i) {
                         if (element_bitset[i]) {

@@ -109,12 +109,14 @@ ChunkTranslator::ChunkTranslator(
         meta_.num_rows_until_chunk_.push_back(
             meta_.num_rows_until_chunk_.back() + info.row_count);
     }
-    AssertInfo(meta_.num_rows_until_chunk_.back() == field_data_info.row_count,
-               fmt::format("data lost while loading column {}: found "
-                           "num rows {} but expected {}",
-                           field_data_info.field_id,
-                           meta_.num_rows_until_chunk_.back(),
-                           field_data_info.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == field_data_info.row_count)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  fmt::format("data lost while loading column {}: found "
+                              "num rows {} but expected {}",
+                              field_data_info.field_id,
+                              meta_.num_rows_until_chunk_.back(),
+                              field_data_info.row_count));
+    }
     virtual_chunk_config(field_data_info.row_count,
                          file_infos_.size(),
                          meta_.num_rows_until_chunk_,

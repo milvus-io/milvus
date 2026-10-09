@@ -26,6 +26,9 @@ import (
 )
 
 const (
+	InsertTaskName = "InsertTask"
+	DeleteTaskName = "DeleteTask"
+	UpsertTaskName = "UpsertTask"
 	SearchTaskName = "SearchTask"
 	QueryTaskName  = "QueryTask"
 )

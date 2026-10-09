@@ -196,7 +196,14 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
- public:
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
+
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
     operator[](size_t idx) const {

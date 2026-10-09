@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path"
 	"path/filepath"
 	"testing"
@@ -29,6 +30,122 @@ import (
 )
 
 var localPath string
+
+func TestLocalChunkManagerWalkWithPrefixPrunesUnrelatedDirectories(t *testing.T) {
+	for _, readOnlyParent := range []bool{false, true} {
+		name := "unreadable backup"
+		if readOnlyParent {
+			name = "read-only backup with unreadable child"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			cm := NewLocalChunkManager(objectstorage.RootPath(root))
+			key := filepath.Join(root, "insert_log/1/2/3/data")
+			backup := filepath.Join(root, ".backup")
+			blocked := backup
+			if readOnlyParent {
+				blocked = filepath.Join(backup, "nested")
+			}
+			require.NoError(t, cm.Write(t.Context(), key, []byte("live")))
+			require.NoError(t, cm.Write(t.Context(), filepath.Join(blocked, "retained"), []byte("backup")))
+			t.Cleanup(func() {
+				require.NoError(t, os.Chmod(backup, 0o700))
+				require.NoError(t, os.Chmod(blocked, 0o700))
+			})
+			if readOnlyParent {
+				require.NoError(t, os.Chmod(backup, 0o500))
+			}
+			require.NoError(t, os.Chmod(blocked, 0))
+			if _, err := os.ReadDir(blocked); err == nil {
+				t.Skip("filesystem permissions do not prevent this user from reading the directory")
+			} else {
+				require.ErrorIs(t, err, os.ErrPermission)
+			}
+			var found []string
+			require.NoError(t, cm.WalkWithPrefix(t.Context(), filepath.Join(root, "insert_log"), true, func(info *ChunkObjectInfo) bool {
+				found = append(found, info.FilePath)
+				return true
+			}))
+			require.Equal(t, []string{key}, found)
+
+			// Pruning unrelated directories must not hide a real error under
+			// the requested prefix itself.
+			err := cm.WalkWithPrefix(t.Context(), blocked+string(filepath.Separator), true, func(*ChunkObjectInfo) bool { return true })
+			require.ErrorIs(t, err, os.ErrPermission)
+		})
+	}
+}
+
+func TestLocalChunkManagerWalkWithPrefixKeepsStringPrefixSemantics(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	keys := []string{"insert_log/1/data", "insert_log/10/data", "insert_logExtra/1/data", "insert_log.file", "unrelated/data"}
+	for _, key := range keys {
+		require.NoError(t, cm.Write(t.Context(), filepath.Join(root, key), []byte(key)))
+	}
+	for _, test := range []struct {
+		prefix string
+		want   []string
+	}{
+		{prefix: "insert_log", want: keys[:4]},
+		{prefix: "insert_log/", want: keys[:2]},
+		{prefix: "insert_log/1", want: keys[:2]},
+		{prefix: "insert_log/1/", want: keys[:1]},
+		{prefix: "insert_logExtra", want: keys[2:3]},
+		{prefix: "missing"},
+	} {
+		t.Run(test.prefix, func(t *testing.T) {
+			var found []string
+			// Concatenate rather than Join so a caller's trailing slash survives.
+			prefix := root + string(filepath.Separator) + filepath.FromSlash(test.prefix)
+			require.NoError(t, cm.WalkWithPrefix(t.Context(), prefix, true, func(info *ChunkObjectInfo) bool {
+				rel, err := filepath.Rel(root, info.FilePath)
+				require.NoError(t, err)
+				found = append(found, filepath.ToSlash(rel))
+				return true
+			}))
+			require.ElementsMatch(t, test.want, found)
+		})
+	}
+	t.Run("relative prefix", func(t *testing.T) {
+		t.Chdir(root)
+		var found []string
+		require.NoError(t, cm.WalkWithPrefix(t.Context(), "insert_log", true, func(info *ChunkObjectInfo) bool {
+			found = append(found, filepath.ToSlash(info.FilePath))
+			return true
+		}))
+		require.ElementsMatch(t, keys[:4], found)
+	})
+}
+
+func TestLocalChunkManagerEmptyKeyDoesNotDeleteRoot(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	testCM := NewLocalChunkManager(objectstorage.RootPath(root))
+	sentinelPath := filepath.Join(root, "sentinel")
+	removedPath := filepath.Join(root, "remove-me")
+	require.NoError(t, testCM.Write(ctx, sentinelPath, []byte("keep")))
+	require.NoError(t, testCM.Write(ctx, removedPath, []byte("remove")))
+
+	require.NoError(t, testCM.Remove(ctx, ""))
+	content, err := testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+
+	err = testCM.Remove(ctx, root)
+	require.Error(t, err)
+	content, err = testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+
+	require.NoError(t, testCM.MultiRemove(ctx, []string{"", removedPath}))
+	content, err = testCM.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), content)
+	exists, err := testCM.Exist(ctx, removedPath)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
 
 func TestLocalCM(t *testing.T) {
 	ctx := context.Background()
@@ -730,4 +847,46 @@ func readAllChunkWithPrefix(ctx context.Context, manager ChunkManager, prefix st
 		return nil, nil, err
 	}
 	return paths, contents, nil
+}
+
+// An object store returns an empty listing for a prefix that holds nothing, so
+// the local manager must not report ENOENT for a directory that was never
+// created or was already cleaned. Callers (segment GC) rely on prefix removal
+// being idempotent across retries.
+func TestLocalChunkManagerWalkMissingPrefixIsEmpty(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	lcm := NewLocalChunkManager(objectstorage.RootPath(root))
+
+	for _, prefix := range []string{
+		path.Join(root, "insert_log", "1", "2", "3"),
+		path.Join(root, "insert_log", "1", "2", "3") + "/",
+		path.Join(root, "never", "existed"),
+	} {
+		walked := 0
+		require.NoError(t, lcm.WalkWithPrefix(ctx, prefix, true, func(*ChunkObjectInfo) bool {
+			walked++
+			return true
+		}))
+		assert.Zero(t, walked)
+		require.NoError(t, lcm.RemoveWithPrefix(ctx, prefix))
+	}
+
+	// Removing a prefix twice must succeed both times.
+	key := path.Join(root, "insert_log", "1", "2", "4", "a.parquet")
+	require.NoError(t, lcm.Write(ctx, key, []byte("payload")))
+	prefix := path.Join(root, "insert_log", "1", "2", "4") + "/"
+	require.NoError(t, lcm.RemoveWithPrefix(ctx, prefix))
+	require.NoError(t, lcm.RemoveWithPrefix(ctx, prefix))
+	exist, err := lcm.Exist(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, exist)
+}
+
+// An empty prefix matches every object in the bucket, so this API must refuse it
+// rather than erase the instance. LocalChunkManager already did; the remote one
+// is the backend where the blast radius is the whole bucket.
+func TestRemoteChunkManagerRemoveWithPrefixRejectsEmptyPrefix(t *testing.T) {
+	rcm := &RemoteChunkManager{}
+	require.Error(t, rcm.RemoveWithPrefix(context.Background(), ""))
 }

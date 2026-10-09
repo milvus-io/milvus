@@ -162,16 +162,40 @@ func (highlight *SemanticHighlight) DynamicFieldID() int64 {
 	return highlight.dynamicFieldID
 }
 
+// processOneQuery highlights documents for a single query, calling the
+// provider in chunks of at most maxBatch documents. The chunking mirrors the
+// embedding and rerank provider paths: max_client_batch_size is the contract
+// with the model service, and the number of documents here is the request's
+// topK, which is user controlled and routinely larger than the default batch.
+// A non-positive maxBatch degrades to a single call rather than looping
+// forever.
 func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, documents []string) ([][]string, [][]float32, error) {
 	if len(documents) == 0 {
 		return [][]string{}, [][]float32{}, nil
 	}
-	highlights, scores, err := highlight.provider.highlight(ctx, query, documents)
-	if err != nil {
-		return nil, nil, err
+
+	maxBatch := highlight.provider.maxBatch()
+	if maxBatch <= 0 {
+		maxBatch = len(documents)
 	}
-	if len(highlights) != len(documents) || len(scores) != len(documents) {
-		return nil, nil, merr.WrapErrFunctionFailedMsg("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
+
+	highlights := make([][]string, 0, len(documents))
+	scores := make([][]float32, 0, len(documents))
+	for i := 0; i < len(documents); i += maxBatch {
+		end := i + maxBatch
+		if end > len(documents) {
+			end = len(documents)
+		}
+		batch := documents[i:end]
+		batchHighlights, batchScores, err := highlight.provider.highlight(ctx, query, batch)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(batchHighlights) != len(batch) || len(batchScores) != len(batch) {
+			return nil, nil, merr.WrapErrFunctionFailedMsg("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(batchHighlights), len(batchScores), len(batch))
+		}
+		highlights = append(highlights, batchHighlights...)
+		scores = append(scores, batchScores...)
 	}
 
 	return highlights, scores, nil

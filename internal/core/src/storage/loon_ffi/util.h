@@ -34,16 +34,22 @@ std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
 
 /**
- * @brief Create Properties for local filesystem storage
+ * @brief fs.root_path handed to the loon / Arrow filesystem for a storage
+ * config.
  *
- * Creates a minimal Properties object configured for local file storage
- * with the specified path as the root.
- *
- * @param c_path Local filesystem path to use as storage root
- * @return Shared pointer to Properties configured for local storage
+ * Milvus keys already carry the storage prefix: localStorage.path for local
+ * (`/var/lib/milvus/data/insert_log/...`) and minio.rootPath for remote
+ * (`files/insert_log/...`). The filesystem therefore has to be rooted at the
+ * namespace root, which is the bucket for remote (milvus-storage never
+ * applies root_path there) and "/" for local. Rooting the local
+ * SubTreeFileSystem at localStorage.path joins the prefix twice
+ * (milvus-storage #351, milvus #53051), making complete keys differ from their
+ * physical locations.
  */
-std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path);
+inline constexpr const char* kLoonLocalFSRootPath = "/";
+
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path);
 
 /**
  * @brief Convert StorageConfig to C-style CStorageConfig
@@ -84,9 +90,10 @@ GetLoonManifest(
  *       Layer 1: derive storage_type / use_ssl / bucket_name / address from
  *                the external_source URI (Milvus form by default).
  *       Layer 2: apply external_spec.extfs JSON with allowlist gating.
- *       Post-process: AWS-form swap + Tier-1/2 endpoint derivation.
+ *       Post-process: explicit endpoint_url mapping, or the legacy AWS-form
+ *       swap + Tier-1/2 endpoint derivation when endpoint_url is absent.
  *   - format-layer — per-format keys derived from spec.format (e.g.
- *     iceberg.snapshot_id when format="iceberg-table").
+ *     reader.exttable.snapshot_id when format="iceberg-table").
  *
  * The caller MUST have run ValidateExternalSource (Go side) first — this
  * function asserts non-empty scheme and host on external_source.

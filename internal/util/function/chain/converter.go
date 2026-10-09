@@ -234,12 +234,16 @@ func exportIntFieldData(col *arrow.Chunked, name string) ([]int32, error) {
 // Import: Milvus -> DataFrame
 // =============================================================================
 
-// FromSearchResultData creates a DataFrame from SearchResultData.
-// Each query's results become a separate chunk.
-// alloc must not be nil.
-// neededFields specifies which field columns to import from FieldsData;
-// other field columns will be skipped. If nil or empty, no field columns are imported.
-func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Allocator, neededFields []string) (*DataFrame, error) {
+// FromSearchResultData creates a DataFrame from SearchResultData using
+// schema-resolved chain inputs. Each query's results become a separate chunk.
+// Ordinary fields are imported directly, while JSON paths are materialized as
+// Arrow columns named by their logical inputs. A nil or empty
+// plan imports only system and group-by columns.
+func FromSearchResultData(
+	resultData *schemapb.SearchResultData,
+	alloc memory.Allocator,
+	plan *DataFrameInputPlan,
+) (*DataFrame, error) {
 	if alloc == nil {
 		return nil, merr.WrapErrServiceInternal("alloc is nil")
 	}
@@ -324,34 +328,15 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 		}
 	}
 
-	// Import other fields (skip when empty results, as stubs may have nil scalars)
-	// neededFields == nil or []: skip all field columns (none needed)
-	// neededFields == ["a","b"]: import only "a" and "b"
-	var fieldFilter map[string]bool
-	if len(neededFields) > 0 {
-		fieldFilter = make(map[string]bool, len(neededFields))
-		for _, name := range neededFields {
-			fieldFilter[name] = true
-		}
-	}
+	// Import planned fields only for non-empty results. Empty-result stubs may
+	// carry no FieldData even when the plan has inputs.
 	if totalRows > 0 {
 		seenFieldIDs := make(map[int64]bool)
 		seenFieldNames := make(map[string]bool)
-		for _, fieldData := range resultData.GetFieldsData() {
-			fieldID := fieldData.GetFieldId()
-			fieldName := fieldData.GetFieldName()
-			if fieldFilter == nil || !fieldFilter[fieldName] {
-				continue
-			}
-			if seenFieldIDs[fieldID] {
-				return nil, merr.WrapErrServiceInternalMsg("duplicate field id %d (fieldName=%q)", fieldID, fieldName)
-			}
-			if seenFieldNames[fieldName] {
-				return nil, merr.WrapErrServiceInternalMsg("duplicate field name %q (fieldId=%d conflicts with existing field)", fieldName, fieldID)
-			}
-			seenFieldIDs[fieldID] = true
-			seenFieldNames[fieldName] = true
-			if err := importFieldData(builder, fieldData, offsets, alloc); err != nil {
+		if plan != nil && len(plan.Inputs) > 0 {
+			if err := importPlannedFieldData(
+				builder, resultData.GetFieldsData(), plan, offsets, alloc, seenFieldIDs, seenFieldNames,
+			); err != nil {
 				return nil, err
 			}
 		}
@@ -374,9 +359,22 @@ func FromSearchResultData(resultData *schemapb.SearchResultData, alloc memory.Al
 				return nil, err
 			}
 		}
+	} else if plan != nil && len(plan.Inputs) > 0 {
+		if err := materializeEmptyPlannedColumns(builder, plan, len(topks), alloc); err != nil {
+			return nil, err
+		}
 	}
 
-	return builder.Build(), nil
+	df := builder.Build()
+	if plan != nil {
+		for _, input := range plan.Inputs {
+			if err := ValidateMaterializedInput(df, input); err != nil {
+				df.Release()
+				return nil, err
+			}
+		}
+	}
+	return df, nil
 }
 
 // importEmptyIDs creates empty $id columns (Int64 type) for empty results.

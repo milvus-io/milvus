@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -54,7 +55,7 @@ func TestValidateCommitPublishesAfterSuccessfulAppend(t *testing.T) {
 	require.NoError(t, err)
 	state.publishCommit(commit, txnState)
 
-	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 299, 301))
+	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 299, 301))
 }
 
 func TestValidateCommitMarkerConsistency(t *testing.T) {
@@ -120,7 +121,7 @@ func TestValidateCommitRejectsInvalidProof(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.txns[1] = &pendingTxn{
 			meta:          validCASMeta(100, 1),
-			pks:           primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}},
+			pks:           primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}},
 			observedBegin: true,
 		}
 
@@ -214,7 +215,7 @@ func TestValidateCommitReplicatedCASBypassesSourceProof(t *testing.T) {
 	txnState, err := state.validateCommit(commit, 1)
 	require.NoError(t, err)
 	state.publishCommit(commit, txnState)
-	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 159, 161))
+	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 159, 161))
 }
 
 func TestValidateCommitReplicatedCASWithoutRuntimeStateUsesFence(t *testing.T) {
@@ -323,7 +324,45 @@ func TestPartialUpdateStateStoresTxnCASProofAndScope(t *testing.T) {
 func newTestAdmissionState(channel types.PChannelInfo) *partialUpdateState {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
+	state.historyStartTs = 1
 	return state
+}
+
+func TestValidateCommitChecksWALLifecycleHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		floor         uint64
+		readTS        uint64
+		conflictTS    uint64
+		unrecoverable bool
+		retryable     bool
+	}{
+		{name: "old snapshot with matching term and empty history", floor: 90, readTS: 70, retryable: true},
+		{name: "snapshot at first timetick", floor: 90, readTS: 90},
+		{name: "snapshot after first timetick", floor: 90, readTS: 100},
+		{name: "missing initialization", readTS: 100, unrecoverable: true},
+		{name: "current lifecycle conflict", floor: 90, readTS: 100, conflictTS: 110, retryable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
+			state.historyStartTs = tc.floor
+			state.recordTxnBegin(1)
+			require.NoError(t, state.recordTxnCAS(1, validCASMeta(tc.readTS, 2), validCASScope()))
+			state.recordTxnWrites(1, []any{int64(10)})
+			if tc.conflictTS != 0 {
+				state.pkVersions.UpdateAll("v1", []any{int64(10)}, tc.conflictTS)
+			}
+			_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 120), 1)
+			switch {
+			case tc.unrecoverable:
+				requireUnrecoverable(t, err)
+			case tc.retryable:
+				requirePartialUpdateRetryable(t, err)
+			default:
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func newCommitTxnMessage(vchannel string, txnID message.TxnID, timetick uint64) message.MutableMessage {

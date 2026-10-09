@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -43,14 +44,18 @@ type EtcdSource struct {
 	currentConfigs map[string]string
 	keyPrefix      string
 
-	updateMu        sync.Mutex
+	updateMu sync.Mutex
+	// appliedRevision is the etcd revision of the published snapshot. Guarded by updateMu.
+	appliedRevision int64
 	configRefresher *refresher
 	manager         ConfigManager
 }
 
-func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	mlog.Debug(context.TODO(), "init etcd source", mlog.Any("etcdInfo", etcdInfo))
-	etcdCli, err := etcd.CreateEtcdClient(
+// newEtcdClient creates the etcd client described by info. The client is owned
+// by the caller: it is passed into NewEtcdSource (which never constructs its
+// own client) and may be shared with other etcd users.
+func newEtcdClient(etcdInfo *EtcdInfo) (*clientv3.Client, error) {
+	return etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
 		etcdInfo.UserName,
@@ -62,9 +67,22 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		etcdInfo.CaCertFile,
 		etcdInfo.MinVersion,
 		etcd.WithDialTimeout(etcdInfo.DialTimeout))
-	if err != nil {
-		return nil, err
+}
+
+// NewEtcdSource creates an etcd config source over the given client. The
+// client is injected by the caller and never constructed here, so it can be
+// shared with other etcd users (e.g. the version gate confirmator); the source
+// does not own it and Close does not close it. A nil client is rejected: the
+// source would otherwise fail asynchronously in its refresher.
+func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	if etcdCli == nil {
+		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
+	// Do not log EtcdInfo directly: it contains the etcd username/password and
+	// certificate paths. Auth and TLS enablement are protected settings too.
+	mlog.Debug(context.TODO(), "init etcd source",
+		mlog.Bool("useEmbed", etcdInfo.UseEmbed),
+		mlog.Int("endpointCount", len(etcdInfo.Endpoints)))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
 		ctx:            context.Background(),
@@ -170,7 +188,6 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	mlog.RatedDebug(es.ctx, rate.Limit(10), "etcd refreshConfigurations", mlog.String("prefix", prefix), mlog.Any("endpoints", es.etcdCli.Endpoints()))
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
@@ -178,31 +195,67 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 	}
 	newConfig := make(map[string]string, len(response.Kvs))
 	for _, kv := range response.Kvs {
-		key := string(kv.Key)
-		key = strings.TrimPrefix(key, prefix+"/")
-		newConfig[key] = string(kv.Value)
-		newConfig[formatKey(key)] = string(kv.Value)
-		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
+		key := strings.TrimPrefix(string(kv.Key), prefix+"/")
+		value := string(kv.Value)
+		newConfig[key] = value
+		newConfig[formatKey(key)] = value
 	}
-	return es.update(newConfig)
+	// Keep the polling loop cheap and bounded. Values may be credentials and key
+	// names and the etcd prefix may be operator-supplied topology, so an aggregate
+	// count is sufficient here.
+	mlog.RatedDebug(es.ctx, rate.Limit(10), "loaded configurations from etcd",
+		mlog.Int("configCount", len(response.Kvs)))
+	// GetRevision rather than Header.Revision: a hand-written clientv3.KV returns a
+	// zero-value GetResponse whose Header is nil, and the generated getter reports 0 for a
+	// nil receiver. Zero means "no revision information" to update below; etcd revisions
+	// start at 1, so it cannot collide with a real one.
+	return es.update(newConfig, response.Header.GetRevision())
 }
 
-func (es *EtcdSource) update(configs map[string]string) error {
+func (es *EtcdSource) update(configs map[string]string, revision int64) error {
 	// make sure config not change when fire event
 	es.updateMu.Lock()
 	defer es.updateMu.Unlock()
 
-	es.Lock()
-	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+	// The etcd read that produced configs runs before updateMu is taken, so refreshes can
+	// finish out of order, and a serializable poll served by a lagging member can return an
+	// older revision than a linearizable refresh that has already published. Publishing it
+	// would roll the configuration back, so drop any snapshot older than the applied one.
+	// A snapshot with no revision (0) cannot be ordered against anything, so it is published
+	// as it was before revisions were tracked rather than silently dropped.
+	if revision > 0 && revision < es.appliedRevision {
+		mlog.RatedInfo(es.ctx, rate.Limit(1), "ignore etcd config snapshot older than the applied one",
+			mlog.Int64("revision", revision),
+			mlog.Int64("appliedRevision", es.appliedRevision))
+		return nil
+	}
+
+	es.RLock()
+	manager := es.manager
+	es.RUnlock()
+	var events []*Event
+	err := publishSourceSnapshot(manager, es.GetSourceName(), configs, func() error {
+		es.Lock()
+		defer es.Unlock()
+		var err error
+		events, err = PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+		if err != nil {
+			return err
+		}
+		es.currentConfigs = configs
+		return nil
+	})
 	if err != nil {
-		es.Unlock()
 		mlog.Warn(es.ctx, "generating event error", mlog.Err(err))
 		return err
 	}
-	es.currentConfigs = configs
-	es.Unlock()
-	if es.manager != nil {
-		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
+	if revision > es.appliedRevision {
+		es.appliedRevision = revision
+	}
+	// Cache eviction and callbacks may read configuration; keep them outside
+	// both the source lock and the manager snapshot publication section.
+	if manager != nil {
+		manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
 
 	es.configRefresher.fireEvents(events...)

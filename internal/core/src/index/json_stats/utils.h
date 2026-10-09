@@ -19,6 +19,7 @@
 #include <cstring>
 #include "common/FastMem.h"
 #include <map>
+#include <new>
 #include <optional>
 #include <set>
 #include <string>
@@ -31,6 +32,7 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/jsmn.h"
 #include "index/InvertedIndexTantivy.h"
 
@@ -77,13 +79,21 @@ UnescapeJsonString(const std::string& escaped) {
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::DataFormatBroken,
                       "input is not a JSON string: {}",
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const SegcoreError&) {
+        // Already classified above (DataFormatBroken); SegcoreError derives from
+        // std::runtime_error, so without this the generic handler below would
+        // rewrap it as UnexpectedError and the build scheduler would retry a
+        // document that fails identically on every attempt.
+        throw;
     } catch (const simdjson::simdjson_error& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
                   escaped,
                   e.what());
@@ -390,6 +400,12 @@ CreateArrowField(const JsonKey& key, const JsonKeyLayoutType& key_type);
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
 CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
+
+// Build task-local Arrow columns without visiting the potentially much larger
+// set of keys stored in the shared BSON column. The shared builder is last.
+std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
+          std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
+CreateArrowBuildersForColumns(const std::set<JsonKey>& column_keys);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map);

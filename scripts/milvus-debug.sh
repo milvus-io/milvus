@@ -5,7 +5,7 @@
 #
 # Starting from v2.6.15, each Milvus release publishes two image variants:
 #   milvusdb/milvus:<tag>         - stripped, production (default, ~1/3 size)
-#   milvusdb/milvus:<tag>-debug   - unstripped, full debug symbols (for GDB)
+#   milvusdb/milvus:<tag>-debug   - unstripped, self-contained debug info (for GDB)
 #
 # The stripped and debug images share byte-identical code sections, so GDB
 # can use the debug image's symbols to resolve addresses in a coredump

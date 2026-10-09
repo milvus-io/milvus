@@ -18,3 +18,9 @@ add_executable(fastmem_benchmark FastMemBenchmark.cpp)
 target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)
 install(TARGETS fastmem_benchmark DESTINATION benchmark)
+
+# This component benchmark can also be built directly with a C++20 compiler;
+# it uses the same membership helper as ScalarIndexSort without storage deps.
+add_executable(sorted_int64_lookup_benchmark SortedInt64LookupBenchmark.cpp)
+target_include_directories(sorted_int64_lookup_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
+install(TARGETS sorted_int64_lookup_benchmark DESTINATION benchmark)

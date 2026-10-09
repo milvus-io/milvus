@@ -25,6 +25,7 @@ func (p *credentialConfig) init(base *BaseTable) {
 		KeyPrefix: "credential.",
 		Version:   "2.6.0",
 		Export:    true,
+		Sensitive: true,
 		DocFunc: func(key string) string {
 			switch key {
 			case "apikey1.apikey":

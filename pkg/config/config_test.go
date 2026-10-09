@@ -19,15 +19,22 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestConfigFromEnv(t *testing.T) {
@@ -352,4 +359,121 @@ func TestConfigFromRemote(t *testing.T) {
 			return err != nil && errors.Is(err, ErrKeyNotFound)
 		}, 300*time.Millisecond, 10*time.Millisecond)
 	})
+}
+
+// FormatKey is what a guard on a specific config key has to compare against.
+// Separators are stripped rather than translated, so a guard that lowercases
+// and swaps "/" for "." -- the obvious hand-rolled version -- lets the
+// underscore and separator-free spellings through to the same stored key.
+func TestFormatKeyCollapsesEverySpellingOfAKey(t *testing.T) {
+	identity := FormatKey("common.security.adminAuthEnabled")
+	assert.Equal(t, "commonsecurityadminauthenabled", identity)
+
+	for _, spelling := range []string{
+		"common.security.adminAuthEnabled",
+		"common_security_adminAuthEnabled",
+		"common/security/adminAuthEnabled",
+		"COMMON.SECURITY.ADMINAUTHENABLED",
+		"commonsecurityadminauthenabled",
+		"common.security_adminAuthEnabled",
+	} {
+		assert.Equal(t, identity, FormatKey(spelling), spelling)
+	}
+
+	assert.NotEqual(t, identity, FormatKey("common.security.authorizationEnabled"))
+}
+
+// /management/config/get and /management/config/alter normalize caller-supplied
+// keys, and both answer anonymously while common.security.adminAuthEnabled is
+// off, so the memo cannot grow with whatever a caller sends. Past the bound the
+// answer has to stay correct -- it is only the caching that stops.
+func TestFormatKeyMemoIsBounded(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	for i := 0; i < maxFormattedKeys*2; i++ {
+		key := fmt.Sprintf("caller.supplied.key_%d", i)
+		assert.Equal(t, normalizeKey(key), FormatKey(key), key)
+	}
+	assert.LessOrEqual(t, formattedKeys.Len(), maxFormattedKeys,
+		"an anonymous caller must not be able to grow the normalization memo without limit")
+
+	// A real key still normalizes correctly with the memo full.
+	assert.Equal(t, "commonsecurityadminauthenabled",
+		FormatKey("common.security.adminAuthEnabled"))
+}
+
+func TestFormatKeyMemoIsStrictlyBoundedUnderConcurrency(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < maxFormattedKeys*2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			FormatKey(fmt.Sprintf("concurrent.caller.key_%d", i))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	assert.LessOrEqual(t, formattedKeys.Len(), maxFormattedKeys)
+}
+
+// A count bound alone still retains megabytes per entry when HTTP callers send
+// large unknown keys. Normalization must work without retaining those strings.
+func TestFormatKeyMemoRejectsOversizedKeys(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	for i := 0; i < 16; i++ {
+		suffix := fmt.Sprint(i)
+		key := strings.Repeat("A._/É", 1024) + suffix
+		assert.Equal(t, strings.Repeat("aé", 1024)+suffix, FormatKey(key))
+	}
+	assert.Zero(t, formattedKeys.Len(), "oversized keys must not enter the memo")
+
+	// Unicode case folding can grow UTF-8 output past the input's byte length.
+	key := strings.Repeat("Ⱥ", 512)
+	assert.Equal(t, strings.Repeat("ⱥ", 512), FormatKey(key))
+	assert.Zero(t, formattedKeys.Len(), "oversized normalized values must not enter the memo")
+
+	special := NotFormatPrefix + strings.Repeat("A._/", 1024)
+	assert.Equal(t, special, FormatKey(special), "knowhere keys retain their existing identity")
+	assert.Zero(t, formattedKeys.Len())
+	assert.Equal(t, "commonsecurityadminauthenabled", FormatKey("common.security.adminAuthEnabled"))
+	assert.Equal(t, 1, formattedKeys.Len(), "ordinary config keys still use the memo")
+}
+
+// URL.Query can return a short key as a substring of an otherwise huge request.
+// Retaining that substring keeps the entire request allocation alive even when
+// the memo checks len(key). Both memo strings must own only their small bytes.
+func TestFormatKeyMemoDoesNotRetainRequestBackingString(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	for _, name := range []string{"shortkey", "SHORTKEY"} {
+		requestURL := &url.URL{RawQuery: "keys=" + name + "&padding=" + strings.Repeat("padding", 1<<15)}
+		key := requestURL.Query().Get("keys")
+		assert.Equal(t, "shortkey", FormatKey(key))
+		found := false
+		formattedKeys.Range(func(cachedKey, cachedValue string) bool {
+			if cachedKey == key {
+				found = true
+				assert.False(t, unsafe.StringData(key) == unsafe.StringData(cachedKey),
+					"the cached key must not retain a caller's large backing string")
+				assert.False(t, unsafe.StringData(key) == unsafe.StringData(cachedValue),
+					"the cached value must not retain a caller's large backing string")
+			}
+			return true
+		})
+		assert.True(t, found, "ordinary short keys must remain memoized")
+	}
 }

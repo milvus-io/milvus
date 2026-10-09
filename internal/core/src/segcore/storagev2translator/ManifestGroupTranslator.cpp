@@ -39,6 +39,7 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/StatusToErrorCode.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/Schema.h"
@@ -55,15 +56,15 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
 
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
-static std::atomic<uint64_t> g_mmap_path_generation{0};
+static std::atomic<uint64_t> g_manifest_mmap_path_generation{0};
 
 ColumnSizeEstimateResult
 FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
@@ -150,7 +151,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                    })),
       writeback_mode_(writeback_mode),
       load_priority_(load_priority),
-      enable_async_load_(enable_async_load) {
+      enable_async_load_(enable_async_load),
+      async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -319,11 +321,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         for (size_t i = 0; i < row_group_rows.size(); ++i) {
             if (row_group_rows[i] >
                 std::numeric_limits<uint64_t>::max() / fallback) {
-                throw std::runtime_error(fmt::format(
-                    "fallback row group size exceeds the uint64_t range, "
-                    "rows {}, bytes per row {}",
-                    row_group_rows[i],
-                    fallback_bytes_per_row));
+                ThrowInfo(
+                    ErrorCode::UnexpectedError,
+                    "{}",
+                    std::string(fmt::format(
+                        "fallback row group size exceeds the uint64_t range, "
+                        "rows {}, bytes per row {}",
+                        row_group_rows[i],
+                        fallback_bytes_per_row)));
             }
             row_group_sizes[i] = row_group_rows[i] * fallback;
         }
@@ -392,11 +397,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         }
         if (row_group_rows[i] > std::numeric_limits<uint64_t>::max() /
                                     positive_fallback_bytes_per_row) {
-            throw std::runtime_error(fmt::format(
-                "positive fallback row group size exceeds the uint64_t "
-                "range, rows {}, bytes per row {}",
-                row_group_rows[i],
-                positive_fallback_bytes_per_row));
+            ThrowInfo(
+                ErrorCode::UnexpectedError,
+                "{}",
+                std::string(fmt::format(
+                    "positive fallback row group size exceeds the uint64_t "
+                    "range, rows {}, bytes per row {}",
+                    row_group_rows[i],
+                    positive_fallback_bytes_per_row)));
         }
         row_group_sizes[i] =
             row_group_rows[i] * positive_fallback_bytes_per_row;
@@ -461,7 +469,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} merged {} row groups into {} cells "
         "(cell_target_size_bytes={})",
         key_,
@@ -473,15 +481,18 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     if (!meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
-        auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
-        auto max_memory_runtime_unit =
-            std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
-        auto max_file_runtime_unit =
-            std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
-        auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+        // Async admission leases a whole window, including all of its cells.
+        // Sync batches are instead split by their accumulated overhead bytes.
+        const auto max_file_runtime_unit =
+            std::max(enable_async_load_ ? async_read_window_bytes_
+                                        : FieldDataLoadBatchTargetBytes(),
+                     max_cell_sz);
+        const auto max_memory_runtime_unit =
+            enable_async_load_ ? loading_overhead_bytes(max_file_runtime_unit)
+                               : std::max(FieldDataLoadBatchTargetBytes(),
+                                          loading_overhead_bytes(max_cell_sz));
         auto memory_group =
-            milvus::storage::LoadMemoryOverheadController::GetInstance()
-                .GetOrCreate(executor_workers);
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -489,9 +500,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 use_mmap_
                     ? std::make_optional(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
-                              milvus::storage::LoadFileOverheadController::
-                                  GetInstance()
-                                      .GetOrCreate(executor_workers),
+                              storage::LoadFileOverheadController::GetInstance()
+                                  .GetOrCreate(),
                               max_file_runtime_unit})
                     : std::nullopt};
     }
@@ -593,7 +603,7 @@ ManifestGroupTranslator::get_cells_legacy(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         });
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
         "column group {}",
         key_,
@@ -662,7 +672,9 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         cell_specs.size(),
         column_group_index_,
         segment_id_);
-    AsyncLoadPipelineOptions options{.load_priority = load_priority_};
+    AsyncLoadPipelineOptions options{
+        .read_window_bytes = static_cast<size_t>(async_read_window_bytes_),
+        .load_priority = load_priority_};
     if (use_mmap_) {
         options.finalization_executor_provider = []() {
             return storage::LocalFileIOPool::GetInstance().GetExecutor();
@@ -770,8 +782,8 @@ ManifestGroupTranslator::load_group_chunk(
     } else {
         // Mmap mode — use unique generation suffix to avoid truncating files
         // that old MAP_SHARED mmaps still reference (see #48658).
-        const auto gen =
-            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
+        const auto gen = g_manifest_mmap_path_generation.fetch_add(
+            1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:
@@ -809,7 +821,7 @@ ManifestGroupTranslator::load_group_chunk(
                                     writeback_mode_);
     }
 
-    return std::make_unique<milvus::GroupChunk>(chunks);
+    return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }
 
 int64_t

@@ -17,10 +17,11 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"log"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
@@ -33,6 +34,15 @@ var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+
+	// ErrKeyUnregistered marks a key that no ParamItem or ParamGroup declares.
+	// Config sources carry more than Milvus configuration — EnvSource imports
+	// the whole process environment — so an undeclared key is not something a
+	// caller-supplied lookup may reach.
+	ErrKeyUnregistered = errors.New("unregistered config key")
+	// ErrKeySensitive marks a declared key whose value carries a credential or
+	// protected infrastructure topology.
+	ErrKeySensitive = errors.New("sensitive config key")
 
 	// config source management
 	ErrSourceDuplicate = errors.New("duplicate config source")
@@ -62,14 +72,21 @@ func Init(opts ...Option) (*Manager, error) {
 		s := NewFileSource(o.FileInfo)
 		err := sourceManager.AddSource(s)
 		if err != nil {
-			log.Fatal("failed to add FileSource config", mlog.Err(err))
+			// Parser errors can quote configuration values. Keep the original
+			// process-exit behavior independently of the logger's fatal hook.
+			mlog.Error(context.TODO(), "failed to add FileSource config", mlog.String("error", RedactedValue))
+			os.Exit(1)
 		}
 	}
 	if o.EnvKeyFormatter != nil {
 		sourceManager.AddSource(NewEnvSource(o.EnvKeyFormatter))
 	}
 	if o.EtcdInfo != nil {
-		s, err := NewEtcdSource(o.EtcdInfo)
+		etcdCli, err := newEtcdClient(o.EtcdInfo)
+		if err != nil {
+			return nil, err
+		}
+		s, err := NewEtcdSource(etcdCli, o.EtcdInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -78,8 +95,25 @@ func Init(opts ...Option) (*Manager, error) {
 	return sourceManager, nil
 }
 
-var formattedKeys = typeutil.NewConcurrentMap[string, string]()
+var (
+	formattedKeys   = typeutil.NewConcurrentMap[string, string]()
+	formattedKeysMu sync.Mutex
+)
 
+// Four spellings of one configuration key travel through this package, and
+// picking the wrong one is how a check ends up guarding a name nothing uses:
+//
+//	lowerKey          "Kafka.SSL.tlsKey" -> "kafka.ssl.tlskey"   (case only)
+//	formatKey         "Kafka.SSL.tlsKey" -> "kafkassltlskey"     (memoised; internal keys only)
+//	formatKeyUncached same as formatKey, no memo                 (caller-supplied keys)
+//	strippedKey       same, without the NotFormatPrefix guard    (what EnvSource produces)
+//
+// lowerKey and formatKey both leave NotFormatPrefix ("knowhere.") keys exactly
+// as they are, because the index engine needs the case and the dots; strippedKey
+// is the one that does not, which is why the two disagree there and only there.
+// Values are stored under formatKey's identity, so that is what a lookup must
+// use; prefixes are declared with dots, so that is what a namespace test must
+// use.
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
@@ -87,17 +121,83 @@ func lowerKey(key string) string {
 	return strings.ToLower(key)
 }
 
+var keyFormatReplacer = strings.NewReplacer("/", "", "_", "", ".", "")
+
+// FormatKey is the identity a config key is stored and looked up under.
+// Callers that guard a specific key must compare against this rather than a
+// hand-rolled normalization: separators are stripped, not translated, so
+// "a.b.c", "a_b_c", "a/b/c" and "abc" are all the same key.
+func FormatKey(key string) string { return formatKey(key) }
+
+// maxFormattedKeys bounds the normalization memo. The cache exists for the
+// fixed config vocabulary, which is a few hundred keys and is resolved on every
+// ParamItem read -- but /management/config/get and /management/config/alter
+// normalize caller-supplied keys, and both answer anonymously while
+// common.security.adminAuthEnabled is off. An unbounded memo therefore lets
+// anyone who can reach the metrics port grow it without limit. Past the bound
+// the result is still correct, it is just recomputed. Bound both stored strings
+// to 1 KiB as well: a count limit alone still permits huge request keys to pin
+// gigabytes, and Unicode lowercasing can grow a normalized string.
+const (
+	maxFormattedKeys     = 4096
+	maxFormattedKeyBytes = 1024
+)
+
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
+	}
+	if len(key) > maxFormattedKeyBytes {
+		return normalizeKey(key)
 	}
 	cached, ok := formattedKeys.Get(key)
 	if ok {
 		return cached
 	}
-	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
-	formattedKeys.Insert(key, result)
+	result := normalizeKey(key)
+	if len(result) > maxFormattedKeyBytes {
+		return result
+	}
+	formattedKeysMu.Lock()
+	defer formattedKeysMu.Unlock()
+	// A concurrent miss may have populated this key while this goroutine waited.
+	if cached, ok := formattedKeys.Get(key); ok {
+		return cached
+	}
+	if formattedKeys.Len() < maxFormattedKeys {
+		// A short query key can be a substring of a much larger HTTP request.
+		// Own the cached bytes so the byte limits also bound retained memory.
+		formattedKeys.Insert(strings.Clone(key), strings.Clone(result))
+	}
 	return result
+}
+
+// normalizeKey is the normalization itself, split out so the memoized and
+// unmemoized paths cannot drift.
+func normalizeKey(key string) string {
+	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
+// formatKeyUncached is formatKey without the memo. Use it for caller-supplied
+// projection keys so diagnostic reads do not populate the bounded cache used
+// by runtime lookups.
+func formatKeyUncached(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return normalizeKey(key)
+}
+
+// strippedKey collapses a key with no NotFormatPrefix exemption at all.
+//
+// formatKey deliberately leaves knowhere.* alone, but the EnvSource key
+// formatter that BaseTable installs does not — it strips every separator
+// unconditionally. So the two disagree exactly on knowhere.*, and any check
+// that asks "did the environment supply this key?" has to look under this
+// spelling too, or an environment variable named KNOWHERE.SOMETHING is invisible
+// to it.
+func strippedKey(key string) string {
+	return normalizeKey(key)
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
@@ -131,7 +231,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 				jsonCompatible := convertToJSONCompatible(val)
 				jsonBytes, err := json.Marshal(jsonCompatible)
 				if err != nil {
-					fmt.Printf("marshal to json failed %s, error = %s\n", fullKey, err.Error())
+					mlog.Warn(context.TODO(), "marshal configuration to json failed", mlog.String("error", RedactedValue))
 					continue
 				}
 				str = string(jsonBytes)
@@ -154,7 +254,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		default:
 			str, err := cast.ToStringE(val)
 			if err != nil {
-				fmt.Printf("cast to string failed %s, error = %s\n", fullKey, err.Error())
+				mlog.Warn(context.TODO(), "cast configuration to string failed", mlog.String("error", RedactedValue))
 				continue
 			}
 			result[lowerKey(fullKey)] = str

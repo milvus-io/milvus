@@ -43,6 +43,14 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	return &openerImpl{
 		tenant: tenant,
 		c:      c,
+		newProducerClient: func() (pulsar.Client, error) {
+			// Build the options again, so the client does not share the auth provider with other clients.
+			options, _, err := b.getPulsarClientOptions()
+			if err != nil {
+				return nil, err
+			}
+			return pulsar.NewClient(options)
+		},
 	}, nil
 }
 

@@ -24,41 +24,46 @@
 
 namespace milvus::storage {
 
+// Reconfigures both dimensions for a quiescent load-mode transition. Rejected
+// policies leave both controllers unchanged; callers publish the mode afterward.
+bool
+ConfigureLoadOverheadControllers(size_t slots, size_t memory_budget_bytes);
+
 template <cachinglayer::LoadingOverheadDimension Dimension>
 class LoadOverheadController {
  public:
     static LoadOverheadController&
     GetInstance();
 
-    // Returns the singleton Group handle, creating it if needed.
-    // initial_executor_workers bootstraps the worker count used by the
-    // Executor policy only when the controller has not been initialized yet;
-    // it is not a lookup key and every call returns the same Group. Use
-    // UpdateExecutorWorkers() for subsequent worker-count changes.
+    // One group per resource dimension; the active load mode selects its policy.
     cachinglayer::LoadingOverheadGroupHandle
-    GetOrCreate(int64_t initial_executor_workers);
+    GetOrCreate();
 
     bool
     UpdateBudgetBytes(size_t bytes)
         requires(Dimension == cachinglayer::LoadingOverheadDimension::kMemory);
 
+    // Updates the fallback concurrency bound. Zero means no slot bound.
+    // Callers publish only the active mode's concurrency limit.
     bool
-    UpdateExecutorWorkers(int64_t executor_workers);
+    UpdateConcurrencyLimit(size_t slots);
 
  private:
+    friend bool ConfigureLoadOverheadControllers(size_t, size_t);
+
     LoadOverheadController() = default;
 
     cachinglayer::LoadingOverheadPolicy
     CurrentPolicy() const;
 
-    bool
-    UsesExecutorPolicy() const;
+    static cachinglayer::LoadingOverheadPolicy
+    SlotPolicy(size_t slots);
 
     std::mutex mutex_;
     cachinglayer::LoadingOverheadGroupHandle group_handle_;
+    bool initialized_{false};
     size_t budget_bytes_{0};
-    int64_t executor_workers_{0};
-    bool executor_workers_initialized_{false};
+    size_t concurrency_limit_{0};
 };
 
 extern template class LoadOverheadController<

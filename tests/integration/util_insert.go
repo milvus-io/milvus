@@ -47,7 +47,7 @@ func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flu
 			s.FailNow("failed to wait for flush until ctx done")
 			return
 		default:
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }

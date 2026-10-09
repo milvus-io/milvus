@@ -152,7 +152,12 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 		for _, field := range allFields {
 			if typeutil.IsVectorType(field.GetDataType()) {
 				if _, ok := insertLogs[field.GetFieldID()]; !ok {
-					// vector field must be provided
+					// A nullable vector field has no column group in segments flushed
+					// before it was added via AddCollectionField; the packed reader
+					// fills the absent column with nulls. Other vector fields must be provided.
+					if field.GetNullable() {
+						continue
+					}
 					return nil, nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
 				}
 			}

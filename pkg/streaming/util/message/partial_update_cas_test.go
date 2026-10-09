@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestPartialUpdateCASPropertyRoundTrip(t *testing.T) {
 	meta := validPartialUpdateCAS()
 	msg := newPartialUpdateCASTestMessageWithMeta(t, meta)
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(meta, got))
 	require.True(t, HasPartialUpdateCAS(msg))
@@ -40,7 +41,7 @@ func TestPartialUpdateCASMetadataStoredInBody(t *testing.T) {
 
 	insertMsg, err := AsMutableInsertMessageV1(msg)
 	require.NoError(t, err)
-	body, err := insertMsg.Body()
+	body, err := insertMsg.Body(context.Background())
 	require.NoError(t, err)
 	encoded := body.GetBase().GetProperties()[messagePartialUpdateCAS]
 	require.NotEmpty(t, encoded)
@@ -74,7 +75,7 @@ func TestPartialUpdateCASBuilderEncryptsMetadataWithBody(t *testing.T) {
 	require.NotEqual(t, plainBody, rawPayload)
 	require.False(t, bytes.Contains(rawPayload, []byte(encodedMeta)))
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(meta, got))
 }
@@ -113,7 +114,7 @@ func TestPartialUpdateCASBodyEncoderEncryptsMetadataWithBody(t *testing.T) {
 	require.NotEmpty(t, encodedMeta)
 	require.False(t, bytes.Contains(rawPayload, []byte(encodedMeta)))
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(meta, got))
 }
@@ -185,7 +186,7 @@ func TestPartialUpdateCASDefensiveErrors(t *testing.T) {
 func TestPartialUpdateCASPropertyMissing(t *testing.T) {
 	msg := newPartialUpdateCASTestMessage()
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.NoError(t, err)
 	require.Nil(t, got)
 	require.False(t, HasPartialUpdateCAS(msg))
@@ -194,7 +195,7 @@ func TestPartialUpdateCASPropertyMissing(t *testing.T) {
 func TestPartialUpdateCASPropertyMalformed(t *testing.T) {
 	msg := newPartialUpdateCASTestMessage("not-base64")
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.Nil(t, got)
@@ -275,7 +276,7 @@ func TestPartialUpdateCASPropertyImmutableExtraction(t *testing.T) {
 	msg := newPartialUpdateCASTestMessageWithMeta(t, meta)
 	immutable := msg.IntoImmutableMessage(nil)
 
-	got, err := ExtractPartialUpdateCAS(immutable)
+	got, err := partialUpdateCASOf(immutable)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(meta, got))
 	require.True(t, HasPartialUpdateCAS(immutable))
@@ -284,7 +285,7 @@ func TestPartialUpdateCASPropertyImmutableExtraction(t *testing.T) {
 func TestPartialUpdateCASPropertyInvalidProtoWire(t *testing.T) {
 	msg := newPartialUpdateCASTestMessage(base64.StdEncoding.EncodeToString([]byte{0xff, 0xff, 0xff}))
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.Error(t, err)
 	require.Nil(t, got)
 }
@@ -294,9 +295,22 @@ func TestPartialUpdateCASPropertyExtractSemanticallyInvalid(t *testing.T) {
 	require.NoError(t, err)
 	msg := newPartialUpdateCASTestMessage(encoded)
 
-	got, err := ExtractPartialUpdateCAS(msg)
+	got, err := partialUpdateCASOf(msg)
 	require.Error(t, err)
 	require.Nil(t, got)
+}
+
+// partialUpdateCASOf reads the CAS metadata from the body of a marked insert
+// message. It returns nil when the message is not marked.
+func partialUpdateCASOf(msg BasicMessage) (*messagespb.PartialUpdateCAS, error) {
+	if !HasPartialUpdateCAS(msg) {
+		return nil, nil
+	}
+	body, err := unmarshalProtoB[*msgpb.InsertRequest](msg.Payload())
+	if err != nil {
+		return nil, err
+	}
+	return DecodePartialUpdateCASMetadata(body.GetBase().GetProperties()[messagePartialUpdateCAS])
 }
 
 func newPartialUpdateCASTestMessage(propertyValue ...string) MutableMessage {

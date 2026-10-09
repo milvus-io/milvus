@@ -169,6 +169,11 @@ func TestAbsentFieldFillReaderFillsDefaultAndNull(t *testing.T) {
 	require.Equal(t, []int64{42, 42, 42}, []int64{def.Value(0), def.Value(1), def.Value(2)}) // default materialized
 	require.Equal(t, 3, rec.Column(nullField).(*array.Int64).NullN())                        // no default -> null
 	require.Equal(t, int64(2), rec.Column(idField).(*array.Int64).Value(1))                  // present passthrough
+	column, ok := TryRecordColumn(rec, defField)
+	require.True(t, ok)
+	require.Same(t, def, column)
+	_, ok = TryRecordColumn(rec, 999)
+	require.False(t, ok)
 }
 
 func TestAbsentFieldFillReaderRejectsNonNullableAbsent(t *testing.T) {

@@ -8,6 +8,7 @@ const (
 	DirectoryQueryView     = "qv"
 	DirectoryVChannel      = "vchannel"
 	DirectorySchema        = "schema"
+	DirectorySummaryStore  = "summary"
 
 	KeyConsumeCheckpoint = "consume-checkpoint"
 	KeySalvageCheckpoint = "salvage-checkpoint"

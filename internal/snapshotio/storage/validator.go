@@ -110,17 +110,28 @@ func applySnapshotExternalSpecToConfig(
 	if err := validateCredentialModes(parsed.Extfs); err != nil {
 		return false, "", err
 	}
+	// The no-spec same-account check must compare the instance's configured
+	// Azure endpoint against the URI host. applySnapshotURILocationToConfig
+	// rewrites cfg to the URI's own account below, so capture the instance
+	// endpoint first; otherwise the comparison sees the URI's account on both
+	// sides and a different-account URI is never rejected. A cfg without Azure
+	// account info has nothing to compare and skips the check.
+	var instanceAzureEndpoint string
+	if !hasSpec && (scheme == "azure" || scheme == "az") {
+		instanceAzureEndpoint, err = effectiveAzureSnapshotEndpoint(cfg)
+		if err != nil {
+			instanceAzureEndpoint = ""
+		}
+	}
 	uriIdentity, transportKnown, err := applySnapshotURILocationToConfig(cfg, scheme, endpoint)
 	if err != nil {
 		return false, "", err
 	}
 	if !hasSpec {
-		if uriIdentity.azureAccount != "" {
-			configuredEndpoint, err := effectiveAzureSnapshotEndpoint(cfg)
-			if err != nil {
-				return false, "", err
-			}
-			if !strings.EqualFold(configuredEndpoint, endpoint) {
+		if uriIdentity.azureAccount != "" && instanceAzureEndpoint != "" {
+			// azure:// snapshot URIs are TLS; an explicit :443 on the URI host
+			// names the same endpoint as the canonical configured form.
+			if !strings.EqualFold(instanceAzureEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 				return false, "", merr.WrapErrParameterInvalidMsg(
 					"snapshot URI Azure account does not match the instance storage credential",
 				)
@@ -287,7 +298,9 @@ func applySnapshotURILocationToConfig(
 				if err != nil {
 					return storageEndpointIdentity{}, false, err
 				}
-				if !strings.EqualFold(configuredEndpoint, endpoint) {
+				// azure:// snapshot URIs are TLS; an explicit :443 on the URI
+				// host names the same endpoint as the canonical configured form.
+				if !strings.EqualFold(configuredEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 					return storageEndpointIdentity{}, false, merr.WrapErrParameterInvalidMsg(
 						"Azure snapshot URI endpoint %q does not match the configured endpoint",
 						endpoint,

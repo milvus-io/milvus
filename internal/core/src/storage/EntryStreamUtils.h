@@ -49,6 +49,12 @@ IsStreamSliceSizeAligned(size_t slice_size) noexcept {
 // Returns the configured default size of one entry-stream slice.
 [[nodiscard]] inline size_t
 DefaultStreamSliceSize() {
+    // Non-tail slices must remain valid DIRECT I/O write ranges.
+    static_assert(
+        DEFAULT_INDEX_FILE_SLICE_SIZE >=
+                static_cast<int64_t>(kMinStreamSliceSize) &&
+            IsStreamSliceSizeAligned(DEFAULT_INDEX_FILE_SLICE_SIZE),
+        "Default index slice size must be at least 64 KiB and 4 KiB-aligned");
     return DEFAULT_INDEX_FILE_SLICE_SIZE;
 }
 

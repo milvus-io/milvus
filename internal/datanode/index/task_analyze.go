@@ -95,24 +95,30 @@ func (at *analyzeTask) PreExecute(ctx context.Context) error {
 
 func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 	storageConfig := &clusteringpb.StorageConfig{
-		Address:           req.GetStorageConfig().GetAddress(),
-		AccessKeyID:       req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:   req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:            req.GetStorageConfig().GetUseSSL(),
-		BucketName:        req.GetStorageConfig().GetBucketName(),
-		RootPath:          req.GetStorageConfig().GetRootPath(),
-		UseIAM:            req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:       req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:       req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:    req.GetStorageConfig().GetUseVirtualHost(),
-		Region:            req.GetStorageConfig().GetRegion(),
-		CloudProvider:     req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs:  req.GetStorageConfig().GetRequestTimeoutMs(),
-		MaxConnections:    req.GetStorageConfig().GetMaxConnections(),
-		SslCACert:         req.GetStorageConfig().GetSslCACert(),
-		GcpCredentialJSON: req.GetStorageConfig().GetGcpCredentialJSON(),
-		SslTlsMinVersion:  req.GetStorageConfig().GetSslTlsMinVersion(),
-		UseCrc32CChecksum: req.GetStorageConfig().GetUseCrc32CChecksum(),
+		Address:                     req.GetStorageConfig().GetAddress(),
+		AccessKeyID:                 req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:             req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:                      req.GetStorageConfig().GetUseSSL(),
+		BucketName:                  req.GetStorageConfig().GetBucketName(),
+		RootPath:                    req.GetStorageConfig().GetRootPath(),
+		UseIAM:                      req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:                 req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:                 req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:              req.GetStorageConfig().GetUseVirtualHost(),
+		Region:                      req.GetStorageConfig().GetRegion(),
+		CloudProvider:               req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:            req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:              req.GetStorageConfig().GetMaxConnections(),
+		SslCACert:                   req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON:           req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:            req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum:           req.GetStorageConfig().GetUseCrc32CChecksum(),
+		TalonMode:                   req.GetStorageConfig().GetTalonMode(),
+		TalonSmallReadThreshold:     req.GetStorageConfig().GetTalonSmallReadThreshold(),
+		TalonCoordinator:            req.GetStorageConfig().GetTalonCoordinator(),
+		TalonBlockSize:              req.GetStorageConfig().GetTalonBlockSize(),
+		TalonMaxIdlePerAddr:         req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
+		TalonEnableForExternalTable: req.GetStorageConfig().GetTalonEnableForExternalTable(),
 	}
 
 	n := len(req.GetSegmentStats())
@@ -234,6 +240,15 @@ func (at *analyzeTask) GetState() indexpb.JobState {
 }
 
 func (at *analyzeTask) Reset() {
+	// Reset runs from processTask's deferred cleanup on every exit path, including
+	// the canceled one where PostExecute -- the only other place that releases the
+	// analyze object -- is skipped. Delete is idempotent.
+	if at.analyze != nil {
+		if err := at.analyze.Delete(); err != nil {
+			mlog.Warn(at.ctx, "failed to release analyze object on task reset", mlog.Err(err))
+		}
+		at.analyze = nil
+	}
 	at.ident = ""
 	at.ctx = nil
 	at.cancel = nil

@@ -71,6 +71,9 @@ func TestOverwriteRecordTimestamps_NonZero(t *testing.T) {
 	assert.Equal(t, 3, out.Len())
 
 	tsCol := out.Column(common.TimeStampField).(*array.Int64)
+	safeColumn, ok := storage.TryRecordColumn(out, common.TimeStampField)
+	assert.True(t, ok)
+	assert.Same(t, tsCol, safeColumn)
 	for i := 0; i < 3; i++ {
 		assert.Equal(t, int64(5000), tsCol.Value(i))
 	}

@@ -330,13 +330,17 @@ func TestForcePromoteSuccess(t *testing.T) {
 	balance.Register(b)
 
 	// Set up broadcaster with WithSecondaryClusterResourceKey (we are secondary)
+	var broadcastMsg message.BroadcastMutableMessage
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
-	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
-		BroadcastID: 1,
-		AppendResults: map[string]*types.AppendResult{
-			"by-dev-1": {TimeTick: 100},
-		},
-	}, nil).Maybe()
+	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		broadcastMsg = msg
+		return &types.BroadcastAppendResult{
+			BroadcastID: 1,
+			AppendResults: map[string]*types.AppendResult{
+				"by-dev-1": {TimeTick: 100},
+			},
+		}, nil
+	}).Once()
 	mba.EXPECT().Close().Return().Maybe()
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
@@ -357,6 +361,13 @@ func TestForcePromoteSuccess(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
+
+	// The control-channel copy must be pchannel-level so that the lock interceptor
+	// acquires the global write lock on the pchannel that hosts the control channel.
+	assert.Equal(t, []string{"by-dev-1_vcchan"}, broadcastMsg.BroadcastHeader().VChannels)
+	for _, msg := range broadcastMsg.WithBroadcastID(1).SplitIntoMutableMessage() {
+		assert.True(t, msg.IsPChannelLevel())
+	}
 }
 
 func TestForcePromoteIdempotent(t *testing.T) {
@@ -811,6 +822,10 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
+	// UpdateReplicateConfiguration reads the latest assignment three times: once
+	// to fill the redacted connection tokens, once for the validation before the
+	// cluster resource key is acquired, and once for the validation after it.
+	// Only the third read must observe the configuration as already applied.
 	callCount := 0
 	cfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
@@ -831,8 +846,8 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 1 {
-			// First call: config is different (nil)
+		if callCount <= 2 {
+			// Before the resource key: config is different (nil)
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
 					Channels: map[channel.ChannelID]*channel.PChannelMeta{
@@ -841,7 +856,7 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 				},
 			}, nil
 		}
-		// Second call: config is now the same (was applied by another path)
+		// After the resource key: config is now the same (applied by another path)
 		return &balancer.WatchChannelAssignmentsCallbackParam{
 			PChannelView: &channel.PChannelView{
 				Channels: map[channel.ChannelID]*channel.PChannelMeta{
@@ -1273,6 +1288,8 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
+	// As above, the first two reads serve the token filling and the validation
+	// before the resource key is acquired; the failure belongs to the third.
 	callCount := 0
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
@@ -1283,7 +1300,7 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 1 {
+		if callCount <= 2 {
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
 					Channels: map[channel.ChannelID]*channel.PChannelMeta{
@@ -1292,7 +1309,7 @@ func TestSecondValidateNonSameError(t *testing.T) {
 				},
 			}, nil
 		}
-		// Second call after lock: return error
+		// After the resource key: return error
 		return nil, errors.New("assignment unavailable")
 	})
 	balance.Register(b)

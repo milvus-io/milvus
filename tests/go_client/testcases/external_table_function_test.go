@@ -191,12 +191,18 @@ func externalSegmentPrefixes(cfg minioConfig, collectionID int64) []string {
 	return []string{base}
 }
 
+const managementRedactedValue = "*****"
+
 func minIOConfigWithServerRootPath(t *testing.T, cfg minioConfig) minioConfig {
 	t.Helper()
 
 	rootPath, err := hp.GetServerConfig("minio.rootPath")
 	if err != nil {
 		t.Logf("Use fallback MinIO root path %q: failed to read Milvus config: %v", cfg.rootPath, err)
+		return cfg
+	}
+	if rootPath == managementRedactedValue {
+		t.Logf("Use fallback MinIO root path %q: Milvus config is redacted", cfg.rootPath)
 		return cfg
 	}
 	cfg.rootPath = strings.Trim(rootPath, "/")

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -17,8 +18,10 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -118,12 +121,34 @@ func TestManager(t *testing.T) {
 			assert.True(t, ok)
 			assert.Equal(t, serverID, pickedServerID)
 			return nil, nil
-		})
+		}).Once()
 	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
 		Channel: types.PChannelInfo{Name: "p", Term: 1},
 		Node:    types.StreamingNodeInfo{ServerID: serverID},
 	})
 	assert.NoError(t, err)
+
+	managerServiceClient.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil, picker.ErrSubConnNotExist).Once()
+	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "p", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: serverID},
+	})
+	assert.ErrorIs(t, err, types.ErrNotAlive)
+
+	managerServiceClient.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil, status.NewIgnoreOperation("not the owner of the wal")).Once()
+	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "p", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: serverID},
+	})
+	assert.NoError(t, err)
+
+	removeErr := errors.New("remove failed")
+	managerServiceClient.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil, removeErr).Once()
+	err = m.Remove(context.Background(), types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "p", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: serverID},
+	})
+	assert.ErrorIs(t, err, removeErr)
 
 	// Test Close
 	managerService.EXPECT().Close().Return()

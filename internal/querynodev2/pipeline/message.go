@@ -17,6 +17,8 @@
 package pipeline
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
@@ -54,7 +56,7 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		collector.Rate.Add(metricsinfo.DeleteConsumeThroughput, float64(deleteMsg.Size()))
 	case commonpb.MsgType_AddCollectionField:
 		schemaMsg := taskMsg.(*adaptor.SchemaChangeMessageBody)
-		body, err := schemaMsg.SchemaChangeMessage.Body()
+		body, err := schemaMsg.SchemaChangeMessage.Body(context.TODO())
 		if err != nil {
 			return err
 		}

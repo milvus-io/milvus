@@ -131,11 +131,12 @@ func StackSkip(key string, skip int) Field { return zap.StackSkip(key, skip) }
 func Skip() Field                          { return zap.Skip() }
 
 // propagatedMarker is a zero-size sentinel stored in Field.Interface to mark
-// a field for RPC propagation. The field itself uses native StringType or
-// Int64Type so that zap encodes it as a flat key-value pair (not a nested object).
+// a field for RPC propagation. The field itself uses a native scalar type so
+// that zap encodes it as a flat key-value pair (not a nested object).
 //
 // This works because zap's Field.AddTo only reads Field.String for StringType
-// and Field.Integer for Int64Type; it never inspects Field.Interface for these types.
+// and Field.Integer for integer types; it never inspects Field.Interface for
+// these types.
 type propagatedMarker struct{}
 
 // propagatedStringField creates a string field that will be propagated via RPC.
@@ -164,6 +165,18 @@ func propagatedInt64Field(key string, val int64) Field {
 	}
 }
 
+// propagatedUint64Field creates a uint64 field that will be propagated via RPC.
+// zap stores the bits in Field.Integer; conversion back to uint64 is exact,
+// including values above math.MaxInt64.
+func propagatedUint64Field(key string, val uint64) Field {
+	return Field{
+		Key:       key,
+		Type:      zapcore.Uint64Type,
+		Integer:   int64(val),
+		Interface: propagatedMarker{},
+	}
+}
+
 // isPropagatedField checks if a field is marked for RPC propagation.
 func isPropagatedField(f *Field) bool {
 	_, ok := f.Interface.(propagatedMarker)
@@ -180,6 +193,8 @@ func getPropagatedValue(f *Field) string {
 		return f.String
 	case zapcore.Int64Type:
 		return strconv.FormatInt(f.Integer, 10)
+	case zapcore.Uint64Type:
+		return strconv.FormatUint(uint64(f.Integer), 10)
 	default:
 		return ""
 	}

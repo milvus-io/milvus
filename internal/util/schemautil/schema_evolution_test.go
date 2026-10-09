@@ -187,6 +187,7 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	}{
 		{name: "data type", mutate: func(field *schemapb.FieldSchema) { field.DataType = schemapb.DataType_Int32 }},
 		{name: "element type", mutate: func(field *schemapb.FieldSchema) { field.ElementType = schemapb.DataType_Int32 }},
+		{name: "element nullability", mutate: func(field *schemapb.FieldSchema) { field.ElementNullable = true }},
 		{name: "nullability", mutate: func(field *schemapb.FieldSchema) { field.Nullable = false }},
 		{name: "dimension", mutate: func(field *schemapb.FieldSchema) { setEvolutionTypeParam(field, common.DimKey, "256") }},
 		{name: "function output role", mutate: func(field *schemapb.FieldSchema) { field.IsFunctionOutput = true }},
@@ -198,7 +199,7 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 			var field *schemapb.FieldSchema
 			switch test.name {
-			case "element type", "nullability":
+			case "element type", "element nullability", "nullability":
 				field = evolutionFieldByID(newSchema, 105)
 			case "dimension":
 				field = evolutionFieldByID(newSchema, 103)

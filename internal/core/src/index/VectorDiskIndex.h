@@ -39,7 +39,8 @@ class VectorDiskAnnIndex : public VectorIndex {
     Serialize(const Config& config) override {  // deprecated
         BinarySet binary_set;
         index_.Serialize(binary_set);
-        auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+        const auto& remote_paths_to_size =
+            file_manager_->GetRemotePathsToFileSize();
         for (auto& file : remote_paths_to_size) {
             binary_set.Append(file.first, nullptr, file.second);
         }

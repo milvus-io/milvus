@@ -311,7 +311,7 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
-			Type:     serdeMap[dsw.pkType].arrowType(0, schemapb.DataType_None),
+			Type:     serdeMap[dsw.pkType].arrowType(0, schemapb.DataType_None, false),
 			Nullable: false,
 		},
 		{
@@ -388,7 +388,7 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 		fields := []arrow.Field{
 			{
 				Name:     "pk",
-				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0, schemapb.DataType_None),
+				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0, schemapb.DataType_None, false),
 				Nullable: false,
 			},
 			{

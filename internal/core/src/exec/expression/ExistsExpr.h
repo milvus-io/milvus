@@ -42,7 +42,7 @@ namespace exec {
 class PhyExistsFilterExpr : public SegmentExpr {
  public:
     PhyExistsFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::ExistsExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -70,6 +70,11 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
 
     std::string
     ToString() const override {

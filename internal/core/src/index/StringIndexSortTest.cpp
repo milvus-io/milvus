@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -12,11 +14,19 @@
 #include "bitset/bitset.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "index/IndexFactory.h"
 #include "index/StringIndexSort.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -39,7 +49,59 @@ class StringIndexBaseTest : public ::testing::Test {
 
 class StringIndexSortTest : public StringIndexBaseTest {};
 
+class InspectableStringIndexSort : public StringIndexSort {
+ public:
+    using StringIndexSort::StringIndexSort;
+    using StringIndexSort::valid_bitset_;
+};
+
 namespace {
+
+class ExposedStringIndexSort : public StringIndexSort {
+ public:
+    using StringIndexSort::StringIndexSort;
+
+    void
+    LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
+        folly::coro::blockingWait(
+            reader.ReadEntriesAsync(plan.entries, priority));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
+    }
+};
+
+struct StringSortAsyncLoadFixture {
+    explicit StringSortAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::String);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~StringSortAsyncLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
 
 void
 CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
@@ -77,6 +139,274 @@ CorruptFirstPostingListRowId(BinarySet& binary_set, uint32_t row_id) {
 }
 
 }  // namespace
+
+namespace {
+
+std::vector<std::string>
+StringMembershipRows() {
+    std::vector<std::string> rows{"",
+                                  "a",
+                                  "aa",
+                                  "ab",
+                                  std::string("a\0b", 3),
+                                  std::string("a\0c", 3),
+                                  "\x80",
+                                  "\xff",
+                                  "\xe4\xb8\xad\xe6\x96\x87",
+                                  std::string(8192, 'x'),
+                                  std::string(8192, 'x') + "a",
+                                  std::string(8192, 'x') + "b"};
+    for (size_t i = 0; i < 129; ++i) {
+        rows.push_back("prefix/" + std::to_string(i % 31));
+    }
+    std::reverse(rows.begin(), rows.end());
+    return rows;
+}
+
+void
+CheckStringMembership(StringIndexSort& index,
+                      const std::vector<std::string>& rows,
+                      const bool* valid) {
+    std::vector<std::vector<std::string>> queries{
+        {},
+        {""},
+        {"absent"},
+        {"a", "a", "aa", "missing"},
+        rows,
+        {std::string("a\0b", 3), std::string("a\0d", 3), "\x80", "\xff"},
+        {std::string(8192, 'x'), std::string(8192, 'x') + "c"},
+        std::vector<std::string>(512, "prefix/3")};
+    auto sorted = rows;
+    std::sort(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    std::reverse(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    ASSERT_EQ(index.Count(), rows.size());
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        const auto original = query;
+        const auto* values = query.empty() ? nullptr : query.data();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool hit =
+                std::find(query.begin(), query.end(), rows[row]) != query.end();
+            const bool is_valid = !valid || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        EXPECT_EQ(query, original);
+    }
+}
+
+}  // namespace
+
+TEST(StringIndexSortMembershipTest, ScanOracleAndInputImmutability) {
+    for (size_t n : {1, 63, 64, 65, 129, 141}) {
+        auto rows = StringMembershipRows();
+        rows.resize(n);
+        for (int null_mode : {0, 1, 2}) {
+            auto valid = std::make_unique<bool[]>(n);
+            for (size_t i = 0; i < n; ++i) {
+                valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+            }
+            const bool* validity = null_mode == 0 ? nullptr : valid.get();
+            StringIndexSort index;
+            index.Build(n, rows.data(), validity);
+            CheckStringMembership(index, rows, validity);
+        }
+    }
+}
+
+TEST(StringIndexSortMembershipTest, LegacyAndPackedReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_membership_reload");
+    const auto rows = StringMembershipRows();
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 0;
+        }
+        StringIndexSort built(fixture.ctx);
+        built.Build(rows.size(), rows.data(), valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/membership";
+            }
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            for (bool async : {false, true}) {
+                SCOPED_TRACE("async=" + std::to_string(async));
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                StringIndexSort loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckStringMembership(loaded, rows, valid.get());
+            }
+            StringIndexSort legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckStringMembership(legacy, rows, valid.get());
+        }
+    }
+}
+
+TEST(StringIndexSortV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_memory");
+    std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
+
+    ExposedStringIndexSort build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexSort load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 2);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    std::vector<std::string> values{"alpha", "delta"};
+    auto bitset = load_index.In(values.size(), values.data());
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_TRUE(bitset[1]);
+    EXPECT_FALSE(bitset[2]);
+    EXPECT_FALSE(bitset[3]);
+    EXPECT_EQ(load_index.Reverse_Lookup(2), data[2]);
+}
+
+TEST(StringIndexSortV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_mmap");
+    std::vector<std::string> data{"zero", "one", "two", "three", "four"};
+
+    ExposedStringIndexSort build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexSort load_index(fixture.ctx);
+    Config config;
+    config[milvus::index::MMAP_FILE_PATH] =
+        fixture.root_path + "/mmap/string_sort";
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 3);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    auto bitset = load_index.PrefixMatch("t");
+    EXPECT_FALSE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_TRUE(bitset[2]);
+    EXPECT_TRUE(bitset[3]);
+    EXPECT_FALSE(bitset[4]);
+    EXPECT_EQ(load_index.Reverse_Lookup(4), data[4]);
+}
+
+TEST(StringIndexSortV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_validity");
+    for (size_t rows : {8, 9, 63, 64, 65}) {
+        std::vector<std::string> data(rows, "value");
+        auto valid = std::make_unique<bool[]>(rows);
+        for (size_t i = 0; i < rows; ++i) {
+            valid[i] = i % 3 != 0;
+        }
+        StringIndexSort build_index(fixture.ctx);
+        build_index.Build(rows, data.data(), valid.get());
+        auto stats = build_index.UploadUnified({});
+        auto packed = milvus::test::ReadPackedIndexBytes(
+            fixture.ctx, stats->GetIndexFiles());
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(testing::Message()
+                         << "rows=" << rows << ", mmap=" << mmap);
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+            }
+            InspectableStringIndexSort load_index(fixture.ctx);
+            {
+                milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+                auto reader = milvus::test::OpenDirectIndexEntryReader(
+                    packed, &remote_file);
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
+                auto entry =
+                    std::find_if(plan.entries.begin(),
+                                 plan.entries.end(),
+                                 [](const auto& entry) {
+                                     return entry.name == "valid_bitset";
+                                 });
+                ASSERT_NE(entry, plan.entries.end());
+                const auto target =
+                    std::get<storage::MemoryEntryTarget>(entry->target);
+                ASSERT_EQ(target.bytes, (rows + 7) / 8);
+                folly::coro::blockingWait(reader->ReadEntriesAsync(
+                    plan.entries, proto::common::LoadPriority::HIGH));
+                // Inject unused bits after CRC to exercise FinishLoadAsync's
+                // compatibility with the synchronous unpacker.
+                if (rows % 8 != 0) {
+                    target.data[target.bytes - 1] |= 0x80;
+                }
+                folly::coro::blockingWait(
+                    load_index.FinishLoadAsync(plan, config));
+                EXPECT_EQ(
+                    reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
+                    target.data);
+                plan.Commit();
+            }
+            const auto* bytes = reinterpret_cast<const uint8_t*>(
+                load_index.valid_bitset_.data());
+            for (size_t i = 0; i < load_index.valid_bitset_.size_in_bytes() * 8;
+                 ++i) {
+                EXPECT_EQ((bytes[i / 8] >> (i % 8)) & 1u, i < rows && valid[i]);
+            }
+            EXPECT_EQ(load_index.IsNotNull().count(),
+                      build_index.IsNotNull().count());
+
+            std::map<std::string, std::string> params{
+                {INDEX_TYPE, ASCENDING_SORT},
+                {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+            for (bool async : {false, true}) {
+                auto context = fixture.ctx;
+                context.use_async_load = async;
+                auto resources =
+                    IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                        DataType::VARCHAR,
+                        packed.size(),
+                        params,
+                        mmap,
+                        rows,
+                        stats->GetIndexFiles(),
+                        context);
+                EXPECT_EQ(resources.overhead.has_value(), async);
+            }
+        }
+    }
+}
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {
     Config config;

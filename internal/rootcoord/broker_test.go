@@ -226,7 +226,13 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidMixCoord())
+		mixCoord := mocks.NewMixCoord(t)
+		mixCoord.On("BroadcastAlteredCollection", mock.Anything,
+			mock.MatchedBy(func(req *datapb.AlterCollectionRequest) bool {
+				return assert.Equal(t, int64(1), req.GetCollectionID()) &&
+					assert.Equal(t, []int64{2}, req.GetPartitionIDs())
+			})).Return(merr.Success(), nil).Once()
+		c := newTestCore(withMixCoord(mixCoord))
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByID",
 			mock.Anything,

@@ -18,10 +18,13 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -29,10 +32,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Note: mockey is not used in this file since we use testify/mock for generated mocks
@@ -237,6 +243,8 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		collectionID: 100,
 		partitionIDs: []int64{1, 2},
 		vchannels:    []string{"v1", "v2"},
+		rlsPrincipal: "alice",
+		skipRLS:      true,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -257,6 +265,8 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	s.Equal([]string{"v1", "v2"}, capturedReq.ChannelNames)
 	s.Equal(uint64(0), capturedReq.DataTimestamp) // Must be 0 for proxy call
 	s.Equal(int64(0), capturedReq.JobID)          // Let DataCoord allocate
+	s.Equal("alice", capturedReq.GetRlsPrincipal())
+	s.True(capturedReq.GetSkipRls())
 }
 
 // --------------------------------
@@ -458,4 +468,218 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 	s.NoError(err)
 	s.Require().NotNil(capturedCtx)
 	s.Equal("run-1-batch-1", interceptor.IdempotencyKeyFromContext(capturedCtx))
+}
+
+// newImportTaskForPreExecute builds an importTask whose dependencies are mocked
+// just far enough for PreExecute to reach the option-driven checks. The checks
+// under test sit at both ends of PreExecute -- the duplicate-key rejection runs
+// before anything is resolved, the privilege gate runs after the schema and
+// vchannels are -- so the mocks must satisfy everything in between.
+func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) *importTask {
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
+		Return(int64(100), nil).Maybe()
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
+		Return(&collectionInfo{
+			CollID: int64(100),
+			Schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					},
+				},
+			},
+		}, nil).Maybe()
+
+	// Only reached by the ordinary-import case, which runs past the gate into
+	// partition resolution.
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(int64(200), nil).Maybe()
+
+	chMgr := channelmgr.NewMockChannelsMgr(t)
+	chMgr.EXPECT().GetVChannels(mock.Anything).Return([]string{"v1"}, nil).Maybe()
+
+	return &importTask{
+		baseTask: baseTask{MetaCache: mockCache},
+		ctx:      context.Background(),
+		node:     &Proxy{chMgr: chMgr},
+		req: &internalpb.ImportRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"staging/file.json"}}},
+			Options:        options,
+		},
+		resp: &internalpb.ImportResponse{},
+	}
+}
+
+func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
+	paramtable.Init()
+	gate := &Params.ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("true")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key))
+	})
+
+	for _, test := range []struct {
+		name              string
+		rlsEnabled        bool
+		skipRLS           bool
+		expectedPrincipal string
+		expectedSkipRLS   bool
+	}{
+		{name: "principal is retained for enforcement", rlsEnabled: true, expectedPrincipal: "alice"},
+		{name: "authorized bypass is retained", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true},
+		{name: "unchecked bypass on disabled collection is discarded", skipRLS: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const collectionID = int64(100)
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "request_db", "alias").Return(collectionID, nil)
+			cache.EXPECT().GetCollectionInfo(mock.Anything, "request_db", "alias", collectionID).Return(&collectionInfo{
+				CollID:     collectionID,
+				DBName:     "canonical_db",
+				RlsEnabled: test.rlsEnabled,
+				Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+					Name: "canonical_collection",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					},
+				}},
+			}, nil)
+			cache.EXPECT().GetPartitionID(mock.Anything, "canonical_db", "canonical_collection", mock.Anything).
+				Return(int64(200), nil)
+
+			channels := channelmgr.NewMockChannelsMgr(t)
+			channels.EXPECT().GetVChannels(collectionID).Return([]string{"v1"}, nil)
+			task := &importTask{
+				baseTask: baseTask{MetaCache: cache},
+				ctx:      context.Background(),
+				node:     &Proxy{chMgr: channels},
+				req: &internalpb.ImportRequest{
+					DbName:         "request_db",
+					CollectionName: "alias",
+					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
+					Options: []*commonpb.KeyValuePair{
+						{Key: "rls_principal", Value: "alice"},
+						{Key: "skip_rls", Value: strconv.FormatBool(test.skipRLS)},
+					},
+				},
+				resp: &internalpb.ImportResponse{},
+			}
+
+			require.NoError(t, task.PreExecute(context.Background()))
+			assert.Equal(t, "canonical_db", task.req.GetDbName())
+			assert.Equal(t, "canonical_collection", task.req.GetCollectionName())
+			assert.Equal(t, test.expectedPrincipal, task.rlsPrincipal)
+			assert.Equal(t, test.expectedSkipRLS, task.skipRLS)
+		})
+	}
+}
+
+func TestImportTask_PreExecuteRejectsRLSBeforeClusterUpgrade(t *testing.T) {
+	paramtable.Init()
+	gate := &Params.ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("false")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, "test_db", "test_collection").Return(int64(100), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "test_db", "test_collection", int64(100)).Return(&collectionInfo{
+		CollID:     100,
+		RlsEnabled: true,
+		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		}},
+	}, nil)
+	task := &importTask{
+		baseTask: baseTask{MetaCache: cache},
+		ctx:      context.Background(),
+		req: &internalpb.ImportRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			Options: []*commonpb.KeyValuePair{
+				{Key: "rls_principal", Value: "alice"},
+				{Key: "skip_rls", Value: "true"},
+			},
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+// TestImportTask_PreExecuteRequiresImportBinlogPrivilege drives the gate through
+// PreExecute rather than calling CheckClusterPrivilege directly: the helper
+// already has its own coverage in privilege_interceptor_test.go, and what is
+// untested is the wiring -- that PreExecute calls it, and only for the options
+// that read Milvus's internal storage layout.
+func TestImportTask_PreExecuteRequiresImportBinlogPrivilege(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	// CheckClusterPrivilege resolves roles via privilege.GetPrivilegeCache(), a
+	// process-wide singleton normally populated once at Proxy startup. Seed it
+	// with an empty policy set (following the same pattern as
+	// privilege_interceptor_test.go's InitEmptyGlobalCache) so the "ordinary
+	// user" case below reaches the actual privilege decision instead of
+	// failing earlier with ErrServiceUnavailable because the cache is nil.
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).
+		Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	require.NoError(t, privilege.InitPrivilegeCache(context.Background(), mixcoord))
+
+	backupOptions := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}
+	l0Options := []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}}
+
+	t.Run("backup import by a user without the privilege is refused", func(t *testing.T) {
+		it := newImportTaskForPreExecute(t, backupOptions)
+		err := it.PreExecute(GetContext(context.Background(), "alice:123456"))
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("l0 import by a user without the privilege is refused", func(t *testing.T) {
+		it := newImportTaskForPreExecute(t, l0Options)
+		err := it.PreExecute(GetContext(context.Background(), "alice:123456"))
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("root passes the gate", func(t *testing.T) {
+		it := newImportTaskForPreExecute(t, backupOptions)
+		err := it.PreExecute(GetContext(context.Background(), "root:123456"))
+		// A backup import still fails afterwards on the unset partition name;
+		// what matters here is that it is no longer the privilege that refuses it.
+		assert.NotErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("ordinary import does not require the privilege", func(t *testing.T) {
+		it := newImportTaskForPreExecute(t, nil)
+		err := it.PreExecute(GetContext(context.Background(), "alice:123456"))
+		assert.NotErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+}
+
+// TestImportTask_PreExecuteRejectsDuplicateOptionKeys pins the same wiring for
+// the duplicate-key check. It must reject before any option is read, because
+// validation reads options as a repeated KV (first match wins) while the
+// broadcast body folds them into a map (last value wins).
+func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
+	paramtable.Init()
+
+	it := newImportTaskForPreExecute(t, []*commonpb.KeyValuePair{
+		{Key: "backup", Value: "false"},
+		{Key: "backup", Value: "true"},
+	})
+
+	err := it.PreExecute(context.Background())
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "duplicate import option key: backup")
 }

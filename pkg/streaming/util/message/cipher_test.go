@@ -261,7 +261,7 @@ func TestDecodePayloadReturnsDecryptErrors(t *testing.T) {
 
 	t.Run("cipher unavailable", func(t *testing.T) {
 		cipher = nil
-		_, err := DecodePayload(context.Background(), msg)
+		_, err := msg.decodePayload(context.Background())
 		assert.ErrorContains(t, err, "cipher not registered")
 	})
 
@@ -272,7 +272,7 @@ func TestDecodePayloadReturnsDecryptErrors(t *testing.T) {
 				return nil, expected
 			},
 		}
-		_, err := DecodePayload(context.Background(), msg)
+		_, err := msg.decodePayload(context.Background())
 		assert.ErrorIs(t, err, expected)
 	})
 
@@ -287,7 +287,7 @@ func TestDecodePayloadReturnsDecryptErrors(t *testing.T) {
 				}, nil
 			},
 		}
-		_, err := DecodePayload(context.Background(), msg)
+		_, err := msg.decodePayload(context.Background())
 		assert.ErrorIs(t, err, expected)
 	})
 
@@ -299,7 +299,7 @@ func TestDecodePayloadReturnsDecryptErrors(t *testing.T) {
 				return nil, ErrKmsKeyInvalid
 			},
 		}
-		_, err := DecodePayload(ctx, msg)
+		_, err := msg.decodePayload(ctx)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
 }

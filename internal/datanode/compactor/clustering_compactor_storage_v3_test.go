@@ -19,19 +19,24 @@ package compactor
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"path"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
+	binlogio "github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -53,6 +58,36 @@ import (
 
 func TestClusteringCompactionTaskStorageV3Suite(t *testing.T) {
 	suite.Run(t, new(ClusteringCompactionTaskStorageV3Suite))
+}
+
+func TestClusteringInitLOBCompactionContextDecodesAcrossPartitionBases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	params := compaction.GenParams()
+	task := &clusteringCompactionTask{
+		collectionID: 10,
+		partitionID:  20,
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_ClusteringCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			}},
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+				SegmentID: 1,
+				Manifest: packed.MarshalManifestPath(
+					params.StorageConfig.GetRootPath()+"/files/insert_log/10/20/1", 1),
+			}},
+		},
+		compactionParams: params,
+	}
+
+	require.NoError(t, task.initLOBCompactionContext(context.Background()))
+	require.NotNil(t, task.lobContext)
+	require.True(t, task.lobContext.ShouldRewriteAnyField())
+	require.True(t, task.lobContext.DecodeTextFromSource)
+	sourceConfigs, err := task.lobContext.GetSourceTextColumnConfigs(task.plan.GetSegmentBinlogs()[0].GetManifest())
+	require.NoError(t, err)
+	require.Len(t, sourceConfigs, 1)
+	require.Contains(t, sourceConfigs[0].LobBasePath, "/files/insert_log/10/20/lobs/101")
 }
 
 type ClusteringCompactionTaskStorageV3Suite struct {
@@ -190,7 +225,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -395,7 +430,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -443,7 +478,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -532,4 +567,93 @@ func genTextLOBInsertData(rows int, seed int64, schema *schemapb.CollectionSchem
 		})
 	}
 	return []*storage.InsertData{buf}
+}
+
+func newClusteringTextTask(fixture *bumpFixture) *clusteringCompactionTask {
+	plan := proto.Clone(fixture.task.plan).(*datapb.CompactionPlan)
+	plan.Type = datapb.CompactionType_ClusteringCompaction
+	plan.ClusteringKeyField = bumpFxPKField
+	plan.PreferSegmentRows, plan.MaxSegmentRows = 128, 128
+	plan.AnalyzeResultPath = fixture.cfg.RootPath + "/analyze_stats/999"
+	return NewClusteringCompactionTask(context.Background(), binlogio.NewBinlogIO(fixture.task.chunkManager), plan, fixture.task.compactionParams)
+}
+
+func TestClusteringTextRewriteAcrossPartitionNamespaces(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID = int64(105)
+	const rows = 6
+	fixture := buildBumpFixture(t, withRows(rows),
+		withSourceFields(&schemapb.FieldSchema{FieldID: textID, Name: "text_lob", DataType: schemapb.DataType_Text}),
+		withFillValue(func(i int, _ uint64, values map[int64]any) { values[textID] = bumpFxLobText(i) }),
+		withTextLOBSource(textID), withLegacySourceNamespace())
+	task := newClusteringTextTask(fixture)
+	result, err := task.Compact()
+	require.NoError(t, err)
+	require.Len(t, result.Segments, 1)
+	segment := result.Segments[0]
+	require.EqualValues(t, rows, segment.NumOfRows)
+	base, _, err := packed.UnmarshalManifestPath(segment.Manifest)
+	require.NoError(t, err)
+	require.Equal(t, storage.SegmentManifestBasePath(fixture.cfg.RootPath, CollectionID, PartitionID, segment.SegmentID), base)
+	lobFiles, err := packed.GetManifestLobFiles(segment.Manifest, fixture.cfg)
+	require.NoError(t, err)
+	require.NotEmpty(t, lobFiles)
+	require.NotNil(t, task.lobContext)
+	require.True(t, task.lobContext.DecodeTextFromSource)
+	configs, err := task.lobContext.GetSourceTextColumnConfigs(segment.Manifest)
+	require.NoError(t, err)
+	reader, err := storage.NewTextDecodedManifestRecordReader(context.Background(), segment.Manifest, task.plan.Schema, configs,
+		storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(fixture.cfg))
+	require.NoError(t, err)
+	defer reader.Close()
+	readRows := 0
+	for {
+		record, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		for row := 0; row < record.Len(); row++ {
+			require.EqualValues(t, readRows, record.Column(bumpFxPKField).(*array.Int64).Value(row))
+			require.Equal(t, bumpFxLobText(readRows), record.Column(textID).(*array.String).Value(row))
+			readRows++
+		}
+	}
+	require.Equal(t, rows, readRows)
+}
+
+func TestClusteringTextAddedAfterAllSourceSegments(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID = int64(105)
+	const rows = 6
+	fixture := buildBumpFixture(t, withRows(rows), withLegacySourceNamespace(),
+		withTargetAddedField(&schemapb.FieldSchema{FieldID: textID, Name: "added_text", DataType: schemapb.DataType_Text, Nullable: true}))
+	task := newClusteringTextTask(fixture)
+	task.compactionParams.BinLogMaxSize = 1 // Each source row produces a separate all-null TEXT batch.
+	result, err := task.Compact()
+	require.NoError(t, err)
+	require.True(t, task.lobContext.DecodeTextFromSource)
+	require.Len(t, result.Segments, 1)
+	segment := result.Segments[0]
+	require.EqualValues(t, rows, segment.NumOfRows)
+	configs, err := task.lobContext.GetSourceTextColumnConfigs(segment.Manifest)
+	require.NoError(t, err)
+	reader, err := storage.NewTextDecodedManifestRecordReader(context.Background(), segment.Manifest, task.plan.Schema, configs,
+		storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(fixture.cfg))
+	require.NoError(t, err)
+	defer reader.Close()
+	readRows := 0
+	for {
+		record, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		require.Equal(t, record.Len(), record.Column(textID).NullN())
+		for row := 0; row < record.Len(); row++ {
+			require.EqualValues(t, readRows, record.Column(bumpFxPKField).(*array.Int64).Value(row))
+			readRows++
+		}
+	}
+	require.Equal(t, rows, readRows)
 }

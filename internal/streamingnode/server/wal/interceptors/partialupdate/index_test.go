@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -54,9 +55,9 @@ func TestVersionByteBudgetRecordsMissedWriteOnce(t *testing.T) {
 	)
 	idx := newPKVersionIndexWithBudget(30*time.Second, budget)
 
-	idx.UpdateAllTyped("v1", primaryKeys{
-		kind:        primaryKeyKindInt64,
-		int64Values: []int64{1, 2, 3},
+	idx.UpdateAllTyped("v1", primarykey.Keys{
+		Kind:        primarykey.KindInt64,
+		Int64Values: []int64{1, 2, 3},
 	}, 100)
 
 	require.Equal(t, float64(1), testutil.ToFloat64(missed))

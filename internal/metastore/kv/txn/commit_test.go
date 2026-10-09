@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -189,6 +190,59 @@ func TestCommit_NonPositiveLimit(t *testing.T) {
 	b := New()
 	b.Save("c1", "x")
 	assert.Error(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_ConditionalCommitAtomic proves CommitSaveIfValue attaches the
+// value-equality predicate to the single atomic txn: the commit only applies
+// while the current value of the guarded key equals oldValue.
+func TestCommit_ConditionalCommitAtomic(t *testing.T) {
+	tk := kvmocks.NewTxnKV(t)
+	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
+	tk.EXPECT().MultiSaveAndRemove(mock.Anything,
+		map[string]string{"cp": "new"}, []string(nil), mock.Anything).
+		RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, preds ...predicates.Predicate) error {
+			require.Len(t, preds, 1)
+			assert.Equal(t, "cp", preds[0].Key())
+			assert.Equal(t, "old", preds[0].TargetValue())
+			return nil
+		}).Once()
+
+	b := New()
+	b.CommitSaveIfValue("cp", "old", "new")
+	assert.NoError(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_ConditionalCommitFallback proves the guard survives the chunked
+// fallback: the predicate rides on the final commit txn, after the non-commit
+// ops were flushed.
+func TestCommit_ConditionalCommitFallback(t *testing.T) {
+	tk := kvmocks.NewTxnKV(t)
+	tk.EXPECT().MaxTxnOps().Return(2).Maybe()
+	tk.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Maybe()
+	tk.EXPECT().MultiSaveAndRemove(mock.Anything,
+		map[string]string{"cp": "new"}, []string(nil), mock.Anything).
+		RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, preds ...predicates.Predicate) error {
+			require.Len(t, preds, 1)
+			assert.Equal(t, "cp", preds[0].Key())
+			assert.Equal(t, "old", preds[0].TargetValue())
+			return nil
+		}).Once()
+
+	b := New()
+	b.Save("c1", "x")
+	b.Save("c2", "y")
+	b.CommitSaveIfValue("cp", "old", "new")
+	assert.NoError(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_SingleConditionalCommit proves the single-conditional precondition
+// of CommitSaveIfValue: a second conditional commit op is a programming error.
+func TestCommit_SingleConditionalCommit(t *testing.T) {
+	b := New()
+	b.CommitSaveIfValue("cp1", "old", "new")
+	assert.Panics(t, func() {
+		b.CommitSaveIfValue("cp2", "old", "new")
+	})
 }
 
 // TestCommit_FallbackSkipsEmptyTrailingCommit proves FIX 2: when the

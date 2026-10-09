@@ -41,6 +41,7 @@
 #include "exec/expression/MatchExpr.h"
 #include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
+#include "exec/expression/RawExprCacheAdapter.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "exec/expression/UnaryExpr.h"
@@ -168,6 +169,13 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
         OptimizeCompiledExprs(context, exprs);
     }
 
+    if (ExprResCacheManager::IsEnabled()) {
+        auto* query_context = context->get_query_context();
+        DecorateRawExprCache(exprs,
+                             query_context->get_op_context(),
+                             query_context->get_enable_sub_expr_cache_write());
+    }
+
     return exprs;
 }
 
@@ -267,7 +275,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
     if (auto call = std::dynamic_pointer_cast<const expr::CallExpr>(expr)) {
         result = std::make_shared<PhyCallExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             call,
             "PhyCallExpr",
             op_ctx,
@@ -277,7 +285,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::UnaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyUnaryRangeFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyUnaryRangeFilterExpr",
             op_ctx,
@@ -289,12 +297,15 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_enable_sub_expr_cache_write());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
-        result = std::make_shared<PhyLogicalUnaryExpr>(
-            compiled_inputs, casted_expr, "PhyLogicalUnaryExpr", op_ctx);
+        result =
+            std::make_shared<PhyLogicalUnaryExpr>(std::move(compiled_inputs),
+                                                  casted_expr,
+                                                  "PhyLogicalUnaryExpr",
+                                                  op_ctx);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TermFilterExpr>(expr)) {
         result = std::make_shared<PhyTermFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyTermFilterExpr",
             op_ctx,
@@ -317,12 +328,15 @@ CompileExpression(const expr::TypedExprPtr& expr,
                 op_ctx);
         } else {
             result = std::make_shared<PhyLogicalBinaryExpr>(
-                compiled_inputs, casted_expr, "PhyLogicalBinaryExpr", op_ctx);
+                std::move(compiled_inputs),
+                casted_expr,
+                "PhyLogicalBinaryExpr",
+                op_ctx);
         }
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyBinaryRangeFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyBinaryRangeFilterExpr",
             op_ctx,
@@ -334,7 +348,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::AlwaysTrueExpr>(expr)) {
         result = std::make_shared<PhyAlwaysTrueExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyAlwaysTrueExpr",
             op_ctx,
@@ -344,7 +358,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryArithOpEvalRangeExpr>(expr)) {
         result = std::make_shared<PhyBinaryArithOpEvalRangeExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyBinaryArithOpEvalRangeExpr",
             op_ctx,
@@ -355,7 +369,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
         result = std::make_shared<PhyTimestamptzArithCompareExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyTimestamptzArithCompareExpr",
             op_ctx,
@@ -367,7 +381,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::CompareExpr>(
                        expr)) {
         result = std::make_shared<PhyCompareFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyCompareFilterExpr",
             op_ctx,
@@ -378,7 +392,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::ExistsExpr>(
                        expr)) {
         result = std::make_shared<PhyExistsFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyExistsFilterExpr",
             op_ctx,
@@ -390,7 +404,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::JsonContainsExpr>(expr)) {
         result = std::make_shared<PhyJsonContainsFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyJsonContainsFilterExpr",
             op_ctx,
@@ -404,7 +418,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                        expr)) {
         // used for function call arguments, may emit any type
         result = std::make_shared<PhyValueExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             value_expr,
             "PhyValueExpr",
             op_ctx,
@@ -415,7 +429,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::ColumnExpr>(
                        expr)) {
         result = std::make_shared<PhyColumnExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             column_expr,
             "PhyColumnExpr",
             op_ctx,
@@ -426,7 +440,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::NullExpr>(
                        expr)) {
         result = std::make_shared<PhyNullExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             column_expr,
             "PhyNullExpr",
             op_ctx,
@@ -437,7 +451,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::GISFunctionFilterExpr>(expr)) {
         result = std::make_shared<PhyGISFunctionFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyGISFunctionFilterExpr",
             op_ctx,
@@ -449,7 +463,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::MatchExpr>(
                        expr)) {
         result = std::make_shared<PhyMatchFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             match_expr,
             "PhyMatchFilterExpr",
             op_ctx,
@@ -459,7 +473,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto bloom_filter_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BloomFilterExpr>(expr)) {
         result = std::make_shared<PhyBloomFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             bloom_filter_expr,
             "PhyBloomFilterExpr",
             op_ctx,
@@ -470,7 +484,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto roaring_filter_expr = std::dynamic_pointer_cast<
                    const milvus::expr::RoaringFilterExpr>(expr)) {
         result = std::make_shared<PhyRoaringFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             roaring_filter_expr,
             "PhyRoaringFilterExpr",
             op_ctx,

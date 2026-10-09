@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,8 +47,28 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
-			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
+			if err := kc.applySegmentEntry(ctx, b, action.Type, e, publishesSegmentVersion(e.Segment, actions)); err != nil {
 				return err
+			}
+		case metastore.SegmentIndexEntry:
+			if e.SegmentIndex == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment index in UpdateAction")
+			}
+			key := BuildSegmentIndexKey(
+				e.SegmentIndex.CollectionID,
+				e.SegmentIndex.PartitionID,
+				e.SegmentIndex.SegmentID,
+				e.SegmentIndex.BuildID,
+			)
+			switch action.Type {
+			case metastore.ActionDelete:
+				// Remove, not CommitRemove: an action set containing a segment
+				// index entry never takes the ordered fallback path (see
+				// containsSegmentIndexUpdate below), so there is no visibility
+				// point to mark.
+				b.Remove(key)
+			default:
+				return unsupportedAction(action)
 			}
 		case metastore.ChannelEntry:
 			if action.Type != metastore.ActionUpdate {
@@ -104,6 +125,30 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				return unsupportedAction(action)
 			}
 			b.Remove(buildAnalyzeTaskKey(e.TaskID))
+		case metastore.DataViewEntry:
+			if action.Type != metastore.ActionAdd {
+				return unsupportedAction(action)
+			}
+			if e.DataView == nil || e.DataView.GetDataVersion() == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil DataView or DataVersion in UpdateAction")
+			}
+			key := buildDataViewVersionKey(
+				e.DataView.GetCollectionId(),
+				e.DataView.GetDataVersion().GetStreamingVersion(),
+				e.DataView.GetDataVersion().GetCompactVersion(),
+			)
+			value, err := proto.Marshal(e.DataView)
+			if err != nil {
+				return err
+			}
+			// The snapshot key is immutable per version; a new version always
+			// writes a fresh key, so the write is idempotent-safe. CommitSave
+			// marks the DataView key as the visibility point of the whole
+			// composite write: in the over-limit fallback, every SegmentMeta op
+			// recorded before it is flushed first and the DataView lands in the
+			// final guarded txn, so a visible DataView implies its SegmentMeta
+			// is committed.
+			b.CommitSave(key, string(value))
 		case metastore.PartitionStatsVersionEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
@@ -138,11 +183,77 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.SegmentChangeGroupEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				// Same encoding as catalog.SaveSegmentChangeGroup.
+				if e.Group == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
+				}
+				value, err := model.MarshalSegmentChangeGroup(e.Group)
+				if err != nil {
+					return err
+				}
+				if e.Group.IsTerminal() {
+					// Terminal states (COMMITTED/FAILED/ABORTED) are the
+					// visibility marker of the composite write: CommitSave lands
+					// the record LAST in the chunked-fallback flush, so a visible
+					// terminal record implies every non-commit op (member flips,
+					// superseded retirement) already landed.
+					b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				} else {
+					// ALIVE states (STAGED/READY) are NOT a commit marker (C13):
+					// for STAGED creation the group record must land BEFORE its
+					// staged members in the fallback flush, otherwise a crash
+					// between the two leaves invisible members with no group
+					// record — unrecoverable without SegmentInfo.change_group_id.
+					// Plain in-order Save lets the caller control that ordering.
+					b.Save(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				}
+			case metastore.ActionDelete:
+				// CommitRemove marks the group removal as the visibility point:
+				// the group must land last when its members/superseded
+				// retirement are composed before it on the ordered fallback path.
+				b.CommitRemove(buildSegmentChangeGroupKey(e.CollectionID, e.GroupID))
+			default:
+				return unsupportedAction(action)
+			}
 		default:
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
+	if containsSegmentIndexUpdate(actions) {
+		// A segment index removal and the segment manifest pointer that
+		// publishes or retracts its artifact must land together. Refuse a
+		// chunked fallback that could expose only half of the transition.
+		return txn.CommitWithoutFallback(ctx, kc.MetaKv, b)
+	}
 	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
+	for _, action := range actions {
+		if _, ok := action.Entry.(metastore.SegmentIndexEntry); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// publishesSegmentVersion identifies a first Flush publication. Later compaction
+// views must not pull all previously published segment records into the final txn.
+func publishesSegmentVersion(segment *datapb.SegmentInfo, actions []metastore.UpdateAction) bool {
+	if segment.GetSealedAtDataVersion() == nil {
+		return false
+	}
+	for _, action := range actions {
+		if entry, ok := action.Entry.(metastore.DataViewEntry); ok &&
+			entry.DataView.GetCollectionId() == segment.GetCollectionID() &&
+			proto.Equal(entry.DataView.GetDataVersion(), segment.GetSealedAtDataVersion()) {
+			return true
+		}
+	}
+	return false
 }
 
 // applySegmentEntry stages the kv writes for a segment action.
@@ -154,20 +265,43 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 //     handleDroppedSegment GC-compat binlog KVs.
 //   - anything else (e.g. ActionDelete: physical segment removal) is not
 //     wired yet and is rejected.
-func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry) error {
+func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry, publishesVersion bool) error {
 	if e.Segment == nil {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment in UpdateAction")
 	}
+	// A durable first-publication binding must never precede its DataView.
+	// Keep just the segment record (not its potentially large binlog set) in
+	// the final atomic transaction with the DataView on the chunked path.
+	save := b.Save
+	if publishesVersion {
+		segmentKey := buildSegmentPath(e.Segment.GetCollectionID(), e.Segment.GetPartitionID(), e.Segment.GetID())
+		save = func(key, value string) {
+			if key == segmentKey {
+				b.CommitSave(key, value)
+			} else {
+				b.Save(key, value)
+			}
+		}
+	}
 	switch t {
 	case metastore.ActionAdd:
+		// C26: honor the caller's increments (including DroppedBinlogFieldIDs
+		// removals) instead of silently overwriting them with a default; a
+		// dropped binlog field whose removal is omitted would be resurrected by
+		// the prefix scan in listBinlogs on restart. Fall back to the full
+		// segment increment only when none is supplied.
+		increments := e.Binlogs
+		if len(increments) == 0 {
+			increments = []metastore.BinlogsIncrement{{Segment: e.Segment}}
+		}
 		kvs, removals, err := kc.buildAlterSegmentsKvs(ctx,
 			[]*datapb.SegmentInfo{e.Segment},
-			[]metastore.BinlogsIncrement{{Segment: e.Segment}})
+			increments)
 		if err != nil {
 			return err
 		}
 		for k, v := range kvs {
-			b.Save(k, v)
+			save(k, v)
 		}
 		for _, k := range removals {
 			b.Remove(k)
@@ -180,12 +314,12 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			// handleDroppedSegment GC-compat write when the segment predates
 			// binlog-prefix persistence, keeping compaction's compactFrom
 			// retirement byte-identical to catalog.AlterSegments.
-			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, nil)
+			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, e.Binlogs)
 			if err != nil {
 				return err
 			}
 			for k, v := range kvs {
-				b.Save(k, v)
+				save(k, v)
 			}
 			for _, k := range removals {
 				b.Remove(k)
@@ -197,7 +331,16 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			return err
 		}
 		for k, v := range kvs {
-			b.Save(k, v)
+			save(k, v)
+		}
+		if len(e.Binlogs) > 0 {
+			// C26: the record-only (non-AlterEncoding) ActionUpdate persists no
+			// binlog KVs and cannot honor DroppedBinlogFieldIDs removals —
+			// silently dropping them would resurrect zombie binlog entries.
+			// Reject per the Update contract ("reject what you cannot
+			// implement") instead of losing the removals without an error.
+			return merr.WrapErrServiceInternalMsg(
+				"datacoord catalog: binlog increments are not supported on a record-only segment update; use AlterEncoding")
 		}
 	default:
 		return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to a segment", t)

@@ -389,6 +389,16 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return PinWrapper<Chunk*>(std::move(ca), chunk);
     }
 
+    TakeCellPin
+    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+        auto slot = slot_;
+        return [slot = std::move(slot), op_ctx](int64_t chunk_id) {
+            auto ca = SemiInlineGet(slot->PinCells(op_ctx, {chunk_id}));
+            auto* chunk = ca->get_cell_of(chunk_id);
+            return PinWrapper<Chunk*>(std::move(ca), chunk);
+        };
+    }
+
     std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override {
         auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
@@ -414,6 +424,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
  protected:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        return data_type_;
+    }
+
     bool nullable_{false};
     DataType data_type_{DataType::NONE};
     size_t num_rows_{0};

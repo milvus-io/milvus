@@ -90,6 +90,148 @@ func (s *SearchOptionSuite) TestBasic() {
 	s.Error(err)
 }
 
+func (s *SearchOptionSuite) TestFunctionScore() {
+	collName := "search_opt_function_score"
+	topK := 10
+
+	boostFn1 := entity.NewFunction().WithName("boost1").WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("weight", 2.0).
+		WithParam("filter", "int64_field > 0")
+	boostFn2 := entity.NewFunction().WithName("boost2").WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("weight", 0.5)
+
+	score := entity.NewFunctionScore().
+		AddFunction(boostFn1).
+		AddFunction(boostFn2).
+		WithParam("boost_mode", "sum").
+		WithParam("function_mode", "multiply")
+
+	s.Run("search", func() {
+		req, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(score).
+			Request()
+		s.Require().NoError(err)
+
+		fs := req.GetFunctionScore()
+		s.Require().NotNil(fs)
+		s.Len(fs.GetFunctions(), 2)
+		s.Equal(map[string]string{"boost_mode": "sum", "function_mode": "multiply"}, entity.KvPairsMap(fs.GetParams()))
+		s.Equal("boost", entity.KvPairsMap(fs.GetFunctions()[0].GetParams())["reranker"])
+		s.Equal("2", entity.KvPairsMap(fs.GetFunctions()[0].GetParams())["weight"])
+		s.Equal("int64_field > 0", entity.KvPairsMap(fs.GetFunctions()[0].GetParams())["filter"])
+	})
+
+	s.Run("search_with_function_reranker_appends", func() {
+		req, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionReranker(boostFn1).
+			WithFunctionReranker(boostFn2).
+			Request()
+		s.Require().NoError(err)
+
+		fs := req.GetFunctionScore()
+		s.Require().NotNil(fs)
+		s.Len(fs.GetFunctions(), 2)
+		s.Empty(fs.GetParams())
+	})
+
+	s.Run("hybrid_search", func() {
+		req, err := NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionScore(score).
+			HybridRequest()
+		s.Require().NoError(err)
+
+		fs := req.GetFunctionScore()
+		s.Require().NotNil(fs)
+		s.Len(fs.GetFunctions(), 2)
+		s.Equal(map[string]string{"boost_mode": "sum", "function_mode": "multiply"}, entity.KvPairsMap(fs.GetParams()))
+	})
+
+	s.Run("hybrid_search_with_function_rerankers_appends", func() {
+		req, err := NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionRerankers(boostFn1).
+			WithFunctionRerankers(boostFn2).
+			HybridRequest()
+		s.Require().NoError(err)
+
+		fs := req.GetFunctionScore()
+		s.Require().NotNil(fs)
+		s.Len(fs.GetFunctions(), 2)
+		s.Empty(fs.GetParams())
+	})
+
+	s.Run("no_function_score", func() {
+		req, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			Request()
+		s.Require().NoError(err)
+		s.Nil(req.GetFunctionScore())
+	})
+
+	s.Run("shared_score_not_aliased", func() {
+		shared := entity.NewFunctionScore().
+			AddFunction(boostFn1).
+			WithParam("boost_mode", "sum")
+
+		optA := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(shared)
+		optB := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(shared)
+
+		// mutating the shared score after building options must not leak into them
+		shared.AddFunction(boostFn2)
+		shared.WithParam("function_mode", "multiply")
+
+		reqA, err := optA.Request()
+		s.Require().NoError(err)
+		fsA := reqA.GetFunctionScore()
+		s.Len(fsA.GetFunctions(), 1, "options must not accumulate functions from a shared score")
+		s.Equal(map[string]string{"boost_mode": "sum"}, entity.KvPairsMap(fsA.GetParams()))
+
+		reqB, err := optB.Request()
+		s.Require().NoError(err)
+		s.Len(reqB.GetFunctionScore().GetFunctions(), 1)
+	})
+
+	s.Run("empty_score_errors", func() {
+		empty := entity.NewFunctionScore().WithParam("boost_mode", "sum")
+
+		_, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionScore(empty).
+			Request()
+		s.Error(err)
+		s.Contains(err.Error(), "no functions")
+
+		_, err = NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionScore(empty).
+			HybridRequest()
+		s.Error(err)
+		s.Contains(err.Error(), "no functions")
+	})
+
+	s.Run("nil_score_noop", func() {
+		req, err := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithANNSField("vector").
+			WithFunctionReranker(boostFn1).
+			WithFunctionScore(nil).
+			Request()
+		s.Require().NoError(err)
+		s.Nil(req.GetFunctionScore(), "nil score must clear any accumulated functions")
+
+		hybridReq, err := NewHybridSearchOption(collName, topK, NewAnnRequest("vector", topK, entity.FloatVector([]float32{0.1, 0.2}))).
+			WithFunctionScore(nil).
+			HybridRequest()
+		s.Require().NoError(err)
+		s.Nil(hybridReq.GetFunctionScore())
+	})
+}
+
 func (s *SearchOptionSuite) TestWithNamespace() {
 	collName := "namespace_read_option"
 	namespace := "tenant_a"
@@ -111,6 +253,37 @@ func (s *SearchOptionSuite) TestWithNamespace() {
 		HybridRequest()
 	s.Require().NoError(err)
 	s.Equal(namespace, hybridReq.GetNamespace())
+}
+
+func (s *SearchOptionSuite) TestWithRLSContext() {
+	const principal = "alice"
+	vector := entity.FloatVector([]float32{0.1, 0.2})
+
+	searchReq, err := NewSearchOption("collection", 10, []entity.Vector{vector}).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(principal, searchReq.GetRlsPrincipal())
+	s.True(searchReq.GetSkipRls())
+
+	hybridReq, err := NewHybridSearchOption("collection", 10, NewAnnRequest("vector", 10, vector)).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		HybridRequest()
+	s.Require().NoError(err)
+	s.Equal(principal, hybridReq.GetRlsPrincipal())
+	s.True(hybridReq.GetSkipRls())
+	s.Empty(hybridReq.GetRequests()[0].GetRlsPrincipal())
+	s.False(hybridReq.GetRequests()[0].GetSkipRls())
+
+	queryReq, err := NewQueryOption("collection").
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(principal, queryReq.GetRlsPrincipal())
+	s.True(queryReq.GetSkipRls())
 }
 
 func (s *SearchOptionSuite) TestQueryOrderByFields() {
