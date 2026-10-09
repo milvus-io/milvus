@@ -759,8 +759,8 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                                           int64_t offset) -> bool {
                     auto [chunk_idx, chunk_offset] =
                         GetChunkByOffset(field_id_, offset);
-                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
+                    auto pw =
+                        GetChunkView<milvus::ArrayView>(field_id_, chunk_idx);
                     auto chunk = pw.get();
                     return chunk.first[chunk_offset].is_same_array(val) ^
                            reverse;
@@ -772,8 +772,8 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                               int64_t offset) -> bool {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
-                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
+                    auto pw =
+                        GetChunkData<milvus::ArrayView>(field_id_, chunk_idx);
                     auto chunk = pw.get();
                     auto array_view = chunk.data() + chunk_offset;
                     return array_view->is_same_array(val) ^ reverse;
