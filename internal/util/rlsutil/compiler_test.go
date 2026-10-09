@@ -231,9 +231,55 @@ func TestNestedNotIsRejected(t *testing.T) {
 		FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64,
 	}}})
 	require.NoError(t, err)
-	expr, err := planparserv2.ParseExpr(helper, "not (not (age == 18))", nil)
+	expr, err := planparserv2.ParseExpr(helper, "age == 18", nil)
 	require.NoError(t, err)
-	require.ErrorIs(t, ValidateParsedExpression(expr, nil), merr.ErrParameterInvalid)
+	require.NoError(t, ValidateParsedExpression(expr, nil))
+	// The parser collapses consecutive NOTs. Construct the unsupported plan
+	// directly so this test still exercises the validator's nested-NOT guard.
+	for range 2 {
+		expr = &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+			Op: planpb.UnaryExpr_Not, Child: expr,
+		}}}
+	}
+	err = ValidateParsedExpression(expr, nil)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "nested RLS not expressions are not supported")
+}
+
+func TestDoubleNotPreservesPredicateSemantics(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64, Nullable: true,
+	}}})
+	require.NoError(t, err)
+	base, err := planparserv2.ParseExpr(helper, "age == 18", nil)
+	require.NoError(t, err)
+	compiled, err := CompileCheckExpression([]*RowPolicy{{
+		PolicyName: "check",
+		PolicyType: PolicyTypePermissive,
+		Actions:    []PolicyAction{PolicyActionInsert},
+		CheckExpr:  "not (not (age == 18))",
+	}}, PolicyActionInsert, helper, 4096)
+	require.NoError(t, err)
+	require.NotNil(t, compiled)
+	require.Len(t, compiled.permissive, 1)
+	require.True(t, proto.Equal(base, compiled.permissive[0].expr), "double NOT must preserve the original nullable predicate")
+	fields := []*schemapb.FieldData{{
+		FieldId: 100, FieldName: "age", Type: schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			ValidData: []bool{true, true, false},
+			Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{18, 19, 0}}},
+		}},
+	}}
+	for _, optimize := range []bool{false, true} {
+		expr, err := compiled.instantiate("alice", nil, optimize)
+		require.NoError(t, err)
+		rows := newRowData(fields, ReferencedFieldIDs(expr))
+		for rowIdx, expected := range []truthValue{truthTrue, truthFalse, truthUnknown} {
+			actual, err := evalExpr(expr, rows, rowIdx)
+			require.NoError(t, err)
+			require.Equal(t, expected, actual, "optimize=%v row=%d", optimize, rowIdx)
+		}
+	}
 }
 
 func TestNotPreservesUnknownForNull(t *testing.T) {
