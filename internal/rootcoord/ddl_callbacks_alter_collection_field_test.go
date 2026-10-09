@@ -130,6 +130,37 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, "key2")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	// A description-only edit must not load cold policies on a disabled collection.
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	meta := core.meta.(*MetaTable)
+	meta.ddLock.Lock()
+	meta.collID2Meta[coll.CollectionID].RLSPoliciesUnloaded = true
+	meta.ddLock.Unlock()
+	req := &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.FieldDescriptionKey, Value: "updated description"},
+		},
+	}
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.True(t, coll.RLSPoliciesUnloaded)
+	require.Equal(t, "updated description", getAlterCollectionField(coll.ToCollectionSchemaPB(), fieldName).GetDescription())
+
+	// An actual field-property change still loads policies for dependency validation.
+	req.Properties[0].Value = "value2"
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.False(t, coll.RLSPoliciesUnloaded)
 }
 
 func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {

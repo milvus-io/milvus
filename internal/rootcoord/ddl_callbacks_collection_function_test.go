@@ -360,6 +360,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAddFunction_NextFuncti
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForAlterFunction() {
 	suite.Run("success", func() {
 		coll := suite.createTestCollection()
+		coll.RLSPoliciesUnloaded = true
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
@@ -385,6 +386,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
+		mockMeta.AssertNotCalled(suite.T(), "GetRLSMetadata", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	suite.Run("altering non-whitelisted param rejected", func() {

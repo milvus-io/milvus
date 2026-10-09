@@ -2903,50 +2903,6 @@ func validateRLSNoReferencedFieldDropped(coll *model.Collection, droppedFieldIDs
 	return nil
 }
 
-func validateRLSFunctionOutputNotReferenced(coll *model.Collection, fn *model.Function, operation string) error {
-	if fn == nil || len(fn.OutputFieldIDs) == 0 {
-		return nil
-	}
-	fieldRefs, err := collectRLSPolicyFieldRefs(coll)
-	if err != nil {
-		return err
-	}
-	for _, fieldID := range fn.OutputFieldIDs {
-		if policies := fieldRefs[fieldID]; len(policies) > 0 {
-			sort.Strings(policies)
-			return merr.WrapErrParameterInvalidMsg("function %q cannot be %s because output field %d is referenced by RLS policies %v", fn.Name, operation, fieldID, policies)
-		}
-	}
-	return nil
-}
-
-func findRLSFunctionByName(coll *model.Collection, functionName string) *model.Function {
-	for _, fn := range coll.Functions {
-		if fn.Name == functionName {
-			return fn
-		}
-	}
-	return nil
-}
-
-func rlsFunctionKeepsOutputShape(oldFn *model.Function, newFn *model.Function) bool {
-	if oldFn == nil || newFn == nil {
-		return false
-	}
-	if oldFn.Type != newFn.Type {
-		return false
-	}
-	if len(oldFn.OutputFieldIDs) != len(newFn.OutputFieldIDs) {
-		return false
-	}
-	for i := range oldFn.OutputFieldIDs {
-		if oldFn.OutputFieldIDs[i] != newFn.OutputFieldIDs[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func validateRLSPolicyExpression(schemaHelper *typeutil.SchemaHelper, exprKind string, expr string, enforceArrayLiteralLimit bool) error {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {

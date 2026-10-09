@@ -179,8 +179,6 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err := rejectExternalCollectionFunctionMutation(oldColl.ToCollectionSchemaPB()); err != nil {
 		return err
 	}
-	oldFn := findRLSFunctionByName(oldColl, req.GetFunctionSchema().GetName())
-
 	// Only whitelisted params may be altered; function identity (type, name,
 	// input/output fields) is immutable. Skip when the function is absent so the
 	// mutation helper below emits the canonical "not exists" error.
@@ -197,18 +195,5 @@ func (c *Core) broadcastAlterCollectionForAlterFunction(ctx context.Context, req
 	if err := alterFunctionGenNewCollection(ctx, req.FunctionSchema, newColl); err != nil {
 		return err
 	}
-	newFn := findRLSFunctionByName(newColl, req.GetFunctionSchema().GetName())
-	if err := c.loadRLSPoliciesForSchema(ctx, oldColl); err != nil {
-		return err
-	}
-	if !rlsFunctionKeepsOutputShape(oldFn, newFn) {
-		if err := validateRLSFunctionOutputNotReferenced(oldColl, oldFn, "altered"); err != nil {
-			return err
-		}
-	}
-	if err := validateRLSPoliciesWithSchema(oldColl.RLSPolicies, newColl.ToCollectionSchemaPB()); err != nil {
-		return err
-	}
-
 	return callAlterCollection(ctx, c, broadcaster, oldColl, newColl, req.GetDbName(), req.GetCollectionName())
 }
