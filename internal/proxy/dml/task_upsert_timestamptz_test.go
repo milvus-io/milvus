@@ -119,6 +119,12 @@ func TestPartialUpsertOmittedTimestamptz(t *testing.T) {
 								TimestamptzData: &schemapb.TimestamptzArray{Data: oldTimestamps},
 							}}},
 						}
+						if len(oldIDs) == 0 {
+							// Match the empty column synthesized by query reduction.
+							var err error
+							ts, err = typeutil.GenEmptyFieldData(timestampSchema)
+							require.NoError(t, err)
+						}
 						if timestampSchema.GetNullable() {
 							typeutil.SetFieldDataValidData(ts, scenario.oldValid)
 						}
