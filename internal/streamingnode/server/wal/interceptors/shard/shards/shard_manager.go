@@ -42,6 +42,11 @@ var (
 	ErrSegmentNotFound                 = errors.New("segment not found")
 	ErrSegmentOnGrowing                = errors.New("segment on growing")
 	ErrFencedAssign                    = errors.New("fenced assign")
+	ErrVChannelFenced                  = errors.New("vchannel is fenced by shard split")
+	// ErrVChannelConflict is returned when a vchannel cannot be registered
+	// because another vchannel of the same collection already holds this
+	// pchannel's entry. See CheckIfVChannelCanBeCreated.
+	ErrVChannelConflict = errors.New("another vchannel of the collection is registered on this pchannel")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -61,8 +66,9 @@ type ShardManagerRecoverParam struct {
 func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	// recover the collection infos
 	collections := newCollectionInfos(param.InitialRecoverSnapshot)
+	fenced := newFencedVChannels(param.InitialRecoverSnapshot)
 	// recover the segment assignment infos
-	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
+	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections, fenced)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := resource.Resource().Logger().With(mlog.FieldComponent("shard-manager")).With(mlog.Stringer("pchannel", param.ChannelInfo))
@@ -105,6 +111,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		pchannel:          param.ChannelInfo,
 		partitionManagers: managers,
 		collections:       collections,
+		fencedVChannels:   fenced,
 		txnManager:        param.TxnManager,
 		metrics:           metrics,
 	}
@@ -125,7 +132,12 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 }
 
 // newSegmentAllocManagersFromRecovery creates new segment alloc managers from the recovery snapshot.
-func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInfos *recovery.RecoverySnapshot, collections map[int64]*CollectionInfo) (
+func newSegmentAllocManagersFromRecovery(
+	pchannel types.PChannelInfo,
+	recoverInfos *recovery.RecoverySnapshot,
+	collections map[int64]*CollectionInfo,
+	fenced map[string]SplitFence,
+) (
 	map[PartitionUniqueKey]map[int64]*segmentAllocManager,
 	map[int64]stats.SegmentBelongs,
 ) {
@@ -135,17 +147,31 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		// a nil dereference at the recovery boundary.
 		return make(map[PartitionUniqueKey]map[int64]*segmentAllocManager), make(map[int64]stats.SegmentBelongs)
 	}
-	return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections)
+	return newSegmentAllocManagersFromWritePathRecovery(pchannel, recoverInfos.WritePathRecovery.GrowingSegments, collections, fenced)
 }
 
 func newSegmentAllocManagersFromWritePathRecovery(
 	pchannel types.PChannelInfo,
 	segments map[int64]moduleapi.SegmentWritePathRecoveryState,
 	collections map[int64]*CollectionInfo,
+	fenced map[string]SplitFence,
 ) (map[PartitionUniqueKey]map[int64]*segmentAllocManager, map[int64]stats.SegmentBelongs) {
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
 	growingBelongs := make(map[int64]stats.SegmentBelongs, len(segments))
 	for segmentID, state := range segments {
+		if _, isFenced := fenced[state.VChannel]; isFenced {
+			// A fenced vchannel keeps no registration to attach a segment to.
+			// The fence seals every growing segment of the source in the same
+			// message, so one surviving here means the meta was persisted in
+			// parts; the alternative -- attaching it to whatever entry sits
+			// under its collection id -- would hand a successor vchannel a
+			// segment that is not its own.
+			mlog.Warn(context.TODO(), "growing segment of a fenced vchannel is skipped on recovery",
+				mlog.FieldCollectionID(state.CollectionID),
+				mlog.FieldVChannel(state.VChannel),
+				mlog.Int64("segmentID", segmentID))
+			continue
+		}
 		if _, ok := collections[state.CollectionID]; !ok {
 			panic(fmt.Sprintf("write path recovery state is dirty, collection not found, %d", state.CollectionID))
 		}
@@ -169,7 +195,41 @@ func newSegmentAllocManagersFromWritePathRecovery(
 	return partitionToSegmentManagers, growingBelongs
 }
 
+// newFencedVChannels recovers the shard split fence tombstones from the
+// recovery snapshot.
+//
+// A fenced source stays VCHANNEL_STATE_NORMAL -- it keeps observing DDL and
+// draining its own data until adoption drops it -- so the write-path snapshot
+// still reports it, carrying SplitFenceTimeTick. That field is the whole
+// tombstone: it is remembered by NAME whether or not the vchannel also keeps
+// this pchannel's single collection registration, because the one that loses a
+// collision to a live successor is precisely the one a stale proxy route still
+// points at.
+func newFencedVChannels(recoverInfos *recovery.RecoverySnapshot) map[string]SplitFence {
+	fenced := make(map[string]SplitFence)
+	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
+		return fenced
+	}
+	for vchannel, state := range recoverInfos.WritePathRecovery.VChannels {
+		if state.SplitFenceTimeTick == 0 {
+			continue
+		}
+		fenced[vchannel] = SplitFence{
+			TimeTick: state.SplitFenceTimeTick,
+			TaskID:   state.SplitFenceTaskID,
+		}
+	}
+	return fenced
+}
+
 // newCollectionInfos creates a new collection info map from the recovery snapshot.
+//
+// A fenced split source is skipped: the fence tears its registration down as it
+// is placed (see SplitShard), and a restart has to land on the same state.
+// Rebuilding one would take back a pchannel slot a live successor may already
+// hold -- m.collections keeps a single entry per collection -- and hand that
+// successor's writes to a shard that is fenced. newFencedVChannels seeds the
+// tombstone for it, which is all that a fenced vchannel is remembered by.
 func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*CollectionInfo {
 	if recoverInfos == nil || recoverInfos.WritePathRecovery == nil {
 		return make(map[int64]*CollectionInfo)
@@ -182,6 +242,9 @@ func newCollectionInfosFromWritePathRecovery(
 ) map[int64]*CollectionInfo {
 	collectionInfoMap := make(map[int64]*CollectionInfo, len(vchannels))
 	for vchannel, state := range vchannels {
+		if state.SplitFenceTimeTick != 0 {
+			continue
+		}
 		partitionIDs := make(map[int64]struct{}, len(state.PartitionIDs)+1)
 		for _, partitionID := range state.PartitionIDs {
 			partitionIDs[partitionID] = struct{}{}
@@ -193,6 +256,21 @@ func newCollectionInfosFromWritePathRecovery(
 		}
 		if state.Schema != nil {
 			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema})
+		}
+		if incumbent, ok := collectionInfoMap[state.CollectionID]; ok {
+			// Two LIVE vchannels of one collection on one pchannel, which the
+			// map cannot hold: it keeps a single entry per collection. A
+			// split's own source no longer collides here (it is skipped above),
+			// so this is a placement the coordinator should never have made.
+			// Keep the entry deterministically -- by name, so every replay of
+			// this snapshot answers the same -- and report it.
+			mlog.Error(context.TODO(), "two live vchannels of one collection recovered on one pchannel",
+				mlog.FieldCollectionID(state.CollectionID),
+				mlog.String("registered", incumbent.VChannel),
+				mlog.String("conflicting", collectionInfo.VChannel))
+			if incumbent.VChannel <= collectionInfo.VChannel {
+				continue
+			}
 		}
 		collectionInfoMap[state.CollectionID] = collectionInfo
 	}
@@ -212,15 +290,38 @@ type shardManagerImpl struct {
 	pchannel          types.PChannelInfo
 	partitionManagers map[PartitionUniqueKey]*partitionManager // map partitionID to partition manager
 	collections       map[int64]*CollectionInfo                // map collectionID to collectionInfo
-	metrics           *metricsutil.SegmentAssignMetrics
-	txnManager        TxnManager
+	// fencedVChannels remembers, by name, every vchannel this pchannel has
+	// fenced by shard split, together with its T_switch. It REPLACES the entry
+	// in collections: the fence removes the registration as it is placed, so
+	// this is the only record a fenced vchannel leaves, and it is what a write
+	// still routing to it is answered from -- SHARD_FENCED, meant to make the
+	// proxy refresh (not implemented on this branch); an unrecoverable error
+	// instead fails a write that one refresh would have completed.
+	//
+	// Best effort across a restart: a vchannel already dropped before the
+	// restart leaves nothing in the snapshot to seed from, and a write to it
+	// falls back to the unknown-route answer.
+	fencedVChannels map[string]SplitFence
+	metrics         *metricsutil.SegmentAssignMetrics
+	txnManager      TxnManager
 }
 
+// CollectionInfo is one collection's LIVE registration on this pchannel: the
+// vchannel that holds the slot, its partitions and its current schema. A vchannel
+// fenced by a shard split has no CollectionInfo -- the fence removes it and
+// leaves a SplitFence tombstone in its place.
 type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
+}
+
+// SplitFence is what a fenced vchannel is remembered by after its registration
+// is gone: when it was fenced, and by which task.
+type SplitFence struct {
+	TimeTick uint64
+	TaskID   int64
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write

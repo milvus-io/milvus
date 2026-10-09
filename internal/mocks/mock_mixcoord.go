@@ -83,65 +83,6 @@ func (_c *MixCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *data
 	return _c
 }
 
-// GetRLSMetadata provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) GetRLSMetadata(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetRLSMetadata")
-	}
-
-	var r0 *rootcoordpb.GetRLSMetadataResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) *rootcoordpb.GetRLSMetadataResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MixCoord_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
-type MixCoord_GetRLSMetadata_Call struct {
-	*mock.Call
-}
-
-// GetRLSMetadata is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.GetRLSMetadataRequest
-func (_e *MixCoord_Expecter) GetRLSMetadata(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSMetadata_Call {
-	return &MixCoord_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", _a0, _a1)}
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest)) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest))
-	})
-	return _c
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 func (_c *MixCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AbortImport_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
@@ -1568,6 +1509,65 @@ func (_c *MixCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// CheckShardSplitDrained provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CheckShardSplitDrained(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckShardSplitDrained")
+	}
+
+	var r0 *datapb.CheckShardSplitDrainedResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) *datapb.CheckShardSplitDrainedResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CheckShardSplitDrainedResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CheckShardSplitDrainedRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CheckShardSplitDrained_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckShardSplitDrained'
+type MixCoord_CheckShardSplitDrained_Call struct {
+	*mock.Call
+}
+
+// CheckShardSplitDrained is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CheckShardSplitDrainedRequest
+func (_e *MixCoord_Expecter) CheckShardSplitDrained(_a0 interface{}, _a1 interface{}) *MixCoord_CheckShardSplitDrained_Call {
+	return &MixCoord_CheckShardSplitDrained_Call{Call: _e.mock.On("CheckShardSplitDrained", _a0, _a1)}
+}
+
+func (_c *MixCoord_CheckShardSplitDrained_Call) Run(run func(_a0 context.Context, _a1 *datapb.CheckShardSplitDrainedRequest)) *MixCoord_CheckShardSplitDrained_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CheckShardSplitDrainedRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CheckShardSplitDrained_Call) Return(_a0 *datapb.CheckShardSplitDrainedResponse, _a1 error) *MixCoord_CheckShardSplitDrained_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CheckShardSplitDrained_Call) RunAndReturn(run func(context.Context, *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error)) *MixCoord_CheckShardSplitDrained_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClearReadTaskQueue provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ClearReadTaskQueue(_a0 context.Context, _a1 *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1800,6 +1800,65 @@ func (_c *MixCoord_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *M
 }
 
 func (_c *MixCoord_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)) *MixCoord_CommitImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitShardSplit provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CommitShardSplit(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitShardSplit")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitShardSplitRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitShardSplitRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CommitShardSplit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitShardSplit'
+type MixCoord_CommitShardSplit_Call struct {
+	*mock.Call
+}
+
+// CommitShardSplit is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitShardSplitRequest
+func (_e *MixCoord_Expecter) CommitShardSplit(_a0 interface{}, _a1 interface{}) *MixCoord_CommitShardSplit_Call {
+	return &MixCoord_CommitShardSplit_Call{Call: _e.mock.On("CommitShardSplit", _a0, _a1)}
+}
+
+func (_c *MixCoord_CommitShardSplit_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitShardSplitRequest)) *MixCoord_CommitShardSplit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitShardSplitRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CommitShardSplit_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CommitShardSplit_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CommitShardSplit_Call) RunAndReturn(run func(context.Context, *datapb.CommitShardSplitRequest) (*commonpb.Status, error)) *MixCoord_CommitShardSplit_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6051,6 +6110,65 @@ func (_c *MixCoord_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetricsR
 }
 
 func (_c *MixCoord_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRLSMetadata provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetRLSMetadata(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSMetadata")
+	}
+
+	var r0 *rootcoordpb.GetRLSMetadataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) *rootcoordpb.GetRLSMetadataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
+type MixCoord_GetRLSMetadata_Call struct {
+	*mock.Call
+}
+
+// GetRLSMetadata is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetRLSMetadataRequest
+func (_e *MixCoord_Expecter) GetRLSMetadata(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSMetadata_Call {
+	return &MixCoord_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest)) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)) *MixCoord_GetRLSMetadata_Call {
 	_c.Call.Return(run)
 	return _c
 }

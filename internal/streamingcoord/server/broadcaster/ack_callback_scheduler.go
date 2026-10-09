@@ -266,14 +266,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	logger.Debug(context.TODO(), "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
-	makeMap := make(map[string]*message.AppendResult, len(result))
-	for vchannel, result := range result {
-		makeMap[vchannel] = &message.AppendResult{
-			MessageID:              result.MessageID,
-			LastConfirmedMessageID: result.LastConfirmedMessageID,
-			TimeTick:               result.TimeTick,
-		}
-	}
+	makeMap := toCallbackAppendResults(result)
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
 	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
