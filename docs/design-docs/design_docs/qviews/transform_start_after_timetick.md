@@ -6,8 +6,10 @@
 - Design Review: 2026-07-29
 - Design Update: 2026-10-09
 
-Status: the dual-frontier contract below supersedes the checkpoint-bounded
-producer. Implementation and regression verification are in progress.
+Status: implemented; the dual-frontier contract below supersedes the
+checkpoint-bounded producer. Focused unit and distributed-cluster regressions
+cover publication, exact-version recovery, Delete/Upsert, and release/reload.
+The broader client L0/L1 E2E campaign is tracked separately.
 
 Each DataView shard persists two version-bound inputs: WAL publication frontier
 W (`growing_transform_start_after_timetick`) and selected-base coverage A

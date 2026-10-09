@@ -234,19 +234,19 @@ func walTxn(t *testing.T, children ...message.ImmutableMessage) message.Immutabl
 	return txn
 }
 
-func TestWALMaterializerWholeTxnAndRegistrationGate(t *testing.T) {
+func TestWALMaterializerWholeTxnAndFinalPublicationGate(t *testing.T) {
 	m, tasks, batches := testWALMaterializer(t, 0, 1)
-	registered := false
-	m.earlierSegmentsFlushed = func(tt uint64) bool { require.Equal(t, uint64(300), tt); return registered }
+	published := false
+	m.earlierSegmentsFlushed = func(tt uint64) bool { require.Equal(t, uint64(300), tt); return published }
 	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(50).WithLastConfirmed(rmq.NewRmqID(49)).IntoImmutableMessage(rmq.NewRmqID(50))
 	txn := walTxn(t, insert, walDelete(100), walDelete(200))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	walObserve(m, tracker, txn)
 	require.Len(t, *tasks, 1)
 	require.ErrorIs(t, (*tasks)[0].Execute(context.Background()), nodescheduler.ErrDelay)
-	require.Empty(t, *batches, "unregistered L1 must block L0 output")
+	require.Empty(t, *batches, "L1 without final publication must block L0 output")
 	require.Zero(t, tracker.CompletedPoint().TimeTick)
-	registered = true
+	published = true
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
 	require.Equal(t, uint64(300), tracker.CompletedPoint().TimeTick)
 	require.Len(t, *batches, 1)
