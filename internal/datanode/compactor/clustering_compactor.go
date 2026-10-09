@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -107,33 +109,92 @@ type clusteringCompactionTask struct {
 type ClusterBuffer struct {
 	id                      int
 	writer                  *MultiSegmentWriter
+	builder                 *storage.RecordBuilder
+	appendErr               error
+	closed                  bool
 	clusteringKeyFieldStats *storage.FieldStats
 
 	lock sync.RWMutex
 }
 
-func (b *ClusterBuffer) Write(v *storage.Value) error {
+// WriteRecord copies a row into the bucket's batch, independently of the input
+// Record's lifetime. The writer receives Records sized by bytes, not input rows.
+func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return b.writer.WriteValue(v)
+	if b.appendErr != nil {
+		return b.appendErr
+	}
+	if b.closed {
+		return merr.WrapErrServiceInternalMsg("cannot write to closed clustering buffer")
+	}
+	if b.builder == nil {
+		b.builder = storage.NewRecordBuilder(b.writer.schema)
+	}
+	if err := b.builder.Append(r, row, row+1); err != nil {
+		// Append can leave columns at different lengths. Poison this bucket
+		// before another mapping worker can acquire it, and discard the batch.
+		b.appendErr = err
+		b.releaseBuilder()
+		return err
+	}
+	// Leave room for buffering in the underlying writer.
+	if b.builder.GetMemorySize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
+		return b.writeRecord()
+	}
+	return nil
 }
 
-func (b *ClusterBuffer) Flush() error {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-	return b.writer.Flush()
+// writeRecord requires b.lock. Submitting a Record may transfer its buffers to
+// the writer; it does not imply that the underlying writer released memory.
+func (b *ClusterBuffer) writeRecord() error {
+	if b.appendErr != nil {
+		return b.appendErr
+	}
+	if b.builder == nil || b.builder.GetRowNum() == 0 {
+		return nil
+	}
+	record := b.builder.Build()
+	defer record.Release()
+	if err := b.writer.Write(record); err != nil {
+		// Another mapping worker may reach this bucket before cancellation.
+		// Keep the first write failure and reject every later row.
+		b.appendErr = err
+		b.releaseBuilder()
+		return err
+	}
+	return nil
 }
 
 func (b *ClusterBuffer) FlushChunk() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.writeRecord(); err != nil {
+		return err
+	}
 	return b.writer.FlushChunk()
 }
 
 func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return b.writer.Close()
+	defer b.releaseBuilder()
+	if b.closed {
+		return nil
+	}
+	defer func() { b.closed = true }()
+	err := b.writeRecord()
+	closeErr := b.writer.Close()
+	// Keep the write/append failure as the primary cause while retaining any
+	// close failure. Closing must release the writer even after a failed flush.
+	return merr.Combine(closeErr, err)
+}
+
+func (b *ClusterBuffer) releaseBuilder() {
+	if b.builder != nil {
+		b.builder.Release()
+		b.builder = nil
+	}
 }
 
 func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
@@ -145,7 +206,11 @@ func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
 func (b *ClusterBuffer) GetBufferSize() uint64 {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
-	return b.writer.GetBufferUncompressed()
+	size := b.writer.GetBufferUncompressed()
+	if b.builder != nil {
+		size += b.builder.GetMemorySize()
+	}
+	return size
 }
 
 func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStats *storage.FieldStats) *ClusterBuffer {
@@ -342,8 +407,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			t.getWriterOpts()...)
 		if err != nil {
 			return err
 		}
@@ -365,8 +429,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			t.getWriterOpts()...)
 		if err != nil {
 			return err
 		}
@@ -425,8 +488,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			t.getWriterOpts()...)
 		if err != nil {
 			return err
 		}
@@ -485,6 +547,8 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	mapStart := time.Now()
 	log := log.Ctx(ctx)
 
@@ -499,12 +563,22 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 			Manifest:       segment.GetManifest(),
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			err := t.mappingSegment(ctx, segmentClone)
+			if err != nil {
+				cancel(err)
+			}
 			return struct{}{}, err
 		})
 		futures = append(futures, future)
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	// Join every worker before deferred cleanup releases shared buffers.
+	if err := conc.BlockOnAll(futures...); err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return nil, nil, cause
+		}
 		return nil, nil, err
 	}
 
@@ -639,7 +713,13 @@ func (t *clusteringCompactionTask) mappingSegment(
 	defer rr.Close()
 
 	offset := int64(-1)
+	done := ctx.Done()
 	for {
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
 		r, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
@@ -649,33 +729,37 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
-			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
-			return err
+		pkColumn := r.Column(t.primaryKeyField.GetFieldID())
+		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
+		tsColumn, ok := ts.(*array.Int64)
+		if !exists || !ok {
+			return merr.WrapErrServiceInternalMsg("timestamp field is not an int64 column in clustering compaction record")
 		}
-
-		for _, v := range vs {
+		for row := 0; row < r.Len(); row++ {
+			select {
+			case <-done:
+				return ctx.Err()
+			default:
+			}
 			offset++
-
-			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
+			pk, err := clusteringScalarValue(pkColumn, t.primaryKeyField, row)
+			if err != nil {
+				return err
+			}
+			if entityFilter.Filtered(pk, uint64(tsColumn.Value(row))) {
 				continue
 			}
-
-			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
-			if !ok {
-				log.Warn("convert interface to map wrong")
-				return merr.WrapErrServiceInternalMsg("unexpected error")
-			}
-
-			clusteringKey := row[t.clusteringKeyField.FieldID]
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
-				clusterBuffer = t.keyToBufferFunc(clusteringKey)
+				key, err := clusteringScalarValue(r.Column(t.clusteringKeyField.FieldID), t.clusteringKeyField, row)
+				if err != nil {
+					return err
+				}
+				clusterBuffer = t.keyToBufferFunc(key)
 			}
-			if err := clusterBuffer.Write(v); err != nil {
+			if err := clusterBuffer.WriteRecord(r, row); err != nil {
 				return err
 			}
 			t.writtenRowNum.Inc()
@@ -694,10 +778,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 		}
 
-		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
-		for _, buffer := range t.clusterBuffers {
-			buffer.Flush()
-		}
 	}
 
 	missing := entityFilter.GetMissingDeleteCount()
@@ -777,7 +857,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 			break
 		}
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
 	}
 
@@ -798,7 +878,7 @@ func (t *clusteringCompactionTask) flushAll() error {
 		})
 		futures = append(futures, future)
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
 	}
 	return nil
@@ -827,6 +907,17 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 
 // cleanUp try best to clean all temp datas
 func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
+	for _, buffer := range t.clusterBuffers {
+		buffer.lock.Lock()
+		buffer.releaseBuilder()
+		// Mapping has joined all workers. Discard pending rows on failure and
+		// close any writer that flushAll did not reach.
+		err := buffer.writer.Close()
+		buffer.lock.Unlock()
+		if err != nil {
+			log.Ctx(ctx).RatedWarn(1.0, "failed to close clustering compaction writer during cleanup", zap.Int("bufferID", buffer.id), zap.Error(err))
+		}
+	}
 	if t.mappingPool != nil {
 		t.mappingPool.Release()
 	}
@@ -1070,4 +1161,40 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
+}
+
+func clusteringScalarValue(column arrow.Array, field *schemapb.FieldSchema, row int) (any, error) {
+	if column.IsNull(row) {
+		if field.GetDefaultValue() != nil {
+			return storage.GetDefaultValue(field), nil
+		}
+		return nil, nil
+	}
+	switch column := column.(type) {
+	case *array.Boolean:
+		return column.Value(row), nil
+	case *array.Int8:
+		return column.Value(row), nil
+	case *array.Int16:
+		return column.Value(row), nil
+	case *array.Int32:
+		return column.Value(row), nil
+	case *array.Int64:
+		return column.Value(row), nil
+	case *array.Float32:
+		return column.Value(row), nil
+	case *array.Float64:
+		return column.Value(row), nil
+	case *array.String:
+		return column.Value(row), nil
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported clustering scalar column %T", column)
+	}
+}
+
+func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
+	return []storage.RwOption{
+		storage.WithBufferSize(max(int64(1), t.bufferSize/2)),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	}
 }
