@@ -3409,6 +3409,64 @@ ChunkedSegmentSealedImpl::ApplyFieldValidData(
 }
 
 void
+ChunkedSegmentSealedImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    if (count == 0) {
+        return;
+    }
+
+    auto snapshot = CapturePublishedState();
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
+        auto vector_entry = GetVectorIndexing(snapshot->runtime, field_id);
+        if (vector_entry != nullptr) {
+            auto ca =
+                SemiInlineGet(vector_entry->indexing_->PinCells(op_ctx, {0}));
+            auto vec_index =
+                dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+            AssertInfo(vec_index != nullptr, "invalid vector indexing");
+            if (vec_index->HasValidData()) {
+                vec_index->ApplyValidDataByRange(
+                    logical_offset, count, valid_result);
+                return;
+            }
+        }
+    }
+
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    auto column = get_column(snapshot->runtime, field_id);
+    AssertInfo(column != nullptr,
+               "field {} column must exist when validity is requested",
+               field_id.get());
+    if (!column->IsNullable()) {
+        return;
+    }
+
+    std::vector<int64_t> offsets(count);
+    for (int64_t i = 0; i < count; ++i) {
+        offsets[i] = logical_offset + i;
+    }
+    column->BulkIsValid(
+        op_ctx,
+        [&valid_result](bool is_valid, size_t i) {
+            if (!is_valid) {
+                valid_result[i] = false;
+            }
+        },
+        offsets.data(),
+        count);
+}
+
+void
 ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -3420,6 +3478,27 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     }
 
     auto snapshot = CapturePublishedState();
+    auto& field_meta = snapshot->schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
+        auto vector_entry = GetVectorIndexing(snapshot->runtime, field_id);
+        if (vector_entry != nullptr) {
+            auto ca =
+                SemiInlineGet(vector_entry->indexing_->PinCells(op_ctx, {0}));
+            auto vec_index =
+                dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+            AssertInfo(vec_index != nullptr, "invalid vector indexing");
+            if (vec_index->HasValidData()) {
+                vec_index->ApplyValidDataByOffsets(
+                    offsets, count, valid_result);
+                return;
+            }
+        }
+    }
+
     std::shared_ptr<ChunkedColumnInterface> column;
     AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));

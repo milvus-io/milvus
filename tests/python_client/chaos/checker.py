@@ -4161,10 +4161,11 @@ class NullVectorQueryChecker(Checker):
     field is non-null is collected; each query() call fetches those specific rows
     and asserts they are still non-null.
 
-    Avoids using 'vec_field is not null' as a server-side filter because Milvus
-    does not yet support IsNull/IsNotNull on vector fields.  Excludes dynamically-
-    added new_vec_* fields: segments sealed before those fields were added have
-    all-null values by design, so sampling those fields at init would yield no PKs.
+    Samples by reading vector output fields instead of using a server-side
+    'vec_field is not null' filter, so the checker keeps validating query
+    result materialization. Excludes dynamically-added new_vec_* fields:
+    segments sealed before those fields were added have all-null values by
+    design, so sampling those fields at init would yield no PKs.
     """
 
     def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
