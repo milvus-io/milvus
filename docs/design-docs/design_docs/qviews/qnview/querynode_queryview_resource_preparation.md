@@ -353,6 +353,14 @@ new subscriptions restart connection establishment without replacing the logical
 stream. A pending unsubscribe cancels only its physical attempt when demand
 reaches zero, never the owner-held logical stream.
 
+Pending acquisitions on one VChannel share a subscription attempt owned by that
+VChannel buffer. Each caller's context bounds only its own wait, including the
+caller that starts the attempt. Canceling one view releases its reference without
+canceling another view's subscription preparation. The last reference cancels
+the pending attempt or closes the established subscription. If subscription
+success races with that final release, the retired buffer closes the late result;
+it cannot install it into a newly acquired buffer for the same VChannel.
+
 A terminated logical stream is removed from the cache for new VChannels even
 while old buffers retain references. Each buffer retains the concrete stream
 state it acquired, so releasing an old buffer cannot evict or close a newer
