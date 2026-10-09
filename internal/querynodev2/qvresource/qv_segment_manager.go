@@ -8,6 +8,7 @@ import (
 	qvtransformlogbuffer "github.com/milvus-io/milvus/internal/querynodev2/transformlogbuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -18,16 +19,31 @@ func NewQueryViewPhysicalSegmentLoader(cm storage.ChunkManager) qnview.PhysicalS
 	return newQueryViewPhysicalSegmentLoader(realQVSegmentLoader{cm: cm})
 }
 
-func NewQueryViewSegmentManager(ctx context.Context, budget *segments.LoadResourceBudget, cm storage.ChunkManager, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactories ...qnview.SegmentLoadInfoStreamFactory) qnview.SegmentManager {
-	if budget == nil || cm == nil || meta == nil || streams == nil {
-		return nil
+// NewQueryViewSegmentManager validates all required dependencies before starting
+// resource workers. Stream connectivity is managed asynchronously by the factory.
+func NewQueryViewSegmentManager(ctx context.Context, budget *segments.LoadResourceBudget, cm storage.ChunkManager, meta qnview.QueryViewLoadMetadataProvider, streams wal.TransformLogStreamManager, streamFactory qnview.SegmentLoadInfoStreamFactory) (qnview.SegmentManager, error) {
+	var missing string
+	switch {
+	case budget == nil:
+		missing = "load resource budget"
+	case cm == nil:
+		missing = "chunk manager"
+	case meta == nil:
+		missing = "load metadata provider"
+	case streams == nil:
+		missing = "TransformLog stream manager"
+	case streamFactory == nil:
+		missing = "SegmentLoadInfoStreamFactory"
+	}
+	if missing != "" {
+		return nil, merr.WrapErrServiceInternalMsg("cannot construct QueryView segment manager: missing %s", missing)
+	}
+	segmentLoadInfoStream := streamFactory.NewSegmentLoadInfoStream(ctx)
+	if segmentLoadInfoStream == nil {
+		return nil, merr.WrapErrServiceInternalMsg("cannot construct QueryView segment manager: SegmentLoadInfoStreamFactory returned nil stream")
 	}
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(cm)
 	nodeScheduler := nodescheduler.Get()
-	var segmentLoadInfoStream qnview.SegmentLoadInfoStream
-	if len(streamFactories) > 0 && streamFactories[0] != nil {
-		segmentLoadInfoStream = streamFactories[0].NewSegmentLoadInfoStream(ctx)
-	}
 	physicalManager := qnview.NewViewScopedPhysicalSegmentManagerWithNodeSchedulerAndStream(
 		nodeScheduler,
 		physicalLoader,
@@ -44,7 +60,7 @@ func NewQueryViewSegmentManager(ctx context.Context, budget *segments.LoadResour
 		),
 		paramtable.Get().QueryNodeCfg.QueryViewSegmentCatchupConcurrency.GetAsInt(),
 		collectionRuntime,
-	)
+	), nil
 }
 
 func newQueryViewPhysicalSegmentLoader(loader qvSegmentLoader) *queryViewPhysicalSegmentLoader {
