@@ -6,7 +6,7 @@
 
 **Architecture:** Keep one existing source reader and the existing read → selection → materialization → timestamp overwrite → write order. A narrow Milvus-local binding exposes the existing native LobColumnReader; compactor prepares a temporary String input view while retaining the selected physical write base. Both function materializers remain storage-agnostic.
 
-**Tech Stack:** Go, Arrow Go v17 / Arrow C data interface, Milvus core C++, milvus-storage pinned at `15ab3d7`, StorageV3, existing BM25 / MinHash runners.
+**Tech Stack:** Go, Arrow Go v17 / Arrow C data interface, Milvus core C++, milvus-storage pinned at `e6e1ab0`, StorageV3, existing BM25 / MinHash runners.
 
 **Spec:** `docs/design-docs/design_docs/20261008-schema-bump-bm25-text-input.md`.
 
@@ -46,9 +46,9 @@ Read the spec, storage path contract, and these implementation anchors before ex
 The build cache can have a different revision from the pin. Inspect the dependency with:
 
 ```bash
-git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show 15ab3d7:cpp/include/milvus-storage/lob_column/lob_column_reader.h
-git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show 15ab3d7:cpp/src/lob_column/lob_column_reader.cpp
-git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show 15ab3d7:cpp/src/segment/segment_writer.cpp
+git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show e6e1ab0:cpp/include/milvus-storage/lob_column/lob_column_reader.h
+git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show e6e1ab0:cpp/src/lob_column/lob_column_reader.cpp
+git -C cmake_build/thirdparty/milvus-storage/milvus-storage-src show e6e1ab0:cpp/src/segment/segment_writer.cpp
 ```
 
 New production files have three narrowly scoped responsibilities:
@@ -488,7 +488,7 @@ Here `fix` is the full-rewrite fixture from Task 4, with dropped field and real 
 
 - [ ] **6.2 Add failure injection cases with explicit assertions.** Test malformed/zero-length/tag/offset refs, missing LOB, truncated payload, transient read error, canceled context, later-function failure, writer failure and commit failure. Each must return an error, not a successful compaction result; source refs/payloads stay unchanged and all temporary arrays/handles close. Check actual publication state: additive append and full rewrite output must not become a successful logical result on failure. Do not equate leftover unreferenced output files with source mutation or claim GC cleanup this feature does not provide.
 
-- [ ] **6.3 Audit producer-to-consumer errors under G1/G2.** Trace native file read/Vortex Take → ReadArrowArray → new C bridge → Go error → compactor/task consumer. Inspect construction, catch-all and stringify sites. The pinned decoder's per-file result-count behavior requires an out-of-range test; if missing data silently becomes empty text, stop that release gate and report the exact dependency repair needed. Do not silently bump the dependency or invent successful empty vectors.
+- [ ] **6.3 Audit producer-to-consumer errors under G1/G2.** Trace native file read/Vortex Take → ReadArrowArray → new C bridge → Go error → compactor/task consumer. Inspect construction, catch-all and stringify sites. The pinned Vortex `take()` validates requested row indices before scanning; keep an out-of-range test to verify the resulting corruption error crosses the bridge without altering source references. Do not silently bump the dependency or invent successful empty vectors.
 
 - [ ] **6.4 Measure batch-local resources.** Exercise long TEXT for both functions, MinHash word/char modes, shared inputs, many source files and repeated task execution. Record decoded bytes, peak RSS, elapsed time and handles/cache growth. Include MinHash's contiguous C-buffer copy and int32 input lengths; Arrow String uses 32-bit offsets. No performance claim without measurements. If a bound fails, report it before adding new tuning knobs; any proposed sub-batching must slice the same selected record, not reopen a stream.
 

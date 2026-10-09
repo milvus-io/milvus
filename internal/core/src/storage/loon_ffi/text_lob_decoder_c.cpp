@@ -20,7 +20,6 @@
 #include <arrow/builder.h>
 #include <arrow/c/bridge.h>
 
-#include <cstring>
 #include <memory>
 #include <string>
 
@@ -155,58 +154,10 @@ DecodeTextLOB(CTextLOBDecoder decoder,
         }
         arrow::StringBuilder builder;
         auto values = decoded.ValueOrDie();
-        // The pinned ReadArrowArray batches Vortex take() results but does not
-        // check each file group's result count. A dropped out-of-range row can
-        // leave an empty final view and shift earlier values. On that signal,
-        // verify every out-of-line value through ReadData, whose single-row
-        // path reports an IndexError for a missing row. Legitimate empty LOBs
-        // remain supported; they only take this slower verification path.
-        bool verify_out_of_line = false;
         for (int64_t i = 0; i < refs->length(); ++i) {
             if (refs->IsNull(i) != values->IsNull(i)) {
                 return DataError("decoded TEXT LOB nullity mismatch at row " +
                                  std::to_string(i));
-            }
-            if (!refs->IsNull(i) &&
-                static_cast<uint8_t>(refs->GetView(i)[0]) ==
-                    milvus_storage::lob_column::FLAG_LOB_REFERENCE &&
-                values->GetView(i).empty()) {
-                verify_out_of_line = true;
-                break;
-            }
-        }
-        if (verify_out_of_line) {
-            for (int64_t i = 0; i < refs->length(); ++i) {
-                if (refs->IsNull(i)) {
-                    continue;
-                }
-                auto ref = refs->GetView(i);
-                if (static_cast<uint8_t>(ref[0]) !=
-                    milvus_storage::lob_column::FLAG_LOB_REFERENCE) {
-                    continue;
-                }
-                auto direct = handle->reader->ReadData(
-                    reinterpret_cast<const uint8_t*>(ref.data()), ref.size());
-                if (!direct.ok()) {
-                    auto code =
-                        direct.status().IsIndexError()
-                            ? milvus::DataFormatBroken
-                            : milvus::storage::ArrowStatusToErrorCode(direct);
-                    return milvus::FailureCStatus(
-                        static_cast<int>(code),
-                        "verify TEXT LOB reference at row " +
-                            std::to_string(i) + ": " +
-                            direct.status().ToString());
-                }
-                auto actual = values->GetView(i);
-                const auto& expected = direct.ValueOrDie();
-                if (actual.size() != expected.size() ||
-                    (!expected.empty() && std::memcmp(actual.data(),
-                                                      expected.data(),
-                                                      expected.size()) != 0)) {
-                    return DataError("TEXT LOB batch decode mismatch at row " +
-                                     std::to_string(i));
-                }
             }
         }
         for (int64_t i = 0; i < values->length(); ++i) {

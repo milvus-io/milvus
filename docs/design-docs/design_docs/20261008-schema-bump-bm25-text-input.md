@@ -64,7 +64,7 @@ boundaries need synchronization; retaining plaintext for an entire segment.
 | `proxy/task.go: validateAddFunctionInputNotText` | Rejects BM25 and MinHash TEXT backfill | Remove this temporary gate after both worker routes support TEXT |
 | `validator.CheckFunctionInputField` / `function.ValidateMinHashFunction` | Maintain separate, inconsistent MinHash input-type rules | Keep one schema-level compatibility rule; retain algorithm parameter checks |
 
-The repository pins milvus-storage at `15ab3d7` in
+The repository currently pins milvus-storage at `e6e1ab0` in
 `internal/core/thirdparty/milvus-storage/CMakeLists.txt`. Inspect that revision,
 not the possibly different HEAD of a cached build checkout.
 
@@ -73,6 +73,10 @@ accepts a BinaryArray of references, groups payload reads by file, and maps the
 results back to the original input positions, preserving nulls. Its output is
 a BinaryArray of **decoded payload bytes**. The TEXT-specific boundary must
 expose those decoded bytes as a valid String array; this is not a cast of refs.
+At this revision, Vortex `take()` validates every requested row index against
+the file row count before scanning. The Milvus bridge still checks reference
+format, output length/nullity and UTF-8; it does not need a second per-row
+`ReadData` pass to detect an out-of-range reference.
 
 The C API exposes SegmentReader streams and Take, but not arbitrary reference-
 array decoding. `SegmentReaderImpl::ResolveLobColumns` is private. The Milvus
@@ -376,8 +380,9 @@ native core library on macOS arm64:
   broader schema-bump and materializer regressions passed.
 - The full `./internal/datanode/compactor` package passed (175.312s). A separate
   preparer fault-injection test confirmed transient decoder failures retain a
-  retryable code. The real-LOB failure test covers both an out-of-range row and
-  a reference to a missing LOB file, leaving the source unchanged.
+  retryable code. The real-LOB failure test covers an out-of-range row both
+  alone and mixed with valid references, plus a reference to a missing LOB
+  file, leaving the source unchanged.
 - `./internal/util/function/... -run 'TestValidateFunction|TestValidateMinHashFunction|TestCheckFunctionInputField'`,
   `./internal/proxy -run 'TestFunctionTask|TestValidateFunctionInputField|TestAlterCollectionSchemaTask'`,
   and `./internal/rootcoord -run Test_createCollectionTask_prepareSchema_validatesFunctions` passed.

@@ -2462,15 +2462,24 @@ func TestBumpUTTextLOBDecoderRejectsOutOfRangeRowWithoutChangingSource(t *testin
 		path.Join(path.Dir(segmentBase), "lobs", strconv.FormatInt(textID, 10)), fix.cfg)
 	require.NoError(t, err)
 	defer decoder.Close()
-	decodeRef := func(encoded []byte) (*array.String, error) {
+	decodeRefs := func(encoded ...[]byte) (*array.String, error) {
 		builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
 		defer builder.Release()
-		builder.Append(encoded)
+		for _, value := range encoded {
+			builder.Append(value)
+		}
 		refs := builder.NewBinaryArray()
 		defer refs.Release()
 		return decoder.Decode(context.Background(), refs)
 	}
-	logical, err := decodeRef(ref)
+	logical, err := decodeRefs(ref)
+	require.Error(t, err)
+	require.Nil(t, logical)
+	require.True(t, merr.IsSegcoreDataFormatBroken(err), "expected corruption code, got %v", err)
+
+	// An invalid reference mixed with valid rows must fail the whole batch,
+	// never become an empty string or shift another row's decoded value.
+	logical, err = decodeRefs(sourceRefs[0], ref, sourceRefs[1])
 	require.Error(t, err)
 	require.Nil(t, logical)
 	require.True(t, merr.IsSegcoreDataFormatBroken(err), "expected corruption code, got %v", err)
@@ -2479,7 +2488,7 @@ func TestBumpUTTextLOBDecoderRejectsOutOfRangeRowWithoutChangingSource(t *testin
 	for i := 4; i < 20; i++ {
 		missingFile[i] = 0xff
 	}
-	logical, err = decodeRef(missingFile)
+	logical, err = decodeRefs(missingFile)
 	require.Error(t, err)
 	require.Nil(t, logical)
 	require.Equal(t, sourceRefs, readTextRefs(t, fix, fix.sourceManifest, textID))
