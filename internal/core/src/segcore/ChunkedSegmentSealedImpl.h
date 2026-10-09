@@ -529,7 +529,41 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
+        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
         milvus::OpContext* op_ctx = nullptr) const;
+
+    // Result-fill reads through a request-pinned snapshot instead of
+    // re-capturing the published state per field at this layer. Inner column /
+    // index helpers called below (get_raw_data, PinIndex, HasFieldData, ...)
+    // still self-capture; migrating them is a Phase 4 follow-up. Public for
+    // cross-class access via dynamic_cast from SegmentInterface (same pattern
+    // as TryTakeForRetrieve); the virtual bulk_subscript keeps its frozen
+    // signature and delegates to these with a fresh capture.
+    std::unique_ptr<DataArray>
+    bulk_subscript_from_state(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_from_state(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        const std::vector<std::string>& dynamic_field_names) const;
+
+    // Rebind a request-scoped SegmentReadSnapshot to the concrete published
+    // state, sharing the snapshot's shared_ptr ownership (one ref-count bump)
+    // and avoiding a second reference to the published state. Returns nullptr
+    // when the snapshot is null; callers then fall back to
+    // CapturePublishedState().
+    static std::shared_ptr<const PublishedSegmentState>
+    ToPublishedState(
+        const std::shared_ptr<const SegmentReadSnapshot>& snapshot);
 
     // count of chunk that has raw data
     int64_t
@@ -711,11 +745,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                     milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
-    TryTakeForSearch(const query::Plan* plan,
-                     const int64_t* seg_offsets,
-                     int64_t size,
-                     SearchResult& results,
-                     milvus::OpContext* op_ctx = nullptr) const;
+    TryTakeForSearch(
+        const query::Plan* plan,
+        const int64_t* seg_offsets,
+        int64_t size,
+        SearchResult& results,
+        std::shared_ptr<const PublishedSegmentState> snapshot = nullptr,
+        milvus::OpContext* op_ctx = nullptr) const;
 
     // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
     struct TakeContext {

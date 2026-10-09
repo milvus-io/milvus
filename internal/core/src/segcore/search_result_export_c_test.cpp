@@ -131,12 +131,18 @@ CGOCallMetricCount(std::string_view metrics, std::string_view function) {
 
 static void
 AttachSealedRequestLease(SearchResult& result,
-                         milvus::segcore::SegmentInterface* segment) {
+                         milvus::segcore::SegmentInterface* segment,
+                         bool pin_snapshot = true) {
     auto* sealed =
         dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(segment);
     ASSERT_NE(sealed, nullptr);
     result.segment_ = segment;
     result.read_lease_ = sealed->AcquireReadLease(folly::CancellationToken());
+    if (pin_snapshot) {
+        // Pin the request snapshot so the export fill paths exercise the
+        // snapshot-backed branch instead of the per-call fallback.
+        result.read_snapshot_ = sealed->CaptureReadSnapshot();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2846,6 +2852,82 @@ TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {
     EXPECT_EQ(result_data.fields_data(1).scalars().long_data().data_size(), 2);
 
     free(const_cast<void*>(c_proto.proto_blob));
+}
+
+// The export fill must produce identical output whether the SearchResult
+// carries the request-pinned read snapshot (snapshot-backed bulk_subscript /
+// temp_result threading) or the per-call fallback. Guards the two export-path
+// pinned branches that AttachSealedRequestLease(..., true) now exercises.
+TEST(SearchResultExport, FillOutputFieldsOrderedPinnedMatchesUnpinned) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto output_fid = schema->AddDebugField("output_i64", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    auto raw_data = DataGen(schema, 4, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(pk_fid);
+    plan->target_entries_.push_back(output_fid);
+
+    SearchResult pinned_sr;
+    AttachSealedRequestLease(pinned_sr, segment.get(), /*pin_snapshot=*/true);
+    ASSERT_NE(pinned_sr.read_snapshot_, nullptr);
+    ASSERT_NE(
+        ChunkedSegmentSealedImpl::ToPublishedState(pinned_sr.read_snapshot_),
+        nullptr);
+    SearchResult unpinned_sr;
+    AttachSealedRequestLease(
+        unpinned_sr, segment.get(), /*pin_snapshot=*/false);
+    ASSERT_EQ(unpinned_sr.read_snapshot_, nullptr);
+
+    std::vector<CSearchResult> pinned_results = {
+        reinterpret_cast<CSearchResult>(&pinned_sr)};
+    std::vector<CSearchResult> unpinned_results = {
+        reinterpret_cast<CSearchResult>(&unpinned_sr)};
+    int32_t seg_indices[] = {0, 0};
+    int64_t seg_offsets[] = {0, 1};
+
+    CProto pinned_proto{};
+    auto status =
+        FillOutputFieldsOrdered(pinned_results.data(),
+                                pinned_results.size(),
+                                reinterpret_cast<CSearchPlan>(plan.get()),
+                                seg_indices,
+                                seg_offsets,
+                                /*total_rows=*/2,
+                                &pinned_proto,
+                                nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+
+    CProto unpinned_proto{};
+    status = FillOutputFieldsOrdered(unpinned_results.data(),
+                                     unpinned_results.size(),
+                                     reinterpret_cast<CSearchPlan>(plan.get()),
+                                     seg_indices,
+                                     seg_offsets,
+                                     /*total_rows=*/2,
+                                     &unpinned_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+
+    ASSERT_GT(pinned_proto.proto_size, 0);
+    ASSERT_EQ(pinned_proto.proto_size, unpinned_proto.proto_size);
+    EXPECT_EQ(std::string(static_cast<const char*>(pinned_proto.proto_blob),
+                          pinned_proto.proto_size),
+              std::string(static_cast<const char*>(unpinned_proto.proto_blob),
+                          unpinned_proto.proto_size));
+
+    free(const_cast<void*>(pinned_proto.proto_blob));
+    free(const_cast<void*>(unpinned_proto.proto_blob));
 }
 
 TEST(SearchResultExport,
