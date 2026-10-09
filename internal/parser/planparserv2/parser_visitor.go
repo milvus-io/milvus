@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
@@ -1705,7 +1706,26 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 
 // VisitUnary unpack the +expr to expr.
 func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
-	child := ctx.Expr().Accept(v)
+	childCtx := ctx.Expr()
+	notCount := 1
+	if ctx.GetOp().GetTokenType() == parser.PlanParserNOT {
+		// Parentheses do not interrupt a NOT chain. Visit its operand once,
+		// then apply parity after the usual validation (even parity must not
+		// make NOT NOT <non-boolean or restricted predicate> valid).
+		for {
+			if parens, ok := childCtx.(*parser.ParensContext); ok {
+				childCtx = parens.Expr()
+				continue
+			}
+			unary, ok := childCtx.(*parser.UnaryContext)
+			if !ok || unary.GetOp().GetTokenType() != parser.PlanParserNOT {
+				break
+			}
+			notCount++
+			childCtx = unary.Expr()
+		}
+	}
+	child := childCtx.Accept(v)
 	if err := getError(child); err != nil {
 		// Special case: handle -9223372036854775808
 		// ANTLR parses -9223372036854775808 as Unary(SUB, Integer(9223372036854775808)).
@@ -1739,6 +1759,9 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 			if err != nil {
 				return err
 			}
+			if notCount%2 == 0 {
+				return child
+			}
 			return n
 		case parser.PlanParserBNOT:
 			n, err := BitNot(childValue)
@@ -1771,6 +1794,9 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	case parser.PlanParserNOT:
 		if !canBeExecuted(childExpr) {
 			return merr.WrapErrParameterInvalidMsg("%s op can only be applied on boolean expression", unaryLogicalNameMap[parser.PlanParserNOT])
+		}
+		if notCount%2 == 0 {
+			return childExpr
 		}
 		return &ExprWithType{
 			expr: &planpb.Expr{
@@ -1829,13 +1855,27 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	}
 }
 
+// Logical operands must produce predicate bitmaps. Keep deferred constants
+// executable even if balancing moves them into a non-template subtree, while
+// retaining the other operand for template validation.
+func normalizeLogicalOperand(expr *planpb.Expr) *planpb.Expr {
+	value := expr.GetValueExpr().GetValue()
+	if !IsBool(value) {
+		return expr
+	}
+	if value.GetBoolVal() {
+		return alwaysTrueExpr()
+	}
+	return alwaysFalseExpr()
+}
+
 func newLogicalBinaryExpr(leftExpr, rightExpr *ExprWithType, op planpb.BinaryExpr_BinaryOp) *ExprWithType {
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_BinaryExpr{
 				BinaryExpr: &planpb.BinaryExpr{
-					Left:  leftExpr.expr,
-					Right: rightExpr.expr,
+					Left:  normalizeLogicalOperand(leftExpr.expr),
+					Right: normalizeLogicalOperand(rightExpr.expr),
 					Op:    op,
 				},
 			},
@@ -1845,14 +1885,139 @@ func newLogicalBinaryExpr(leftExpr, rightExpr *ExprWithType, op planpb.BinaryExp
 	}
 }
 
-// VisitLogicalOr apply logical or to two boolean expressions.
-func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{} {
-	left := ctx.Expr(0).Accept(v)
-	if err := getError(left); err != nil {
+// andExistingPredicate attaches an outer document predicate without losing
+// conditions already captured by a terminal wrapper (for example via OR false),
+// and propagates the combined predicate's template state to that wrapper.
+// Keep wrapperTemplate as well: element_filter may have a templated body, and
+// FillExpressionValue must visit both that body and the document predicate.
+func andExistingPredicate(leftExpr *ExprWithType, existing *planpb.Expr, wrapperTemplate bool) (*planpb.Expr, bool) {
+	predicate := leftExpr.expr
+	if existing != nil {
+		predicate = newLogicalBinaryExpr(leftExpr, &ExprWithType{
+			expr:     existing,
+			dataType: schemapb.DataType_Bool,
+		}, planpb.BinaryExpr_LogicalAnd).expr
+	}
+	return predicate, wrapperTemplate || predicate.GetIsTemplate()
+}
+
+// balanceLogicalResult keeps logical chains shallow before template filling,
+// including predicates captured by the terminal random_sample/element_filter.
+// Nested logical expressions have already been balanced by their own visitors.
+// Semantic folding must finish first to preserve validation and wrapper rules.
+func balanceLogicalResult(result interface{}) interface{} {
+	expr := getExpr(result)
+	if expr == nil {
+		return result
+	}
+	switch e := expr.expr.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr:
+		e.RandomSampleExpr.Predicate = rewriter.BalanceLogicalExpr(e.RandomSampleExpr.GetPredicate())
+	case *planpb.Expr_ElementFilterExpr:
+		e.ElementFilterExpr.Predicate = rewriter.BalanceLogicalExpr(e.ElementFilterExpr.GetPredicate())
+	default:
+		expr.expr = rewriter.BalanceLogicalExpr(expr.expr)
+	}
+	return result
+}
+
+// validateLogicalOperands owns the type and wrapper-placement rules for both
+// whole chains and pairwise folds. Validate a whole chain before folding can
+// discard operands, and recheck accumulated results with the same rules.
+// Boolean literals do not move a terminal wrapper before another predicate.
+func validateLogicalOperands(operands []interface{}, op planpb.BinaryExpr_BinaryOp) error {
+	name := "or"
+	if op == planpb.BinaryExpr_LogicalAnd {
+		name = "and"
+	}
+	lastPredicate := -1
+	predicateCount := 0
+	for i, operand := range operands {
+		if err := getError(operand); err != nil {
+			return err
+		}
+		if value := getGenericValue(operand); value != nil {
+			if !IsBool(value) {
+				return merr.WrapErrQueryPlanMsg("'%s' can only be used between boolean expressions", name)
+			}
+			continue
+		}
+		expr := getExpr(operand)
+		if expr == nil || !canBeExecuted(expr) {
+			return merr.WrapErrQueryPlanMsg("'%s' can only be used between boolean expressions", name)
+		}
+		lastPredicate = i
+		predicateCount++
+	}
+	for i, operand := range operands {
+		if getGenericValue(operand) != nil {
+			continue
+		}
+		expr := getExpr(operand)
+		if isRandomSampleExpr(expr) {
+			// Boolean literals may fold an OR back to the sampler (or true).
+			// A real predicate beside it still makes an unsupported OR plan.
+			if op == planpb.BinaryExpr_LogicalOr && predicateCount != 1 {
+				return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical or expression")
+			}
+			if i != lastPredicate {
+				return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
+			}
+		}
+		if isElementFilterExpr(expr) {
+			// Only boolean literals may accompany element_filter under OR:
+			// they can fold away without mixing document and element scopes.
+			// Validate here so ParseExprTemplate callers enforce the same rule.
+			if op == planpb.BinaryExpr_LogicalOr && predicateCount != 1 {
+				return merr.WrapErrQueryPlanMsg("element filter expression cannot be used in logical or expression with other predicates; combine document-level predicates with AND")
+			}
+			if i != lastPredicate {
+				return merr.WrapErrQueryPlanMsg("element filter expression can only be the last expression in the logical %s expression", name)
+			}
+		}
+	}
+	return nil
+}
+
+// foldOrOperands folds an OR chain of two or more already-visited operands
+// into a single expression, preserving the original pairwise short-circuit
+// semantics. Operands are folded left-to-right in source order so combined
+// literals (e.g. text_match merges) keep their original relative order.
+func (v *ParserVisitor) foldOrOperands(operands []interface{}) interface{} {
+	if err := validateLogicalOperands(operands, planpb.BinaryExpr_LogicalOr); err != nil {
 		return err
 	}
-	right := ctx.Expr(1).Accept(v)
-	if err := getError(right); err != nil {
+	if len(operands) == 1 {
+		return operands[0]
+	}
+
+	cur := operands[0]
+	for i := 1; i < len(operands); i++ {
+		cur = v.foldOr2(cur, operands[i])
+	}
+	return balanceLogicalResult(cur)
+}
+
+// foldAndOperands folds visited operands left-to-right, keeping a terminal
+// random_sample/element_filter last and preserving its document predicate.
+func (v *ParserVisitor) foldAndOperands(operands []interface{}) interface{} {
+	if err := validateLogicalOperands(operands, planpb.BinaryExpr_LogicalAnd); err != nil {
+		return err
+	}
+	if len(operands) == 1 {
+		return operands[0]
+	}
+
+	cur := operands[0]
+	for i := 1; i < len(operands); i++ {
+		cur = v.foldAnd2(cur, operands[i])
+	}
+	return balanceLogicalResult(cur)
+}
+
+// foldOr2 folds two operands after checking them with the shared logical rules.
+func (v *ParserVisitor) foldOr2(left, right interface{}) interface{} {
+	if err := validateLogicalOperands([]interface{}{left, right}, planpb.BinaryExpr_LogicalOr); err != nil {
 		return err
 	}
 
@@ -1874,11 +2039,8 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 			boolLiteral = rightValue
 			otherExpr = getExpr(left)
 		}
-		if !IsBool(boolLiteral) {
-			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
-		}
 		if boolLiteral.GetBoolVal() {
-			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+			if otherExpr.expr.GetIsTemplate() {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalOr)
 			}
 			// true or expr → always true
@@ -1888,35 +2050,60 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 			}
 		}
 		// false or expr → expr
-		if otherExpr == nil || !canBeExecuted(otherExpr) {
-			return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
-		}
 		return otherExpr
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	if isRandomSampleExpr(leftExpr) || isRandomSampleExpr(rightExpr) {
-		return merr.WrapErrQueryPlanMsg("random sample expression cannot be used in logical and expression")
-	}
-
-	if isElementFilterExpr(leftExpr) {
-		return merr.WrapErrQueryPlanMsg("element filter expression can only be the last expression in the logical or expression")
-	}
-
-	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return merr.WrapErrQueryPlanMsg("'or' can only be used between boolean expressions")
-	}
 	return newLogicalBinaryExpr(leftExpr, rightExpr, planpb.BinaryExpr_LogicalOr)
 }
 
-// VisitLogicalAnd apply logical and to two boolean expressions.
-func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface{} {
-	left := ctx.Expr(0).Accept(v)
-	if err := getError(left); err != nil {
-		return err
+// collectLogicalOperands iteratively flattens a same-operator chain, including
+// parentheses, without crossing mixed AND/OR boundaries. Reverse stack pushes
+// preserve source order and avoid recursion through long logical chains.
+func (v *ParserVisitor) collectLogicalOperands(ctx antlr.ParseTree, op planpb.BinaryExpr_BinaryOp) []interface{} {
+	var operands []interface{}
+	stack := []antlr.ParseTree{ctx}
+	for len(stack) > 0 {
+		node := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		var exprs []parser.IExprContext
+		switch n := node.(type) {
+		case *parser.LogicalOrContext:
+			if op == planpb.BinaryExpr_LogicalOr {
+				exprs = n.AllExpr()
+			}
+		case *parser.LogicalAndContext:
+			if op == planpb.BinaryExpr_LogicalAnd {
+				exprs = n.AllExpr()
+			}
+		case *parser.ParensContext:
+			stack = append(stack, n.Expr())
+			continue
+		}
+		if exprs != nil {
+			for i := len(exprs) - 1; i >= 0; i-- {
+				stack = append(stack, exprs[i])
+			}
+			continue
+		}
+		operands = append(operands, node.Accept(v))
 	}
-	right := ctx.Expr(1).Accept(v)
-	if err := getError(right); err != nil {
+	return operands
+}
+
+// VisitLogicalOr applies logical OR to operands collected in source order.
+func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{} {
+	return v.foldOrOperands(v.collectLogicalOperands(ctx, planpb.BinaryExpr_LogicalOr))
+}
+
+// VisitLogicalAnd applies logical AND to operands collected in source order.
+func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface{} {
+	return v.foldAndOperands(v.collectLogicalOperands(ctx, planpb.BinaryExpr_LogicalAnd))
+}
+
+// foldAnd2 folds two operands after checking them with the shared logical rules.
+func (v *ParserVisitor) foldAnd2(left, right interface{}) interface{} {
+	if err := validateLogicalOperands([]interface{}{left, right}, planpb.BinaryExpr_LogicalAnd); err != nil {
 		return err
 	}
 
@@ -1938,11 +2125,8 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			boolLiteral = rightValue
 			otherExpr = getExpr(left)
 		}
-		if !IsBool(boolLiteral) {
-			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
-		}
 		if !boolLiteral.GetBoolVal() {
-			if otherExpr != nil && canBeExecuted(otherExpr) && otherExpr.expr.GetIsTemplate() {
+			if otherExpr.expr.GetIsTemplate() {
 				return newLogicalBinaryExpr(getExpr(left), getExpr(right), planpb.BinaryExpr_LogicalAnd)
 			}
 			// false and expr → always false
@@ -1952,38 +2136,20 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 			}
 		}
 		// true and expr → expr
-		if otherExpr == nil || !canBeExecuted(otherExpr) {
-			return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
-		}
 		return otherExpr
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	if isRandomSampleExpr(leftExpr) {
-		return merr.WrapErrQueryPlanMsg("random sample expression can only be the last expression in the logical and expression")
-	}
-
-	if isElementFilterExpr(leftExpr) {
-		return merr.WrapErrQueryPlanMsg("element filter expression can only be the last expression in the logical and expression")
-	}
-
-	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
-		return merr.WrapErrQueryPlanMsg("'and' can only be used between boolean expressions")
-	}
-
 	if isRandomSampleExpr(rightExpr) {
 		randomSampleExpr := rightExpr.expr.GetRandomSampleExpr()
-		randomSampleExpr.Predicate = leftExpr.expr
+		predicate, isTemplate := andExistingPredicate(leftExpr, randomSampleExpr.GetPredicate(), rightExpr.expr.GetIsTemplate())
+		randomSampleExpr.Predicate = predicate
 		return &ExprWithType{
 			expr: &planpb.Expr{
 				Expr: &planpb.Expr_RandomSampleExpr{
 					RandomSampleExpr: randomSampleExpr,
 				},
-				// The wrapper must carry the predicate's template flag, or the
-				// top-level IsTemplate short-circuit skips FillExpressionValue and
-				// an unfilled placeholder (e.g. a deferred bloom_match) fans out
-				// to QueryNodes. Mirrors the element_filter branch below.
-				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+				IsTemplate: isTemplate,
 			},
 			dataType: schemapb.DataType_Bool,
 		}
@@ -1991,13 +2157,14 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 	if isElementFilterExpr(rightExpr) {
 		// Similar to RandomSampleExpr, extract doc-level predicate
 		elementFilterExpr := rightExpr.expr.GetElementFilterExpr()
-		elementFilterExpr.Predicate = leftExpr.expr
+		predicate, isTemplate := andExistingPredicate(leftExpr, elementFilterExpr.GetPredicate(), rightExpr.expr.GetIsTemplate())
+		elementFilterExpr.Predicate = predicate
 		return &ExprWithType{
 			expr: &planpb.Expr{
 				Expr: &planpb.Expr_ElementFilterExpr{
 					ElementFilterExpr: elementFilterExpr,
 				},
-				IsTemplate: leftExpr.expr.GetIsTemplate() || rightExpr.expr.GetIsTemplate(),
+				IsTemplate: isTemplate,
 			},
 			dataType: schemapb.DataType_Bool,
 		}
