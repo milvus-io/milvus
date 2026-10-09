@@ -141,8 +141,8 @@ func (s *resumableStream) resumeLoop() {
 			finalErr = err
 			return
 		}
-		// Owner migration can cancel a subscription before its transport closes.
-		// Keep that cancellation scoped to this connection attempt.
+		// Each physical connection owns its context; logical subscriptions
+		// survive until explicitly released, completed or failed.
 		ctx, cancel := context.WithCancel(s.ctx)
 		underlying, err := s.factory(ctx, s.pchannel)
 		if err != nil {
@@ -165,13 +165,17 @@ func (s *resumableStream) resumeLoop() {
 			mlog.FieldPChannel(s.pchannel),
 		)
 		s.setUnderlying(underlying)
-		err = s.subscribePending(ctx, cancel, underlying)
+		err = s.subscribePending(ctx, underlying)
 		if err == nil {
-			err = s.waitUntilUnavailable(ctx, cancel, underlying)
+			err = s.waitUntilUnavailable(ctx, underlying)
 		}
 		cancel()
 		_ = underlying.Close()
 		s.clearUnderlying(underlying)
+		if err != nil && terminalSubscriptionError(err) {
+			finalErr = err
+			return
+		}
 		mlog.Debug(s.ctx, "resumable transform log stream underlying stream unavailable, retrying",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.Err(err),
@@ -200,12 +204,12 @@ func (s *resumableStream) clearUnderlying(underlying wal.TransformLogStream) {
 	}
 }
 
-func (s *resumableStream) subscribePending(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream) error {
+func (s *resumableStream) subscribePending(ctx context.Context, underlying wal.TransformLogStream) error {
 	for _, sub := range s.subscriptionSnapshot() {
 		if sub.hasRemote() {
 			continue
 		}
-		if err := s.subscribeRemote(ctx, cancel, underlying, sub); err != nil {
+		if err := s.subscribeRemote(ctx, underlying, sub); err != nil {
 			if ctx.Err() != nil || !terminalSubscriptionError(err) {
 				return err
 			}
@@ -230,13 +234,13 @@ func (s *resumableStream) subscriptionSnapshot() []*resumableSubscription {
 	return subs
 }
 
-func (s *resumableStream) subscribeRemote(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream, sub *resumableSubscription) error {
+func (s *resumableStream) subscribeRemote(ctx context.Context, underlying wal.TransformLogStream, sub *resumableSubscription) error {
 	opt := sub.option()
 	if sub.isComplete() {
 		s.removeSubscription(sub, nil)
 		return nil
 	}
-	opt.Handler = resumeHandler{sub: sub, cancel: cancel}
+	opt.Handler = resumeHandler{sub: sub}
 	mlog.Debug(s.ctx, "resumable transform log stream subscribing vchannel",
 		mlog.FieldPChannel(s.pchannel),
 		mlog.FieldVChannel(opt.VChannel),
@@ -266,13 +270,13 @@ func (s *resumableStream) subscribeRemote(ctx context.Context, cancel context.Ca
 	return nil
 }
 
-func (s *resumableStream) waitUntilUnavailable(ctx context.Context, cancel context.CancelFunc, underlying wal.TransformLogStream) error {
+func (s *resumableStream) waitUntilUnavailable(ctx context.Context, underlying wal.TransformLogStream) error {
 	for {
 		select {
 		case <-underlying.Done():
 			return underlying.Error()
 		case <-s.wake:
-			if err := s.subscribePending(ctx, cancel, underlying); err != nil {
+			if err := s.subscribePending(ctx, underlying); err != nil {
 				return err
 			}
 		case <-ctx.Done():

@@ -382,6 +382,5 @@ func (s *EventStream) finish(err error) {
 		}
 		s.cancel()
 		close(s.done)
-		_ = s.stream.CloseSend()
 	})
 }

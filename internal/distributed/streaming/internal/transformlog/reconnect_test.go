@@ -18,10 +18,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func TestBufferResumesMigrationEventBeforeTransportEnds(t *testing.T) {
+func TestBufferResumesServerOwnerFailure(t *testing.T) {
 	for _, migration := range []error{
 		context.Canceled, context.DeadlineExceeded,
-		status.AsStreamingError(context.Canceled), status.AsStreamingError(context.DeadlineExceeded),
 		status.NewOnShutdownError("owner closed"), status.NewChannelFenced("p"),
 		status.NewChannelNotExist("p"), status.NewUnmatchedChannelTerm("p", 1, 2),
 	} {
@@ -64,8 +63,8 @@ func TestBufferResumesMigrationEventBeforeTransportEnds(t *testing.T) {
 			require.NoError(t, reg.WaitCatchup(ctx))
 			require.Equal(t, uint64(10), receiveApplied(t, ctx, applied))
 
-			// Emit only the subscription event. The SN stream is still alive,
-			// so its server-side shutdown filter cannot convert this into EOF.
+			// An active provider reports owner failure before its Done closes.
+			// The server must end the RPC without sending SubscriptionError.
 			local := <-source.opened
 			require.NoError(t, local.ctx.Err())
 			source.mu.Lock()
@@ -121,6 +120,7 @@ func receiveApplied(t *testing.T, ctx context.Context, applied <-chan uint64) ui
 func TestMigrationRecoveryPreservesTerminalSubscriptions(t *testing.T) {
 	for _, failure := range []error{
 		status.NewUnknownError("corrupt retained chunk"), status.NewUnknownError("read failed: context canceled"),
+		status.NewUnknownError("context canceled"), status.NewUnknownError("context deadline exceeded"),
 		wal.ErrTransformLogStartPointTruncated, wal.ErrTransformLogVChannelUnavailable, wal.ErrTransformLogInvalidReadOption,
 	} {
 		t.Run(failure.Error(), func(t *testing.T) {

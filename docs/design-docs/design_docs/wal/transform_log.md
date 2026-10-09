@@ -105,6 +105,16 @@ the client reacquires the PChannel stream and resubscribes exclusively after the
 last position its handler successfully accepted. Entry, SyncUp and an explicitly accepted FastForward advance
 that cursor; failed handler calls do not.
 
+For remote streams, the server owns the boundary between provider lifetime and
+subscription lifetime. An unavailable PChannel owner ends the physical RPC;
+normal CloseSubscription closes only the selected reader after disabling its
+forwarding handler. The client reconnects at PChannel scope and restores only
+logical subscriptions that remain live. Reader cancellation must not mask a
+terminal error already reported by the local PChannel stream. Typed terminal
+physical errors stop client resumption; logical semantic errors remain attached
+to their subscriptions. Subscription handlers do not request physical reconnects
+or infer migration from UNKNOWN error text.
+
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
 A caller recovering its own state must select a cursor consistent with that
 state. If the recovered server has not yet reconstructed a previously delivered

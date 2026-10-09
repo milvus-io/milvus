@@ -346,18 +346,23 @@ manager still checks physical preparation against this view's
 DataVersion and LoadInfo. Only then can it report Ready without re-registering
 the segment.
 
-Continuous TransformLog subscriptions resume across SN owner migration. The
-client uses a separate context for each connection attempt. A subscription
-event indicating cancellation, shutdown, fencing, or stale ownership cancels
-that attempt even if the transport is still alive. The resume loop closes the
-old connection outside the delivery callback and resubscribes all live channels
-from their last successfully accepted Entry/SyncUp cursors. These migration
-events do not reach the QN buffer's terminal error state. Exact legacy UNKNOWN
-causes `context canceled` and `context deadline exceeded` receive the same
-treatment; other UNKNOWN and semantic/data failures remain terminal. Consumer
-callback failures still terminate the logical subscription, even when the
-returned error is cancellation. Bounded completion, parent cancellation and
-explicit Close retain their existing termination semantics.
+Continuous TransformLog subscriptions resume at PChannel scope across SN owner
+migration. The server ends the physical RPC on provider shutdown, fencing,
+stale ownership, or cancellation of an active provider operation. Explicit
+unsubscription first disables that subscription's forwarding handler and then
+closes its reader; its cancellation is normal cleanup and does not reconnect
+other subscriptions. When the local PChannel stream has already ended, its
+error takes precedence over consequential reader cancellation.
+
+The client resume loop owns each physical connection's context and restores
+only live logical subscriptions from their last accepted Entry/SyncUp cursors.
+Subscription handlers never cancel physical connections. A terminal physical
+stream error stops resumption just as a terminal connection-creation error does.
+Subscription semantic errors and consumer rejection terminate the affected
+logical subscription; UNKNOWN error text is not interpreted as owner migration.
+Bounded completion, parent cancellation and explicit Close retain their existing
+termination semantics. Canceling the context passed to Subscribe withdraws a
+pending creation; after success, the caller releases the subscription with Close.
 
 The TransformLogBuffer retains entries strictly after the minimum
 `TransformStartAfterTimeTick` of its live view guards and pending segment
