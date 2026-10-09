@@ -102,10 +102,14 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 							Name: task.req.CollectionName,
 							Fields: []*schemapb.FieldSchema{
 								{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-								{FieldID: 101, Name: "vector", DataType: dataType, Nullable: true,
-									TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
-								{FieldID: 102, Name: "array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
-									TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}}},
+								{
+									FieldID: 101, Name: "vector", DataType: dataType, Nullable: true,
+									TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+								},
+								{
+									FieldID: 102, Name: "array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+									TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}},
+								},
 							},
 						}
 						task.schema = mustNewSchemaInfo(schema)
@@ -114,10 +118,12 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 							for i, id := range ids {
 								rows[i] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{id}}}}
 							}
-							return &schemapb.FieldData{FieldName: "array", FieldId: 102, Type: schemapb.DataType_Array,
+							return &schemapb.FieldData{
+								FieldName: "array", FieldId: 102, Type: schemapb.DataType_Array,
 								Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
 									ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: rows},
-								}}}}
+								}}},
+							}
 						}
 						ids := []int64{10, 20, 30}
 						requestVector := nullableUpsertVector(dataType, ids, bitmap.valid)
