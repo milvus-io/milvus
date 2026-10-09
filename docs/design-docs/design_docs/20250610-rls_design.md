@@ -24,14 +24,20 @@ are outside the initial scope.
 
 ## Collection Switch
 
-`rls.enabled` can be changed through collection properties. Disabled
-collections bypass RLS. Enabling RLS makes the collection deny-by-default and
-must not become observable until the RLS metadata state is ready and every
-serving Proxy will refresh the collection state before handling later
-requests. Disabling RLS removes all policies and tag bindings for the
-collection and invalidates Proxy RLS state. These synchronization steps are
-performed by Milvus as part of the property transition; users do not manage
-Proxy caches directly.
+`rls.enabled` controls enforcement, not metadata ownership, and can be changed
+through collection properties. Policy and tag management is available whether
+RLS is enabled or disabled, subject to the same management privileges and
+validation. Applications can configure rules before enabling enforcement.
+
+Disabled collections bypass RLS without deleting policies or tag bindings.
+Enabling or re-enabling applies the current configuration and remains
+deny-by-default when no applicable permissive policy exists. Deleting the
+property restores the disabled default. The switch uses the existing
+AlterCollection cache-invalidation path; policy and tag mutations continue to
+invalidate their caches even while enforcement is disabled. Requests load
+missing or stale RLS state on demand and fail closed if that fails. Already
+captured request snapshots are unchanged. Metadata is removed by explicit
+policy/tag deletion or collection drop, not by toggling enforcement.
 
 Every row-bearing request on an enabled collection must provide request-level
 RLS context. Most APIs use top-level `rls_principal` and `skip_rls`; bulk import
@@ -39,8 +45,9 @@ carries the same values in its existing `options` map. Sub-searches inherit the
 top-level decision. A skip is allowed only when authorization is disabled or the
 authenticated Milvus user has `SkipRLS` on the collection.
 
-`rls.force=true` rejects `skip_rls=true` and is meaningful only while RLS is
-enabled.
+`rls.force=true` rejects `skip_rls=true` and requires `rls.enabled=true`.
+To disable a forced collection, set both properties to false together, or
+delete both properties.
 
 ## Principal Tag Bindings
 
@@ -208,9 +215,11 @@ functions such as `now()`.
 
 RootCoord owns policies and principal tag bindings. Records use globally unique
 collection IDs as identity; database and collection names are descriptive.
-RootCoord keeps complete policies in a name-keyed collection map, including
-their internal IDs. Principal tag bindings remain in the catalog and are read
-by `(collectionID, principalName)` instead of being loaded during recovery.
+RootCoord recovers and keeps complete policies in a name-keyed collection map,
+including their internal IDs, even when enforcement is disabled. Policy schema
+dependencies remain protected while disabled. Principal tag bindings remain
+in the catalog and are read by `(collectionID, principalName)` instead of being
+loaded during recovery.
 
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same

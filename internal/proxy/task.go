@@ -2134,9 +2134,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
 		return err
 	}
-	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
-		return err
-	}
 	for _, key := range t.GetDeleteKeys() {
 		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
 			if strings.EqualFold(key, expected) && key != expected {

@@ -793,28 +793,6 @@ func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValueP
 	return nil
 }
 
-// ValidateRLSEnabledNotAltered rejects attempts to update or delete
-// rls.enabled after collection creation.
-func ValidateRLSEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
-	for _, property := range properties {
-		if property.GetKey() == RLSEnabledKey {
-			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", RLSEnabledKey)
-		}
-		if strings.EqualFold(property.GetKey(), RLSEnabledKey) {
-			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), RLSEnabledKey)
-		}
-	}
-	for _, key := range deleteKeys {
-		if key == RLSEnabledKey {
-			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", RLSEnabledKey)
-		}
-		if strings.EqualFold(key, RLSEnabledKey) {
-			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, RLSEnabledKey)
-		}
-	}
-	return nil
-}
-
 // IsRLSEnabled extracts rls.enabled from collection properties.
 // Returns false if not set.
 func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {

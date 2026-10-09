@@ -2570,21 +2570,13 @@ func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, co
 	if err != nil {
 		return nil, err
 	}
-	enabled, err := common.IsRLSEnabled(collection.Properties...)
-	if err != nil {
+	if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-	}
-	if !enabled {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"RLS is not enabled for collection %q; set %s=true when creating the collection",
-			collection.Name,
-			common.RLSEnabledKey,
-		)
 	}
 	return collection, nil
 }
 
-func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
+func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
 	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
 	if err != nil {
 		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
@@ -2611,20 +2603,13 @@ func (mt *MetaTable) reloadEnabledCollectionRLSMetadata(ctx context.Context, col
 }
 
 func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
-	enabledCollections := make([]*model.Collection, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
 		}
-		enabled, err := common.IsRLSEnabled(collection.Properties...)
-		if err != nil {
+		if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
 			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
 		}
-		if !enabled {
-			collection.RLSPolicies = nil
-			continue
-		}
-		enabledCollections = append(enabledCollections, collection)
 	}
 
 	if ctx == nil {
@@ -2632,10 +2617,15 @@ func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collectio
 	}
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(rlsRecoveryConcurrency)
-	for _, collection := range enabledCollections {
+	// Disabled collections may have preconfigured policies, whose names and
+	// schema dependencies must survive recovery as well.
+	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
 		collection := collection
 		group.Go(func() error {
-			return mt.reloadEnabledCollectionRLSMetadata(groupCtx, collection)
+			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
 		})
 	}
 	return group.Wait()
