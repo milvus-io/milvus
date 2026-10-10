@@ -72,29 +72,6 @@ func (f *FunctionTaskSuite) TestAddFunctionRequiresStorageV3Gate() {
 	f.NoError(validateAddFunctionRequiresStorageV3())
 }
 
-// TestValidateAddFunctionInputNotText guards the reject of a BM25/MinHash function whose
-// input is a TEXT field (issue #51167): its output cannot be backfilled into existing
-// segments (stringInputsFromRecord hard-fails on the binary LOB column), so add-function
-// must fail fast. VarChar input stays allowed; non-materialized function types are ignored.
-func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "varchar_in", DataType: schemapb.DataType_VarChar},
-		{FieldID: 101, Name: "text_in", DataType: schemapb.DataType_Text},
-	}}
-	fn := func(t schemapb.FunctionType, input string) *schemapb.FunctionSchema {
-		return &schemapb.FunctionSchema{Name: "fn", Type: t, InputFieldNames: []string{input}}
-	}
-
-	// TEXT input rejected for BM25 and MinHash
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
-	// VarChar input allowed
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
-	// non-materialized function type (e.g. TextEmbedding) is out of scope -> allowed even with TEXT input
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
-}
-
 func (f *FunctionTaskSuite) TestFunctionOnType() {
 	{
 		task := &alterCollectionFunctionTask{

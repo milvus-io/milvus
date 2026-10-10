@@ -178,6 +178,19 @@ set_target_properties(all_tests PROPERTIES
 
 install(TARGETS all_tests DESTINATION unittest)
 
+# Standalone target keeps this bridge test runnable even when unrelated
+# all_tests translation units fail to compile on a given toolchain.
+add_executable(text_lob_decoder_test test_text_lob_decoder.cpp)
+target_link_libraries(text_lob_decoder_test
+        GTest::gtest
+        GTest::gtest_main
+        milvus_core
+        milvus_conan_deps
+        knowhere
+        milvus-storage
+        )
+install(TARGETS text_lob_decoder_test DESTINATION unittest)
+
 add_subdirectory(test_json_stats)
 
 # bitset unit test
