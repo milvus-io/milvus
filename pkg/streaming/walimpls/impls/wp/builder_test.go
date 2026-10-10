@@ -422,3 +422,81 @@ func TestSetCustomWpConfigCompactionParams(t *testing.T) {
 		})
 	}
 }
+
+// Exercise the public paramtable-to-client mapping, including coupled guards.
+func TestSetCustomWpConfigOperationalParams(t *testing.T) {
+	params := paramtable.Get()
+	prefix := "woodpecker.client."
+	custom := map[string]string{
+		"segmentAppend.sendTimeout": "1500ms", "quorum.selectNodesTimeout": "2500ms",
+		"grpc.dialTimeout": "500ms", "grpc.connectBackoff.baseDelay": "200ms",
+		"grpc.connectBackoff.maxDelay": "4s", "grpc.connectBackoff.multiplier": "2",
+		"grpc.connectBackoff.jitter": "0", "segmentRead.activeTimeout": "5s",
+		"segmentRead.settledTimeout": "30s", "skipRangeRefreshInterval": "15s",
+	}
+	t.Cleanup(func() {
+		for key := range custom {
+			params.Reset(prefix + key)
+		}
+	})
+	build := func() *config.Configuration {
+		c, err := config.NewConfiguration()
+		require.NoError(t, err)
+		require.NoError(t, setCustomWpConfig(c, &params.WoodpeckerCfg))
+		return c
+	}
+	defaults := build().Woodpecker.Client
+	assert.Equal(t, 2000, defaults.SegmentAppend.SendTimeout.Milliseconds())
+	assert.Equal(t, 2000, defaults.Quorum.SelectNodesTimeout.Milliseconds())
+	assert.Equal(t, config.DefaultGRPCClientConfig(), defaults.GRPC)
+	assert.Equal(t, 3000, defaults.SegmentRead.ActiveTimeout.Milliseconds())
+	assert.Equal(t, 20000, defaults.SegmentRead.SettledTimeout.Milliseconds())
+	assert.Equal(t, 10, defaults.SkipRangeRefreshInterval.Seconds())
+	for key, value := range custom {
+		require.NoError(t, params.Save(prefix+key, value))
+	}
+	c := build().Woodpecker.Client
+	assert.Equal(t, 1500, c.SegmentAppend.SendTimeout.Milliseconds())
+	assert.Equal(t, 2500, c.Quorum.SelectNodesTimeout.Milliseconds())
+	assert.Equal(t, 500, c.GRPC.DialTimeout.Milliseconds())
+	assert.Equal(t, 200, c.GRPC.ConnectBackoff.BaseDelay.Milliseconds())
+	assert.Equal(t, 4000, c.GRPC.ConnectBackoff.MaxDelay.Milliseconds())
+	assert.Equal(t, 2.0, c.GRPC.ConnectBackoff.Multiplier)
+	assert.Zero(t, c.GRPC.ConnectBackoff.Jitter)
+	assert.Equal(t, 5000, c.SegmentRead.ActiveTimeout.Milliseconds())
+	assert.Equal(t, 30000, c.SegmentRead.SettledTimeout.Milliseconds())
+	assert.Equal(t, 15, c.SkipRangeRefreshInterval.Seconds())
+	for _, value := range []string{"0s", "-1s", "1ns", "bad-duration"} {
+		t.Run(value, func(t *testing.T) {
+			for key := range custom {
+				params.Reset(prefix + key)
+			}
+			for _, key := range []string{"segmentAppend.sendTimeout", "quorum.selectNodesTimeout", "grpc.dialTimeout", "segmentRead.activeTimeout", "segmentRead.settledTimeout", "skipRangeRefreshInterval"} {
+				require.NoError(t, params.Save(prefix+key, value))
+			}
+			got := build().Woodpecker.Client
+			assert.Equal(t, defaults.SegmentAppend.SendTimeout, got.SegmentAppend.SendTimeout)
+			assert.Equal(t, defaults.Quorum.SelectNodesTimeout, got.Quorum.SelectNodesTimeout)
+			assert.Equal(t, defaults.GRPC, got.GRPC)
+			assert.Equal(t, defaults.SegmentRead, got.SegmentRead)
+			assert.Equal(t, defaults.GetSkipRangeRefreshInterval(), got.GetSkipRangeRefreshInterval())
+		})
+	}
+	for _, tc := range []struct{ key, value string }{
+		{"grpc.connectBackoff.baseDelay", "0s"}, {"grpc.connectBackoff.maxDelay", "50ms"},
+		{"grpc.connectBackoff.multiplier", "bad"}, {"grpc.connectBackoff.multiplier", "NaN"},
+		{"grpc.connectBackoff.multiplier", "+Inf"}, {"grpc.connectBackoff.jitter", "bad"},
+		{"grpc.connectBackoff.jitter", "NaN"}, {"grpc.connectBackoff.jitter", "1.1"},
+		{"grpc.connectBackoff.jitter", "-0.1"}, {"segmentRead.activeTimeout", "21s"},
+	} {
+		t.Run(tc.key+"/"+tc.value, func(t *testing.T) {
+			for key := range custom {
+				params.Reset(prefix + key)
+			}
+			require.NoError(t, params.Save(prefix+tc.key, tc.value))
+			got := build().Woodpecker.Client
+			assert.Equal(t, defaults.GRPC, got.GRPC)
+			assert.Equal(t, defaults.SegmentRead, got.SegmentRead)
+		})
+	}
+}
