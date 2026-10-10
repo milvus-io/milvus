@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <memory>
 #include <new>
 #include <vector>
 
@@ -165,7 +166,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto bool_result = segment->bulk_subscript(
@@ -348,7 +349,7 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         auto num_queries = 5;
         auto ph_group_raw =
             is_sparse ? CreateSparseFloatPlaceholderGroup(num_queries)
@@ -396,7 +397,7 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;

@@ -40,10 +40,8 @@
 #include "exec/expression/Element.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -69,15 +67,15 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/PbHelper.h"
-#include "test_utils/c_api_test_utils.h"
+#include "segcore/test_utils/ConsumerCApiTestUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::test;
 using namespace knowhere;
+using namespace milvus::test::consumer;
 
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
@@ -1224,15 +1222,20 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    N);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     SearchInfo search_info;
     search_info.topk_ = TOPK;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.search_params_ = generate_search_conf(
         IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -1249,7 +1252,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1396,12 +1399,17 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     // gen query dataset and query on index before moving it
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1410,7 +1418,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
@@ -1645,75 +1653,65 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
 
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);
-    GenScalarIndexing(N, age8_col.data());
-    auto age8_index = milvus::index::CreateScalarIndexSort<int8_t>();
-    age8_index->Build(N, age8_col.data());
-    load_index_info.field_id = i8_fid.get();
-    load_index_info.field_type = DataType::INT8;
-    load_index_info.index_params = GenIndexParams(age8_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age8_index));
+    auto age8_index = BuildScalarReader<int8_t>(
+        i8_fid, DataType::INT8, index::ASCENDING_SORT, N, age8_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age8_index), DataType::INT8, i8_fid.get());
+    // Derive raw-value availability from the index parameters instead of
+    // retaining the helper's zero-cost placeholder resource request.
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for 16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_fid);
-    GenScalarIndexing(N, age16_col.data());
-    auto age16_index = milvus::index::CreateScalarIndexSort<int16_t>();
-    age16_index->Build(N, age16_col.data());
-    load_index_info.field_id = i16_fid.get();
-    load_index_info.field_type = DataType::INT16;
-    load_index_info.index_params = GenIndexParams(age16_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age16_index));
+    auto age16_index = BuildScalarReader<int16_t>(
+        i16_fid, DataType::INT16, index::ASCENDING_SORT, N, age16_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age16_index), DataType::INT16, i16_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
-    GenScalarIndexing(N, age32_col.data());
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_col.data());
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
+    auto age32_index = BuildScalarReader<int32_t>(
+        i32_fid, DataType::INT32, index::ASCENDING_SORT, N, age32_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age32_index), DataType::INT32, i32_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
-    GenScalarIndexing(N, age64_col.data());
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data());
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
+    auto age64_index = BuildScalarReader<int64_t>(
+        i64_fid, DataType::INT64, index::ASCENDING_SORT, N, age64_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age64_index), DataType::INT64, i64_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
-    GenScalarIndexing(N, age_float_col.data());
-    auto age_float_index = milvus::index::CreateScalarIndexSort<float>();
-    age_float_index->Build(N, age_float_col.data());
-    load_index_info.field_id = float_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_float_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_float_index));
+    auto age_float_index = BuildScalarReader<float>(
+        float_fid, DataType::FLOAT, index::ASCENDING_SORT, N, age_float_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age_float_index), DataType::FLOAT, float_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_fid);
-    GenScalarIndexing(N, age_double_col.data());
-    auto age_double_index = milvus::index::CreateScalarIndexSort<double>();
-    age_double_index->Build(N, age_double_col.data());
-    load_index_info.field_id = double_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_double_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_double_index));
+    auto age_double_index = BuildScalarReader<double>(
+        double_fid, DataType::DOUBLE, index::ASCENDING_SORT, N, age_double_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age_double_index), DataType::DOUBLE, double_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
+
+    for (auto field_id :
+         {i8_fid, i16_fid, i32_fid, i64_fid, float_fid, double_fid}) {
+        ASSERT_TRUE(segment->HasRawData(field_id.get()));
+        ASSERT_EQ(segment->HasFieldData(field_id), field_id == i64_fid);
+    }
 
     // create retrieve plan
     auto plan = std::make_unique<query::RetrievePlan>(schema);
@@ -1810,16 +1808,10 @@ TEST(
         value += 1;
     }
 
-    GenScalarIndexing(N, age32_index_col.data());
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_index_col.data());
-
-    LoadIndexInfo load_index_info;
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
+    auto age32_index = BuildScalarReader<int32_t>(
+        i32_fid, DataType::INT32, index::ASCENDING_SORT, N, age32_index_col.data());
+    auto load_index_info = MakeLoadIndexInfo(
+        std::move(age32_index), DataType::INT32, i32_fid.get());
     segment->LoadIndex(load_index_info);
 
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -2017,5 +2009,9 @@ TEST(CApiTest, SearchIdTest) {
 }
 
 TEST(CApiTest, IsLoadWithDisk) {
-    ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
+    bool is_load_with_disk = false;
+    const auto status =
+        IsLoadWithDisk(INVERTED_INDEX_TYPE, 0, &is_load_with_disk);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_TRUE(is_load_with_disk);
 }

@@ -38,8 +38,8 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexStats.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "storage/artifact/ArtifactStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "pb/common.pb.h"
@@ -180,8 +180,12 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
     auto builder = std::make_shared<JsonKeyStats>(ctx, false);
     builder->Build(build_config);
 
-    auto create_index_result = builder->Upload(build_config);
-    auto index_files = create_index_result->GetIndexFiles();
+    const auto create_index_result = builder->Upload(build_config);
+    std::vector<std::string> index_files;
+    index_files.reserve(create_index_result.Files().size());
+    for (const auto& file : create_index_result.Files()) {
+        index_files.push_back(file.file_name);
+    }
 
     Config load_config;
     load_config["index_files"] = index_files;

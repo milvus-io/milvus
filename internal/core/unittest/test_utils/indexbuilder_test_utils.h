@@ -19,11 +19,7 @@
 
 #include "DataGen.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
-#include "index/StringIndex.h"
 #include "index/Utils.h"
-#include "indexbuilder/ScalarIndexCreator.h"
-#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -39,10 +35,7 @@ constexpr int64_t K = 4;
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
 using MapParams = std::map<std::string, std::string>;
-using milvus::indexbuilder::ScalarIndexCreator;
 using ScalarTestParams = std::pair<MapParams, MapParams>;
-using milvus::index::ScalarIndexPtr;
-using milvus::index::StringIndexPtr;
 
 namespace {
 

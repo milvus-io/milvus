@@ -69,8 +69,9 @@ Add 改变近似搜索的遍历，但旧 reader 不会返回其固定前缀之�
 
 ## 已知未完成项
 
-- 完整输入与 typed builder 注册已在源码接通；本轮接口合并未编译或测试，运行与性能尚未验证。
-  当前不支持的多额外字段和 VECTOR_ARRAY 额外标量字段组合仍会被拒绝。
+- 完整输入与 typed builder 注册已通过默认配置的 `index_tests` 构建和行为测试；
+  HNSW 标量 side input 已覆盖真实 build/load，DiskANN 标量 sidecar 按后端能力跳过。
+  性能尚未验证。当前不支持的多额外字段和 VECTOR_ARRAY 额外标量字段组合仍会被拒绝。
 - `ReaderCaps` 缺少向量 raw-value/refine 能力位；默认 false 查询位和 exact=true 不能替代完整能力判断。
 - `IVectorReader` 同时提供 dense/sparse getter，磁盘后端的 sparse retrieval 仍返回 Unsupported。
 - reader 的 `MemoryUsage` 和 `CellByteSize` 返回显式记录的 unavailable-zero sentinel，不表示
@@ -78,7 +79,8 @@ Add 改变近似搜索的遍历，但旧 reader 不会返回其固定前缀之�
   `VectorLoadResource`/`IndexLoadResource` 继续负责预加载准入；live sealed translator 和 growing
   segment 的既有估算与安全系数不变。按 backend 精确拆分原生 memory/file 属于 follow-up，
   不阻塞当前生产接线验证。
-- Growing owner 的初始 Build、后续 Add、发布和 consumer 路由已完成静态接线，本轮未编译或测试。发布记录固定
+- Growing owner 的初始 Build、后续 Add 和发布已有 `index_tests` 行为覆盖；consumer 路由
+  还需结合 `all_tests` 的运行结果判断。发布记录固定
   reader Count、mapping 和 CoveredRowEnd；它与后续 Add 共享 live engine，因此只承诺上述逻辑前缀，
   不承诺近似 ANN 遍历结果是物理稳定快照。
 

@@ -41,7 +41,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/NgramInvertedIndex.h"
+#include "index/scalar/ngram/NgramRegex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"

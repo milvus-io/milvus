@@ -274,8 +274,9 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
-	initcore.InitLocalArrowFileSystem(suite.rootPath)
-	initcore.InitRemoteArrowFileSystem(paramtable.Get())
+	// Like the query node, initialize the process-wide default filesystem once
+	// from common.storageType so it matches the remote ChunkManager.
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
@@ -491,6 +492,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -548,6 +550,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRaw
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -613,6 +616,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,

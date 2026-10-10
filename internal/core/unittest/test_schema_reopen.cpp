@@ -16,6 +16,8 @@
 
 #include "common/Schema.h"
 #include "common/Utils.h"
+#include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/ITextMatchReader.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -109,7 +111,7 @@ TEST_F(SchemaReopenTest, LoadWithAbsentNullableVectorFieldShouldReadAllNull) {
                     N,
                     data_v1.row_ids_.data(),
                     data_v1.timestamps_.data(),
-                    data_v1.raw_);
+                    data_v1.SharedRaw());
     ASSERT_EQ(segment->get_row_count(), 2 * N);
 
     std::vector<int64_t> all_offsets(2 * N);
@@ -140,7 +142,7 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexForNewEnableMatchField) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     ASSERT_EQ(segment->get_row_count(), N);
 
     // V2 shares V1's field ids and adds a nullable enable_match VARCHAR.
@@ -160,20 +162,23 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexForNewEnableMatchField) {
     schema_v2->set_primary_field_id(pk_fid);
     schema_v2->set_schema_version(2);
 
-    milvus::OpContext op_ctx;
-    EXPECT_ANY_THROW(seg_impl->GetTextIndex(&op_ctx, text_fid));
+    EXPECT_ANY_THROW(seg_impl->PinGrowingIndex(text_fid).Reader());
 
     seg_impl->Reopen(schema_v2);
 
-    ASSERT_NO_THROW(seg_impl->GetTextIndex(&op_ctx, text_fid));
-    auto pw = seg_impl->GetTextIndex(&op_ctx, text_fid);
-    auto* index = pw.get();
+    ASSERT_NO_THROW(seg_impl->PinGrowingIndex(text_fid).Reader());
+    auto pw = seg_impl->PinGrowingIndex(text_fid);
+    auto* index =
+        dynamic_cast<const milvus::index::ITextMatchReader*>(&pw.Reader());
     ASSERT_NE(index, nullptr);
 
     // No explicit Commit/Reload: Reopen already made the backfill visible.
     // No default value -> all rows null, nothing matches.
     EXPECT_EQ(index->MatchQuery("anything", 1).count(), 0);
-    auto not_null = index->IsNotNull();
+    auto* null_reader =
+        dynamic_cast<const milvus::index::INullReader*>(&pw.Reader());
+    ASSERT_NE(null_reader, nullptr);
+    auto not_null = null_reader->IsNotNull();
     ASSERT_EQ(not_null.size(), static_cast<size_t>(N));
     EXPECT_EQ(not_null.count(), 0);
 }
@@ -193,7 +198,7 @@ TEST_F(SchemaReopenTest, ReopenTextIndexIndexesDefaultValueForOldRows) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     ASSERT_EQ(segment->get_row_count(), N);
 
     auto schema_v2 = std::make_shared<Schema>();
@@ -217,15 +222,18 @@ TEST_F(SchemaReopenTest, ReopenTextIndexIndexesDefaultValueForOldRows) {
 
     seg_impl->Reopen(schema_v2);
 
-    milvus::OpContext op_ctx;
-    auto pw = seg_impl->GetTextIndex(&op_ctx, text_fid);
-    auto* index = pw.get();
+    auto pw = seg_impl->PinGrowingIndex(text_fid);
+    auto* index =
+        dynamic_cast<const milvus::index::ITextMatchReader*>(&pw.Reader());
     ASSERT_NE(index, nullptr);
 
     // No explicit Commit/Reload: every old row carries the default text.
     EXPECT_EQ(index->MatchQuery("default", 1).count(), static_cast<size_t>(N));
     EXPECT_EQ(index->MatchQuery("absent-token", 1).count(), 0);
-    auto not_null = index->IsNotNull();
+    auto* null_reader =
+        dynamic_cast<const milvus::index::INullReader*>(&pw.Reader());
+    ASSERT_NE(null_reader, nullptr);
+    auto not_null = null_reader->IsNotNull();
     ASSERT_EQ(not_null.size(), static_cast<size_t>(N));
     EXPECT_EQ(not_null.count(), static_cast<size_t>(N));
 }
@@ -244,7 +252,7 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     ASSERT_EQ(segment->get_row_count(), N);
 
     auto schema_v2 = std::make_shared<Schema>();
@@ -276,15 +284,26 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
 
     seg_impl->Reopen(schema_v2);
 
-    milvus::OpContext op_ctx;
-    auto null_pw = seg_impl->GetTextIndex(&op_ctx, null_fid);
-    ASSERT_NE(null_pw.get(), nullptr);
-    EXPECT_EQ(null_pw.get()->MatchQuery("anything", 1).count(), 0);
-    EXPECT_EQ(null_pw.get()->IsNotNull().count(), 0);
+    auto null_pw = seg_impl->PinGrowingIndex(null_fid);
+    ASSERT_TRUE(static_cast<bool>(null_pw));
+    auto* null_index =
+        dynamic_cast<const milvus::index::ITextMatchReader*>(&null_pw.Reader());
+    ASSERT_NE(null_index, nullptr);
+    EXPECT_EQ(null_index->MatchQuery("anything", 1).count(), 0);
+    auto* null_reader =
+        dynamic_cast<const milvus::index::INullReader*>(&null_pw.Reader());
+    ASSERT_NE(null_reader, nullptr);
+    EXPECT_EQ(null_reader->IsNotNull().count(), 0);
 
-    auto default_pw = seg_impl->GetTextIndex(&op_ctx, default_fid);
-    ASSERT_NE(default_pw.get(), nullptr);
-    EXPECT_EQ(default_pw.get()->MatchQuery("default", 1).count(),
+    auto default_pw = seg_impl->PinGrowingIndex(default_fid);
+    ASSERT_TRUE(static_cast<bool>(default_pw));
+    auto* default_index = dynamic_cast<const milvus::index::ITextMatchReader*>(
+        &default_pw.Reader());
+    ASSERT_NE(default_index, nullptr);
+    EXPECT_EQ(default_index->MatchQuery("default", 1).count(),
               static_cast<size_t>(N));
-    EXPECT_EQ(default_pw.get()->IsNotNull().count(), static_cast<size_t>(N));
+    auto* default_null_reader =
+        dynamic_cast<const milvus::index::INullReader*>(&default_pw.Reader());
+    ASSERT_NE(default_null_reader, nullptr);
+    EXPECT_EQ(default_null_reader->IsNotNull().count(), static_cast<size_t>(N));
 }

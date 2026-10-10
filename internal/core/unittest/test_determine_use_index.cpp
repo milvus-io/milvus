@@ -23,11 +23,11 @@
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
 #include "plan/PlanNode.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
@@ -68,13 +68,14 @@ class DetermineExecPathTest : public ::testing::Test {
 
         // Build and load STL_SORT scalar index for int64 field
         auto int64_col = raw_data_->get_col<int64_t>(int64_fid_);
-        auto int64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-        int64_index->Build(N_, int64_col.data());
+        auto int64_index = milvus::BuildTestScalarIndex<int64_t>(
+            "sort", N_, int64_col.data());
 
-        LoadIndexInfo load_index_info;
+        LoadIndexInfo load_index_info{};
         load_index_info.field_id = int64_fid_.get();
         load_index_info.field_type = DataType::INT64;
-        load_index_info.index_params = GenIndexParams(int64_index.get());
+        load_index_info.index_params = GenIndexParams(int64_index.get(), "sort");
+        SetTestIndexMetadata(load_index_info, *int64_index, "sort");
         load_index_info.cache_index =
             CreateTestCacheIndex("test_int64", std::move(int64_index));
         segment->LoadIndex(load_index_info);

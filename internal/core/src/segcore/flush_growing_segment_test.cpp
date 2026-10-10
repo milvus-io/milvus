@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -373,7 +374,7 @@ TEST_F(FlushGrowingSegmentTest, BasicFlushScalarFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -445,7 +446,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllowsStaleReadVersionOverwrite) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     std::string segment_path = test_dir_ + "/segment_stale_read_version";
 
@@ -514,7 +515,7 @@ TEST_F(FlushGrowingSegmentTest, FlushUsesWriterFormatFromConfig) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_writer_format";
@@ -556,7 +557,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithVectorFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -600,7 +601,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithStringFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -644,7 +645,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPartialRange) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -693,7 +694,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithTextColumnConfig) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config with TEXT column
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -744,7 +745,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithNullableFields) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -817,7 +818,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
     GEOS_finish_r(geos_ctx);
     bool geometry_valid[N] = {true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -844,7 +845,7 @@ TEST_F(FlushGrowingSegmentTest, FlushOrdinaryFieldSemanticsRoundTrip) {
     // default_i32 is intentionally absent from insert_data. Growing insert must
     // fill it exactly as the DataNode write-buffer path does.
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_semantics";
@@ -950,7 +951,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
                                         1700000004000};
     bool event_time_valid[N] = {true, false, true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -961,7 +962,7 @@ TEST_F(FlushGrowingSegmentTest, FlushTimestamptzPartialRangeRoundTrip) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_timestamptz";
@@ -1024,7 +1025,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
     std::vector<double> double_values = {10.25, 20.5, 30.75, 40.5, 50.25};
     bool valid_data[N] = {true, false, true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -1054,7 +1055,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableScalarTypesPartialRangeRoundTrip) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_scalars";
@@ -1157,7 +1158,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_vector_array";
@@ -1230,7 +1231,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
     vec_arrays[3].mutable_float_vector();
     bool valid_data[N] = {true, false, true, false};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -1241,7 +1242,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableVectorArrayRoundTrip) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_vector_array";
@@ -1322,7 +1323,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
                         N,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path =
@@ -1386,7 +1387,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
         "short text", "", std::string(512, 'x') + "-tail"};
     bool text_valid[N] = {true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -1400,7 +1401,7 @@ TEST_F(FlushGrowingSegmentTest, FlushStringAndTextRoundTrip) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_string_text";
@@ -1491,7 +1492,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
     double_arrays[2].mutable_double_data()->add_data(4.5);
     bool double_valid[N] = {true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -1514,7 +1515,7 @@ TEST_F(FlushGrowingSegmentTest, FlushArrayElementTypesRoundTrip) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_arrays";
@@ -1623,7 +1624,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     bool valid_data[N] = {false, true, true};
     std::vector<float> compact_vectors = {1.0F, 2.0F, 3.0F, 4.0F};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
@@ -1633,7 +1634,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFloatVectorKeepsCompactMapping) {
     insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_vec";
@@ -1691,7 +1692,7 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_offset_out_of_range";
@@ -1755,7 +1756,7 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
                     row_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
     auto vec_base = segment_impl->get_insert_record().get_data_base(vec_fid);
     ASSERT_NE(vec_base, nullptr);
     ASSERT_EQ(vec_base->num_chunk(), 0);
@@ -1846,7 +1847,7 @@ TEST_F(FlushGrowingSegmentTest,
         }
     }
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(row_count);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk_fid]);
@@ -1860,7 +1861,7 @@ TEST_F(FlushGrowingSegmentTest,
 
     segment->PreInsert(row_count);
     segment->Insert(
-        0, row_count, row_ids.data(), timestamps.data(), insert_data.get());
+        0, row_count, row_ids.data(), timestamps.data(), insert_data);
     auto vec_base = segment_impl->get_insert_record().get_data_base(vec_fid);
     ASSERT_NE(vec_base, nullptr);
     ASSERT_EQ(vec_base->num_chunk(), 0);
@@ -1954,7 +1955,7 @@ TEST_F(FlushGrowingSegmentTest,
         }
     }
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(row_count);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk_fid]);
@@ -1968,7 +1969,7 @@ TEST_F(FlushGrowingSegmentTest,
 
     segment->PreInsert(row_count);
     segment->Insert(
-        0, row_count, row_ids.data(), timestamps.data(), insert_data.get());
+        0, row_count, row_ids.data(), timestamps.data(), insert_data);
     auto vec_base = segment_impl->get_insert_record().get_data_base(sparse_fid);
     ASSERT_NE(vec_base, nullptr);
     ASSERT_EQ(vec_base->num_chunk(), 0);
@@ -2035,7 +2036,7 @@ TEST_F(FlushGrowingSegmentTest, FlushPrimaryKeyStatsManifestAndCompound) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     std::string segment_path = test_dir_ + "/segment_pk_stats";
     std::vector<uint8_t> first_pk_blob = {'s', 'i', 'n', 'g', 'l', 'e', 'A'};
@@ -2124,7 +2125,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
     bool valid_data[N] = {true, false, true};
     std::vector<int8> compact_vectors = {1, 2, 3, 4, 5, 6, 7, 8};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
@@ -2134,7 +2135,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableInt8VectorKeepsCompactMapping) {
     insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_int8_vec";
@@ -2207,7 +2208,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
         std::vector<int64_t> pks = {100, 101, 102};
         bool valid_data[N] = {true, false, true};
 
-        auto insert_data = std::make_unique<InsertRecordProto>();
+        auto insert_data = std::make_shared<InsertRecordProto>();
         insert_data->set_num_rows(N);
         auto pk_array =
             CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
@@ -2237,7 +2238,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
 
         segment->PreInsert(N);
         segment->Insert(
-            0, N, row_ids.data(), timestamps.data(), insert_data.get());
+            0, N, row_ids.data(), timestamps.data(), insert_data);
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path =
@@ -2335,7 +2336,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     bool valid_data[N] = {false, true, true};
     auto sparse_vectors = GenerateRandomSparseFloatVector(2, 16, 0.5);
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
@@ -2345,7 +2346,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableSparseVectorKeepsCompactMapping) {
     insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_sparse_vec";
@@ -2419,7 +2420,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
     sparse_vectors[3].set_at(0, 10, 3.0F);
     sparse_vectors[3].set_at(1, 30, 1.0F);
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid]);
@@ -2429,7 +2430,7 @@ TEST_F(FlushGrowingSegmentTest, FlushBM25StatsRangeAndCompoundManifest) {
     insert_data->mutable_fields_data()->AddAllocated(sparse_array.release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     std::string segment_path = test_dir_ + "/segment_bm25";
     int64_t bm25_field_ids[] = {sparse_fid.get()};
@@ -2549,7 +2550,7 @@ TEST_F(FlushGrowingSegmentTest, FlushEmptyRange) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -2595,7 +2596,7 @@ TEST_F(FlushGrowingSegmentTest, FlushLargeDataMultipleChunks) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -2643,7 +2644,7 @@ TEST_F(FlushGrowingSegmentTest, FlushMultipleTextColumns) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config with multiple TEXT columns
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -2696,7 +2697,7 @@ TEST_F(FlushGrowingSegmentTest, FlushWithBoolField) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -2744,7 +2745,7 @@ TEST_F(FlushGrowingSegmentTest, FlushAllNumericTypes) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // prepare flush config
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
@@ -2788,7 +2789,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         N,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_fp16";
@@ -2827,7 +2828,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         N,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_bf16";
@@ -2866,7 +2867,7 @@ TEST_F(FlushGrowingSegmentTest, FlushDifferentVectorTypes) {
                         N,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
 
         C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
         std::string segment_path = test_dir_ + "/segment_binary";
@@ -3009,7 +3010,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_nullable_emblist";
@@ -3091,7 +3092,7 @@ TEST_F(FlushGrowingSegmentTest,
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_multibatch";

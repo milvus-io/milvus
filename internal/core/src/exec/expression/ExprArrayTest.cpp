@@ -32,6 +32,7 @@
 #include "bitset/bitset.h"
 #include "common/Array.h"
 #include "common/Consts.h"
+#include "common/FieldData.h"
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
 #include "common/Types.h"
@@ -39,11 +40,14 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprIndexIntegrationTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/BitmapIndex.h"
+#include "index/Meta.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -134,7 +138,7 @@ TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ASSERT_NE(seg_promote, nullptr);
 
@@ -258,7 +262,7 @@ TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ASSERT_NE(seg_promote, nullptr);
 
@@ -554,7 +558,7 @@ TEST(Expr, TestArrayRange) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -656,7 +660,7 @@ TEST(Expr, TestArrayEqual) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -742,7 +746,7 @@ TEST(Expr, TestArrayNullExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -815,37 +819,15 @@ TEST(Expr, TestArrayNullExprWithBitmapIndex) {
         storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
     field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
 
-    proto::schema::FieldSchema field_schema;
-    field_schema.set_name("long_array");
-    field_schema.set_fieldid(long_array_fid.get());
-    field_schema.set_data_type(proto::schema::DataType::Array);
-    field_schema.set_element_type(proto::schema::DataType::Int64);
-    field_schema.set_nullable(true);
-    storage::FileManagerContext ctx;
-    ctx.fieldDataMeta = storage::FieldDataMeta{
-        kCollectionID,
-        kPartitionID,
-        kSegmentID,
-        long_array_fid.get(),
-        field_schema,
-    };
-    ctx.indexMeta =
-        storage::IndexMeta{kSegmentID, long_array_fid.get(), 4000, 4000};
-
-    auto bitmap_index =
-        std::make_unique<index::BitmapIndex<int64_t>>(ctx, false);
-    bitmap_index->BuildWithFieldData({field_data});
-    ASSERT_FALSE(bitmap_index->IsNestedIndex());
-    ASSERT_EQ(bitmap_index->Count(), N);
-
-    LoadIndexInfo load_index_info;
-    load_index_info.field_id = long_array_fid.get();
-    load_index_info.field_type = DataType::ARRAY;
-    load_index_info.element_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(bitmap_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("array_bitmap", std::move(bitmap_index));
-    segment->LoadIndex(load_index_info);
+    auto bitmap_index = test::expr_index::BuildIndex(
+        long_array_fid, DataType::ARRAY, index::BITMAP_INDEX_TYPE, {field_data},
+        Config::object(), DataType::INT64);
+    ASSERT_EQ(bitmap_index.reader->CoordDomain(), index::Domain::Row);
+    ASSERT_FALSE(bitmap_index.caps.nested);
+    ASSERT_EQ(bitmap_index.reader->Count(), N);
+    test::expr_index::InstallIndex(
+        *segment, long_array_fid, DataType::ARRAY, std::move(bitmap_index),
+        DataType::INT64);
 
     auto null_expr = std::make_shared<expr::NullExpr>(
         expr::ColumnInfo(
@@ -898,7 +880,7 @@ TEST(Expr, TestStructArrayParentNullExprUsesRepresentativeSubField) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
 
@@ -1009,7 +991,7 @@ TEST(Expr, TestVectorArrayNullExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
 
@@ -1121,7 +1103,7 @@ TEST(Expr, TestVectorArrayLengthExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
 
@@ -1326,7 +1308,7 @@ TEST(Expr, TestArrayContains) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1729,7 +1711,7 @@ TEST(Expr, TestArrayContainsTargetCoverage) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1951,7 +1933,7 @@ TEST(Expr, TestArrayContainsFloatLiteralCastsToElementType) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     ASSERT_NE(seg_promote, nullptr);
 
@@ -2056,7 +2038,7 @@ TEST(Expr, TestArrayContainsEmptyValues) {
                           N,
                           raw_data.row_ids_.data(),
                           raw_data.timestamps_.data(),
-                          raw_data.raw_);
+                          std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(dummy_seg.get());
@@ -2128,7 +2110,7 @@ TEST(Expr, TestArrayBinaryArith) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -2628,7 +2610,7 @@ TEST(Expr, TestArrayStringMatch) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -2746,7 +2728,7 @@ TEST(Expr, TestArrayInTerm) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -2876,7 +2858,7 @@ TEST(Expr, TestTermInArray) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -3031,12 +3013,18 @@ TEST(Expr, TestArrayContainsForStruct) {
                                    knowhere::IndexEnum::INDEX_HNSW);
     LoadIndexInfo load_index_info;
     load_index_info.field_id = vec_fid.get();
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.num_rows = N;
+    load_index_info.index_size = indexing->MemoryUsage();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
-    load_index_info.field_type = DataType::VECTOR_ARRAY;
-    load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
 
     int topK = 5;
@@ -3136,35 +3124,23 @@ TEST(Expr, TestArrayContainsForStruct) {
 
     // Step 6: Test with scalar index on price_array field
     {
-        // Get array data from raw_data and convert to boost::container::vector format
-        // (required by InvertedIndexTantivy::BuildWithRawDataForUT)
+        // Materialize the same per-row arrays; the builder publishes element
+        // coordinates and the segment retains the offsets used for projection.
         auto array_col =
             raw_data.get_col(int_array_fid)->scalars().array_data().data();
-        std::vector<boost::container::vector<int32_t>> vec_of_array;
-        vec_of_array.reserve(N);
+        std::vector<Array> arrays;
+        arrays.reserve(N);
         for (size_t i = 0; i < N; i++) {
-            boost::container::vector<int32_t> arr;
-            for (size_t j = 0; j < array_col[i].int_data().data_size(); j++) {
-                arr.push_back(array_col[i].int_data().data(j));
-            }
-            vec_of_array.push_back(arr);
+            arrays.emplace_back(array_col[i]);
         }
-
-        // Build inverted index using simplified API
-        auto arr_index =
-            std::make_unique<index::InvertedIndexTantivy<int32_t>>();
-        Config cfg;
-        cfg["is_array"] = true;
-        cfg["is_nested_index"] = true;
-        arr_index->BuildWithRawDataForUT(N, vec_of_array.data(), cfg);
-
-        // Load index into segment
-        LoadIndexInfo arr_index_info;
-        arr_index_info.field_id = int_array_fid.get();
-        arr_index_info.index_params = GenIndexParams(arr_index.get());
-        arr_index_info.cache_index =
-            CreateTestCacheIndex("test_array", std::move(arr_index));
-        segment->LoadIndex(arr_index_info);
+        auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+        field->FillFieldData(arrays.data(), arrays.size());
+        auto arr_index = test::expr_index::BuildIndex(
+            int_array_fid, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
+            Config::object(), DataType::INT32, true);
+        test::expr_index::InstallIndex(
+            *segment, int_array_fid, DataType::ARRAY, std::move(arr_index),
+            DataType::INT32);
 
         // Now search with index
         std::string expr = "array_contains_any(structA[price_array], [5])";
