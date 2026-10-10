@@ -109,6 +109,36 @@ func TestAutoIndexParams_build(t *testing.T) {
 		assert.Equal(t, "0.2", CParams.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()["drop_ratio_build"])
 	})
 
+	t.Run("test metric-specific sparse params with legacy fallback", func(t *testing.T) {
+		assert.NotEmpty(t, CParams.AutoIndexConfig.SparseIPIndexParams.DefaultValue)
+		assert.NotEmpty(t, CParams.AutoIndexConfig.SparseBM25IndexParams.DefaultValue)
+
+		err := bt.Save(CParams.AutoIndexConfig.SparseIndexParams.Key,
+			`{"index_type": "SPARSE_WAND", "drop_ratio_build": 0.2}`)
+		assert.NoError(t, err)
+		// The legacy value is used while the new metric-specific keys are absent.
+		// Their formatters supply the metric appropriate for each key when the
+		// legacy config omits metric_type.
+		ipParams := CParams.AutoIndexConfig.SparseIPIndexParams.GetAsJSONMap()
+		bm25Params := CParams.AutoIndexConfig.SparseBM25IndexParams.GetAsJSONMap()
+		assert.Equal(t, "SPARSE_WAND", ipParams[IndexTypeKey])
+		assert.Equal(t, "0.2", ipParams["drop_ratio_build"])
+		assert.Equal(t, "IP", ipParams[MetricTypeKey])
+		assert.Equal(t, "SPARSE_WAND", bm25Params[IndexTypeKey])
+		assert.Equal(t, "0.2", bm25Params["drop_ratio_build"])
+		assert.Equal(t, "BM25", bm25Params[MetricTypeKey])
+
+		err = bt.Save(CParams.AutoIndexConfig.SparseIPIndexParams.Key,
+			`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP", "drop_ratio_build": 0.1}`)
+		assert.NoError(t, err)
+		err = bt.Save(CParams.AutoIndexConfig.SparseBM25IndexParams.Key,
+			`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "drop_ratio_build": 0.3}`)
+		assert.NoError(t, err)
+
+		assert.Equal(t, "0.1", CParams.AutoIndexConfig.SparseIPIndexParams.GetAsJSONMap()["drop_ratio_build"])
+		assert.Equal(t, "0.3", CParams.AutoIndexConfig.SparseBM25IndexParams.GetAsJSONMap()["drop_ratio_build"])
+	})
+
 	t.Run("test parseBinaryParams success", func(t *testing.T) {
 		// Params := CParams.AutoIndexConfig
 		// buildParams := make([string]interface)

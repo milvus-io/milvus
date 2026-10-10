@@ -37,6 +37,8 @@ type AutoIndexConfig struct {
 	IndexParams            ParamItem  `refreshable:"true"`
 	IntVectorIndexParams   ParamItem  `refreshable:"true"`
 	SparseIndexParams      ParamItem  `refreshable:"true"`
+	SparseIPIndexParams    ParamItem  `refreshable:"true"`
+	SparseBM25IndexParams  ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
 	LargeTopKIndexParams   ParamItem  `refreshable:"true"`
@@ -113,6 +115,26 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SparseIndexParams.Init(base.mgr)
+
+	p.SparseIPIndexParams = ParamItem{
+		Key:          "autoIndex.params.sparse.ip.build",
+		Version:      "3.0.3",
+		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
+		FallbackKeys: []string{p.SparseIndexParams.Key},
+		Formatter:    GetBuildParamFormatter(metric.IP, "autoIndex.params.sparse.ip.build"),
+		Export:       true,
+	}
+	p.SparseIPIndexParams.Init(base.mgr)
+
+	p.SparseBM25IndexParams = ParamItem{
+		Key:          "autoIndex.params.sparse.bm25.build",
+		Version:      "3.0.3",
+		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25"}`,
+		FallbackKeys: []string{p.SparseIndexParams.Key},
+		Formatter:    GetBuildParamFormatter(metric.BM25, "autoIndex.params.sparse.bm25.build"),
+		Export:       true,
+	}
+	p.SparseBM25IndexParams.Init(base.mgr)
 
 	p.IntVectorIndexParams = ParamItem{
 		Key:          "autoIndex.params.int8.build",
