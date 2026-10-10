@@ -1114,6 +1114,8 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 			}
 		}
 	}
+	denyAllLoaded := Params.QuotaConfig.MemProtectionDenyAllLoaded.GetAsBool()
+	queryNodeOverHighWater := false
 	for nodeID, metric := range q.queryNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
 		if memoryWaterLevel <= queryNodeMemoryLowWaterLevel {
@@ -1127,8 +1129,13 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 				mlog.Uint64("TotalMem", metric.Hms.Memory),
 				mlog.Float64("curWatermark", memoryWaterLevel),
 				mlog.Float64("lowWatermark", queryNodeMemoryLowWaterLevel),
-				mlog.Float64("highWatermark", queryNodeMemoryHighWaterLevel))
-			updateCollectionFactor(0, metric.Effect.CollectionIDs)
+				mlog.Float64("highWatermark", queryNodeMemoryHighWaterLevel),
+				mlog.Bool("denyAllLoadedCollections", denyAllLoaded))
+			if denyAllLoaded {
+				queryNodeOverHighWater = true
+			} else {
+				updateCollectionFactor(0, metric.Effect.CollectionIDs)
+			}
 			continue
 		}
 		factor := (queryNodeMemoryHighWaterLevel - memoryWaterLevel) / (queryNodeMemoryHighWaterLevel - queryNodeMemoryLowWaterLevel)
@@ -1141,6 +1148,9 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 			mlog.Float64("curWatermark", memoryWaterLevel),
 			mlog.Float64("lowWatermark", queryNodeMemoryLowWaterLevel),
 			mlog.Float64("highWatermark", queryNodeMemoryHighWaterLevel))
+	}
+	if queryNodeOverHighWater {
+		updateCollectionFactor(0, q.loadedCollectionIDs().Collect())
 	}
 	for nodeID, metric := range q.dataNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
