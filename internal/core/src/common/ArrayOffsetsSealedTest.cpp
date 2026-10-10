@@ -13,7 +13,8 @@
 
 #include "common/ArrayOffsets.h"
 
-TEST(ArrayOffsetsSealedTest, BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
+TEST(ArrayOffsetsSealedTest,
+     BuildAllZerosKeepsEmptyRangesAcrossRepeatedConstruction) {
     constexpr int64_t kRowCount = 1000;
     auto offsets = milvus::ArrayOffsetsSealed::BuildAllZeros(kRowCount);
     ASSERT_NE(offsets, nullptr);

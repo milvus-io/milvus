@@ -56,7 +56,8 @@ ParseBuildParams(const BuildParams& params) {
 RTreeIndexBuilder::RTreeIndexBuilder(RTreeBuildParams params)
     : directory_(CreateRTreeIndexDirectory(params.local_dir, {})),
       engine_(std::make_unique<RTreeBuildEngine>(
-          (std::filesystem::path(directory_->Path()) / "index_file").string())) {
+          (std::filesystem::path(directory_->Path()) / "index_file")
+              .string())) {
 }
 
 RTreeIndexBuilder::~RTreeIndexBuilder() = default;

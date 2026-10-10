@@ -2379,9 +2379,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         i8_fid,
         DataType::INT8,
-        test::consumer::BuildScalarReader<int8_t>(
-            i8_fid, DataType::INT8, index::ASCENDING_SORT, N,
-            age8_col.data(), nullptr));
+        test::consumer::BuildScalarReader<int8_t>(i8_fid,
+                                                  DataType::INT8,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age8_col.data(),
+                                                  nullptr));
 
     // load index for int16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_fid);
@@ -2390,9 +2393,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         i16_fid,
         DataType::INT16,
-        test::consumer::BuildScalarReader<int16_t>(
-            i16_fid, DataType::INT16, index::ASCENDING_SORT, N,
-            age16_col.data(), nullptr));
+        test::consumer::BuildScalarReader<int16_t>(i16_fid,
+                                                   DataType::INT16,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age16_col.data(),
+                                                   nullptr));
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
@@ -2401,9 +2407,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         i32_fid,
         DataType::INT32,
-        test::consumer::BuildScalarReader<int32_t>(
-            i32_fid, DataType::INT32, index::ASCENDING_SORT, N,
-            age32_col.data(), nullptr));
+        test::consumer::BuildScalarReader<int32_t>(i32_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age32_col.data(),
+                                                   nullptr));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -2412,9 +2421,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         i64_fid,
         DataType::INT64,
-        test::consumer::BuildScalarReader<int64_t>(
-            i64_fid, DataType::INT64, index::ASCENDING_SORT, N,
-            age64_col.data(), nullptr));
+        test::consumer::BuildScalarReader<int64_t>(i64_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data(),
+                                                   nullptr));
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
@@ -2423,9 +2435,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         float_fid,
         DataType::FLOAT,
-        test::consumer::BuildScalarReader<float>(
-            float_fid, DataType::FLOAT, index::ASCENDING_SORT, N,
-            age_float_col.data(), nullptr));
+        test::consumer::BuildScalarReader<float>(float_fid,
+                                                 DataType::FLOAT,
+                                                 index::ASCENDING_SORT,
+                                                 N,
+                                                 age_float_col.data(),
+                                                 nullptr));
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_fid);
@@ -2434,9 +2449,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         *seg,
         double_fid,
         DataType::DOUBLE,
-        test::consumer::BuildScalarReader<double>(
-            double_fid, DataType::DOUBLE, index::ASCENDING_SORT, N,
-            age_double_col.data(), nullptr));
+        test::consumer::BuildScalarReader<double>(double_fid,
+                                                  DataType::DOUBLE,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age_double_col.data(),
+                                                  nullptr));
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
@@ -2622,9 +2640,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         i8_nullable_fid,
         DataType::INT8,
-        test::consumer::BuildScalarReader<int8_t>(
-            i8_nullable_fid, DataType::INT8, index::ASCENDING_SORT, N,
-            age8_col.data(), i8_valid_data.data()));
+        test::consumer::BuildScalarReader<int8_t>(i8_nullable_fid,
+                                                  DataType::INT8,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age8_col.data(),
+                                                  i8_valid_data.data()));
 
     // load index for int16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_nullable_fid);
@@ -2633,9 +2654,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         i16_nullable_fid,
         DataType::INT16,
-        test::consumer::BuildScalarReader<int16_t>(
-            i16_nullable_fid, DataType::INT16, index::ASCENDING_SORT, N,
-            age16_col.data(), i16_valid_data.data()));
+        test::consumer::BuildScalarReader<int16_t>(i16_nullable_fid,
+                                                   DataType::INT16,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age16_col.data(),
+                                                   i16_valid_data.data()));
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_nullable_fid);
@@ -2644,9 +2668,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         i32_nullable_fid,
         DataType::INT32,
-        test::consumer::BuildScalarReader<int32_t>(
-            i32_nullable_fid, DataType::INT32, index::ASCENDING_SORT, N,
-            age32_col.data(), i32_valid_data.data()));
+        test::consumer::BuildScalarReader<int32_t>(i32_nullable_fid,
+                                                   DataType::INT32,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age32_col.data(),
+                                                   i32_valid_data.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_nullable_fid);
@@ -2655,9 +2682,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         i64_nullable_fid,
         DataType::INT64,
-        test::consumer::BuildScalarReader<int64_t>(
-            i64_nullable_fid, DataType::INT64, index::ASCENDING_SORT, N,
-            age64_col.data(), i64_valid_data.data()));
+        test::consumer::BuildScalarReader<int64_t>(i64_nullable_fid,
+                                                   DataType::INT64,
+                                                   index::ASCENDING_SORT,
+                                                   N,
+                                                   age64_col.data(),
+                                                   i64_valid_data.data()));
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_nullable_fid);
@@ -2666,9 +2696,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         float_nullable_fid,
         DataType::FLOAT,
-        test::consumer::BuildScalarReader<float>(
-            float_nullable_fid, DataType::FLOAT, index::ASCENDING_SORT, N,
-            age_float_col.data(), float_valid_data.data()));
+        test::consumer::BuildScalarReader<float>(float_nullable_fid,
+                                                 DataType::FLOAT,
+                                                 index::ASCENDING_SORT,
+                                                 N,
+                                                 age_float_col.data(),
+                                                 float_valid_data.data()));
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_nullable_fid);
@@ -2677,9 +2710,12 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         *seg,
         double_nullable_fid,
         DataType::DOUBLE,
-        test::consumer::BuildScalarReader<double>(
-            double_nullable_fid, DataType::DOUBLE, index::ASCENDING_SORT, N,
-            age_double_col.data(), double_valid_data.data()));
+        test::consumer::BuildScalarReader<double>(double_nullable_fid,
+                                                  DataType::DOUBLE,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age_double_col.data(),
+                                                  double_valid_data.data()));
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);

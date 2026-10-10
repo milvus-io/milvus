@@ -552,16 +552,16 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             // same raw field data for exact row validity. Padding the reader's
             // shorter bitmap would turn UNKNOWN into non-NULL under NOT.
             coarse_valid_global_ = GetFieldRowValidity(covered);
-            AssertInfo(coarse_valid_global_.size() ==
-                           static_cast<size_t>(covered),
-                       "raw spatial validity has {} rows, expected {}",
-                       coarse_valid_global_.size(),
-                       covered);
+            AssertInfo(
+                coarse_valid_global_.size() == static_cast<size_t>(covered),
+                "raw spatial validity has {} rows, expected {}",
+                coarse_valid_global_.size(),
+                covered);
         } else {
             coarse_valid_global_ = null_reader_->IsNotNull();
-            AssertInfo(coarse_valid_global_.size() >=
-                           static_cast<size_t>(covered),
-                       "spatial validity does not cover snapshot prefix");
+            AssertInfo(
+                coarse_valid_global_.size() >= static_cast<size_t>(covered),
+                "spatial validity does not cover snapshot prefix");
             coarse_valid_global_.resize(covered);
         }
         if (covered < active_count_) {

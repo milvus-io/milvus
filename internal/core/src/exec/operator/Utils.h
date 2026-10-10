@@ -131,8 +131,8 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             auto search_conf = reader.PrepareSearchParams(
                 ProjectVectorSearchParams(search_info));
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-                iterators_val = reader.Iterators(
-                    dataset, search_conf, bitset, op_context);
+                iterators_val =
+                    reader.Iterators(dataset, search_conf, bitset, op_context);
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);

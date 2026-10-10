@@ -37,11 +37,10 @@ enum class DiskEngineFileMode {
 // status value.
 class DiskEngineFileHandle final {
  public:
-    DiskEngineFileHandle(
-        const FileManagerContext& context,
-        DiskEngineFileMode mode,
-        const std::vector<std::string>& remote_paths,
-        const std::vector<std::string>& engine_entry_names);
+    DiskEngineFileHandle(const FileManagerContext& context,
+                         DiskEngineFileMode mode,
+                         const std::vector<std::string>& remote_paths,
+                         const std::vector<std::string>& engine_entry_names);
     ~DiskEngineFileHandle();
 
     std::shared_ptr<milvus::FileManager>

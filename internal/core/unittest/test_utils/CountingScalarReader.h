@@ -37,8 +37,8 @@ class CountingScalarReader final : public index::IIndexReaderBase,
     CountingScalarReader(index::IIndexReaderBasePtr reader,
                          std::atomic<int64_t>& lookup_calls)
         : reader_(std::move(reader)),
-          predicates_(dynamic_cast<const index::IScalarPredicateReader<T>&>(
-              *reader_)),
+          predicates_(
+              dynamic_cast<const index::IScalarPredicateReader<T>&>(*reader_)),
           values_(dynamic_cast<const index::IScalarValueReader<T>&>(*reader_)),
           nulls_(dynamic_cast<const index::INullReader&>(*reader_)),
           lookup_calls_(lookup_calls) {

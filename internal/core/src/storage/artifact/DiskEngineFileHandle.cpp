@@ -171,8 +171,8 @@ class RestrictedDiskEngineFileManager final
         try {
             ValidateRawPath(filename);
             auto input = delegate_->OpenInputStream(filename);
-            return std::make_shared<RecordingInputStream>(
-                std::move(input), shared_from_this());
+            return std::make_shared<RecordingInputStream>(std::move(input),
+                                                          shared_from_this());
         } catch (...) {
             RecordFailure(std::current_exception());
             throw;
@@ -234,10 +234,9 @@ class RestrictedDiskEngineFileManager final
         const auto remote_path = ResolveRemotePath(filename);
         if (allowed_remote_paths_.find(remote_path) ==
             allowed_remote_paths_.end()) {
-            ThrowInfo(
-                DataFormatBroken,
-                "disk vector engine requested unadvertised raw object {}",
-                remote_path);
+            ThrowInfo(DataFormatBroken,
+                      "disk vector engine requested unadvertised raw object {}",
+                      remote_path);
         }
     }
 

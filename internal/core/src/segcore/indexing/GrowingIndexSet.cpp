@@ -44,24 +44,21 @@ namespace {
 constexpr int64_t kGrowingTextCommitIntervalMs = 200;
 
 template <typename T>
-class ChunkedGrowingVectorSource final
-    : public index::GrowingVectorSource<T> {
+class ChunkedGrowingVectorSource final : public index::GrowingVectorSource<T> {
  public:
-    ChunkedGrowingVectorSource(
-        std::shared_ptr<ChunkVectorBase<T>> storage,
-        int64_t rows_per_chunk,
-        int64_t elements_per_row)
+    ChunkedGrowingVectorSource(std::shared_ptr<ChunkVectorBase<T>> storage,
+                               int64_t rows_per_chunk,
+                               int64_t elements_per_row)
         : storage_(std::move(storage)),
           rows_per_chunk_(rows_per_chunk),
           elements_per_row_(elements_per_row) {
-        AssertInfo(storage_ != nullptr && rows_per_chunk_ > 0 &&
-                       elements_per_row_ > 0,
-                   "invalid growing vector column source");
+        AssertInfo(
+            storage_ != nullptr && rows_per_chunk_ > 0 && elements_per_row_ > 0,
+            "invalid growing vector column source");
     }
 
     std::span<const T>
-    ContiguousRows(int64_t physical_begin,
-                   int64_t row_count) const override {
+    ContiguousRows(int64_t physical_begin, int64_t row_count) const override {
         ValidateRange(physical_begin, row_count);
         if (row_count == 0) {
             return {};
@@ -130,8 +127,8 @@ class ChunkedGrowingVectorSource final
                        chunk_offset < ChunkRows(snapshot, chunk_id),
                    "growing vector source row {} is unavailable",
                    physical_offset);
-        const auto* chunk = static_cast<const T*>(
-            storage_->get_chunk_data(snapshot, chunk_id));
+        const auto* chunk =
+            static_cast<const T*>(storage_->get_chunk_data(snapshot, chunk_id));
         return chunk + chunk_offset * elements_per_row_;
     }
 
@@ -148,11 +145,10 @@ class ChunkedGrowingVectorSource final
 
     size_t
     ElementCount(int64_t row_count) const {
-        AssertInfo(
-            static_cast<uint64_t>(row_count) <=
-                std::numeric_limits<size_t>::max() /
-                    static_cast<uint64_t>(elements_per_row_),
-            "growing vector source element count overflows size_t");
+        AssertInfo(static_cast<uint64_t>(row_count) <=
+                       std::numeric_limits<size_t>::max() /
+                           static_cast<uint64_t>(elements_per_row_),
+                   "growing vector source element count overflows size_t");
         return static_cast<size_t>(row_count) *
                static_cast<size_t>(elements_per_row_);
     }
@@ -190,8 +186,7 @@ MakeVectorSource(const VectorBase* raw) {
 
 std::string
 UniqueFieldId(int64_t segment_id, FieldId field_id) {
-    return std::to_string(segment_id) + "_" +
-           std::to_string(field_id.get());
+    return std::to_string(segment_id) + "_" + std::to_string(field_id.get());
 }
 
 FieldIndexCapability
@@ -235,11 +230,10 @@ ResolveGrowingBuildThreadNum(const SegcoreConfig& segcore_config) {
     return std::clamp<int64_t>(thread_num, 1, pool_size);
 }
 
-GrowingIndexSet::Appender::Appender(
-    FieldId field_id,
-    index::ReaderCaps reader_caps,
-    std::unique_ptr<index::IGrowingIndex> value,
-    bool source_backed_value)
+GrowingIndexSet::Appender::Appender(FieldId field_id,
+                                    index::ReaderCaps reader_caps,
+                                    std::unique_ptr<index::IGrowingIndex> value,
+                                    bool source_backed_value)
     : caps(reader_caps),
       owner(std::move(value)),
       source_backed(source_backed_value),
@@ -276,34 +270,31 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         field_meta.enable_match()) {
         const auto unique_id = UniqueFieldId(segment_id, field_meta.get_id());
         const auto analyzer_params = field_meta.get_analyzer_params();
-        return Appender(
-            field_meta.get_id(),
-            index::ReaderCaps{.text_match = true},
-            std::make_unique<index::TantivyGrowingTextIndex>(
-                unique_id.c_str(),
-                "milvus_tokenizer",
-                analyzer_params.c_str(),
-                field_meta.get_data_type(),
-                kGrowingTextCommitIntervalMs));
+        return Appender(field_meta.get_id(),
+                        index::ReaderCaps{.text_match = true},
+                        std::make_unique<index::TantivyGrowingTextIndex>(
+                            unique_id.c_str(),
+                            "milvus_tokenizer",
+                            analyzer_params.c_str(),
+                            field_meta.get_data_type(),
+                            kGrowingTextCommitIntervalMs));
     }
 
     if (field_meta.get_data_type() == DataType::GEOMETRY &&
         segcore_config.get_enable_interim_segment_index() &&
         index_meta != nullptr && index_meta->GetIndexMaxRowCount() > 0 &&
         index_meta->HasField(field_meta.get_id())) {
-        return Appender(
-            field_meta.get_id(),
-            index::ReaderCaps{.spatial = true, .exact = false},
-            std::make_unique<index::RTreeGrowingSpatialIndex>(
-                segcore_config.get_chunk_rows()));
+        return Appender(field_meta.get_id(),
+                        index::ReaderCaps{.spatial = true, .exact = false},
+                        std::make_unique<index::RTreeGrowingSpatialIndex>(
+                            segcore_config.get_chunk_rows()));
     }
 
     const auto data_type = field_meta.get_data_type();
-    const bool supported_vector =
-        data_type == DataType::VECTOR_FLOAT ||
-        data_type == DataType::VECTOR_FLOAT16 ||
-        data_type == DataType::VECTOR_BFLOAT16 ||
-        data_type == DataType::VECTOR_SPARSE_U32_F32;
+    const bool supported_vector = data_type == DataType::VECTOR_FLOAT ||
+                                  data_type == DataType::VECTOR_FLOAT16 ||
+                                  data_type == DataType::VECTOR_BFLOAT16 ||
+                                  data_type == DataType::VECTOR_SPARSE_U32_F32;
     const bool growing_mmap_enabled = storage::MmapManager::GetInstance()
                                           .GetMmapConfig()
                                           .GetEnableGrowingMmap();
@@ -330,9 +321,8 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                           SegmentType::Growing,
                           IsSparseFloatVectorDataType(data_type));
     auto build_params = config.GetBuildBaseParams(data_type);
-    const int64_t dim = IsSparseFloatVectorDataType(data_type)
-                            ? 0
-                            : field_meta.get_dim();
+    const int64_t dim =
+        IsSparseFloatVectorDataType(data_type) ? 0 : field_meta.get_dim();
     if (dim > 0) {
         build_params[knowhere::meta::DIM] = std::to_string(dim);
     }
@@ -353,10 +343,11 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         return ResolveGrowingBuildThreadNum(SegcoreConfig::default_config());
     };
 
-    auto make_owner = [&]<typename EngineType>(
-                          std::shared_ptr<const index::GrowingVectorSource<
-                              index::GrowingVectorStorageType<EngineType>>>
-                              source) -> std::unique_ptr<index::IGrowingIndex> {
+    auto make_owner =
+        [&]<typename EngineType>(
+            std::shared_ptr<const index::GrowingVectorSource<
+                index::GrowingVectorStorageType<EngineType>>> source)
+        -> std::unique_ptr<index::IGrowingIndex> {
         return std::make_unique<index::KnowhereGrowingVectorIndex<EngineType>>(
             data_type,
             config.GetIndexType(),
@@ -396,8 +387,7 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                       data_type);
     }
 
-    return Appender(
-        field_meta.get_id(), {}, std::move(owner), source_backed);
+    return Appender(field_meta.get_id(), {}, std::move(owner), source_backed);
 }
 
 void

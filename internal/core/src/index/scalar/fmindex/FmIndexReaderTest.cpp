@@ -62,17 +62,17 @@ BuildFmReader(std::vector<std::string> values) {
     const ScalarTestInput<std::string_view> input(data);
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("FmIndexVarcharNonNull");
-    auto artifact = backend.Build(input.View(), {.row_count = data.values.size()});
+    auto artifact =
+        backend.Build(input.View(), {.row_count = data.values.size()});
     return backend.Open(std::move(artifact), {.row_count = data.values.size()});
 }
 
 TEST(FmIndexReaderTest, RepeatedOccurrencesMapToOneRow) {
-    auto reader = BuildFmReader({std::string(100, 'a'),
-                                 "zzzz",
-                                 "xxabxx",
-                                 std::string(400, 'a')});
+    auto reader = BuildFmReader(
+        {std::string(100, 'a'), "zzzz", "xxabxx", std::string(400, 'a')});
     ASSERT_NE(reader, nullptr);
-    const auto* pattern = dynamic_cast<const IPatternMatchReader*>(reader.get());
+    const auto* pattern =
+        dynamic_cast<const IPatternMatchReader*>(reader.get());
     ASSERT_NE(pattern, nullptr);
     const auto hits = pattern->PatternMatch("a", PatternOp::InnerMatch);
     ASSERT_EQ(hits.size(), 4);
@@ -104,7 +104,8 @@ TEST(FmIndexReaderTest, RandomBytesAgreeWithIndependentAnchoredOracle) {
     }
     auto reader = BuildFmReader(rows);
     ASSERT_NE(reader, nullptr);
-    const auto* pattern = dynamic_cast<const IPatternMatchReader*>(reader.get());
+    const auto* pattern =
+        dynamic_cast<const IPatternMatchReader*>(reader.get());
     ASSERT_NE(pattern, nullptr);
 
     const auto check = [&](std::string_view needle, PatternOp op) {
@@ -144,21 +145,37 @@ TEST(FmIndexReaderTest, RandomBytesAgreeWithIndependentAnchoredOracle) {
             continue;
         }
         const auto start = static_cast<size_t>(rng()) % row.size();
-        const auto length = 1 + static_cast<size_t>(rng()) % (row.size() - start);
-        check(std::string_view(row).substr(start, length), PatternOp::InnerMatch);
+        const auto length =
+            1 + static_cast<size_t>(rng()) % (row.size() - start);
+        check(std::string_view(row).substr(start, length),
+              PatternOp::InnerMatch);
     }
 }
 
 TEST(FmIndexReaderTest, GeneralLikeCandidatesPreserveEveryExactMatch) {
     const std::vector<std::string> rows{
-        "apple", "apply", "banana", "grape", "application", "app", "",
-        "foo bar", "fooXbar", "café", "caf\xC3\xA9 extra", "你好世界",
-        "hello你好world", "a_b", "a%b", "100%",
+        "apple",
+        "apply",
+        "banana",
+        "grape",
+        "application",
+        "app",
+        "",
+        "foo bar",
+        "fooXbar",
+        "café",
+        "caf\xC3\xA9 extra",
+        "你好世界",
+        "hello你好world",
+        "a_b",
+        "a%b",
+        "100%",
         std::string(200, 'z') + "NEEDLE" + std::string(200, 'z'),
         std::string(80, 'q')};
     auto reader = BuildFmReader(rows);
     ASSERT_NE(reader, nullptr);
-    const auto* pattern = dynamic_cast<const IPatternMatchReader*>(reader.get());
+    const auto* pattern =
+        dynamic_cast<const IPatternMatchReader*>(reader.get());
     ASSERT_NE(pattern, nullptr);
     EXPECT_FALSE(pattern->PatternMatchIsExact(PatternOp::Match));
 

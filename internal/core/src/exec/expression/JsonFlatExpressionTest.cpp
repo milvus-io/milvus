@@ -29,7 +29,8 @@ namespace milvus::test {
 
 class JsonFlatExpressionTest : public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         exec::ExprResCacheManager::Instance().Clear();
         exec::ExprResCacheManager::SetEnabled(false);
         json_data_ = {
@@ -59,15 +60,22 @@ class JsonFlatExpressionTest : public ::testing::Test {
         segment_ = segcore::CreateSealedSegment(schema);
         auto raw_info = raw_files_.Prepare(json_fid_, {field});
         segment_->LoadFieldData(raw_info);
-        auto opened = expr_index::BuildIndex(
-            json_fid_, DataType::JSON, index::INVERTED_INDEX_TYPE, {field},
-            {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
-        expr_index::InstallIndex(*segment_, json_fid_, DataType::JSON,
-                                  std::move(opened), DataType::NONE,
-                                  &observed_index_pin_ctx_);
+        auto opened =
+            expr_index::BuildIndex(json_fid_,
+                                   DataType::JSON,
+                                   index::INVERTED_INDEX_TYPE,
+                                   {field},
+                                   {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
+        expr_index::InstallIndex(*segment_,
+                                 json_fid_,
+                                 DataType::JSON,
+                                 std::move(opened),
+                                 DataType::NONE,
+                                 &observed_index_pin_ctx_);
     }
 
-    void TearDown() override {
+    void
+    TearDown() override {
         exec::ExprResCacheManager::Instance().Clear();
         exec::ExprResCacheManager::SetEnabled(false);
     }
@@ -81,7 +89,8 @@ class JsonFlatExpressionTest : public ::testing::Test {
 
 class JsonFlatContainsExpressionTest : public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         exec::ExprResCacheManager::Instance().Clear();
         exec::ExprResCacheManager::SetEnabled(false);
         json_data_ = {
@@ -107,14 +116,18 @@ class JsonFlatContainsExpressionTest : public ::testing::Test {
         segment_ = segcore::CreateSealedSegment(schema);
         auto raw_info = raw_files_.Prepare(json_fid_, {json_field_});
         segment_->LoadFieldData(raw_info);
-        auto opened = expr_index::BuildIndex(
-            json_fid_, DataType::JSON, index::INVERTED_INDEX_TYPE,
-            {json_field_}, {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
-        expr_index::InstallIndex(*segment_, json_fid_, DataType::JSON,
-                                  std::move(opened));
+        auto opened =
+            expr_index::BuildIndex(json_fid_,
+                                   DataType::JSON,
+                                   index::INVERTED_INDEX_TYPE,
+                                   {json_field_},
+                                   {{JSON_PATH, ""}, {JSON_CAST_TYPE, "JSON"}});
+        expr_index::InstallIndex(
+            *segment_, json_fid_, DataType::JSON, std::move(opened));
     }
 
-    void TearDown() override {
+    void
+    TearDown() override {
         exec::ExprResCacheManager::Instance().Clear();
         exec::ExprResCacheManager::SetEnabled(false);
     }
@@ -253,7 +266,8 @@ TEST_F(JsonFlatContainsExpressionTest, UsesExactPathThreeValuedValidity) {
         expected_valid);
 }
 
-TEST_F(JsonFlatContainsExpressionTest, RawFallbackPreservesLargeInt64Precision) {
+TEST_F(JsonFlatContainsExpressionTest,
+       RawFallbackPreservesLargeInt64Precision) {
     ExprBatchSizeGuard batch_size_guard(5);
     proto::plan::GenericValue value;
     value.set_int64_val(9007199254740993LL);
@@ -312,9 +326,20 @@ TEST_F(JsonFlatContainsExpressionTest,
     ASSERT_TRUE(cache.SetConfig(config));
     exec::ExprResCacheManager::SetEnabled(true);
 
-    const std::vector<bool> expected_valid = {
-        true, true, true, true, false, false, false,
-        false, true, false, true, true, true, true};
+    const std::vector<bool> expected_valid = {true,
+                                              true,
+                                              true,
+                                              true,
+                                              false,
+                                              false,
+                                              false,
+                                              false,
+                                              true,
+                                              false,
+                                              true,
+                                              true,
+                                              true,
+                                              true};
     const auto check_validity = [&](const ColumnVectorPtr& result) {
         ASSERT_EQ(result->size(), expected_valid.size());
         TargetBitmapView valid(result->GetValidRawData(), result->size());
@@ -323,10 +348,12 @@ TEST_F(JsonFlatContainsExpressionTest,
         }
     };
 
-    check_validity(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}));
+    check_validity(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {1}));
     EXPECT_EQ(cache.GetEntryCount(), 2);
 
-    check_validity(Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {2}));
+    check_validity(
+        Evaluate(proto::plan::JSONContainsExpr_JSONOp_Contains, {2}));
     EXPECT_EQ(cache.GetEntryCount(), 3);
 
     check_validity(

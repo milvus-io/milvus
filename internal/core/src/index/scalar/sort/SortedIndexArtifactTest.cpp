@@ -204,8 +204,7 @@ TEST(SortedIndexArtifactTest, StringPostingRowBeyondCountIsRejected) {
     data.validity_present = false;
     auto artifact = BuildSorted(backend, std::move(data));
     auto persisted = SerializeV3(*artifact);
-    auto& payload =
-        persisted.entries.at(std::string(sort_format::kIndexData));
+    auto& payload = persisted.entries.at(std::string(sort_format::kIndexData));
     auto read_u32 = [&](size_t offset) {
         EXPECT_LE(offset + sizeof(uint32_t), payload.size());
         uint32_t value = 0;
@@ -218,8 +217,8 @@ TEST(SortedIndexArtifactTest, StringPostingRowBeyondCountIsRejected) {
     const size_t offsets_start = sizeof(uint32_t);
     const size_t strings_start = offsets_start + unique * sizeof(uint32_t);
     ASSERT_LE(strings_start, payload.size());
-    const auto last_string = read_u32(offsets_start +
-                                      (unique - 1) * sizeof(uint32_t));
+    const auto last_string =
+        read_u32(offsets_start + (unique - 1) * sizeof(uint32_t));
     const size_t last_length_at = strings_start + last_string;
     const size_t postings_offsets_start =
         last_length_at + sizeof(uint32_t) + read_u32(last_length_at);

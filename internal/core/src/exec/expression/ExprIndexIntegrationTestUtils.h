@@ -66,7 +66,8 @@ class RawFieldFiles {
     }
 
     RawFieldFiles(const RawFieldFiles&) = delete;
-    RawFieldFiles& operator=(const RawFieldFiles&) = delete;
+    RawFieldFiles&
+    operator=(const RawFieldFiles&) = delete;
 
     ~RawFieldFiles() {
         for (const auto& file : files_) {
@@ -85,16 +86,14 @@ class RawFieldFiles {
         const auto batch_id = NextFixtureId();
         for (size_t i = 0; i < chunks.size(); ++i) {
             const auto& chunk = chunks[i];
-            const auto file = cm_->GetRootPath() +
-                              "/expr_index_integration/" +
-                              std::to_string(id_) + "/" +
-                              std::to_string(batch_id) + "/" +
-                              std::to_string(field_id.get()) + "/" +
-                              std::to_string(i);
+            const auto file =
+                cm_->GetRootPath() + "/expr_index_integration/" +
+                std::to_string(id_) + "/" + std::to_string(batch_id) + "/" +
+                std::to_string(field_id.get()) + "/" + std::to_string(i);
             auto payload = std::make_shared<storage::PayloadReader>(chunk);
             storage::InsertData insert(payload);
-            insert.SetFieldDataMeta({1, 1, static_cast<int64_t>(id_),
-                                     field_id.get()});
+            insert.SetFieldDataMeta(
+                {1, 1, static_cast<int64_t>(id_), field_id.get()});
             auto bytes = insert.serialize_to_remote_file();
             cm_->Write(file, bytes.data(), bytes.size());
             files_.push_back(file);
@@ -118,11 +117,12 @@ inline std::shared_ptr<FieldData<std::string>>
 StringField(const std::vector<std::string>& rows,
             bool nullable = false,
             const uint8_t* validity = nullptr) {
-    auto field = std::make_shared<FieldData<std::string>>(
-        DataType::VARCHAR, nullable);
+    auto field =
+        std::make_shared<FieldData<std::string>>(DataType::VARCHAR, nullable);
     FieldDataBase& output = *field;
     if (nullable) {
-        AssertInfo(validity != nullptr, "nullable string fixture needs validity");
+        AssertInfo(validity != nullptr,
+                   "nullable string fixture needs validity");
         output.FillFieldData(rows.data(), validity, rows.size(), 0);
     } else {
         output.FillFieldData(rows.data(), rows.size());
@@ -144,9 +144,9 @@ JsonField(const std::vector<std::string>& rows,
     if (nullable) {
         std::vector<uint8_t> all_valid((rows.size() + 7) / 8, 0xFF);
         output.FillFieldData(jsons.data(),
-                            validity == nullptr ? all_valid.data() : validity,
-                            jsons.size(),
-                            0);
+                             validity == nullptr ? all_valid.data() : validity,
+                             jsons.size(),
+                             0);
     } else {
         output.FillFieldData(jsons.data(), jsons.size());
     }
@@ -198,7 +198,8 @@ BuildIndex(FieldId field_id,
     artifact->Serialize(writer);
     writer.Finish();
     auto input = std::make_shared<storage::RemoteInputStream>(
-        std::make_shared<arrow::io::BufferReader>(buffer->Finish().ValueOrDie()));
+        std::make_shared<arrow::io::BufferReader>(
+            buffer->Finish().ValueOrDie()));
     auto source = storage::IndexEntryReader::Open(input, input->Size());
     const auto family = index::ResolvePackedLoadFamily(
         adapted.family, source->IndexMeta(), adapted.params);
@@ -231,27 +232,38 @@ class ReaderTranslator final
           key_("expr-reader-" + std::to_string(NextFixtureId())),
           observed_(observed),
           meta_(usage_.file_bytes > 0 ? cachinglayer::StorageType::DISK
-                                     : cachinglayer::StorageType::MEMORY,
+                                      : cachinglayer::StorageType::MEMORY,
                 cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
                 cachinglayer::CellDataType::SCALAR_INDEX,
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
     }
 
-    size_t num_cells() const override { return 1; }
-    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t) const override {
+    size_t
+    num_cells() const override {
+        return 1;
+    }
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t) const override {
         return 0;
     }
     std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
         return {usage_, {0, 0}};
     }
-    int64_t cells_storage_bytes(
+    int64_t
+    cells_storage_bytes(
         const std::vector<cachinglayer::cid_t>&) const override {
         return usage_.file_bytes;
     }
-    const std::string& key() const override { return key_; }
-    cachinglayer::Meta* meta() override { return &meta_; }
+    const std::string&
+    key() const override {
+        return key_;
+    }
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
     std::vector<std::pair<cachinglayer::cid_t, index::IIndexReaderBasePtr>>
     get_cells(OpContext* context,
               const std::vector<cachinglayer::cid_t>& cells) override {
@@ -260,8 +272,8 @@ class ReaderTranslator final
         if (observed_ != nullptr) {
             *observed_ = context;
         }
-        std::vector<std::pair<cachinglayer::cid_t,
-                              index::IIndexReaderBasePtr>> result;
+        std::vector<std::pair<cachinglayer::cid_t, index::IIndexReaderBasePtr>>
+            result;
         result.emplace_back(0, std::move(reader_));
         return result;
     }
@@ -292,13 +304,12 @@ InstallIndex(segcore::SegmentSealed& segment,
     info.index_caps = opened.caps;
     info.num_rows = opened.reader->Count();
     for (const auto& [key, value] : opened.params.items()) {
-        info.index_params.emplace(key,
-                                  value.is_string()
-                                      ? value.get<std::string>()
-                                      : value.dump());
+        info.index_params.emplace(
+            key, value.is_string() ? value.get<std::string>() : value.dump());
     }
-    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>> translator =
-        std::make_unique<ReaderTranslator>(std::move(opened.reader), observed);
+    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
+        translator = std::make_unique<ReaderTranslator>(
+            std::move(opened.reader), observed);
     info.cache_index = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
     // Consumer tests retain a raw column for refinement/fallback. The fixture

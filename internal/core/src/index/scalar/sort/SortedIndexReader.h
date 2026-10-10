@@ -234,9 +234,7 @@ class SortedStorageView<std::string_view> {
     FileUsage() const;
 
     TargetBitmap
-    PatternMatch(size_t count,
-                 std::string_view pattern,
-                 PatternOp op) const;
+    PatternMatch(size_t count, std::string_view pattern, PatternOp op) const;
 
  private:
     std::shared_ptr<const SortedStringLayout> layout_;

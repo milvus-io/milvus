@@ -132,10 +132,7 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // runtime node exists. Inherit its inputs' effective batch size.
             auto batch_size = ngram_exprs[0]->GetNextBatchSize();
             auto like_conjunct = std::make_shared<PhyLikeConjunctExpr>(
-                std::move(ngram_exprs),
-                op_ctx_,
-                active_count,
-                batch_size);
+                std::move(ngram_exprs), op_ctx_, active_count, batch_size);
             inputs_.push_back(like_conjunct);
         } else {
             batch_ngram_indices_.clear();

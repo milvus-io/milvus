@@ -21,11 +21,13 @@
 namespace milvus::storage {
 namespace {
 
-TEST(ScalarLoadAdmissionTest, EncryptedBitmapIncludesDestinationAndFullStreamMemory) {
+TEST(ScalarLoadAdmissionTest,
+     EncryptedBitmapIncludesDestinationAndFullStreamMemory) {
     auto& admission = LoadAdmissionController::GetInstance();
     const auto previous = admission.CapacityBytes();
     auto& plugins = PluginLoader::GetInstance();
-    plugins.registerPluginForTest(std::make_shared<milvus::test::PlannerCipherPlugin>());
+    plugins.registerPluginForTest(
+        std::make_shared<milvus::test::PlannerCipherPlugin>());
     auto restore = folly::makeGuard([&] {
         admission.SetCapacityBytes(previous);
         plugins.unregisterPluginForTest("CipherPlugin");
@@ -33,9 +35,13 @@ TEST(ScalarLoadAdmissionTest, EncryptedBitmapIncludesDestinationAndFullStreamMem
     admission.SetCapacityBytes(0);
     constexpr uint64_t bytes = 32 * 1024 * 1024;
     const auto request = index::ScalarIndexLoadResource(
-        DataType::INT64, 0, bytes,
+        DataType::INT64,
+        0,
+        bytes,
         {{index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
-         {index::SCALAR_INDEX_ENGINE_VERSION, "3"}}, false, 1024);
+         {index::SCALAR_INDEX_ENGINE_VERSION, "3"}},
+        false,
+        1024);
     EXPECT_EQ(request.final_memory_cost,
               bytes + index::kScalarIndexFixedResidentBytes);
     EXPECT_EQ(request.max_memory_cost,

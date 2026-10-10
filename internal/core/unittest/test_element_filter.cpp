@@ -752,20 +752,29 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     // Insert batch 2 first (docs 10-19) - should be cached
     auto batch2 = gen_batch(10, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        10, 10, batch2.row_ids_.data(), batch2.timestamps_.data(), batch2.SharedRaw());
+    segment->Insert(10,
+                    10,
+                    batch2.row_ids_.data(),
+                    batch2.timestamps_.data(),
+                    batch2.SharedRaw());
 
     // Insert batch 1 (docs 0-9) - should trigger drain of batch 2
     auto batch1 = gen_batch(0, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        0, 10, batch1.row_ids_.data(), batch1.timestamps_.data(), batch1.SharedRaw());
+    segment->Insert(0,
+                    10,
+                    batch1.row_ids_.data(),
+                    batch1.timestamps_.data(),
+                    batch1.SharedRaw());
 
     // Insert batch 3 (docs 25-34) - should be cached (gap at 20-24)
     auto batch3 = gen_batch(25, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.SharedRaw());
+    segment->Insert(25,
+                    10,
+                    batch3.row_ids_.data(),
+                    batch3.timestamps_.data(),
+                    batch3.SharedRaw());
 
     // Verify ArrayOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -2968,14 +2977,14 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
 
     if (with_sealed) {
         std::vector<int32_t> indexed_elements = {7, 9};
-        auto nested_index = BuildTestScalarIndex<int32_t>(
-            milvus::index::families::kSort,
-            indexed_elements.size(),
-            indexed_elements.data(),
-            nullptr,
-            {{"nested", true},
-             {"field_type", DataType::ARRAY},
-             {"element_type", DataType::INT32}});
+        auto nested_index =
+            BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                          indexed_elements.size(),
+                                          indexed_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
 
         LoadIndexInfo load_info{};
         load_info.field_id = int_array_fid.get();
@@ -3046,11 +3055,8 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     std::vector<int64_t> row_ids = {0, 1, 2};
     std::vector<Timestamp> timestamps = {100, 101, 102};
     auto offset = segment->PreInsert(3);
-    segment->Insert(offset,
-                    3,
-                    row_ids.data(),
-                    timestamps.data(),
-                    insert_record_proto);
+    segment->Insert(
+        offset, 3, row_ids.data(), timestamps.data(), insert_record_proto);
 
     proto::plan::PlanNode plan_node;
     auto* query = plan_node.mutable_query();
@@ -3291,14 +3297,14 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
         const auto family = index_type == NestedIndexType::STL_SORT
                                 ? milvus::index::families::kSort
                                 : milvus::index::families::kInverted;
-        auto nested_index = BuildTestScalarIndex<int32_t>(
-            family,
-            all_elements.size(),
-            all_elements.data(),
-            nullptr,
-            {{"nested", true},
-             {"field_type", DataType::ARRAY},
-             {"element_type", DataType::INT32}});
+        auto nested_index =
+            BuildTestScalarIndex<int32_t>(family,
+                                          all_elements.size(),
+                                          all_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
 
         // Load nested index to segment
         LoadIndexInfo nested_load_info{};
@@ -4042,14 +4048,14 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
         }
     }
 
-    auto stl_index = BuildTestScalarIndex<int32_t>(
-        milvus::index::families::kSort,
-        all_elements.size(),
-        all_elements.data(),
-        nullptr,
-        {{"nested", true},
-         {"field_type", DataType::ARRAY},
-         {"element_type", DataType::INT32}});
+    auto stl_index =
+        BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                      all_elements.size(),
+                                      all_elements.data(),
+                                      nullptr,
+                                      {{"nested", true},
+                                       {"field_type", DataType::ARRAY},
+                                       {"element_type", DataType::INT32}});
 
     LoadIndexInfo nested_load_info{};
     nested_load_info.field_id = int_array_fid.get();

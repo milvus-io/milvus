@@ -106,13 +106,14 @@ class TimestamptzCompareCorrectnessTest : public ::testing::Test {
     LoadTimestamptzIndex(FieldId fid,
                          const int64_t* values,
                          const bool* valid) {
-        auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
-            "sort", N, values, valid);
+        auto scalar_index =
+            milvus::BuildTestScalarIndex<int64_t>("sort", N, values, valid);
 
         LoadIndexInfo load_index_info{};
         load_index_info.field_id = fid.get();
         load_index_info.field_type = DataType::TIMESTAMPTZ;
-        load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        load_index_info.index_params =
+            GenIndexParams(scalar_index.get(), "sort");
         SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
         load_index_info.cache_index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));

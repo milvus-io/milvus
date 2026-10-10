@@ -113,7 +113,6 @@ struct ExecPathDecision {
     // index-backed. The caller passes this straight to
     // `segcore::SegmentInterface::PinIndex` — ONCE, for the whole expression node.
     std::optional<segcore::IndexKey> key;
-
 };
 
 // Pure function of requirements and metadata: no pin, cast, or exception probe.
@@ -156,8 +155,8 @@ RelativePathContainsInteger(std::string_view prefix, std::string_view path) {
         }
         const auto end = relative.find('/', pos);
         const auto token = relative.substr(
-            pos, end == std::string_view::npos ? relative.size() - pos
-                                               : end - pos);
+            pos,
+            end == std::string_view::npos ? relative.size() - pos : end - pos);
         if (!token.empty() && milvus::IsInteger(std::string(token))) {
             return true;
         }
@@ -170,9 +169,8 @@ inline bool
 ReaderMatches(const ExprIndexRequirement& req,
               const segcore::IndexCapabilityEntry& entry) {
     const auto& caps = entry.caps;
-    const bool multi_path_router =
-        req.is_json_field && caps.json_paths &&
-        entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && caps.json_paths &&
+                                   entry.value_type == DataType::JSON;
     if (multi_path_router) {
         return req.reader == RequiredReader::Predicate ||
                req.reader == RequiredReader::PatternMatch ||
@@ -212,8 +210,7 @@ PathMatchScore(const ExprIndexRequirement& req,
     }
     const bool multi_path_router =
         entry.caps.json_paths && entry.value_type == DataType::JSON;
-    if (!multi_path_router ||
-        !IsPathPrefix(entry.json_path, req.json_path) ||
+    if (!multi_path_router || !IsPathPrefix(entry.json_path, req.json_path) ||
         RelativePathContainsInteger(entry.json_path, req.json_path)) {
         return -1;
     }
@@ -226,9 +223,8 @@ ValueTypeMatches(const ExprIndexRequirement& req,
     if (req.value_type == DataType::NONE) {
         return true;
     }
-    const bool multi_path_router =
-        req.is_json_field && entry.caps.json_paths &&
-        entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && entry.caps.json_paths &&
+                                   entry.value_type == DataType::JSON;
     if (multi_path_router) {
         return true;
     }
@@ -248,17 +244,14 @@ ValueTypeMatches(const ExprIndexRequirement& req,
         // array-element query must not guess that an unknown cast was ARRAY_*.
         return !req.json_array_cast;
     }
-    return (cast_shape == JsonCastType::DataType::ARRAY) ==
-           req.json_array_cast;
+    return (cast_shape == JsonCastType::DataType::ARRAY) == req.json_array_cast;
 }
 
 inline bool
-NeedsCandidateRefine(RequiredReader required,
-                     const index::ReaderCaps& caps) {
-    return !caps.exact &&
-           (required == RequiredReader::Predicate ||
-            required == RequiredReader::Ngram ||
-            required == RequiredReader::Spatial);
+NeedsCandidateRefine(RequiredReader required, const index::ReaderCaps& caps) {
+    return !caps.exact && (required == RequiredReader::Predicate ||
+                           required == RequiredReader::Ngram ||
+                           required == RequiredReader::Spatial);
 }
 
 }  // namespace index_path_detail
@@ -285,8 +278,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
             !index_path_detail::ValueTypeMatches(req, entry)) {
             continue;
         }
-        const auto path_score =
-            index_path_detail::PathMatchScore(req, entry);
+        const auto path_score = index_path_detail::PathMatchScore(req, entry);
         if (path_score < 0) {
             continue;
         }

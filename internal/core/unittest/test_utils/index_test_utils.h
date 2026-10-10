@@ -53,7 +53,8 @@ SetTestIndexMetadata(segcore::LoadIndexInfo& info,
     if (info.field_type == DataType::NONE) {
         info.field_type = reader.ValueType();
     }
-    if (const auto* vector = dynamic_cast<const index::IVectorReader*>(&reader)) {
+    if (const auto* vector =
+            dynamic_cast<const index::IVectorReader*>(&reader)) {
         info.dim = vector->Dim();
     }
 }

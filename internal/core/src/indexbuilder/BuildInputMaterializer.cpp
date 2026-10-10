@@ -54,7 +54,8 @@ ParseNested(const index::BuildParams& params) {
 
 DataType
 ResolveArrayElementType(const index::BuildParams& params) {
-    auto current = index::ReadNullableDataTypeParam(params, "array_element_type");
+    auto current =
+        index::ReadNullableDataTypeParam(params, "array_element_type");
     auto legacy = index::ReadNullableDataTypeParam(params, "element_type");
     if (current == DataType::NONE)
         current.reset();

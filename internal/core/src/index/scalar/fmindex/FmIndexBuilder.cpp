@@ -158,8 +158,8 @@ ParseBuildParams(const BuildParams& params) {
     }
     result.value_type = ParseValueType(params);
     if (params.contains("nullable") && !params.at("nullable").is_null()) {
-        result.nullable = GetValueFromConfigOrFallback<bool>(
-            params, "nullable", false);
+        result.nullable =
+            GetValueFromConfigOrFallback<bool>(params, "nullable", false);
     }
     result.local_dir = ParseStringParam(params, "local_dir");
     return result;
@@ -320,11 +320,11 @@ FmIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
                                                  params_.value_type,
                                                  params_.nullable,
                                                  std::move(params_.local_dir));
-    // Same classification the shared GuardFmIndexLibrary applies on the load
-    // path (FmIndexArtifact.h), with IndexBuildError as this phase's fallback:
-    // the vendored library throws untyped std:: exceptions, and an unclassified
-    // one reaches cgo as UnexpectedError(2001). bad_alloc stays separate because
-    // it is transient and retriable while a build failure is permanent.
+        // Same classification the shared GuardFmIndexLibrary applies on the load
+        // path (FmIndexArtifact.h), with IndexBuildError as this phase's fallback:
+        // the vendored library throws untyped std:: exceptions, and an unclassified
+        // one reaches cgo as UnexpectedError(2001). bad_alloc stays separate because
+        // it is transient and retriable while a build failure is permanent.
     } catch (const SegcoreError&) {
         throw;
     } catch (const std::bad_alloc& error) {

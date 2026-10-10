@@ -126,7 +126,8 @@ ReadDataTypeParam(const Config& params, std::string_view key) {
 // Optional normalized types also treat an explicit null as absent.
 inline std::optional<DataType>
 ReadNullableDataTypeParam(const Config& params, std::string_view key) {
-    if (params.is_object() && params.contains(key) && params.at(key).is_null()) {
+    if (params.is_object() && params.contains(key) &&
+        params.at(key).is_null()) {
         return std::nullopt;
     }
     return ReadDataTypeParam(params, key);

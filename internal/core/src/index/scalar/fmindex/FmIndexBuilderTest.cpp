@@ -34,9 +34,13 @@ namespace {
 using StringBuilder = BuilderRegistry<ScalarBuildInput<std::string_view>>;
 
 TEST(FmIndexBuilderTest, RejectsInvalidNumericParametersWithInputCode) {
-    const std::array<Config, 7> bad_values = {
-        Config("abc"), Config("3"), Config("257"), Config("8junk"),
-        Config(-1), Config(8.5), Config(true)};
+    const std::array<Config, 7> bad_values = {Config("abc"),
+                                              Config("3"),
+                                              Config("257"),
+                                              Config("8junk"),
+                                              Config(-1),
+                                              Config(8.5),
+                                              Config(true)};
     for (const auto& value : bad_values) {
         SCOPED_TRACE(value.dump());
         const Config params = {{FM_SA_SAMPLE_RATE, value}};
@@ -45,9 +49,14 @@ TEST(FmIndexBuilderTest, RejectsInvalidNumericParametersWithInputCode) {
                 StringBuilder::Instance().Create(families::kFmIndex, params));
         });
     }
-    for (const auto& value : {Config("abc"), Config("4"), Config("24"),
-                              Config("256"), Config("64junk"), Config(-1),
-                              Config(64.5), Config(false)}) {
+    for (const auto& value : {Config("abc"),
+                              Config("4"),
+                              Config("24"),
+                              Config("256"),
+                              Config("64junk"),
+                              Config(-1),
+                              Config(64.5),
+                              Config(false)}) {
         SCOPED_TRACE(value.dump());
         const Config params = {{FM_BLOCK_BYTES, value}};
         ExpectSegcoreError(ErrorCode::InvalidParameter, [&] {

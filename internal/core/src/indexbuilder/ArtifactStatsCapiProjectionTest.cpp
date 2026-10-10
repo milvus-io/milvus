@@ -37,9 +37,10 @@ struct ExpectedFile {
 };
 
 void
-ExpectStatsAndCapiProjection(const ArtifactStats& stats,
-                            int64_t expected_mem_size,
-                            std::initializer_list<ExpectedFile> expected_files) {
+ExpectStatsAndCapiProjection(
+    const ArtifactStats& stats,
+    int64_t expected_mem_size,
+    std::initializer_list<ExpectedFile> expected_files) {
     const auto projected = AdaptArtifactStats(stats);
     EXPECT_EQ(stats.MemSize(), expected_mem_size);
     EXPECT_EQ(projected.mem_size(), expected_mem_size);
@@ -74,20 +75,20 @@ TEST(ArtifactStatsCapiProjectionTest,
 
     stats.Append(SerializedFileInfo("0-first.bin", large_file_size));
     ExpectStatsAndCapiProjection(stats,
-                                37,
-                                {{"z-last.bin", 19},
-                                 {"a/empty.meta", 0},
-                                 {"0-first.bin", large_file_size}});
+                                 37,
+                                 {{"z-last.bin", 19},
+                                  {"a/empty.meta", 0},
+                                  {"0-first.bin", large_file_size}});
 
     // Appending an existing name adds another entry without overwriting the
     // earlier entry or merging their sizes.
     stats.Append(SerializedFileInfo("z-last.bin", 23));
     ExpectStatsAndCapiProjection(stats,
-                                37,
-                                {{"z-last.bin", 19},
-                                 {"a/empty.meta", 0},
-                                 {"0-first.bin", large_file_size},
-                                 {"z-last.bin", 23}});
+                                 37,
+                                 {{"z-last.bin", 19},
+                                  {"a/empty.meta", 0},
+                                  {"0-first.bin", large_file_size},
+                                  {"z-last.bin", 23}});
 }
 
 TEST(ArtifactStatsCapiProjectionTest,

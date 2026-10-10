@@ -1592,9 +1592,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using ReaderType = std::conditional_t<std::is_same_v<T, std::string>,
-                                          std::string_view,
-                                          T>;
+    using ReaderType =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
     if (!arg_inited_) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
@@ -1614,8 +1613,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     }
     auto op_type = expr_->op_type_;
     auto execute_sub_batch = [this, op_type](
-                                 const index::IScalarPredicateReader<ReaderType>*
-                                     index_ptr,
+                                 const index::IScalarPredicateReader<
+                                     ReaderType>* index_ptr,
                                  const IndexInnerType& stored_val) {
         const ReaderType val = stored_val;
         TargetBitmap res;
@@ -2324,8 +2323,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                 } else if (op_type == proto::plan::OpType::PhraseMatch) {
                     res = text_reader_->PhraseMatchQuery(query, slop);
                 } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
-                    res = text_reader_->FuzzyMatchQuery(query,
-                                                        max_edit_distance);
+                    res =
+                        text_reader_->FuzzyMatchQuery(query, max_edit_distance);
                 } else {
                     ThrowInfo(UnexpectedError,
                               "unsupported operator type for match query: {}",
@@ -2338,10 +2337,11 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                            covered);
                 res.resize(covered);
                 auto valid_res = null_reader_->IsNotNull();
-                AssertInfo(valid_res.size() >= static_cast<size_t>(covered),
-                           "text null index covers {} rows, snapshot requires {}",
-                           valid_res.size(),
-                           covered);
+                AssertInfo(
+                    valid_res.size() >= static_cast<size_t>(covered),
+                    "text null index covers {} rows, snapshot requires {}",
+                    valid_res.size(),
+                    covered);
                 valid_res.resize(covered);
                 if (covered < active_count_) {
                     TargetBitmap tail(active_count_ - covered);
@@ -2381,8 +2381,7 @@ PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
         return false;
     }
     auto literal = GetValueFromProto<std::string>(expr_->val_);
-    return ngram_reader_->CanHandle(literal,
-                                    ToIndexPatternOp(expr_->op_type_));
+    return ngram_reader_->CanHandle(literal, ToIndexPatternOp(expr_->op_type_));
 }
 
 void
@@ -2419,8 +2418,8 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
         auto execute_batch = [&predicate](const std::string_view* data,
                                           int64_t size,
                                           TargetBitmapView output) {
-            for (auto pos = output.find_first(); pos.has_value() &&
-                 *pos < static_cast<size_t>(size);
+            for (auto pos = output.find_first();
+                 pos.has_value() && *pos < static_cast<size_t>(size);
                  pos = output.find_next(*pos)) {
                 if (!predicate(data[*pos])) {
                     output[*pos] = false;
@@ -2434,8 +2433,8 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
         auto execute_batch = [&predicate](const milvus::Json* data,
                                           int64_t size,
                                           TargetBitmapView output) {
-            for (auto pos = output.find_first(); pos.has_value() &&
-                 *pos < static_cast<size_t>(size);
+            for (auto pos = output.find_first();
+                 pos.has_value() && *pos < static_cast<size_t>(size);
                  pos = output.find_next(*pos)) {
                 if (!predicate(data[*pos])) {
                     output[*pos] = false;
@@ -2488,11 +2487,11 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
 
     if (field_type_ == DataType::JSON) {
         auto pointer = milvus::Json::pointer(nested_path_);
-        apply_json_predicate([pointer = std::move(pointer), &matches](
-                                 const milvus::Json& data) {
-            auto value = data.template at<std::string_view>(pointer);
-            return !value.error() && matches(value.value());
-        });
+        apply_json_predicate(
+            [pointer = std::move(pointer), &matches](const milvus::Json& data) {
+                auto value = data.template at<std::string_view>(pointer);
+                return !value.error() && matches(value.value());
+            });
     } else {
         apply_string_predicate(matches);
     }
@@ -2585,8 +2584,8 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
                    "count {}",
                    validity.size(),
                    active_count_);
-        cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
-            std::move(validity));
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(std::move(validity));
     }
 
     const int64_t segment_offset = current_index_chunk_pos_;
@@ -2696,8 +2695,8 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
             literal, ToIndexPatternOp(expr_->op_type_), candidates);
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
-        cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
-            null_reader_->IsNotNull());
+        cached_index_chunk_valid_res_ =
+            std::make_shared<TargetBitmap>(null_reader_->IsNotNull());
     }
 
     // Phase 2: Execute per batch with batch-level bitmap_input
@@ -2717,9 +2716,8 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
 
     // Execute Phase2 (post-filter) on this batch
     if (!batch_candidates.none()) {
-        ExecuteNgramPhase2(batch_candidates,
-                           current_data_global_pos_,
-                           real_batch_size);
+        ExecuteNgramPhase2(
+            batch_candidates, current_data_global_pos_, real_batch_size);
     }
 
     TargetBitmap valid_result;

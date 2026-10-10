@@ -88,8 +88,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         }
     }
 
-    if (milvus::exec::UseVectorIterator(search_conf) &&
-        !owns_search_bitset) {
+    if (milvus::exec::UseVectorIterator(search_conf) && !owns_search_bitset) {
         AssertInfo(active_count >= 0,
                    "growing vector iterator requires a fixed logical prefix");
         TargetBitmap owned_filter(static_cast<size_t>(active_count), true);
@@ -102,8 +101,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                 owned_filter[i] = search_bitset.test(i);
             }
         }
-        search_bitset =
-            search_result.PinBitset(std::move(owned_filter));
+        search_bitset = search_result.PinBitset(std::move(owned_filter));
     }
 
     if (active_count >= 0) {

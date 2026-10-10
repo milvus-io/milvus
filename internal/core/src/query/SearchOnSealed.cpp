@@ -130,11 +130,8 @@ SearchOnSealedIndex(const Schema& schema,
     BitsetView search_bitset = bitset;
 
     if (search_info.iterator_v2_info_.has_value()) {
-        CachedSearchIterator cached_iter(reader,
-                                         dataset,
-                                         search_info,
-                                         search_bitset,
-                                         op_context);
+        CachedSearchIterator cached_iter(
+            reader, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.array_offsets_.get());

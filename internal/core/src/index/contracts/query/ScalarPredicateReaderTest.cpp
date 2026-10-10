@@ -55,8 +55,8 @@ CheckArrayRowsMultiKey(std::string_view type_name, T first, T last) {
             SCOPED_TRACE(dataset_name + "/" + backend.Name());
             auto data = dataset.make_data();
             const ScalarTestInput<ArrayView> input(data);
-            auto artifact = backend.Build(input.View(),
-                                          {.row_count = data.values.size()});
+            auto artifact =
+                backend.Build(input.View(), {.row_count = data.values.size()});
             ASSERT_NE(artifact, nullptr);
             auto reader = backend.Open(std::move(artifact), {.row_count = 4});
             ASSERT_NE(reader, nullptr);
@@ -852,7 +852,8 @@ AddResultOwnershipCase(IndexTestCases& cases) {
                         auto interval = predicate->Range(key, true, key, true);
 
                         const auto expected_in = In<T>::Oracle(
-                            data, typename In<T>::Args{.keys = {values.middle}});
+                            data,
+                            typename In<T>::Args{.keys = {values.middle}});
                         const auto expected_not_in = NotIn<T>::Oracle(
                             data,
                             typename NotIn<T>::Args{.keys = {values.middle}});

@@ -86,11 +86,8 @@ class IPatternMatchReader {
 
 // String-only CRTP bridge for typed scalar readers. Numeric instantiations
 // inherit an empty primary, so they do not expose IPatternMatchReader.
-template <typename Derived,
-          typename T,
-          bool DelegateShouldUseForOp = false>
-class PatternMatchReaderAdapter {
-};
+template <typename Derived, typename T, bool DelegateShouldUseForOp = false>
+class PatternMatchReaderAdapter {};
 
 template <typename Derived, bool DelegateShouldUseForOp>
 class PatternMatchReaderAdapter<Derived,

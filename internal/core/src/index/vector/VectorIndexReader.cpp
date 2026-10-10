@@ -333,7 +333,8 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
         const knowhere::sparse::SparseRow<SparseValueType>[]>(tensor);
 }
 
-MetricType VectorIndexReader::Metric() const {
+MetricType
+VectorIndexReader::Metric() const {
     return engine_.Metric();
 }
 

@@ -54,9 +54,8 @@ class RegistryTable {
         std::lock_guard lock(mu_);
         auto [it, inserted] =
             table_.emplace(std::move(family), std::move(value));
-        AssertInfo(inserted,
-                   "duplicate index family registration: {}",
-                   it->first);
+        AssertInfo(
+            inserted, "duplicate index family registration: {}", it->first);
     }
 
     Value

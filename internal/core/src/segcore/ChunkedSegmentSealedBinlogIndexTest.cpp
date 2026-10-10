@@ -421,18 +421,23 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
 
     OpenedIndex
     BuildFinalVectorIndex() {
-        const auto config = Config{
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, data_d},
-            {knowhere::indexparam::NLIST, 64}};
+        const auto config = Config{{knowhere::meta::METRIC_TYPE, metric_type},
+                                   {knowhere::meta::DIM, data_d},
+                                   {knowhere::indexparam::NLIST, 64}};
         auto build = [&]<typename T>() {
             // Keep the original logical row map: the engine tensor omits null
             // rows, while search filters/results still use segment offsets.
             return BuildVectorReader<T>(
-                data_type, index_type, metric_type, data_d, data_n,
-                static_cast<const typename index::VectorBuildInput<T>::value_type*>(
+                data_type,
+                index_type,
+                metric_type,
+                data_d,
+                data_n,
+                static_cast<
+                    const typename index::VectorBuildInput<T>::value_type*>(
                     raw_dataset->GetTensor()),
-                config, true,
+                config,
+                true,
                 nullable ? ValidityView::FromPacked(valid_data.data())
                          : ValidityView{},
                 valid_count);
@@ -845,10 +850,14 @@ TEST(test_chunk_segment,
     ASSERT_TRUE(segment->HasFieldData(vec_field_id));
     ASSERT_EQ(segment->get_row_count(), data_n);
 
-    auto indexing = BuildVectorReader<float>(
-        DataType::VECTOR_FLOAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-        knowhere::metric::L2, dim, valid_count, vec_values.data(),
-        {{knowhere::indexparam::NLIST, 16}});
+    auto indexing =
+        BuildVectorReader<float>(DataType::VECTOR_FLOAT,
+                                 knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                 knowhere::metric::L2,
+                                 dim,
+                                 valid_count,
+                                 vec_values.data(),
+                                 {{knowhere::indexparam::NLIST, 16}});
     auto load_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, vec_field_id.get());
     ASSERT_NO_THROW(segment->LoadIndex(load_info));

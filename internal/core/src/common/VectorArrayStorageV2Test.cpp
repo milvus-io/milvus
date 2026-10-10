@@ -318,12 +318,12 @@ class TestVectorArrayStorageV2 : public testing::Test {
                  IndexVersion engine_version,
                  Config params) {
         auto field_meta = gen_field_meta(1,
-                                        2,
-                                        segment_id,
-                                        field_id.get(),
-                                        DataType::VECTOR_ARRAY,
-                                        DataType::VECTOR_FLOAT,
-                                        false);
+                                         2,
+                                         segment_id,
+                                         field_id.get(),
+                                         DataType::VECTOR_ARRAY,
+                                         DataType::VECTOR_FLOAT,
+                                         false);
         auto index_meta =
             gen_index_meta(segment_id, field_id.get(), build_id, index_version);
         index_meta.dim = DIM;
@@ -374,12 +374,12 @@ class TestVectorArrayStorageV2 : public testing::Test {
         context.set_for_loading_index(true);
         return index::LoaderRegistry::Instance()
             .Lookup(published.family)
-            .Load({index::IndexFiles{
-                       std::move(context),
-                       std::move(paths),
-                       index::LegacyIndexStorageConfig{
-                           storage::V1SourceLayout::MemoryEntries}},
-                   std::move(options)});
+            .Load(
+                {index::IndexFiles{std::move(context),
+                                   std::move(paths),
+                                   index::LegacyIndexStorageConfig{
+                                       storage::V1SourceLayout::MemoryEntries}},
+                 std::move(options)});
     }
 
     SchemaPtr schema_;
@@ -404,14 +404,14 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
-    auto published = PublishIndex(
-        paths,
-        vector_array_field_id,
-        3,
-        4000,
-        4000,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        std::move(config));
+    auto published =
+        PublishIndex(paths,
+                     vector_array_field_id,
+                     3,
+                     4000,
+                     4000,
+                     knowhere::Version::GetCurrentVersion().VersionNumber(),
+                     std::move(config));
     auto owner = OpenIndex(published);
     auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
     ASSERT_NE(vec_index, nullptr);
@@ -476,14 +476,14 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM_IP;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
-    auto published = PublishIndex(
-        paths,
-        vector_array_field_id,
-        3,
-        4000,
-        4000,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        std::move(config));
+    auto published =
+        PublishIndex(paths,
+                     vector_array_field_id,
+                     3,
+                     4000,
+                     4000,
+                     knowhere::Version::GetCurrentVersion().VersionNumber(),
+                     std::move(config));
     ASSERT_GT(published.stats.MemSize(), 0);
     const auto serialized_size = std::accumulate(
         published.stats.Files().begin(),
@@ -585,13 +585,13 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
                                       knowhere::kEmbListMetaV2MinVersion,
                                       std::move(config));
         ASSERT_GT(published.stats.MemSize(), 0);
-        const auto serialized_size = std::accumulate(
-            published.stats.Files().begin(),
-            published.stats.Files().end(),
-            int64_t{0},
-            [](int64_t size, const auto& file) {
-                return size + file.file_size;
-            });
+        const auto serialized_size =
+            std::accumulate(published.stats.Files().begin(),
+                            published.stats.Files().end(),
+                            int64_t{0},
+                            [](int64_t size, const auto& file) {
+                                return size + file.file_size;
+                            });
         ASSERT_GT(serialized_size, 0);
 
         auto materialized_owner = OpenIndex(published);
@@ -603,10 +603,10 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         auto mismatched = published;
         mismatched.params[DIM_KEY] = DIM + 1;
         for (const bool mmap : {false, true}) {
-            EXPECT_THROW(OpenIndex(mismatched,
-                                   mmap,
-                                   "test_emb_list_bad_dim_" + strategy),
-                         SegcoreError);
+            EXPECT_THROW(
+                OpenIndex(
+                    mismatched, mmap, "test_emb_list_bad_dim_" + strategy),
+                SegcoreError);
         }
 
         auto owner = OpenIndex(published, true, "test_emb_list_" + strategy);

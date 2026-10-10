@@ -54,8 +54,7 @@ struct HybridBuildParams {
 };
 
 template <typename T>
-class HybridIndexBuilder final
-    : public IArtifactBuilder<ScalarBuildInput<T>> {
+class HybridIndexBuilder final : public IArtifactBuilder<ScalarBuildInput<T>> {
  public:
     explicit HybridIndexBuilder(HybridBuildParams params);
 

@@ -41,8 +41,8 @@ namespace milvus::index {
 namespace {
 
 using json_flat_params::ParseInteger;
-using json_flat_params::RequireDataTypeParam;
 using json_flat_params::ParseString;
+using json_flat_params::RequireDataTypeParam;
 using json_flat_params::ValidateRowDomain;
 
 constexpr std::string_view kJsonPathParam = "json_path";
@@ -76,9 +76,8 @@ ParseTantivyVersion(const Config& params) {
     }
     const auto version = explicit_version != 0
                              ? static_cast<uint32_t>(explicit_version)
-                             : scalar_version <= 1
-                                   ? TANTIVY_INDEX_MINIMUM_VERSION
-                                   : TANTIVY_INDEX_LATEST_VERSION;
+                         : scalar_version <= 1 ? TANTIVY_INDEX_MINIMUM_VERSION
+                                               : TANTIVY_INDEX_LATEST_VERSION;
     if (version != TANTIVY_INDEX_MINIMUM_VERSION &&
         version != TANTIVY_INDEX_LATEST_VERSION) {
         ThrowInfo(DataTypeInvalid,
@@ -320,8 +319,8 @@ JsonFlatIndexBuilder::Build(
     AssertInfo(engine != nullptr, "JSON flat builder has no writer to finish");
     engine->finish();
     engine.reset();
-    return std::make_unique<JsonFlatIndexArtifact>(
-        std::move(directory), std::move(null_offsets));
+    return std::make_unique<JsonFlatIndexArtifact>(std::move(directory),
+                                                   std::move(null_offsets));
 }
 
 namespace {

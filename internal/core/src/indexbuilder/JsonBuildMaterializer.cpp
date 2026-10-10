@@ -271,8 +271,8 @@ template <typename T>
 class ProjectedBase : public BuildInputMaterializer {
  public:
     ProjectedBase(
-        std::unique_ptr<
-            index::IArtifactBuilder<index::ScalarBuildInput<T>>> builder,
+        std::unique_ptr<index::IArtifactBuilder<index::ScalarBuildInput<T>>>
+            builder,
         ProjectionParams params,
         int64_t expected_rows)
         : builder_(std::move(builder)),
@@ -597,13 +597,11 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
         std::unique_ptr<bool[]> validity;
     };
 
-    ArrayProjectedMaterializer(
-        std::unique_ptr<
-            index::IArtifactBuilder<index::ScalarBuildInput<ArrayView>>>
-            builder,
-        ProjectionParams params,
-        int64_t expected_rows,
-        DataType element_type)
+    ArrayProjectedMaterializer(std::unique_ptr<index::IArtifactBuilder<
+                                   index::ScalarBuildInput<ArrayView>>> builder,
+                               ProjectionParams params,
+                               int64_t expected_rows,
+                               DataType element_type)
         : ProjectedBase(std::move(builder), std::move(params), expected_rows),
           element_type_(element_type) {
     }

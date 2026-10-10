@@ -39,11 +39,13 @@ class VectorBuildSessionRoundTripTest
 
 TEST_P(VectorBuildSessionRoundTripTest, PublishedBinlogIndexCanSearch) {
     const auto& [index_type, metric] = GetParam();
-    const bool binary = index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
-                        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    const bool sparse = index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
-                        index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
-    const auto field_type = binary ? DataType::VECTOR_BINARY
+    const bool binary =
+        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
+        index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    const bool sparse =
+        index_type == knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+        index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND;
+    const auto field_type = binary   ? DataType::VECTOR_BINARY
                             : sparse ? DataType::VECTOR_SPARSE_U32_F32
                                      : DataType::VECTOR_FLOAT;
     constexpr int64_t rows = 512;
@@ -70,10 +72,10 @@ TEST_P(VectorBuildSessionRoundTripTest, PublishedBinlogIndexCanSearch) {
     } else if (sparse) {
         params[knowhere::indexparam::DROP_RATIO_BUILD] = 0.1;
     }
-    const auto prepared =
-        Prepare(field_type, DataType::NONE, false, index_type, rows, dim, params);
-    auto field_data = storage::CreateFieldData(
-        field_type, DataType::NONE, false, dim);
+    const auto prepared = Prepare(
+        field_type, DataType::NONE, false, index_type, rows, dim, params);
+    auto field_data =
+        storage::CreateFieldData(field_type, DataType::NONE, false, dim);
     DatasetPtr queries;
     std::vector<uint8_t> binary_values;
     std::vector<float> float_values;
@@ -93,7 +95,8 @@ TEST_P(VectorBuildSessionRoundTripTest, PublishedBinlogIndexCanSearch) {
         for (int64_t row = 0; row < rows; ++row) {
             sparse_values.emplace_back(2);
             sparse_values.back().set_at(0, static_cast<uint32_t>(row), 2.0F);
-            sparse_values.back().set_at(1, static_cast<uint32_t>(row + rows), 1.0F);
+            sparse_values.back().set_at(
+                1, static_cast<uint32_t>(row + rows), 1.0F);
         }
         field_data->FillFieldData(sparse_values.data(), rows);
         queries = knowhere::GenDataSet(nq, dim, sparse_values.data());
@@ -143,10 +146,13 @@ INSTANTIATE_TEST_SUITE_P(
         Param{knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2},
         Param{knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2},
         Param{knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2},
-        Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::JACCARD},
-        Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, knowhere::metric::JACCARD},
+        Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+              knowhere::metric::JACCARD},
+        Param{knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+              knowhere::metric::JACCARD},
         Param{knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2},
-        Param{knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX, knowhere::metric::IP},
+        Param{knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+              knowhere::metric::IP},
         Param{knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP}),
     [](const ::testing::TestParamInfo<Param>& info) {
         return info.param.first;
@@ -156,20 +162,23 @@ class VectorBuildSessionSlicingTest : public SourceBuildTest {};
 
 TEST_F(VectorBuildSessionSlicingTest, MmapLoadRestoresSlicedValidity) {
     struct SliceSizeGuard {
-        SliceSizeGuard() : previous(FILE_SLICE_SIZE.exchange(64)) {}
-        ~SliceSizeGuard() { FILE_SLICE_SIZE.store(previous); }
+        SliceSizeGuard() : previous(FILE_SLICE_SIZE.exchange(64)) {
+        }
+        ~SliceSizeGuard() {
+            FILE_SLICE_SIZE.store(previous);
+        }
         int64_t previous;
     } slice_size;
     constexpr int64_t rows = 600;
     constexpr int64_t dim = 4;
-    const auto prepared = Prepare(DataType::VECTOR_FLOAT,
-                                   DataType::NONE,
-                                   true,
-                                   knowhere::IndexEnum::INDEX_FAISS_IDMAP,
-                                   rows,
-                                   dim,
-                                   {{knowhere::meta::METRIC_TYPE,
-                                     knowhere::metric::L2}});
+    const auto prepared =
+        Prepare(DataType::VECTOR_FLOAT,
+                DataType::NONE,
+                true,
+                knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                rows,
+                dim,
+                {{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}});
     std::vector<float> values(rows * dim);
     std::vector<uint8_t> validity((rows + 7) / 8, 0);
     int64_t valid_count = 0;
@@ -188,12 +197,10 @@ TEST_F(VectorBuildSessionSlicingTest, MmapLoadRestoresSlicedValidity) {
     WriteInsert(prepared, data);
     const auto stats = Publish(prepared);
     const auto has_file = [&](const std::string& name) {
-        return std::any_of(stats.Files().begin(),
-                            stats.Files().end(),
-                            [&](const auto& file) {
-                                return std::filesystem::path(file.file_name)
-                                           .filename() == name;
-                            });
+        return std::any_of(
+            stats.Files().begin(), stats.Files().end(), [&](const auto& file) {
+                return std::filesystem::path(file.file_name).filename() == name;
+            });
     };
     ASSERT_TRUE(has_file(INDEX_FILE_SLICE_META));
     ASSERT_TRUE(has_file("valid_data_1"));

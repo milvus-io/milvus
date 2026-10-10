@@ -85,15 +85,15 @@ TantivyGrowingTextIndex::TantivyGrowingTextIndex(const char* unique_id,
           milvus::tantivy::DEFAULT_NUM_THREADS,
           WriterMemoryBudget(commit_interval_in_ms),
           /*enable_background_merge=*/true)),
-      commit_policy_(commit_interval_in_ms), value_type_(value_type) {
+      commit_policy_(commit_interval_in_ms),
+      value_type_(value_type) {
     AssertInfo(IsStringDataType(value_type_),
                "growing Tantivy text requires a string value type, got {}",
                static_cast<int>(value_type_));
 }
 
 TantivyGrowingTextIndex::OwnedBatch
-TantivyGrowingTextIndex::OwnBatch(int64_t row_begin,
-                                  const TextBatch& batch) {
+TantivyGrowingTextIndex::OwnBatch(int64_t row_begin, const TextBatch& batch) {
     static_cast<void>(CheckedBatchEnd(row_begin, batch.row_count));
     AssertInfo(batch.row_count == 0 || batch.values != nullptr,
                "growing Tantivy text batch has null values for {} rows",
@@ -157,17 +157,17 @@ TantivyGrowingTextIndex::PublishCommitted() {
     const auto null_end = std::lower_bound(null_offsets_.begin(),
                                            null_offsets_.end(),
                                            static_cast<size_t>(committed_end_));
-    auto frozen_null_offsets =
-        std::make_shared<const std::vector<size_t>>(null_offsets_.begin(),
-                                                    null_end);
+    auto frozen_null_offsets = std::make_shared<const std::vector<size_t>>(
+        null_offsets_.begin(), null_end);
     const auto payload_bytes = TextIndexRamPayloadBytes(*snapshot);
-    auto reader = std::make_unique<TextIndexReader>(nullptr,
-                                                     std::move(snapshot),
-                                                     std::move(frozen_null_offsets),
-                                                     committed_end_,
-                                                     value_type_,
-                                                     /*file_backed=*/false,
-                                                     payload_bytes);
+    auto reader =
+        std::make_unique<TextIndexReader>(nullptr,
+                                          std::move(snapshot),
+                                          std::move(frozen_null_offsets),
+                                          committed_end_,
+                                          value_type_,
+                                          /*file_backed=*/false,
+                                          payload_bytes);
     PublishSnapshot(std::move(reader), committed_end_);
     published_end_ = committed_end_;
     commit_policy_.NoteCommitted();
@@ -255,10 +255,8 @@ TantivyGrowingTextIndex::Append(int64_t row_begin, const TextBatch& batch) {
         return;
     }
 
-    const auto new_null_count =
-        static_cast<size_t>(std::count(owned.valid.begin(),
-                                      owned.valid.end(),
-                                      static_cast<uint8_t>(0)));
+    const auto new_null_count = static_cast<size_t>(std::count(
+        owned.valid.begin(), owned.valid.end(), static_cast<uint8_t>(0)));
     uncommitted_.reserve(uncommitted_.size() + 1);
     if (new_null_count != 0) {
         const auto required = null_offsets_.size() + new_null_count;

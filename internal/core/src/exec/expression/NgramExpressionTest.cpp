@@ -30,9 +30,16 @@ using namespace milvus::segcore;
 // Regression for #44020: installing a candidate-only NGRAM reader must not
 // route equality, membership, ranges, or logical composition into that reader.
 TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
-    const std::vector<std::string> data = {
-        "apple", "banana", "cherry", "date", "elderberry", "fig", "grape",
-        "honeydew", "kiwi", "lemon"};
+    const std::vector<std::string> data = {"apple",
+                                           "banana",
+                                           "cherry",
+                                           "date",
+                                           "elderberry",
+                                           "fig",
+                                           "grape",
+                                           "honeydew",
+                                           "kiwi",
+                                           "lemon"};
     auto schema = std::make_shared<Schema>();
     const auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
     test::expr_index::RawFieldFiles raw_files;
@@ -41,11 +48,16 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
     auto raw_info = raw_files.Prepare(field_id, {field});
     segment->LoadFieldData(raw_info);
     auto opened = test::expr_index::BuildIndex(
-        field_id, DataType::VARCHAR, index::NGRAM_INDEX_TYPE, {field},
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
         {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}},
-        DataType::NONE, false, true);
-    test::expr_index::InstallIndex(*segment, field_id, DataType::VARCHAR,
-                                   std::move(opened));
+        DataType::NONE,
+        false,
+        true);
+    test::expr_index::InstallIndex(
+        *segment, field_id, DataType::VARCHAR, std::move(opened));
     const auto nb = data.size();
     // Test: TermFilterExpr (IN operator)
     {
@@ -62,8 +74,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
 
         auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
             milvus::expr::ColumnInfo(field_id, DataType::VARCHAR), values);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, term_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           term_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -116,8 +128,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
                 upper_val,
                 true,
                 true);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, binary_range_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           binary_range_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -145,8 +157,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
         auto typed_expr1 = parser1.ParseExprs(*expr1);
 
         // Create NotEqual expression
-        auto unary_range_expr2 = test::GenUnaryRangeExpr(
-            proto::plan::OpType::NotEqual, "banana");
+        auto unary_range_expr2 =
+            test::GenUnaryRangeExpr(proto::plan::OpType::NotEqual, "banana");
         auto column_info2 = test::GenColumnInfo(
             field_id.get(), proto::schema::DataType::VarChar, false, false);
         unary_range_expr2->set_allocated_column_info(column_info2);
@@ -161,8 +173,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
                 milvus::expr::LogicalBinaryExpr::OpType::And,
                 typed_expr1,
                 typed_expr2);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, logical_and_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_and_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -192,10 +204,9 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
         // Create LogicalUnaryExpr with NOT
         auto logical_not_expr =
             std::make_shared<milvus::expr::LogicalUnaryExpr>(
-                milvus::expr::LogicalUnaryExpr::OpType::LogicalNot,
-                typed_expr);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, logical_not_expr);
+                milvus::expr::LogicalUnaryExpr::OpType::LogicalNot, typed_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_not_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -239,8 +250,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
                 milvus::expr::LogicalBinaryExpr::OpType::Or,
                 typed_expr1,
                 typed_expr2);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, logical_or_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           logical_or_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -259,8 +270,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
         auto null_expr = std::make_shared<milvus::expr::NullExpr>(
             milvus::expr::ColumnInfo(field_id, DataType::VARCHAR),
             proto::plan::NullExpr_NullOp_IsNull);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, null_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           null_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -275,8 +286,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
         auto null_expr = std::make_shared<milvus::expr::NullExpr>(
             milvus::expr::ColumnInfo(field_id, DataType::VARCHAR),
             proto::plan::NullExpr_NullOp_IsNotNull);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, null_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           null_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -290,8 +301,8 @@ TEST(NgramExpressionTest, NonPatternOperatorsUseTheirOrdinaryExpressionPaths) {
     {
         auto always_true_expr =
             std::make_shared<milvus::expr::AlwaysTrueExpr>();
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, always_true_expr);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           always_true_expr);
 
         BitsetType final =
             ExecuteQueryExpr(plan, segment.get(), nb, MAX_TIMESTAMP);
@@ -321,13 +332,19 @@ TEST(NgramExpressionTest, JsonProjectionPreservesNonPatternFallbacks) {
     auto segment = CreateSealedSegment(schema);
     auto raw_info = raw_files.Prepare(json_fid, {field});
     segment->LoadFieldData(raw_info);
-    auto opened = test::expr_index::BuildIndex(
-        json_fid, DataType::JSON, index::NGRAM_INDEX_TYPE, {field},
-        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4},
-         {JSON_PATH, json_path}, {JSON_CAST_TYPE, "VARCHAR"}},
-        DataType::NONE, false, true);
-    test::expr_index::InstallIndex(*segment, json_fid, DataType::JSON,
-                                   std::move(opened));
+    auto opened = test::expr_index::BuildIndex(json_fid,
+                                               DataType::JSON,
+                                               index::NGRAM_INDEX_TYPE,
+                                               {field},
+                                               {{index::MIN_GRAM, 2},
+                                                {index::MAX_GRAM, 4},
+                                                {JSON_PATH, json_path},
+                                                {JSON_CAST_TYPE, "VARCHAR"}},
+                                               DataType::NONE,
+                                               false,
+                                               true);
+    test::expr_index::InstallIndex(
+        *segment, json_fid, DataType::JSON, std::move(opened));
     const auto nb = json_raw_data.size();
 
     // Test: JSON Equal operation

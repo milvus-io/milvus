@@ -47,9 +47,8 @@ PrefixValue(int value) {
 template <typename T>
 class InvertedMissingBinlogPrefixTest : public SourceBuildTest {
  protected:
-    using QueryT = std::conditional_t<std::is_same_v<T, std::string>,
-                                      std::string_view,
-                                      T>;
+    using QueryT =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
     static constexpr int64_t kMissingRows = 100;
     static constexpr size_t kSourceRows = 9;
 
@@ -67,8 +66,8 @@ class InvertedMissingBinlogPrefixTest : public SourceBuildTest {
         auto* field = info.mutable_field_schema();
         field->set_fieldid(100);
         field->set_name("values");
-        field->set_data_type(static_cast<proto::schema::DataType>(
-            index::CppDataType<T>()));
+        field->set_data_type(
+            static_cast<proto::schema::DataType>(index::CppDataType<T>()));
         field->set_nullable(true);
         if (with_default) {
             auto* value = field->mutable_default_value();
@@ -101,16 +100,15 @@ class InvertedMissingBinlogPrefixTest : public SourceBuildTest {
 
     void
     CheckPrefix(bool with_default) {
-        const std::array<T, kSourceRows> values{
-            PrefixValue<T>(1),
-            PrefixValue<T>(20),
-            PrefixValue<T>(10),
-            PrefixValue<T>(20),
-            PrefixValue<T>(30),
-            PrefixValue<T>(2),
-            PrefixValue<T>(20),
-            PrefixValue<T>(10),
-            PrefixValue<T>(20)};
+        const std::array<T, kSourceRows> values{PrefixValue<T>(1),
+                                                PrefixValue<T>(20),
+                                                PrefixValue<T>(10),
+                                                PrefixValue<T>(20),
+                                                PrefixValue<T>(30),
+                                                PrefixValue<T>(2),
+                                                PrefixValue<T>(20),
+                                                PrefixValue<T>(10),
+                                                PrefixValue<T>(20)};
         const std::array<uint8_t, 2> validity{0b10110101, 0b00000001};
         const auto prepared = PreparePrefix(with_default);
         // The session derives the missing prefix from the decoded source rows.
@@ -199,9 +197,9 @@ class InvertedMissingBinlogPrefixTest : public SourceBuildTest {
             for (const bool lower_inclusive : {false, true}) {
                 for (const bool upper_inclusive : {false, true}) {
                     expect_hits(predicate->Range(QueryT(lower),
-                                                  lower_inclusive,
-                                                  QueryT(default_value),
-                                                  upper_inclusive),
+                                                 lower_inclusive,
+                                                 QueryT(default_value),
+                                                 upper_inclusive),
                                 [&](const T& value) {
                                     return (lower_inclusive ? value >= lower
                                                             : value > lower) &&
@@ -219,25 +217,21 @@ class InvertedMissingBinlogPrefixTest : public SourceBuildTest {
             const auto starts_with_two = [](const T& value) {
                 return value.starts_with("2");
             };
-            expect_hits(pattern->PatternMatch("2", index::PatternOp::PrefixMatch),
-                        starts_with_two);
+            expect_hits(
+                pattern->PatternMatch("2", index::PatternOp::PrefixMatch),
+                starts_with_two);
             expect_hits(pattern->PatternMatch("2%", index::PatternOp::Match),
                         starts_with_two);
         }
     }
 };
 
-using PrefixTypes = ::testing::Types<bool,
-                                      int8_t,
-                                      int16_t,
-                                      int32_t,
-                                      int64_t,
-                                      float,
-                                      double,
-                                      std::string>;
+using PrefixTypes = ::testing::
+    Types<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
 TYPED_TEST_SUITE(InvertedMissingBinlogPrefixTest, PrefixTypes);
 
-TYPED_TEST(InvertedMissingBinlogPrefixTest, MissingPrefixIsNullBeforeSourceRows) {
+TYPED_TEST(InvertedMissingBinlogPrefixTest,
+           MissingPrefixIsNullBeforeSourceRows) {
     this->CheckPrefix(false);
 }
 

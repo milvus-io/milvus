@@ -109,8 +109,11 @@ TEST(GrowingConcurrentReopenTest,
         const int N = 16;
         auto data = DataGen(base, N, /*seed=*/round + 1);
         segment->PreInsert(N);
-        segment->Insert(
-            0, N, data.row_ids_.data(), data.timestamps_.data(), data.SharedRaw());
+        segment->Insert(0,
+                        N,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.SharedRaw());
 
         std::atomic<bool> stop_flag{false};
 

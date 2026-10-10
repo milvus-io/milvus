@@ -128,8 +128,8 @@ CheckMarisaColumnComparisons(bool nullable_left, bool nullable_right) {
                           proto::plan::OpType::Equal,
                           proto::plan::OpType::NotEqual}) {
         for (const bool negate : {false, true}) {
-            SCOPED_TRACE(::testing::Message()
-                         << "op=" << static_cast<int>(op) << " negate=" << negate);
+            SCOPED_TRACE(::testing::Message() << "op=" << static_cast<int>(op)
+                                              << " negate=" << negate);
             expr::TypedExprPtr logical = std::make_shared<expr::CompareExpr>(
                 left_id, right_id, DataType::VARCHAR, DataType::VARCHAR, op);
             if (negate) {
@@ -141,7 +141,8 @@ CheckMarisaColumnComparisons(bool nullable_left, bool nullable_right) {
             EXPECT_EQ(evaluation.batch_sizes, (std::vector<int64_t>{5, 5, 2}));
             ASSERT_EQ(evaluation.result->size(), count);
             BitsetTypeView bits(evaluation.result->GetRawData(), count);
-            BitsetTypeView validity(evaluation.result->GetValidRawData(), count);
+            BitsetTypeView validity(evaluation.result->GetValidRawData(),
+                                    count);
             auto plan = std::make_shared<plan::FilterBitsNode>(
                 DEFAULT_PLANNODE_ID, logical);
             auto filtered = query::ExecuteQueryExpr(

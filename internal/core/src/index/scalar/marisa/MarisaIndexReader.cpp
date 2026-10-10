@@ -72,11 +72,12 @@ ToUsageBytes(size_t value) {
 
 }  // namespace
 
-MarisaMmapOwner::MarisaMmapOwner(char* str_ids_data,
-                                 size_t str_ids_bytes,
-                                 char* csr_data,
-                                 size_t csr_bytes,
-                                 std::shared_ptr<storage::LocalDirectory> directory)
+MarisaMmapOwner::MarisaMmapOwner(
+    char* str_ids_data,
+    size_t str_ids_bytes,
+    char* csr_data,
+    size_t csr_bytes,
+    std::shared_ptr<storage::LocalDirectory> directory)
     : str_ids_data_(str_ids_data),
       str_ids_bytes_(str_ids_bytes),
       csr_data_(csr_data),

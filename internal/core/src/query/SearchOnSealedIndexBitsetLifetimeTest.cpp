@@ -344,7 +344,8 @@ AssertNullableReaderMapping(const index::IVectorReader& reader,
     ASSERT_TRUE(reader.HasValidData());
     ASSERT_EQ(reader.ValidCount(), valid_count);
     for (int64_t row = 0; row < total_count; ++row) {
-        ASSERT_EQ(reader.IsRowValid(row), valid_data[row]) << "logical row " << row;
+        ASSERT_EQ(reader.IsRowValid(row), valid_data[row])
+            << "logical row " << row;
     }
     EXPECT_FALSE(reader.IsRowValid(total_count));
 }
@@ -364,25 +365,26 @@ MakeNullableIndexLoadInfo(test::consumer::OpenedIndex opened,
     info.index_value_type = opened.reader->ValueType();
     info.index_caps = opened.caps;
     info.num_rows = logical_rows;
-    const auto* reader = dynamic_cast<const index::IVectorReader*>(opened.reader.get());
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(opened.reader.get());
     info.dim = reader->Dim();
     for (const auto& [key, value] : opened.params.items()) {
         info.index_params.emplace(
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.cache_index = CreateTestCacheIndex(
-        "nullable-vector-" + std::to_string(info.index_id),
-        std::move(opened.reader),
-        observed_ctx);
+    info.cache_index =
+        CreateTestCacheIndex("nullable-vector-" + std::to_string(info.index_id),
+                             std::move(opened.reader),
+                             observed_ctx);
     return info;
 }
 
 segcore::SegmentSealedUPtr
 BuildIndexSearchSegment(const SchemaPtr& schema,
-                         FieldId vector_field,
-                         int64_t logical_rows,
-                         segcore::LoadIndexInfo& info) {
+                        FieldId vector_field,
+                        int64_t logical_rows,
+                        segcore::LoadIndexInfo& info) {
     auto data = segcore::DataGen(schema, logical_rows);
     auto segment = CreateSealedWithFieldDataLoaded(
         schema, data, false, {vector_field.get()});
@@ -605,11 +607,11 @@ TEST(SearchOnSealedIndexBitsetLifetime,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
     AssertNullableReaderMapping(
         *vector_index, total_count, valid_count, valid_data.get());
-
 
     auto logical_bitset_bytes = MakeLogicalBitsetBytes(total_count);
     BitsetView logical_bitset(logical_bitset_bytes.data(), total_count);
@@ -715,7 +717,8 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
     AssertNullableReaderMapping(
         *vector_index, total_count, valid_count, valid_data.get());
@@ -818,11 +821,11 @@ TEST(SearchOnSealedIndexNullableNoFilter,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
     AssertNullableReaderMapping(
         *vector_index, total_count, valid_count, valid_data.get());
-
 
     SearchInfo search_info;
     search_info.field_id_ = vector_field;
@@ -869,8 +872,8 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<const index::IVectorReader*>(
-        index_base.reader.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
     AssertNullableReaderMapping(
         *vector_index, total_count, valid_count, valid_data.get());
@@ -1416,9 +1419,9 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
     const auto planned_index_pin =
         growing_segment->PinGrowingIndex(vector_field);
     ASSERT_TRUE(planned_index_pin);
-    ASSERT_NE(dynamic_cast<const index::IVectorReader*>(
-                  &planned_index_pin.Reader()),
-              nullptr);
+    ASSERT_NE(
+        dynamic_cast<const index::IVectorReader*>(&planned_index_pin.Reader()),
+        nullptr);
     ASSERT_EQ(planned_index_pin.CoveredRowEnd(), initial_count);
     const auto planned_count = growing_segment->get_row_count();
     ASSERT_EQ(planned_count, initial_count);
@@ -1463,7 +1466,8 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
     const auto appended_index_pin =
         growing_segment->PinGrowingIndex(vector_field);
     ASSERT_TRUE(appended_index_pin);
-    ASSERT_EQ(appended_index_pin.CoveredRowEnd(), initial_count + appended_count);
+    ASSERT_EQ(appended_index_pin.CoveredRowEnd(),
+              initial_count + appended_count);
     EXPECT_EQ(planned_index_pin.CoveredRowEnd(), planned_count);
 
     SearchInfo search_info;

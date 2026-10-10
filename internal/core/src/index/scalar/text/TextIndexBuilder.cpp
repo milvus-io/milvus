@@ -165,10 +165,9 @@ ParseBuildParams(const Config& params) {
                   configured_tantivy);
     }
     result.tantivy_index_version =
-        configured_tantivy != 0
-            ? static_cast<uint32_t>(configured_tantivy)
-            : scalar_version <= 1 ? TANTIVY_INDEX_MINIMUM_VERSION
-                                  : TANTIVY_INDEX_LATEST_VERSION;
+        configured_tantivy != 0 ? static_cast<uint32_t>(configured_tantivy)
+        : scalar_version <= 1   ? TANTIVY_INDEX_MINIMUM_VERSION
+                                : TANTIVY_INDEX_LATEST_VERSION;
     return result;
 }
 
@@ -357,9 +356,8 @@ TextIndexBuilder::FinishArtifact() {
                expected_count,
                count);
     const bool file_backed = directory != nullptr;
-    const auto payload_bytes =
-        file_backed ? TextIndexDirectoryBytes(*directory)
-                    : TextIndexRamPayloadBytes(*engine);
+    const auto payload_bytes = file_backed ? TextIndexDirectoryBytes(*directory)
+                                           : TextIndexRamPayloadBytes(*engine);
     return std::make_unique<TextIndexArtifact>(std::move(directory),
                                                std::move(engine),
                                                std::move(null_offsets),

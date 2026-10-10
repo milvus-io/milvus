@@ -186,10 +186,10 @@ class GrowingDataGetter : public DataGetter<OutputType> {
 template <typename OutputType, typename InnerRawType = OutputType>
 class SealedDataGetter : public DataGetter<OutputType> {
  private:
-    using IndexValueType = std::conditional_t<
-        std::is_same_v<OutputType, std::string>,
-        std::string_view,
-        OutputType>;
+    using IndexValueType =
+        std::conditional_t<std::is_same_v<OutputType, std::string>,
+                           std::string_view,
+                           OutputType>;
 
     milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
@@ -305,8 +305,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     InitValueReader(const std::optional<std::string>& json_path,
                     const std::optional<DataType>& json_type,
                     bool strict_cast) {
-        constexpr bool is_json =
-            std::is_same_v<InnerRawType, milvus::Json>;
+        constexpr bool is_json = std::is_same_v<InnerRawType, milvus::Json>;
         if constexpr (is_json) {
             // The index cannot reproduce at_string_any, strict cast failures,
             // or the original integer-vs-floating JSON number category from a
@@ -340,9 +339,10 @@ class SealedDataGetter : public DataGetter<OutputType> {
             return false;
         }
         const auto* entry = capabilities.Find(*decision.key);
-        AssertInfo(entry != nullptr,
-                   "selected group-by index for field {} is absent from metadata",
-                   field_id_.get());
+        AssertInfo(
+            entry != nullptr,
+            "selected group-by index for field {} is absent from metadata",
+            field_id_.get());
         index_pin_ = segment_.PinIndex(op_ctx_, *decision.key);
         if (!index_pin_) {
             return false;
@@ -368,7 +368,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
             }
         }
         value_reader_ =
-            dynamic_cast<const index::IScalarValueReader<IndexValueType>*>(reader);
+            dynamic_cast<const index::IScalarValueReader<IndexValueType>*>(
+                reader);
         AssertInfo(value_reader_ != nullptr,
                    "selected group-by index for field {} has no value reader",
                    field_id_.get());

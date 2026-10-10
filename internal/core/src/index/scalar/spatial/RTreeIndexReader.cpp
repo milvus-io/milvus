@@ -110,8 +110,8 @@ RTreeIndexState::CreateFromValidatedShards(
         sizeof(RTreeIndexState) + sizeof(std::vector<size_t>) +
         sizeof(std::vector<std::shared_ptr<const RTreeQueryEngine>>));
     const auto add_bytes = [&](uint64_t bytes) {
-        if (bytes > static_cast<uint64_t>(
-                        std::numeric_limits<int64_t>::max() - memory_usage)) {
+        if (bytes > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() -
+                                          memory_usage)) {
             memory_usage = std::numeric_limits<int64_t>::max();
         } else {
             memory_usage += static_cast<int64_t>(bytes);
