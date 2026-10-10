@@ -57,10 +57,15 @@ func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStream
 	return &last, nil
 }
 
+// GetLatestReplicateConfiguration returns the replicate configuration of the
+// latest assignment. It waits until an assignment has been received, and only
+// for that: a nil ConfigHelper is a valid answer meaning "this cluster has no
+// replication configured", which is the steady state of every cluster that has
+// never been given one. Waiting for a non-nil helper would block forever there
+// and surface as DEADLINE_EXCEEDED, indistinguishable from an unhealthy cluster.
 func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
 	w.cond.L.Lock()
-	for (w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1) ||
-		w.lastVersionedAssignment.ReplicateConfigHelper == nil {
+	for w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1 {
 		if err := w.cond.Wait(ctx); err != nil {
 			return nil, err
 		}
