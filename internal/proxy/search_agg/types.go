@@ -97,7 +97,9 @@ type TopHitsConfig struct {
 }
 
 type SortCriterion struct {
-	FieldID   int64
+	FieldID int64
+
+	// Empty Dir for _score means most similar first, according to the metric.
 	Dir       string
 	NullFirst bool
 }
