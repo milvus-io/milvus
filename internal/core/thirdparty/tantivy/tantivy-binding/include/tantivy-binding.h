@@ -194,7 +194,15 @@ RustResult tantivy_terms_query_keyword(void *ptr,
                                        uintptr_t len,
                                        void *bitset);
 
+RustResult tantivy_terms_query_keyword_with_len(void *ptr,
+                                                const char *const *terms,
+                                                const uintptr_t *lengths,
+                                                uintptr_t len,
+                                                void *bitset);
+
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
+
+RustResult tantivy_term_query_keyword_i64_with_len(void *ptr, const char *term, uintptr_t term_len);
 
 RustResult tantivy_lower_bound_range_query_i64(void *ptr,
                                                int64_t lower_bound,
@@ -252,10 +260,22 @@ RustResult tantivy_lower_bound_range_query_keyword(void *ptr,
                                                    bool inclusive,
                                                    void *bitset);
 
+RustResult tantivy_lower_bound_range_query_keyword_with_len(void *ptr,
+                                                            const char *lower_bound,
+                                                            uintptr_t lower_bound_len,
+                                                            bool inclusive,
+                                                            void *bitset);
+
 RustResult tantivy_upper_bound_range_query_keyword(void *ptr,
                                                    const char *upper_bound,
                                                    bool inclusive,
                                                    void *bitset);
+
+RustResult tantivy_upper_bound_range_query_keyword_with_len(void *ptr,
+                                                            const char *upper_bound,
+                                                            uintptr_t upper_bound_len,
+                                                            bool inclusive,
+                                                            void *bitset);
 
 RustResult tantivy_range_query_keyword(void *ptr,
                                        const char *lower_bound,
@@ -263,6 +283,15 @@ RustResult tantivy_range_query_keyword(void *ptr,
                                        bool lb_inclusive,
                                        bool ub_inclusive,
                                        void *bitset);
+
+RustResult tantivy_range_query_keyword_with_len(void *ptr,
+                                                const char *lower_bound,
+                                                uintptr_t lower_bound_len,
+                                                const char *upper_bound,
+                                                uintptr_t upper_bound_len,
+                                                bool lb_inclusive,
+                                                bool ub_inclusive,
+                                                void *bitset);
 
 RustResult tantivy_prefix_query_keyword(void *ptr,
                                         const uint8_t *prefix,
@@ -298,6 +327,12 @@ RustResult tantivy_json_term_query_keyword(void *ptr,
                                            const char *term,
                                            void *bitset);
 
+RustResult tantivy_json_term_query_keyword_with_len(void *ptr,
+                                                    const char *json_path,
+                                                    const char *term,
+                                                    uintptr_t length,
+                                                    void *bitset);
+
 RustResult tantivy_json_terms_query_i64(void *ptr,
                                         const char *json_path,
                                         const int64_t *terms,
@@ -327,6 +362,13 @@ RustResult tantivy_json_terms_query_keyword(void *ptr,
                                             const char *const *terms,
                                             uintptr_t len,
                                             void *bitset);
+
+RustResult tantivy_json_terms_query_keyword_with_len(void *ptr,
+                                                     const char *json_path,
+                                                     const char *const *terms,
+                                                     const uintptr_t *lengths,
+                                                     uintptr_t len,
+                                                     void *bitset);
 
 RustResult tantivy_json_exist_query(void *ptr,
                                     const char *json_path,
@@ -383,6 +425,18 @@ RustResult tantivy_json_range_query_keyword(void *ptr,
                                             bool lb_inclusive,
                                             bool ub_inclusive,
                                             void *bitset);
+
+RustResult tantivy_json_range_query_keyword_with_len(void *ptr,
+                                                     const char *json_path,
+                                                     const char *lower_bound,
+                                                     uintptr_t lower_bound_len,
+                                                     const char *higher_bound,
+                                                     uintptr_t higher_bound_len,
+                                                     bool lb_unbounded,
+                                                     bool up_unbounded,
+                                                     bool lb_inclusive,
+                                                     bool ub_inclusive,
+                                                     void *bitset);
 
 RustResult tantivy_json_regex_query(void *ptr,
                                     const char *json_path,
@@ -446,7 +500,11 @@ RustResult tantivy_finish_index(void *ptr);
 
 RustResult tantivy_commit_index(void *ptr);
 
+RustResult tantivy_rollback_index(void *ptr);
+
 RustResult tantivy_create_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
+
+RustResult tantivy_create_snapshot_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
 
 RustResult tantivy_index_add_int8s(void *ptr,
                                    const int8_t *array,
