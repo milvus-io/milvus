@@ -200,5 +200,9 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+milvus_check_aws_runtime(milvus_core)
+if(TARGET milvus-storage_aws_runtime_check)
+    add_dependencies(milvus_core milvus-storage_aws_runtime_check)
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
