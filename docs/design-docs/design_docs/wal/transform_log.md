@@ -260,6 +260,32 @@ This retry policy does not alter the lower-bound compatibility rule above or
 implement reliable retention. It preserves delivery across transient failures
 within retained history; it cannot reconstruct Deletes already retired by GC.
 
+### Deferred: NodeScheduler task priorities
+
+TODO(#40451, explicitly deferred from this PR): introduce task priorities in
+NodeScheduler to protect persistence and recovery progress from long-running
+query-resource preparation. Bootstrap currently waits synchronously for bounded
+TransformLog replay inside a shared NodeScheduler task. Although the subscription
+reads in its own goroutine, the preparation task retains its worker until replay
+finishes or is cancelled. When enough VChannels need uncached historical chunks
+and those reads keep failing, their preparation tasks can occupy all workers and
+delay otherwise runnable Summary chunk/manifest and other recovery tasks.
+
+This is an availability/performance limitation under sustained read failures,
+not a violation of Delete delivery, cursor ordering or SyncUp coverage. Reads can
+resume when storage recovers; owner cancellation stops the retry. Keep the
+current retry behavior in this PR.
+
+The future priority design must address workers already occupied by waiting or
+retrying tasks, through cooperative yielding or execution-capacity reservation;
+prioritizing queued tasks alone cannot free an occupied worker. Preserve the
+same subscription and its accepted replay progress, cancellation and resource
+cleanup semantics. Do not implement priority by turning temporary read failures
+into terminal subscription errors or repeatedly rebuilding the whole runtime.
+Validate that persistence still progresses while enough bootstrap reads fail to
+saturate the pool, followed by recovery without missing Deletes or premature
+SyncUp and prompt cancellation during backoff.
+
 ## 6. Retention Prerequisite
 
 QueryView/DataView integration must protect
