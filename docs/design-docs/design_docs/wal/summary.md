@@ -800,7 +800,7 @@ as in §3.2.
 | Gap before a later completed upload | Stop at the gap; later generations do not advance the recovered position. |
 | Manifest PUT interrupted | Readers must see a complete old or new object; retry dirty publication, never a partial index. |
 | Manifest ahead of the external checkpoint | Replay may overlap; restored coverage suppresses staging already summarized records. |
-| Transient LIST, GET or PUT failure | Return or retry the error; do not infer absent data or permit checkpoint advancement past undurable records. |
+| Transient LIST, GET or PUT failure | Return or retry the error; do not infer absent data or permit checkpoint advancement past undurable records. TransformLog's adaptor retries GET failures outside the single-read snapshot/GC pin, without advancing delivery or SyncUp; see [local read recovery](transform_log.md#local-read-recovery). |
 | Corrupt newest manifest or corrupt tail candidate | Fail recovery; do not fall back to an older manifest or silently skip corrupt data. |
 | Missing/corrupt retained chunk during consumer loading | Fail the read and consumer recovery; never fabricate an empty history. Restore validates the index without eagerly reading every retained chunk. |
 | Reference removal published before physical deletion | Garbage may remain; a later background sweep rediscovers it. |

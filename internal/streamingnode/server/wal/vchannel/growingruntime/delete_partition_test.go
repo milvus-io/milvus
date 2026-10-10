@@ -3,6 +3,7 @@ package growingruntime
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,6 +75,46 @@ func TestDeletePartitionIsolation(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestBootstrapRetriesTransformReads(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := walsummary.NewManager(walsummary.ManagerConfig{PChannel: "p1"})
+	manager.ObserveMessage(ctx, newPartitionDeleteMessage(t, 10, true))
+	var reads atomic.Int64
+	var original func(*walsummary.Manager, context.Context, string, uint64, uint64, walsummary.ReadLimits) (walsummary.TransformBatch, error)
+	readPatch := mockey.Mock((*walsummary.Manager).ReadTransform).Origin(&original).To(func(m *walsummary.Manager, ctx context.Context, vc string, after, through uint64, limits walsummary.ReadLimits) (walsummary.TransformBatch, error) {
+		if reads.Add(1) <= 2 {
+			return walsummary.TransformBatch{}, merr.ErrIoFailed
+		}
+		return original(m, ctx, vc, after, through, limits)
+	}).Build()
+	defer readPatch.UnPatch()
+	var applied int
+	applyPatch := mockey.Mock((*growingSegment).applyDelete).To(func(s *growingSegment, _ context.Context, keys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
+		applied++
+		require.Equal(t, int64(1), s.segmentID)
+		require.Equal(t, int64(1), keys.Get(0).GetValue())
+		require.Equal(t, []uint64{100}, timestamps, "replay preserves the transaction commit timestamp")
+		return nil
+	}).Build()
+	defer applyPatch.UnPatch()
+	stream := walsummary.NewStream(manager)
+	defer stream.Close()
+	r := newRuntime()
+	defer r.Close()
+	require.NoError(t, r.Prepare(ctx, walview.VChannelWALView{
+		VChannel: "v1", CollectionID: 1,
+		BaseGrowingTimeTick: 100, BaseTransformTimeTick: 100,
+		TransformLogStream: stream,
+		SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{
+			{SegmentID: 1, PartitionID: 10},
+		}},
+	}))
+	require.Equal(t, int64(3), reads.Load())
+	require.Equal(t, 1, applied, "temporary read failures must not duplicate application")
+	require.Equal(t, uint64(100), r.appliedTransformTimeTick.Load())
 }
 
 func TestPartitionDeleteNoopInputs(t *testing.T) {
