@@ -172,6 +172,15 @@ type QueryRuntimeModule interface {
 
 `GrowingRuntime` implements this interface.
 
+It also implements `QueryRuntimeIndexModule.UpdateIndexMeta`. Before a reused
+runtime reports a view with changed load requirements Ready, QueryRuntime obtains
+current index definitions from GetQueryViewLoadInfo and applies them under its
+live-event/close serialization. GrowingRuntime updates the collection's native
+search metadata using the WAL-applied schema. This supplies metric and search
+parameters for growing searches; it does not load sealed index files. Metadata
+for fields absent from the new list is retained for older leased views. Schema
+application remains WAL-driven and independent of this refresh.
+
 ### 4.2 GrowingRuntime
 
 ```go

@@ -26,6 +26,11 @@ type QueryRuntimePrepareModule interface {
 	PrepareDataVersion(context.Context, qviews.DataVersion) error
 }
 
+// QueryRuntimeIndexModule refreshes collection search metadata for a reused runtime.
+type QueryRuntimeIndexModule interface {
+	UpdateIndexMeta(context.Context, []*indexpb.IndexInfo) error
+}
+
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
 type QueryRuntimeModuleBuilder interface {
 	NewRuntime() (QueryRuntimeModule, error)

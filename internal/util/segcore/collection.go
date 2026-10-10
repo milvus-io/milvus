@@ -80,6 +80,7 @@ type CCollection struct {
 	schemaMu      sync.RWMutex
 	schemaVersion uint64
 	schema        *schemapb.CollectionSchema
+	indexMetaMu   sync.RWMutex
 	indexMeta     *segcorepb.CollectionIndexMeta
 }
 
@@ -100,6 +101,8 @@ func (c *CCollection) Schema() *schemapb.CollectionSchema {
 }
 
 func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
+	c.indexMetaMu.RLock()
+	defer c.indexMetaMu.RUnlock()
 	return c.indexMeta
 }
 
@@ -107,6 +110,8 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	if meta == nil {
 		return nil
 	}
+	c.indexMetaMu.Lock()
+	defer c.indexMetaMu.Unlock()
 
 	indexMetaBlob, err := proto.Marshal(meta)
 	if err != nil {

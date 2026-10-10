@@ -419,8 +419,18 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		return nil
 	}
 	// Schema transitions are applied on the WAL path; fence that path before
-	// checking the target revision. Load-scope changes still need reprepare.
-	if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
+	// checking the target revision and refreshing shared search index metadata.
+	// Partition/load-field resource changes still need reprepare.
+	err := func() error {
+		if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
+			return err
+		}
+		if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
+			return err
+		}
+		return runtime.PrepareIndexMeta(ctx, ref.meta.GetCollectionId(), ref.meta.GetLoadInfoVersion(), m.loadInfoProvider)
+	}()
+	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return err
 		}
@@ -442,9 +452,6 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	m.mu.Unlock()
 	if !ready {
 		return nil
-	}
-	if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
-		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	onReady()
 	return nil

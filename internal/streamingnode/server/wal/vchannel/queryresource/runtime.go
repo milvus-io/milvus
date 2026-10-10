@@ -24,6 +24,8 @@ type QueryRuntime struct {
 	dispatcher     *Dispatcher
 	drainScheduled bool
 	applyMu        sync.Mutex
+	indexMu        sync.Mutex // serializes load-info resolution and index publication
+	indexVersion   uint64     // load-info identity, not an ordered version
 
 	latestAdvance qviews.DataVersion
 	hasAdvance    bool
@@ -74,6 +76,7 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	if r == nil {
 		return nil
 	}
+	r.indexVersion = view.LoadInfoVersion
 	view.ResourceEventBarrier = func(ctx context.Context) error {
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
 	}
@@ -198,6 +201,47 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.
 			return err
 		}
 	}
+	return nil
+}
+
+// PrepareIndexMeta refreshes a reused runtime before the new view can serve.
+// Hold indexMu across the RPC: an older concurrent preparation must resolve its
+// version against Coord after a newer publication, rather than overwrite it with
+// a response captured earlier. Load-info versions are hashes and cannot be ordered.
+func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, collectionID int64, version uint64, provider LoadInfoProvider) error {
+	if version == 0 || provider == nil {
+		return nil
+	}
+	r.indexMu.Lock()
+	defer r.indexMu.Unlock()
+	if r.indexVersion == version {
+		return nil
+	}
+	info, err := provider.QueryViewLoadInfo(ctx, collectionID, version)
+	if err != nil {
+		return err
+	}
+	// Do not hold applyMu during the RPC. WAL application and Close must remain
+	// independent of coordinator availability.
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	r.mu.Lock()
+	ready := r.state == queryRuntimeReady
+	r.mu.Unlock()
+	if !ready {
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, module := range r.modules {
+		if indexed, ok := module.(QueryRuntimeIndexModule); ok {
+			if err := indexed.UpdateIndexMeta(ctx, info.IndexInfos); err != nil {
+				return err
+			}
+		}
+	}
+	r.indexVersion = version
 	return nil
 }
 
