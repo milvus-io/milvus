@@ -27,12 +27,14 @@ Query preparation depends on the type:
 
 | Types | Query preparation |
 | --- | --- |
-| Integers | Copy, sort, and deduplicate typed values. |
+| Integers | Deduplicate up to eight terms on the stack; copy, sort, and deduplicate larger lists. |
 | Bool | Track the presence of false and true with two flags; no allocation or sorting. |
-| Float/Double | Copy, sort, and deduplicate non-NaN queries; preserve the original lookup loop when any query value is NaN. |
-| String/VarChar | Sort and deduplicate borrowed `string_view`s without copying character buffers. |
+| Float/Double | Use the integer preparation strategy for non-NaN queries; preserve the original lookup loop when any query value is NaN. |
+| String/VarChar | Deduplicate short lists of borrowed `string_view`s on the stack; sort and deduplicate larger lists without copying character buffers. |
 
-For ordered distinct queries, the cursor advances through index values using
+Up to eight distinct query values use independent binary lookups. Bool always
+uses this path after reducing its two-value domain. For more than eight ordered
+distinct queries, the cursor advances through index values using
 galloping to bound each search, followed by binary search within that range.
 It visits each matching numeric entry or string posting list once. Numeric
 matches report original row offsets; string matches expand dictionary entries
@@ -62,9 +64,11 @@ Long common prefixes still incur character comparison costs.
 
 ### Cost and tradeoffs
 
-For queries other than Bool or NaN-containing lists, preparation costs
-`O(N log N)` comparisons and `O(N)` auxiliary elements, where `N` is the query
-count. Bool preparation takes `O(N)` time and constant storage. Deduplication
+For non-Bool queries without NaN, lists longer than eight terms require
+`O(N log N)` preparation comparisons and `O(N)` auxiliary elements, where `N`
+is the query count. Short lists use a
+bounded duplicate check and a fixed-size stack buffer without sorting or heap
+allocation. Bool preparation takes `O(N)` time and constant storage. Deduplication
 reduces repeated bitmap writes; the monotonic cursor avoids restarting each
 search over the full index.
 
@@ -112,9 +116,14 @@ main-sweep cases, average speedups by query size were:
 
 The benchmark also passed 2,400 scan/baseline correctness comparisons. Small
 queries and small indexes contain regressions: 40 of 576 main-sweep cases and
-64 of 144 small-index cases were slower. The initial implementation keeps the
-same strategy for all query sizes; per-type and small-list fast paths remain
-follow-up tuning based on these measurements.
+64 of 144 small-index cases were slower. These measurements describe the
+original #53901 implementation before the small-list binary path. The current
+strategy uses binary lookup for up to eight distinct terms, retaining
+deduplication even for short repeated lists. The benchmark now captures the
+fixed IN/NOT IN operation by value, matching the production visitors and
+avoiding aliasing of the operation flag with bitmap writes. Comparisons of the
+current strategy should run both variants with this same benchmark harness.
+Per-type tuning remains follow-up work.
 
 ## References
 
