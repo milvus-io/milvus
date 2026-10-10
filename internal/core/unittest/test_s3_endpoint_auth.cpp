@@ -20,10 +20,13 @@
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/core/client/DefaultRetryStrategy.h>
+#include <aws/core/endpoint/AWSPartitions.h>
 #include <aws/core/http/HttpClient.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/http/standard/StandardHttpResponse.h>
+#include <aws/crt/endpoints/RuleEngine.h>
+#include <aws/s3/S3EndpointRules.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 
 #include <cstdio>
@@ -222,6 +225,29 @@ TEST_F(S3EndpointAuthGuardDeathTest, MalformedPropertiesStopBeforeSigning) {
                 result.GetError().GetMessage().find("invalid-auth-properties"),
                 Aws::String::npos);
             EXPECT_EQ(http.requests, 0);
+        }),
+        ::testing::ExitedWithCode(0),
+        "");
+}
+
+TEST_F(S3EndpointAuthGuardDeathTest, CrtRuleEngineUsesSdkInitialization) {
+    ASSERT_EXIT(
+        RunWithSdk([](RecordingHttpClient&) {
+            // Call CRT directly from the executable after InitAPI in SDK core.
+            // Static CRT copies in this binary and libmilvus-storage.so leave
+            // this copy's JSON allocator uninitialized, even when compiler
+            // inlining happens to make the endpoint-provider tests pass.
+            Aws::Crt::Endpoints::RuleEngine engine(
+                Aws::Crt::ByteCursorFromArray(
+                    reinterpret_cast<const uint8_t*>(
+                        Aws::S3::S3EndpointRules::GetRulesBlob()),
+                    Aws::S3::S3EndpointRules::RulesBlobSize),
+                Aws::Crt::ByteCursorFromArray(
+                    reinterpret_cast<const uint8_t*>(
+                        Aws::Endpoint::AWSPartitions::GetPartitionsBlob()),
+                    Aws::Endpoint::AWSPartitions::PartitionsBlobSize));
+            ASSERT_TRUE(engine);
+            // engine is destroyed before RunWithSdk shuts down the SDK.
         }),
         ::testing::ExitedWithCode(0),
         "");

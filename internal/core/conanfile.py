@@ -1,6 +1,7 @@
 required_conan_version = ">=2.0"
 
 from conan import ConanFile
+from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
 from conan.tools.files import copy
 import os
@@ -43,6 +44,12 @@ class MilvusConan(ConanFile):
     )
 
     default_options = {
+        # SDK initialization must reach the same CRT state in every shared
+        # library and executable. Static AWS archives create private copies.
+        "aws-sdk-cpp/*:shared": True,
+        "aws-crt-cpp/*:shared": True,
+        "aws-c-*/*:shared": True,
+        "aws-checksums/*:shared": True,
         "openssl/*:shared": True,
         "openssl/*:no_apps": True,
         "libevent/*:shared": True,
@@ -131,6 +138,8 @@ class MilvusConan(ConanFile):
         # Without this, find_package(Azure) can't find include directories.
         self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
         self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
+        # Tests directly use CRT APIs; generate its own CMake dependency target.
+        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750", force=True)
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
@@ -146,6 +155,15 @@ class MilvusConan(ConanFile):
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
         if self.settings.os in ["Linux", "FreeBSD"]:
             self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
+
+    def validate(self):
+        # Profiles and command-line options can override default_options.
+        # Reject a partially static runtime before generating linker inputs.
+        for dep in self.dependencies.host.values():
+            if dep.ref.name.startswith("aws-") and not dep.options.get_safe("shared"):
+                raise ConanInvalidConfiguration(
+                    f"{dep.ref.name} must use shared=True: Milvus requires a single AWS runtime"
+                )
 
     def generate(self):
         deps = CMakeDeps(self)
