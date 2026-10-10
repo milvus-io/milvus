@@ -21,6 +21,10 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 	if collection == nil {
 		return nil, merr.WrapErrServiceInternalMsg("query view collection runtime is nil")
 	}
+	info, err := segments.PrepareSegmentLoadInfo(info, collection.Schema())
+	if err != nil {
+		return nil, err
+	}
 
 	loaded, err := l.loader.NewSegment(ctx, collection, info)
 	if err != nil {
@@ -57,15 +61,19 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("unexpected query view transform segment type %T", segment)
 	}
+	info, err := segments.PrepareSegmentLoadInfo(snapshot.LoadInfo, collection.Schema())
+	if err != nil {
+		return err
+	}
 	if action.Has(qnview.SegmentUpdateReopen) {
-		if err := l.loader.ReopenSegment(ctx, transform.segment, snapshot.LoadInfo); err != nil {
+		if err := l.loader.ReopenSegment(ctx, transform.segment, info); err != nil {
 			return err
 		}
 	}
 	if action.Has(qnview.SegmentUpdateLoadIndex) {
 		// SegmentLoadInfoRevision is a content hash used only for equality. It is
 		// intentionally not forwarded as the loader's ordered version.
-		if err := l.loader.LoadIndex(ctx, transform.segment, snapshot.LoadInfo, 0); err != nil {
+		if err := l.loader.LoadIndex(ctx, transform.segment, info, 0); err != nil {
 			return err
 		}
 	}

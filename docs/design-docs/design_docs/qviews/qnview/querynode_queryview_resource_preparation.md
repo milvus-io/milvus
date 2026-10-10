@@ -237,6 +237,15 @@ Load task behavior:
    a delete-apply start timetick;
 6. report the loaded segment back to the physical manager.
 
+The physical loader first clones the watched load info and applies QueryNode-local
+parameters through `segments.PrepareSegmentLoadInfo`: DISKANN load threads/cache,
+bitmap/common index load settings, and the internal/external collection
+`UseTakeForOutput` setting. This happens **before** `NewSegment`, which already
+passes the metadata to segcore. The constructor and subsequent physical loads
+consume that same private copy. Reopen/index updates prepare a private copy as
+well, since legacy Reopen mutates index parameters in place. Local settings must
+never modify the shared snapshot or its content-based revision.
+
 Update task behavior:
 
 1. classify the revision change into the required physical update actions;

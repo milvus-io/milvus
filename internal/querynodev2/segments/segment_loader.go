@@ -40,6 +40,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -475,6 +476,18 @@ func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentTyp
 	}
 
 	return infos
+}
+
+// PrepareSegmentLoadInfo creates a private load info with node-local parameters.
+// Call it before constructing a native segment or reopening it; neither the
+// coordinator's metadata nor a shared watch snapshot may be modified in place.
+func PrepareSegmentLoadInfo(info *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (*querypb.SegmentLoadInfo, error) {
+	prepared := proto.Clone(info).(*querypb.SegmentLoadInfo)
+	configureUseTakeForOutput(prepared, schema)
+	if err := prepareIndexLoadParams(prepared.GetIndexInfos()); err != nil {
+		return nil, err
+	}
+	return prepared, nil
 }
 
 func configureUseTakeForOutput(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) {
