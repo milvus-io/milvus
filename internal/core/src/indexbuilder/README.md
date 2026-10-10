@@ -1,10 +1,10 @@
 # Index build orchestration
 
-本组件负责读取和准备完整输入、调用一次索引 Builder，以及发布构建产物。
-索引算法和格式属于各 index family；输入接口见
-[`index/contracts/README.md`](../index/contracts/README.md)。
+This component reads and prepares the complete input, invokes the index Builder once, and publishes
+the build artifact. Index algorithms and formats belong to each index family; for the input
+interfaces, see [`index/contracts/README.md`](../index/contracts/README.md).
 
-## 架构与构建上传流程
+## Architecture and build/upload flow
 
 ```mermaid
 flowchart LR
@@ -18,23 +18,23 @@ flowchart LR
         c_upload["SerializeIndexAndUpLoad"]
     end
 
-    subgraph orchestration["构建编排"]
+    subgraph orchestration["Build orchestration"]
         adapter["IndexBuildCapiAdapter<br/>BuildIndexInfo → BuildRequest<br/>+ FileManagerContext"]
         type_adapter["IndexTypeAdapter<br/>index type + schema → family / value type"]
-        session["BuildSession / CIndex<br/>读取、物化、构建、保留结果、发布"]
+        session["BuildSession / CIndex<br/>read, materialize, build, retain result, publish"]
         source["BuildSource<br/>V1 binlogs / StorageV2 groups / Manifest"]
-        materializer["完整输入物化<br/>Scalar / JSON<br/>Vector / VectorDisk"]
+        materializer["Complete-input materialization<br/>Scalar / JSON<br/>Vector / VectorDisk"]
     end
 
-    subgraph family["索引 family"]
+    subgraph family["Index family"]
         registry["BuilderRegistry&lt;typed Input&gt;"]
-        builder["IArtifactBuilder&lt;typed Input&gt;<br/>只执行算法 Build"]
+        builder["IArtifactBuilder&lt;typed Input&gt;<br/>runs only the algorithm Build"]
         artifact["Artifact"]
     end
 
-    subgraph publish["产物发布"]
+    subgraph publish["Artifact publication"]
         sink["V1DiskSink / IndexEntryWriter"]
-        remote["远端对象存储"]
+        remote["Remote object storage"]
         stats["ArtifactStats → IndexStats"]
     end
 
@@ -45,97 +45,123 @@ flowchart LR
     adapter -->|"BuildRequest + FileManagerContext"| session
     session -->|"BuildFromSource → VisitBuildField"| source
     source -->|"FieldData batches"| materializer
-    session -->|"按 family 选择；逐批 Add"| materializer
+    session -->|"selected by family; per-batch Add"| materializer
     materializer -->|"Create: family + typed input shape"| registry
-    registry -->|"返回选中的 builder"| builder
-    materializer -->|"Build 完整 typed input，仅一次"| builder
+    registry -->|"returns the selected builder"| builder
+    materializer -->|"Build complete typed input, exactly once"| builder
     builder --> artifact
-    artifact -->|"封装为 BuildProduct；跨调用保留"| session
+    artifact -->|"wrapped as BuildProduct; retained across calls"| session
 
     go_upload --> c_upload
     c_upload -->|"Publish"| session
-    session -->|"选择 output generation"| sink
+    session -->|"selects output generation"| sink
     artifact -->|"Serialize(FileSink&) / Serialize(IndexEntryWriter&)"| sink
     sink -->|"Write* / Finish"| remote
-    session -->|"Finish 后统计"| stats
+    session -->|"statistics after Finish"| stats
     stats -->|"AdaptArtifactStats + ProtoLayout"| c_upload
     c_upload -->|"IndexStats"| go_upload
 ```
 
-输入 source generation 与输出格式相互独立。V1/V2 的本地文件 entry
-可在 `WriteEntryFromLocalFile` 时上传，内存 entry 在 `Finish` 上传；V3 writer 直接向远端
-stream，`Finish` 完成收尾，图中的 `Write* / Finish` 表示这组发布动作而非统一的上传起点。
-Builder 只接收物化后的完整 typed input，不读取远端 source，也不负责上传。
+The input source generation and the output format are independent. For V1/V2, a local-file entry
+may be uploaded during `WriteEntryFromLocalFile`, and an in-memory entry is uploaded at `Finish`;
+the V3 writer streams directly to remote storage, and `Finish` completes the write. `Write* / Finish`
+in the diagram denotes this set of publication actions, not a single point where upload starts.
+The Builder receives only the materialized complete typed input; it does not read the remote
+source and is not responsible for upload.
 
-已有索引的加载不经过构建 Session，而是由查询侧通过 Loader 打开，见下文。
+Loading an existing index does not go through the build Session; the query side opens it through a
+Loader, as described below.
 
-## 阅读顺序
+## Reading order
 
-| 文件组 | 职责 |
+| File group | Responsibility |
 |---|---|
-| `BuildSession` | 参数归一化、field-schema 投影、源顺序和缺失前缀、side-input 预检、输入物化；跨 C 调用保留结果并发布 |
-| `BuildInputMaterializer` / `JsonBuildMaterializer` | 保留稳定标量批次，或完成 JSON/ARRAY 投影后保留其原生输入 |
-| `VectorBuildMaterializer` | 准备 compact tensor、逻辑/物理行信息、embedding offsets 和标量分类组 |
-| `VectorDiskBuildMaterializer` | 准备完整 raw/sidecar 文件，持有本次输入目录直到同步 Build 结束 |
-| `index_c.cpp` | C ABI 参数转换、调用 Session 和错误返回；不实现索引算法 |
+| `BuildSession` | Parameter normalization, field-schema projection, source order and the missing prefix, side-input precheck, input materialization; retains the result across C calls and publishes it |
+| `BuildInputMaterializer` / `JsonBuildMaterializer` | Retains stable scalar batches, or retains the native input produced by JSON/ARRAY projection |
+| `VectorBuildMaterializer` | Prepares the compact tensor, logical/physical row information, embedding offsets, and scalar category groups |
+| `VectorDiskBuildMaterializer` | Prepares complete raw/sidecar files and holds this build's input directory until the synchronous Build finishes |
+| `index_c.cpp` | C ABI parameter conversion, Session calls, and error return; implements no index algorithm |
 
-## 输入边界
+## Input boundary
 
-物化器的逐批 `Add` 只收集调用方持有的输入，不逐批调用 sealed Builder。
-完整数据准备好后，物化器调用一次 typed `IArtifactBuilder<Input>::Build(input)`。
-Hybrid 可以在此调用内探测和重遍历相同批次，不触发调用方重放或第二次远端读取。
+A materializer's per-batch `Add` only collects caller-held input and does not call the sealed
+Builder per batch. Once the complete data is ready, the materializer calls the typed
+`IArtifactBuilder<Input>::Build(input)` once. Hybrid may probe and re-traverse the same batches
+within this call without triggering a caller replay or a second remote read.
 
-`BuildRequest::value_type` 是选中 Builder 实际建立索引的值类型，与 `BuildSource` 的
-binlog、column group 或 manifest 传输形态无关。例如 JSON 列投影并 cast 为 DOUBLE 时，
-`value_type` 是 DOUBLE；`ARRAY<INT64>` 的 `value_type` 是 INT64。
+`BuildRequest::value_type` is the value type the selected Builder actually indexes. It is
+independent of whether `BuildSource` transports the data as binlogs, column groups, or a manifest.
+For example, when a JSON column is projected and cast to DOUBLE, `value_type` is DOUBLE; for
+`ARRAY<INT64>`, `value_type` is INT64.
 
-`expected_rows` 是字段最终的逻辑行数。source 只保存字段写入后的行；字段新增前已经存在的
-历史行构成缺失的起始前缀，其长度是 `expected_rows` 减去实际解码的行数。请求中的
-`lack_binlog_rows`（由 binlog `EntriesNum` 计算）不参与推导。schema 提供且支持 default
-时前缀填 default；否则 nullable 字段填 null；non-nullable 且无 default 时拒绝构建。
-解码行数超过 `expected_rows`，或列出的文件读取、解码失败，都使构建失败，不计入缺失前缀。
+`expected_rows` is the field's final logical row count. A source holds only the rows written after
+the field was added; historical rows that already existed before the field was added form the
+missing leading prefix, whose length is `expected_rows` minus the rows actually decoded. The
+request's `lack_binlog_rows` (computed from binlog `EntriesNum`) is not used in this derivation.
+When the schema provides a supported default, the prefix is filled with the default; otherwise a
+nullable field is filled with null, and a non-nullable field without a default is rejected.
+Decoding more rows than `expected_rows`, or failing to read or decode a listed file, fails the build
+and is not counted toward the missing prefix.
 
-前缀必须先于 source 行交付给物化器。V1 binlog 只有解码后才知道行数：首遍按无前缀流式交付并
-累计解码行数，行数不足时丢弃该物化器，新建物化器先填前缀，再流式读取一遍；两遍解码行数
-不一致时报 `DataFormatBroken`。只有缺少起始行的 binlog 才付出第二遍读取，没有 binlog 的
-字段无需重读。column group 和 manifest source 先保留解码批次，得到行数后先填前缀再交付；
-其中磁盘向量直接流式交付且不填前缀，行数不足时由 `FinishPrimary` 拒绝。
+The prefix must reach the materializer before any source row. The row count of V1 binlogs is known
+only after decoding: the first pass streams the rows assuming no prefix and counts the decoded
+rows; if the count is short, that materializer is discarded, a new materializer is filled with the
+prefix first, and the binlogs are streamed again. If the two passes decode different row counts,
+the build reports `DataFormatBroken`. Only binlogs that lack leading rows pay for the second read; a
+field without binlogs needs no re-read. Column-group and manifest sources first retain the decoded
+batches, then fill the prefix once the row count is known and deliver the batches; disk vectors are
+the exception and stream directly without filling a prefix, so `FinishPrimary` rejects a short row
+count.
 
-- 普通标量保留原始 `FieldData` 及稳定视图；字符串、数组和 validity 的传递后备数据
-  必须活到 Build 返回或抛错。投影输入保留自己的结果，不同时缓存另一份完整原始列。
-- JSON 缺失/null、类型转换失败及 ngram 的无值状态保持区分；有效空数组不等于字段 null。
-  nested ARRAY 输出元素坐标，不在索引内聚合为父行。
-- 内存向量物化器将 source 批次整理为完整物理 tensor。逻辑 parent validity 与物理
-  向量行号分别传递，Builder 在同步构建期间借用物化器持有的输入。
-- 磁盘向量的输入 generation 与索引输出 staging 分离。输入借用在同步 Build 结束前终止，
-  输出文件由 Artifact/Reader 的实际后备 owner 保留。
-- 额外标量字段先按 Builder 的实际能力预检，再读取并交付；声明字段 ID 不等于交付了值。
-  scalar-info 的未交付、已交付无文件和实际文件三个状态不得合并。
+- Plain scalars retain the original `FieldData` and its stable views; the transitive backing data
+  of strings, arrays, and validity must stay alive until Build returns or throws. A projected input
+  retains its own result and does not also cache another full copy of the raw column.
+- JSON missing/null, type-conversion failure, and the ngram no-value state remain distinct; a valid
+  empty array is not a null field. A nested ARRAY outputs element coordinates and is not aggregated
+  into parent rows inside the index.
+- The in-memory vector materializer assembles source batches into a complete physical tensor.
+  Logical parent validity and physical vector row numbers are passed separately, and the Builder
+  borrows the materializer-held input during the synchronous build.
+- A disk vector's input generation is separate from the index output staging. Input borrows end
+  before the synchronous Build finishes, and output files are retained by the actual backing owner
+  of the Artifact/Reader.
+- An extra scalar field is first prechecked against the Builder's actual capability, then read and
+  delivered; declaring a field ID does not mean its values were delivered. The three scalar-info
+  states (not delivered, delivered without a file, and an actual file) must not be merged.
 
-完整输入路径使用 accumulating manifest 解码窗口；磁盘文件物化仍使用 streaming 窗口。
-这只限制在途解码，不意味着完整输入或构建出的索引状态无需内存。
+Complete-input paths use the accumulating manifest decode window; disk-file materialization still
+uses the streaming window. This only bounds in-flight decoding; it does not mean the complete input
+or the built index state needs no memory.
 
-## 产物与加载
+## Artifacts and loading
 
-`BuildSession::BuildFromSource` 读取并物化 session 配置的 source。
-Session 只负责构建与发布，不提供直接输入、内存 BinarySet 导出或已有索引加载入口。
-已有索引由查询侧构造对应的 `FileSource`，通过 `LoaderRegistry` 打开为 Reader。
+`BuildSession::BuildFromSource` reads and materializes the source configured for the session.
+The Session is responsible only for building and publishing; it provides no entry point for direct
+input, in-memory BinarySet export, or loading an existing index. For an existing index, the query
+side constructs the corresponding `FileSource` and opens it as a Reader through `LoaderRegistry`.
 
-Session 区分待构建、已构建 Artifact、明确跳过的空结果以及失败状态。
-`BuildProduct` 是显式的 Artifact-or-SkippedEmpty 构建结果，不是 Artifact 抽象基类；
-SkippedEmpty 表示没有产生 Artifact。只有构建产物或跳过的空结果可通过 Session 发布。
-`BuildSession::Publish` 调用 `Artifact::Serialize(FileSink&) / Serialize(IndexEntryWriter&)` 序列化完整产物，通过
-output generation 对应的 sink 或 writer 写入配置的远端对象存储，并返回已发布文件统计；它不是 growing snapshot
-publish。sink 可以在各次写入时逐步上传，`Finish` 负责最终收尾，不保证从此刻才开始上传。
-V1/V2 通过 `FileSink` 保留历史切片和文件布局；V3 直接使用现有 `IndexEntryWriter`，
-由 Publish 创建 writer、调用 Finish 并生成文件统计。Hybrid/JSON 包装沿用同一 writer。
+The Session distinguishes the pending-build, built-Artifact, explicitly skipped empty result, and
+failed states. `BuildProduct` is an explicit Artifact-or-SkippedEmpty build result, not an Artifact
+abstract base class; SkippedEmpty means no Artifact was produced. Only a build artifact or a skipped
+empty result can be published through the Session.
+`BuildSession::Publish` calls `Artifact::Serialize(FileSink&) / Serialize(IndexEntryWriter&)` to serialize the complete artifact, writes it through the
+sink or writer for the output generation to the configured remote object storage, and returns the
+published file statistics; it is not a growing snapshot publish. A sink may upload incrementally
+across writes; `Finish` performs the final completion and does not mean upload starts only then.
+V1/V2 keep the historical slicing and file layout through `FileSink`; V3 uses the existing
+`IndexEntryWriter` directly, and Publish creates the writer, calls Finish, and produces the file
+statistics. Hybrid/JSON wrappers use the same writer.
 
-Loader 不生成用于重新发布的 Artifact。原始 source/buffer 在打开结束后可释放，Reader
-必须自行保留查询需要的引擎、映射或文件。所有构建产物都保留 Serialize 接口，具体模式是否
-支持持久化由 family 决定；只有 Text 与内存向量 Artifact 额外提供消费式 Reader 转换。产物模式
-支持持久化且调用方同时需要两种结果时，先 Serialize/Publish，再消费；转换
-成功或失败后均不保留可重试的 Artifact，能力缺失也不触发 serialize/load 回退。本组件当前不
-提供 BuildSession 的 Artifact 消费或 Reader 取出入口。上传失败不丢弃尚未消费的 Artifact，
-允许之后重试发布。
+A Loader does not produce an Artifact for republishing. The original source/buffer may be released
+once opening completes, so the Reader must itself retain the engine, mappings, or files that queries
+need. Every build artifact keeps the Serialize interface, and whether a given mode supports
+persistence is decided by the family; only Text and in-memory vector Artifacts additionally provide
+a consuming conversion into a Reader. When the artifact's mode supports persistence and the caller
+needs both results, it serializes/publishes first and then consumes; after a conversion succeeds or
+fails, no retryable Artifact remains, and a missing capability does not trigger a serialize/load
+fallback. This component currently provides no entry point for consuming a BuildSession's Artifact
+or taking a Reader out of it. An upload failure does not discard an Artifact that has not been
+consumed, so publication can be retried later.
 
-这些说明是源码接口约束，不表示编译、运行、故障场景或性能已经验证。
+These notes describe source-level interface constraints; they do not mean that compilation, runtime
+behavior, failure scenarios, or performance have been verified.
