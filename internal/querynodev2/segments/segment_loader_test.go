@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -44,6 +46,90 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestGetLocalDiskUsage(t *testing.T) {
+	duf := &diskUsageFetcher{
+		usage: atomic.NewInt64(0),
+		err:   atomic.NewError(nil),
+	}
+	loader := &segmentLoader{duf: duf}
+	usage, err := loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Zero(t, usage)
+
+	duf.usage.Store(100)
+	loader.committedResource.DiskSize = 20
+	usage, err = loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), usage)
+
+	duf.err.Store(merr.WrapErrServiceInternalMsg("disk usage unavailable"))
+	_, err = loader.GetLocalDiskUsage()
+	assert.Error(t, err)
+}
+
+func TestCheckSegmentSizePreservesStructArrayAccounting(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		params.QueryCoordCfg.AutoscalePrecheckEnabled.Key:           "false",
+		params.QueryNodeCfg.TieredEvictionEnabled.Key:               "false",
+		params.QueryNodeCfg.MmapScalarIndex.Key:                     "false",
+		params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key: "95",
+	} {
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() { params.Reset(key) })
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name: "index_update_with_struct",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200,
+			Name:    "items",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			},
+		}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID: 1,
+		SegmentID:    2,
+		NumOfRows:    1_000_000,
+		IndexInfos: []*querypb.FieldIndexInfo{{
+			FieldID:        101,
+			IndexSize:      1 << 20,
+			NumRows:        1_000_000,
+			IndexFilePaths: []string{"metadata-only-index"},
+			IndexParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED}},
+		}},
+	}
+	indexUsage, err := loadresource.EstimateIndexLoadResource(context.Background(), schema.Fields[1], loadInfo, loadInfo.IndexInfos[0])
+	require.NoError(t, err)
+
+	collectionManager := NewMockCollectionManager(t)
+	collectionManager.EXPECT().Get(loadInfo.GetCollectionID()).
+		Return(NewCollectionWithoutSegcoreForTest(loadInfo.GetCollectionID(), schema)).Twice()
+	loader := &segmentLoader{manager: &Manager{Collection: collectionManager}}
+
+	// Preserve the 2.6 reservation: schema-only struct offsets do not consume
+	// the remaining capacity, while struct field data still does.
+	const totalMemory, usedMemory = uint64(64 << 20), uint64(56 << 20)
+	memory, disk, err := loader.checkSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{loadInfo}, totalMemory, usedMemory, 0)
+	require.NoError(t, err)
+	require.Equal(t, indexUsage.MaxMemoryBytes, memory)
+	require.Equal(t, indexUsage.MaxDiskBytes, disk)
+
+	loadInfo.BinlogPaths = []*datapb.FieldBinlog{{
+		FieldID: 201,
+		Binlogs: []*datapb.Binlog{{MemorySize: 32 << 20}},
+	}}
+	_, _, err = loader.checkSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{loadInfo}, totalMemory, usedMemory, 0)
+	require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+}
 
 type SegmentLoaderSuite struct {
 	suite.Suite
@@ -1002,13 +1088,11 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int
 	}
 }
 
-func (suite *SegmentLoaderTextIndexEstimateSuite) TestTantivyValidityBitmapBytesWordAligned() {
-	suite.EqualValues(0, estimateTantivyValidityBitmapBytes(-1))
-	suite.EqualValues(0, estimateTantivyValidityBitmapBytes(0))
-	suite.EqualValues(8, estimateTantivyValidityBitmapBytes(1))
-	suite.EqualValues(8, estimateTantivyValidityBitmapBytes(64))
-	suite.EqualValues(16, estimateTantivyValidityBitmapBytes(65))
-	suite.EqualValues(24, estimateTantivyValidityBitmapBytes(129))
+func expectedTantivyValidityBitmapBytes(numRows int64) uint64 {
+	if numRows <= 0 {
+		return 0
+	}
+	return ((uint64(numRows)-1)/64 + 1) * 8
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {
@@ -1028,7 +1112,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_No
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expectedMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be counted in memory")
 	suite.EqualValues(0, usage.DiskSize, "non-mmap text index must not be counted in disk")
 }
@@ -1050,7 +1134,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTie
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be counted in memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be counted in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
 }
 
@@ -1095,7 +1179,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	validityBitmapBytes := expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap")
 }
 
@@ -1116,7 +1200,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionF
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize)*expansionFactor) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expected := uint64(float64(textIndexSize)*expansionFactor) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expected, usage.MemorySize, "expansion factor must apply only to text index file bytes")
 }
 
@@ -1178,7 +1262,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonMmap_Ev
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expectedMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expectedMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be in evictable memory")
 	suite.EqualValues(0, usage.DiskSize)
 }
@@ -1201,7 +1285,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_Mmap_Evict
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be in evictable memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be in evictable memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be in evictable disk")
 }
 
@@ -1225,7 +1309,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_CacheRatio
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	evictableMemorySize := uint64(textIndexSize) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	evictableMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	expected := uint64(float64(evictableMemorySize) * cacheRatio)
 	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index files and validity bitmap")
 }
@@ -1269,7 +1353,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	validityBitmapBytes := expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap in logical estimate")
 }
 
@@ -1293,7 +1377,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheR
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must remain in memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must remain in memory")
 	expected := uint64(float64(textIndexSize) * diskCacheRatio)
 	suite.EqualValues(expected, usage.DiskSize, "disk cache ratio must be applied to mmap text index")
 }
@@ -1317,7 +1401,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize)*expansionFactor) + estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expected := uint64(float64(textIndexSize)*expansionFactor) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expected, usage.MemorySize)
 }
 
@@ -1408,4 +1492,51 @@ func TestSegmentLoader(t *testing.T) {
 	suite.Run(t, &SegmentLoaderSuite{})
 	suite.Run(t, &SegmentLoaderDetailSuite{})
 	suite.Run(t, &SegmentLoaderTextIndexEstimateSuite{})
+}
+
+func TestCheckLogicalSegmentSizeUsesJSONKeyStatsExpansionFactor(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictionEnabled.Key)
+	params.Save(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	params.Save(params.QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer params.Reset(params.QueryNodeCfg.MmapJSONStats.Key)
+	params.Save(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer params.Reset(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+
+	const collectionID = int64(10)
+	collectionManager := NewMockCollectionManager(t)
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Collection: collectionManager,
+			Segment:    segmentManager,
+		},
+	}
+	collectionManager.EXPECT().
+		Get(collectionID).
+		Return(NewCollectionWithoutSegcoreForTest(collectionID, &schemapb.CollectionSchema{
+			Name: "test_json_stats_estimate",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}))
+	segmentManager.EXPECT().GetLogicalResource().Return(ResourceUsage{}).Twice()
+
+	memoryBytes, diskBytes, err := loader.checkLogicalSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{
+		{
+			CollectionID: collectionID,
+			SegmentID:    20,
+			NumOfRows:    1,
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				101: {FieldID: 101, MemorySize: 100},
+			},
+		},
+	}, 1024)
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 300, memoryBytes)
+	assert.Zero(t, diskBytes)
 }
