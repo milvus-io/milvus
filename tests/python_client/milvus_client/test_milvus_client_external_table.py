@@ -81,7 +81,6 @@ _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES = {
     "Date": 28,
     "Time": 29,
     "Decimal": 30,
-    "UUID": 31,
 }
 _EXTERNAL_ADD_FIELD_INTERNAL_TYPES = {
     DataType.NONE,
