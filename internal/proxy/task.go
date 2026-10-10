@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -4118,9 +4117,7 @@ type RunAnalyzerTask struct {
 	*milvuspb.RunAnalyzerRequest
 	ctx          context.Context
 	collectionID typeutil.UniqueID
-	fieldID      typeutil.UniqueID
 	dbName       string
-	lb           shardclient.LBPolicy
 
 	result *milvuspb.RunAnalyzerResponse
 }
@@ -4176,50 +4173,13 @@ func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
 
 	t.collectionID = collID
 
-	schema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-
-	fieldId, ok := schema.MapFieldID(t.GetFieldName())
-	if !ok {
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(t.GetFieldName()))
-	}
-
-	t.fieldID = fieldId
 	t.result = &milvuspb.RunAnalyzerResponse{}
 	return nil
 }
 
-func (t *RunAnalyzerTask) runAnalyzerOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	resp, err := qn.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
-		Channel:       channel,
-		FieldId:       t.fieldID,
-		AnalyzerNames: t.GetAnalyzerNames(),
-		Placeholder:   t.GetPlaceholder(),
-		WithDetail:    t.GetWithDetail(),
-		WithHash:      t.GetWithHash(),
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return err
-	}
-	t.result = resp
-	return nil
-}
-
 func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.GetCollectionName(),
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetPlaceholder())),
-		Exec:           t.runAnalyzerOnShardleader,
-	})
-
+	var err error
+	t.result, err = t.runFieldAnalyzer(ctx)
 	return err
 }
 

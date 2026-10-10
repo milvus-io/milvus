@@ -1831,3 +1831,26 @@ func newBM25InsertRequest(texts ...string) *msgpb.InsertRequest {
 		},
 	}
 }
+
+func TestFunctionRunnerManagerAnalyzerSchemaAdmission(t *testing.T) {
+	manager, _ := newMockFunctionRunnerManager(t)
+	t.Cleanup(manager.Close)
+	schema := newBM25SignatureTestSchema()
+	require.NoError(t, manager.Alloc(1, "wal", schema))
+	called := false
+	callback := func(Analyzer) error { called = true; return nil }
+	ok, err := manager.RunWithAnalyzerAtSchemaVersion(context.Background(), 1, "wal", 101, schema.Version+1, callback)
+	require.False(t, ok)
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.False(t, called)
+	updated := cloneCollectionSchema(schema)
+	updated.Version++
+	require.NoError(t, manager.Update(1, "wal", updated))
+	_, err = manager.RunWithAnalyzerAtSchemaVersion(context.Background(), 1, "wal", 101, schema.Version, callback)
+	require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	require.False(t, called)
+	ok, err = manager.RunWithAnalyzerAtSchemaVersion(context.Background(), 1, "wal", 101, updated.Version, callback)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, called)
+}

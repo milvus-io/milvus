@@ -79,6 +79,8 @@ type FunctionRunnerManager interface {
 	// their input fields; other analyzer-enabled fields use a short-lived analyzer.
 	// The callback is protected from concurrent close and must not retain the analyzer.
 	RunWithAnalyzer(ctx context.Context, collectionID int64, key string, fieldID int64, run func(Analyzer) error) (bool, error)
+	// RunWithAnalyzerAtSchemaVersion additionally admits only the key's current schema version.
+	RunWithAnalyzerAtSchemaVersion(ctx context.Context, collectionID int64, key string, fieldID int64, schemaVersion int32, run func(Analyzer) error) (bool, error)
 
 	// Close releases all cached runners managed by this manager.
 	Close()
@@ -769,12 +771,17 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 	key string,
 	fieldID int64,
 	run func(Analyzer) error,
+	expectedVersion ...int32,
 ) (bool, error) {
 	e.mu.RLock()
 	schemaVersion, ok := e.keyVersions[key]
 	if !ok {
 		e.mu.RUnlock()
 		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for key %s is not available", key)
+	}
+	if len(expectedVersion) != 0 && schemaVersion != expectedVersion[0] {
+		e.mu.RUnlock()
+		return false, merr.Wrap(merr.ErrCollectionSchemaVersionNotReady, "analyzer schema version changed")
 	}
 	versionRunners := e.versionRunners[schemaVersion]
 	if versionRunners == nil {
@@ -931,6 +938,15 @@ func (m *functionRunnerManager) RunWithAnalyzer(
 		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for collection %d is not available", collectionID)
 	}
 	ok, err := entry.RunWithAnalyzer(ctx, key, fieldID, run)
+	return ok, wrapFunctionRunnerLifecycleError(collectionID, err)
+}
+
+func (m *functionRunnerManager) RunWithAnalyzerAtSchemaVersion(ctx context.Context, collectionID int64, key string, fieldID int64, schemaVersion int32, run func(Analyzer) error) (bool, error) {
+	entry := m.getEntry(collectionID)
+	if entry == nil {
+		return false, merr.WrapErrServiceUnavailableMsg("function runner schema for collection %d is not available", collectionID)
+	}
+	ok, err := entry.RunWithAnalyzer(ctx, key, fieldID, run, schemaVersion)
 	return ok, wrapFunctionRunnerLifecycleError(collectionID, err)
 }
 

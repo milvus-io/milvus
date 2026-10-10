@@ -361,6 +361,7 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
@@ -997,4 +998,31 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+// Analyzer execution is independent of segment queries. Streaming failures use
+// native gRPC errors; analyzer failures are carried by the response Status.
+message StreamingNodeRunAnalyzerRequest {
+    repeated bytes placeholder = 1;
+    bool with_detail = 2;
+    bool with_hash = 3;
+    oneof source {
+        StreamingInlineAnalyzer inline_analyzer = 4;
+        StreamingFieldAnalyzer field_analyzer = 5;
+    }
+}
+message StreamingInlineAnalyzer {
+    string analyzer_params = 1;
+}
+message StreamingFieldAnalyzer {
+    int64 collection_id = 1;
+    string vchannel = 2;
+    int64 field_id = 3;
+    optional int32 schema_version = 4;
+    repeated string analyzer_names = 5;
+    PChannelInfo pchannel = 6;
+}
+message StreamingNodeRunAnalyzerResponse {
+    repeated milvus.AnalyzerResult results = 1;
+    common.Status status = 2;
 }

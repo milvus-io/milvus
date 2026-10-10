@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/streamingnode/analyzerservice"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -69,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -7379,19 +7381,19 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
-	// build and run analyzer at any streaming node/query node
-	// if collection and field not set
+	// Inline parameters use the existing handler client's ready-SN picker.
 	if req.GetCollectionName() == "" {
-		return node.mixCoord.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
-			AnalyzerParams: req.GetAnalyzerParams(),
-			Placeholder:    req.GetPlaceholder(),
-			WithDetail:     req.GetWithDetail(),
-			WithHash:       req.GetWithHash(),
+		resp, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
+			Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
+			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()}},
 		})
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err))}, nil
+		}
+		return &milvuspb.RunAnalyzerResponse{Status: resp.GetStatus(), Results: resp.GetResults()}, nil
 	}
 
-	// run builded analyzer by delegator
-	// collection must loaded
+	// Run the field analyzer owned by the primary streaming node.
 	if err := validateRunAnalyzer(req); err != nil {
 		return &milvuspb.RunAnalyzerResponse{
 			Status: merr.Status(merr.WrapErrAsInputError(err)),
@@ -7402,7 +7404,6 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	task := &RunAnalyzerTask{
 		baseTask:           baseTask{MetaCache: node.GetMetaCache()},
 		ctx:                ctx,
-		lb:                 node.lbPolicy,
 		Condition:          NewTaskCondition(ctx),
 		RunAnalyzerRequest: req,
 	}
