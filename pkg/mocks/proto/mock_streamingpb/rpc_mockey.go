@@ -15,8 +15,3 @@ import (
 func (*MockStreamingNodeHandlerServiceClient) SubscribeTransform(context.Context, ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_SubscribeTransformClient, error) {
 	panic("SubscribeTransform must be patched with mockey")
 }
-
-// ValidateRuntime completes the RPC already declared by the QueryView proto.
-func (*MockStreamingNodeManagerServiceClient) ValidateRuntime(context.Context, *streamingpb.StreamingNodeManagerValidateRuntimeRequest, ...grpc.CallOption) (*streamingpb.StreamingNodeManagerValidateRuntimeResponse, error) {
-	panic("ValidateRuntime must be patched with mockey")
-}

@@ -156,7 +156,3 @@ type routedViewSyncServiceClient struct {
 func (c *routedViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
 	return c.client.SyncQueryView(contextutil.WithPickServerID(ctx, c.queryNodeID), opts...)
 }
-
-func (c *routedViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	return c.client.SyncDataView(contextutil.WithPickServerID(ctx, c.queryNodeID), in, opts...)
-}

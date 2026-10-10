@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	ViewSyncService_SyncQueryView_FullMethodName = "/milvus.proto.view.ViewSyncService/SyncQueryView"
-	ViewSyncService_SyncDataView_FullMethodName  = "/milvus.proto.view.ViewSyncService/SyncDataView"
 )
 
 // ViewSyncServiceClient is the client API for ViewSyncService service.
@@ -31,9 +30,6 @@ type ViewSyncServiceClient interface {
 	// Coord pushes query view state transitions to nodes; nodes respond with their current local state.
 	// The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
 	SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (ViewSyncService_SyncQueryViewClient, error)
-	// SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
-	// Applies to both loaded and unloaded collections.
-	SyncDataView(ctx context.Context, in *SyncDataViewRequest, opts ...grpc.CallOption) (*SyncDataViewResponse, error)
 }
 
 type viewSyncServiceClient struct {
@@ -75,15 +71,6 @@ func (x *viewSyncServiceSyncQueryViewClient) Recv() (*SyncResponse, error) {
 	return m, nil
 }
 
-func (c *viewSyncServiceClient) SyncDataView(ctx context.Context, in *SyncDataViewRequest, opts ...grpc.CallOption) (*SyncDataViewResponse, error) {
-	out := new(SyncDataViewResponse)
-	err := c.cc.Invoke(ctx, ViewSyncService_SyncDataView_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ViewSyncServiceServer is the server API for ViewSyncService service.
 // All implementations should embed UnimplementedViewSyncServiceServer
 // for forward compatibility
@@ -92,9 +79,6 @@ type ViewSyncServiceServer interface {
 	// Coord pushes query view state transitions to nodes; nodes respond with their current local state.
 	// The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
 	SyncQueryView(ViewSyncService_SyncQueryViewServer) error
-	// SyncDataView syncs data view timetick from coord to streaming nodes for delete data eviction.
-	// Applies to both loaded and unloaded collections.
-	SyncDataView(context.Context, *SyncDataViewRequest) (*SyncDataViewResponse, error)
 }
 
 // UnimplementedViewSyncServiceServer should be embedded to have forward compatible implementations.
@@ -103,9 +87,6 @@ type UnimplementedViewSyncServiceServer struct {
 
 func (UnimplementedViewSyncServiceServer) SyncQueryView(ViewSyncService_SyncQueryViewServer) error {
 	return status.Errorf(codes.Unimplemented, "method SyncQueryView not implemented")
-}
-func (UnimplementedViewSyncServiceServer) SyncDataView(context.Context, *SyncDataViewRequest) (*SyncDataViewResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SyncDataView not implemented")
 }
 
 // UnsafeViewSyncServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -145,36 +126,13 @@ func (x *viewSyncServiceSyncQueryViewServer) Recv() (*SyncRequest, error) {
 	return m, nil
 }
 
-func _ViewSyncService_SyncDataView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SyncDataViewRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ViewSyncServiceServer).SyncDataView(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ViewSyncService_SyncDataView_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ViewSyncServiceServer).SyncDataView(ctx, req.(*SyncDataViewRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ViewSyncService_ServiceDesc is the grpc.ServiceDesc for ViewSyncService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ViewSyncService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.view.ViewSyncService",
 	HandlerType: (*ViewSyncServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "SyncDataView",
-			Handler:    _ViewSyncService_SyncDataView_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "SyncQueryView",
@@ -183,139 +141,6 @@ var ViewSyncService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "view.proto",
-}
-
-const (
-	QueryPlanService_GetQueryPlan_FullMethodName     = "/milvus.proto.view.QueryPlanService/GetQueryPlan"
-	QueryPlanService_GetMVCCTimestamp_FullMethodName = "/milvus.proto.view.QueryPlanService/GetMVCCTimestamp"
-)
-
-// QueryPlanServiceClient is the client API for QueryPlanService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type QueryPlanServiceClient interface {
-	GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error)
-	// GetMVCCTimestamp returns only the MVCC frontiers from the primary replica's WAL.
-	// Lightweight alternative to GetQueryPlan for cross-replica strong consistency:
-	// Proxy gets MVCC from primary, then calls GetQueryPlan on the target replica with the pre-obtained frontiers.
-	// Returns VIEW_CODE_NOT_PRIMARY if the node is not the primary replica.
-	GetMVCCTimestamp(ctx context.Context, in *GetMVCCTimestampRequest, opts ...grpc.CallOption) (*GetMVCCTimestampResponse, error)
-}
-
-type queryPlanServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewQueryPlanServiceClient(cc grpc.ClientConnInterface) QueryPlanServiceClient {
-	return &queryPlanServiceClient{cc}
-}
-
-func (c *queryPlanServiceClient) GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error) {
-	out := new(GetQueryPlanResponse)
-	err := c.cc.Invoke(ctx, QueryPlanService_GetQueryPlan_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *queryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, in *GetMVCCTimestampRequest, opts ...grpc.CallOption) (*GetMVCCTimestampResponse, error) {
-	out := new(GetMVCCTimestampResponse)
-	err := c.cc.Invoke(ctx, QueryPlanService_GetMVCCTimestamp_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// QueryPlanServiceServer is the server API for QueryPlanService service.
-// All implementations should embed UnimplementedQueryPlanServiceServer
-// for forward compatibility
-type QueryPlanServiceServer interface {
-	GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error)
-	// GetMVCCTimestamp returns only the MVCC frontiers from the primary replica's WAL.
-	// Lightweight alternative to GetQueryPlan for cross-replica strong consistency:
-	// Proxy gets MVCC from primary, then calls GetQueryPlan on the target replica with the pre-obtained frontiers.
-	// Returns VIEW_CODE_NOT_PRIMARY if the node is not the primary replica.
-	GetMVCCTimestamp(context.Context, *GetMVCCTimestampRequest) (*GetMVCCTimestampResponse, error)
-}
-
-// UnimplementedQueryPlanServiceServer should be embedded to have forward compatible implementations.
-type UnimplementedQueryPlanServiceServer struct {
-}
-
-func (UnimplementedQueryPlanServiceServer) GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetQueryPlan not implemented")
-}
-func (UnimplementedQueryPlanServiceServer) GetMVCCTimestamp(context.Context, *GetMVCCTimestampRequest) (*GetMVCCTimestampResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetMVCCTimestamp not implemented")
-}
-
-// UnsafeQueryPlanServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to QueryPlanServiceServer will
-// result in compilation errors.
-type UnsafeQueryPlanServiceServer interface {
-	mustEmbedUnimplementedQueryPlanServiceServer()
-}
-
-func RegisterQueryPlanServiceServer(s grpc.ServiceRegistrar, srv QueryPlanServiceServer) {
-	s.RegisterService(&QueryPlanService_ServiceDesc, srv)
-}
-
-func _QueryPlanService_GetQueryPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetQueryPlanRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryPlanServiceServer).GetQueryPlan(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: QueryPlanService_GetQueryPlan_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryPlanServiceServer).GetQueryPlan(ctx, req.(*GetQueryPlanRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _QueryPlanService_GetMVCCTimestamp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetMVCCTimestampRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryPlanServiceServer).GetMVCCTimestamp(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: QueryPlanService_GetMVCCTimestamp_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryPlanServiceServer).GetMVCCTimestamp(ctx, req.(*GetMVCCTimestampRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// QueryPlanService_ServiceDesc is the grpc.ServiceDesc for QueryPlanService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "milvus.proto.view.QueryPlanService",
-	HandlerType: (*QueryPlanServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetQueryPlan",
-			Handler:    _QueryPlanService_GetQueryPlan_Handler,
-		},
-		{
-			MethodName: "GetMVCCTimestamp",
-			Handler:    _QueryPlanService_GetMVCCTimestamp_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "view.proto",
 }
 

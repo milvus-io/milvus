@@ -46,14 +46,9 @@ func (e *ViewError) IsOnShutdown() bool {
 	return e.Code == viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN
 }
 
-// IsNotPrimary returns true if the node is not the primary replica for this shard.
-func (e *ViewError) IsNotPrimary() bool {
-	return e.Code == viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY
-}
-
 // IsRetryable returns true if the error should trigger a retry from Phase 1.
 func (e *ViewError) IsRetryable() bool {
-	return e.IsViewInvalidated() || e.IsViewNotFound() || e.IsOnShutdown() || e.IsNotPrimary()
+	return e.IsViewInvalidated() || e.IsViewNotFound() || e.IsOnShutdown()
 }
 
 // NewViewInvalidated creates a ViewError with VIEW_CODE_VIEW_INVALIDATED.
@@ -69,11 +64,6 @@ func NewViewNotFound(format string, args ...interface{}) *ViewError {
 // NewOnShutdownError creates a ViewError with VIEW_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *ViewError {
 	return New(viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN, format, args...)
-}
-
-// NewNotPrimaryError creates a ViewError with VIEW_CODE_NOT_PRIMARY.
-func NewNotPrimaryError(format string, args ...interface{}) *ViewError {
-	return New(viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, format, args...)
 }
 
 // NewUnknownError creates a ViewError with VIEW_CODE_UNKNOWN.

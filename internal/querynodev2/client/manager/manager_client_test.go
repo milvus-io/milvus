@@ -97,13 +97,6 @@ func TestCreateViewSyncClientRoutesByQueryNodeID(t *testing.T) {
 	picked, ok := contextutil.GetPickServerID(baseClient.queryCtx)
 	assert.True(t, ok)
 	assert.Equal(t, queryNodeID, picked)
-
-	resp, err := client.SyncDataView(context.Background(), &viewpb.SyncDataViewRequest{})
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	picked, ok = contextutil.GetPickServerID(baseClient.dataCtx)
-	assert.True(t, ok)
-	assert.Equal(t, queryNodeID, picked)
 }
 
 func TestRegisterNodeChangedNotifier(t *testing.T) {
@@ -205,15 +198,9 @@ func (s *fakeViewSyncService) GetService(context.Context) (viewpb.ViewSyncServic
 
 type capturingViewSyncServiceClient struct {
 	queryCtx context.Context
-	dataCtx  context.Context
 }
 
 func (c *capturingViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
 	c.queryCtx = ctx
 	return nil, nil
-}
-
-func (c *capturingViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	c.dataCtx = ctx
-	return &viewpb.SyncDataViewResponse{}, nil
 }
