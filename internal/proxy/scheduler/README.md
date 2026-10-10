@@ -28,9 +28,7 @@ loop, runs `PreExecute -> Execute -> PostExecute` under a bounded worker pool.
 3. **TSO + ID allocation** — `Enqueue` allocates a timestamp (or an ID from the
    meta cache for tasks that skip timestamp allocation) before a task is
    unissued.
-4. **DML channel statistics** — `DmTaskQueue` tracks per-physical-channel
-   min/max timestamps for DML tasks (`commitPChanStats`/`popPChanStats`).
-5. **Metrics** — `GetMetrics` reports per-queue pending/executing task counts
+4. **Metrics** — `GetMetrics` reports per-queue pending/executing task counts
    and timing, consumed by the proxy's quota/system-info metrics.
 
 ## Architecture

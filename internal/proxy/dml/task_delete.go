@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/atomic"
@@ -109,11 +110,8 @@ func (dt *DeleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *DeleteTask) OnEnqueue() error {
-	if dt.req.Base == nil {
-		dt.req.Base = commonpbutil.NewMsgBase()
-	}
-	dt.req.Base.MsgType = commonpb.MsgType_Delete
-	dt.req.Base.SourceID = paramtable.GetNodeID()
+	// The runner initializes the shared request before enqueueing. IDs and
+	// timestamps belong to each task; repacking creates independent WAL bases.
 	return nil
 }
 
@@ -287,10 +285,11 @@ func repackDeleteMsgByHash(
 }
 
 type DeleteRunner struct {
-	req       *milvuspb.DeleteRequest
-	result    *milvuspb.MutationResult
-	node      taskmodel.TaskNode
-	metaCache Cache
+	initRequestOnce sync.Once
+	req             *milvuspb.DeleteRequest
+	result          *milvuspb.MutationResult
+	node            taskmodel.TaskNode
+	metaCache       Cache
 
 	// channel
 	chMgr     channelmgr.ChannelsMgr
@@ -550,6 +549,16 @@ func (dr *DeleteRunner) Run(ctx context.Context) error {
 }
 
 func (dr *DeleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*DeleteTask, error) {
+	// Shard callbacks can produce tasks concurrently from the same request.
+	// Preserve lazy initialization when producing the first task.
+	dr.initRequestOnce.Do(func() {
+		if dr.req.Base == nil {
+			dr.req.Base = commonpbutil.NewMsgBase()
+		}
+		dr.req.Base.MsgType = commonpb.MsgType_Delete
+		dr.req.Base.SourceID = paramtable.GetNodeID()
+	})
+
 	dt := &DeleteTask{
 		baseTask:     baseTask{MetaCache: dr.GetMetaCache()},
 		ctx:          ctx,

@@ -26,15 +26,14 @@ import (
 // remain in this package can keep their original (unexported) type names.
 
 type (
-	baseTask        = taskmodel.BaseTask
-	dmlTask         = taskmodel.DMLTask
-	tsoAllocator    = taskmodel.TsoAllocator
-	Condition       = taskmodel.Condition
-	TaskCondition   = taskmodel.TaskCondition
-	pChan           = taskmodel.PChan
-	vChan           = taskmodel.VChan
-	pChanStatistics = taskmodel.PChanStatistics
-	BaseInsertTask  = taskmodel.BaseInsertTask
+	baseTask       = taskmodel.BaseTask
+	dmlTask        = taskmodel.DMLTask
+	tsoAllocator   = taskmodel.TsoAllocator
+	Condition      = taskmodel.Condition
+	TaskCondition  = taskmodel.TaskCondition
+	pChan          = taskmodel.PChan
+	vChan          = taskmodel.VChan
+	BaseInsertTask = taskmodel.BaseInsertTask
 )
 
 func NewTaskCondition(ctx context.Context) *taskmodel.TaskCondition {
