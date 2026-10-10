@@ -37,6 +37,23 @@ func vectorFieldData(rows, dim int) []*schemapb.FieldData {
 	}}
 }
 
+func int64FieldData(rows, columns int) []*schemapb.FieldData {
+	fields := make([]*schemapb.FieldData, columns)
+	for col := range fields {
+		values := make([]int64, rows)
+		for i := range values {
+			values[i] = int64(i + col)
+		}
+		fields[col] = &schemapb.FieldData{
+			Type: schemapb.DataType_Int64, FieldName: fmt.Sprintf("int64_%d", col), FieldId: int64(col + 1),
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+			}},
+		}
+	}
+	return fields
+}
+
 // --- Query path: RetrieveResults ---
 
 func benchRetrieve(b *testing.B, rr *internalpb.RetrieveResults) {
@@ -72,6 +89,14 @@ func BenchmarkRetrieve_Varchar(b *testing.B) {
 
 func BenchmarkRetrieve_Vector(b *testing.B) {
 	benchRetrieve(b, &internalpb.RetrieveResults{FieldsData: vectorFieldData(1000, 768)})
+}
+
+func BenchmarkRetrieve_Int64Scalar(b *testing.B) {
+	for _, columns := range []int{1, 10} {
+		b.Run(fmt.Sprintf("columns_%d", columns), func(b *testing.B) {
+			benchRetrieve(b, &internalpb.RetrieveResults{FieldsData: int64FieldData(1000, columns)})
+		})
+	}
 }
 
 // --- Insert path: InsertRequest (UTF-8 validated) ---
