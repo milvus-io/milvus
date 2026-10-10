@@ -203,6 +203,7 @@ woodpecker:
       maxRetries: 3 # Maximum number of retries for segment append operations.
       maxBatchEntries: 1000 # Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.
       maxBatchBytes: 2000000 # Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.
+      sendTimeout: 2s # Timeout for opening an append stream and receiving buffered responses from one replica in service mode; excludes durability acknowledgement and total append latency. Requires restart. Non-positive duration values retain Woodpecker defaults.
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
@@ -224,6 +225,7 @@ woodpecker:
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
       maxFetchThreads: 4 # Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.
     quorum:
+      selectNodesTimeout: 2s # Timeout for one SelectNodes call to one seed in service mode; expiry allows trying the next seed. Requires restart. Non-positive duration values retain Woodpecker defaults.
       # Quorum Buffer Pools: Define groups of nodes for different purposes
       # Example configuration below:
       #   - name: region1 # Name of the region pool
@@ -259,6 +261,17 @@ woodpecker:
         #     az: "az.*"
         #     resourceGroup: "rg.*"
         customPlacement: 
+    grpc:
+      dialTimeout: 1s # Minimum connection attempt timeout for the Woodpecker client dialing logstores. Independent of Milvus internal gRPC clients. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      connectBackoff:
+        baseDelay: 100ms # Initial delay between failed connection attempts to a Woodpecker logstore; not an RPC retry delay. Requires restart. Non-positive duration values retain Woodpecker defaults.
+        multiplier: 1.6 # Growth multiplier for connection backoff; must be finite and at least 1. Requires restart.
+        jitter: 0.2 # Connection backoff jitter fraction, between 0 and 1. Requires restart.
+        maxDelay: 3s # Maximum connection backoff delay; must be at least baseDelay. Invalid backoff settings retain Woodpecker defaults as a group. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    segmentRead:
+      activeTimeout: 3s # Timeout per replica read of an Active segment in service mode. A timed-out pass may retry with settledTimeout. Must not exceed settledTimeout; invalid pairs retain Woodpecker defaults. Requires restart. Non-positive duration values retain Woodpecker defaults.
+      settledTimeout: 20s # Timeout per replica read for other segments and embedded storage, and the longer retry pass for Active segments. Does not bound direct object-storage reads. Requires restart. Non-positive duration values retain Woodpecker defaults.
+    skipRangeRefreshInterval: 10s # Minimum interval between background refreshes of operator-declared skip ranges when stalled readers ask. Reads use the cached copy; reader report ticks also affect propagation. Not a maximum cache age. Requires restart. Values below 1s retain Woodpecker defaults; whole seconds are used.
   logstore:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
