@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -853,11 +855,33 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecArrayLength(OffsetVector* input = nullptr);
 
+    // Row-level ARRAY length on a sealed ArrayChunk column: each chunk
+    // stores (offset, length) per row, so the predicate reads that table
+    // directly instead of building an ArrayView per row.
+    bool
+    UseArrayChunkLengths() const;
+
+    template <typename ValueType>
+    VectorPtr
+    ExecArrayLengthFromChunks(OffsetVector* input, int64_t real_batch_size);
+
+ public:
+    // The chunk-length path reads no element data and keeps no per-batch
+    // state beyond the data cursor, so it can run in one pass like an
+    // indexed expression; otherwise this one raw-data leaf would force the
+    // whole plan back to per-batch execution.
+    bool
+    CanExecuteAllAtOnce() const override {
+        return UseArrayChunkLengths() || SegmentExpr::CanExecuteAllAtOnce();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;
     SingleElement value_arg_;
     bool arg_inited_{false};
+    mutable std::optional<bool> use_array_chunk_lengths_;
+    std::shared_ptr<ChunkedColumnInterface> array_length_column_;
 };
 
 }  //namespace exec
