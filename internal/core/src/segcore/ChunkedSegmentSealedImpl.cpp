@@ -89,6 +89,7 @@
 #include "geos_c.h"
 #include "glog/logging.h"
 #include "index/Families.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
@@ -438,7 +439,16 @@ make_persisted_index_entry(LoadIndexInfo& info) {
                    "cast metadata",
                    info.field_id);
         meta.json_path = path->second;
-        meta.json_cast_type = JsonCastType::FromString(cast->second);
+        // index_params hold the persisted cast. family and value_type above
+        // come from the adapted load config, so register the cast that config
+        // ran with. Only an NGRAM index type has a runtime cast that differs,
+        // and AdaptIndexType resolves every NGRAM index with a VARCHAR element
+        // cast to the ngram family, so the resolved family identifies it even
+        // when a caller-installed cache slot carries no index_type.
+        meta.json_cast_type = index::RuntimeJsonCastType(
+            meta.family == index::families::kNgram ? index::NGRAM_INDEX_TYPE
+                                                   : "",
+            JsonCastType::FromString(cast->second));
     }
     return IndexInventory::Entry{std::move(meta),
                                  std::move(info.cache_index)};
