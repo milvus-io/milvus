@@ -17,10 +17,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -70,13 +72,15 @@ type queryTask struct {
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
-	plan             *planpb.PlanNode
-	partitionKeyMode bool
-	shardclientMgr   shardclient.ShardClientMgr
-	lb               shardclient.LBPolicy
-	channelsMvcc     map[string]Timestamp
-	preferredNodes   map[string]int64
-	fastSkip         bool
+	plan              *planpb.PlanNode
+	partitionKeyMode  bool
+	shardclientMgr    shardclient.ShardClientMgr
+	lb                shardclient.LBPolicy
+	channelsMvcc      map[string]Timestamp
+	preferredNodes    map[string]int64
+	fastSkip          bool
+	skipRuntimeRLS    bool
+	preserveRawFields bool
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -85,6 +89,16 @@ type queryTask struct {
 	resolvedTimezoneStr  string
 
 	storageCost segcore.StorageCost
+}
+
+// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
+func (t *queryTask) SetSkipRuntimeRLS(skip bool) {
+	t.skipRuntimeRLS = skip
+}
+
+// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
+func (t *queryTask) SetPreserveRawFields(preserve bool) {
+	t.preserveRawFields = preserve
 }
 
 func (t *queryTask) getQueryLabel() string {
@@ -412,11 +426,30 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("Get collection ID by name", zap.Int64("collectionID", t.CollectionID))
 
-	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("check partition key mode failed", zap.Int64("collectionID", t.CollectionID), zap.Error(err))
-		return err
+	canonicalDBName := colInfo.dbName
+	if canonicalDBName == "" {
+		canonicalDBName = t.request.GetDbName()
 	}
+	var principalName string
+	var enforceRLS bool
+	if !t.skipRuntimeRLS {
+		rlsEnabled := colInfo.rlsEnabled
+		if rlsEnabled && t.request.GetSkipRls() {
+			rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
+				canonicalDBName, colInfo.schema.GetName(), "query")
+			if err != nil {
+				return err
+			}
+		}
+		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		if err != nil {
+			return err
+		}
+	}
+
+	schema := colInfo.schema
+	t.schema = schema
+	t.partitionKeyMode = schema.IsPartitionKeyCollection()
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if partition key mode is used")
 	}
@@ -453,13 +486,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	t.queryParams = queryParams
 	t.Limit = queryParams.limit + queryParams.offset
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), t.collectionName)
-	if err != nil {
-		log.Warn("get collection schema failed", zap.Error(err))
-		return err
-	}
-	t.schema = schema
-
 	if t.ids != nil {
 		pkField := ""
 		for _, field := range schema.Fields {
@@ -479,12 +505,23 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		log.Debug("determine timezone from collection", zap.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
-	if err := t.createPlanArgs(ctx, &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}); err != nil {
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr}
+	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
 		return err
+	}
+	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
+	if enforceRLS {
+		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.schemaHelper)
+		if err != nil {
+			return err
+		}
+		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
+			return err
+		}
 	}
 	t.plan.GetQuery().Limit = t.Limit
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.Limit == typeutil.Unlimited {
+	if userPlanAlwaysTrue && t.Limit == typeutil.Unlimited {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -497,7 +534,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, partitionKeys)
+			hashedPartitionNames, err := assignPartitionKeys(ctx, t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -686,24 +723,31 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
-	if !t.reQuery {
-		if len(t.queryParams.extractTimeFields) > 0 {
-			log.Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
-			err = extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields)
-			if err != nil {
-				log.Warn("fail to extract fields for timestamptz", zap.Error(err))
-				return err
-			}
-		} else {
-			log.Debug("translate timestamp to ISO string", zap.String("user define timezone", t.queryParams.timezone))
-			err = timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr)
-			if err != nil {
-				log.Warn("fail to translate timestamp", zap.Error(err))
-				return err
-			}
-		}
+	if err := t.formatTimeFields(ctx); err != nil {
+		return err
 	}
 	log.Debug("Query PostExecute done")
+	return nil
+}
+
+func (t *queryTask) formatTimeFields(ctx context.Context) error {
+	if t.reQuery || t.preserveRawFields {
+		return nil
+	}
+	if len(t.queryParams.extractTimeFields) > 0 {
+		log.Ctx(ctx).Debug("extracting fields for timestamptz", zap.Strings("fields", t.queryParams.extractTimeFields))
+		if err := extractFieldsFromResults(t.result.GetFieldsData(), t.resolvedTimezoneStr, t.queryParams.extractTimeFields); err != nil {
+			log.Ctx(ctx).Warn("fail to extract fields for timestamptz", zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
+	log.Ctx(ctx).Debug("translate timestamp to ISO string", zap.String("timezone", t.resolvedTimezoneStr))
+	if err := timestamptzUTC2IsoStr(t.result.GetFieldsData(), t.resolvedTimezoneStr); err != nil {
+		log.Ctx(ctx).Warn("fail to translate timestamp", zap.Error(err))
+		return err
+	}
 	return nil
 }
 

@@ -16,9 +16,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -54,6 +56,7 @@ type deleteTask struct {
 
 	// delete info
 	primaryKeys  *schemapb.IDs
+	schema       *schemaInfo
 	collectionID UniqueID
 	partitionID  UniqueID
 	dbID         UniqueID
@@ -291,28 +294,59 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return merr.WrapErrCollectionReplicateMode("delete")
 	}
 
-	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get collection schema", err)
-	}
-
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dr.req.GetDbName(), collName, dr.collectionID)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
+	canonicalDBName := colInfo.dbName
+	if canonicalDBName == "" {
+		canonicalDBName = dr.req.GetDbName()
+	}
+	rlsEnabled := colInfo.rlsEnabled
+	if rlsEnabled && dr.req.GetSkipRls() {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, rlsEnabled, colInfo.rlsForce, true,
+			canonicalDBName, colInfo.schema.GetName(), "delete")
+		if err != nil {
+			return err
+		}
+	}
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
+	if err != nil {
+		return err
+	}
+
+	dr.schema = colInfo.schema
 	colTimezone := getColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
-	start := time.Now()
-	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
-	if err != nil {
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
+		start := time.Now()
+		plan, err := planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, expr, dr.req.GetExprTemplateValues(), visitorArgs)
+		if err != nil {
+			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+			return nil, merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err))
+		}
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+		return plan, nil
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
-	if planparserv2.IsAlwaysTruePlan(dr.plan) {
+	userPlan, err := parseDeletePlan(dr.req.GetExpr())
+	if err != nil {
+		return err
+	}
+	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
+	}
+	dr.plan = userPlan
+
+	if enforceRLS {
+		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.schemaHelper)
+		if err != nil {
+			return err
+		}
+		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
+			return err
+		}
 	}
 
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
@@ -326,7 +360,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.req.GetDbName(), dr.req.GetCollectionName(), dr.schema.CollectionSchema, partitionKeys)
 		if err != nil {
 			return err
 		}
@@ -391,6 +425,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
 		chMgr:        dr.chMgr,
+		schema:       dr.schema,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,
 		vChannels:    dr.vChannels,

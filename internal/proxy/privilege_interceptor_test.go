@@ -85,12 +85,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		err = InitMetaCache(ctx, client)
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
@@ -137,18 +137,20 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
-			DbName:          "db_test",
+			DbName:          "default",
 			CollectionNames: []string{"col1"},
 		})
 		assert.NoError(t, err)
 
 		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-			DbName:         "db_test",
+			DbName:         "default",
 			CollectionName: "col1",
 		})
 		assert.NoError(t, err)
 
-		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "foo"), &milvuspb.LoadCollectionRequest{
+		// fooo holds Global-All only on "default"; a request explicitly targeting
+		// another db must be denied regardless of the connection-context db.
+		_, err = PrivilegeInterceptor(GetContextWithDB(context.Background(), "fooo:123456", "default"), &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
@@ -279,6 +281,73 @@ func TestRootShouldBindRole(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+}
+
+func TestCheckSkipRLSPrivilege(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+	defer Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer privilege.CleanPrivilegeCache()
+	previousCache := globalMetaCache
+	defer func() { globalMetaCache = previousCache }()
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	assert.NoError(t, checkSkipRLSPrivilege(context.Background(), "db1", "coll1", "query"))
+
+	enforce, err := resolveRLSEnforcement(context.Background(), false, true, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), true, true, false, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.True(t, enforce)
+
+	enforce, err = resolveRLSEnforcement(context.Background(), true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+
+	_, err = resolveRLSEnforcement(context.Background(), true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "rls.force")
+
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	ctx := GetContext(context.Background(), "alice:123456")
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status:      merr.Success(),
+			PolicyInfos: nil,
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(ctx, client))
+	err = checkSkipRLSPrivilege(ctx, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "SkipRLS")
+	_, err = resolveRLSEnforcement(ctx, true, false, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), "db1"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("alice", "role1"),
+			},
+		}, nil
+	}
+	require.NoError(t, InitMetaCache(ctx, client))
+	assert.NoError(t, checkSkipRLSPrivilege(ctx, "db1", "coll1", "query"))
+	enforce, err = resolveRLSEnforcement(ctx, true, false, true, "db1", "coll1", "query")
+	assert.NoError(t, err)
+	assert.False(t, enforce)
+	_, err = resolveRLSEnforcement(ctx, true, true, true, "db1", "coll1", "query")
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {

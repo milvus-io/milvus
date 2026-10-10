@@ -392,12 +392,6 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
-
 	cache.On("GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
@@ -534,12 +528,6 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
-
 	cache.On("GetPartitionInfo",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
@@ -588,6 +576,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
+			schema:          newSchemaInfo(&schemapb.CollectionSchema{Name: "fooooo"}),
 		}, nil)
 		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		err := it.PreExecute(ctx)
@@ -641,11 +630,9 @@ func TestInsertTask_Namespace(t *testing.T) {
 
 	t.Run("test insert with namespace enabled", func(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			schema: newSchemaInfo(schemaWithNamespaceEnabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceEnabled), nil).Maybe()
 		namespace := "test"
 		it := insertTask{
 			ctx: context.Background(),
@@ -682,11 +669,9 @@ func TestInsertTask_Namespace(t *testing.T) {
 
 	t.Run("test insert with namespace disabled", func(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Unset()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Unset()
 		cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			schema: newSchemaInfo(schemaWithNamespaceDisabled),
 		}, nil).Maybe()
-		cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(newSchemaInfo(schemaWithNamespaceDisabled), nil).Maybe()
 		cache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
 			name:                "p1",
 			partitionID:         10,

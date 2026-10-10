@@ -377,6 +377,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 	t.appendConsistecyLevel()
+	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
+		return err
+	}
+	if err := common.ValidateRLSForceRequiresEnabled(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err

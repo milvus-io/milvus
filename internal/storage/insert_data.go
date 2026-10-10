@@ -186,7 +186,7 @@ type FieldData interface {
 	GetRow(i int) any
 	GetRowSize(i int) int
 	GetDataRows() any
-	// GetValidDataRows() any
+	GetValidData() []bool
 	AppendRow(row interface{}) error
 	AppendRows(dataRows interface{}, validDataRows interface{}) error
 	AppendDataRows(rows interface{}) error
@@ -1949,7 +1949,10 @@ func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 }
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
-func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
+func (data *ArrayFieldData) GetElementType() schemapb.DataType {
+	return data.ElementType
+}
+func (data *JSONFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_JSON }
 func (data *GeometryFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Geometry
 }

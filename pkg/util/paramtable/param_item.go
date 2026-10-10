@@ -320,14 +320,14 @@ func (pi *ParamItem) gateValue(v string) string {
 // SetTempValue set the value for this ParamItem,
 // Once value set, ParamItem will use the value instead of underlying config manager.
 func (pi *ParamItem) SwapTempValue(s string) string {
+	var old *string
 	if s == "" {
-		if old := pi.tempValue.Swap(nil); old != nil {
-			return *old
-		}
-		return ""
+		old = pi.tempValue.Swap(nil)
+	} else {
+		old = pi.tempValue.Swap(&s)
 	}
 	pi.manager.EvictCachedValue(pi.Key)
-	if old := pi.tempValue.Swap(&s); old != nil {
+	if old != nil {
 		return *old
 	}
 	return ""

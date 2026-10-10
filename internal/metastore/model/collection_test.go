@@ -20,11 +20,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
 var (
@@ -648,4 +651,33 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, clone1, collection)
 	clone2 := collection.ShallowClone()
 	assert.Equal(t, clone2, collection)
+}
+
+func TestCollectionShallowCloneCopiesRLSPolicies(t *testing.T) {
+	policy := &RLSPolicy{PolicyName: "policy"}
+	collection := &Collection{
+		RLSPolicies: map[string]*RLSPolicy{"policy": policy},
+	}
+
+	clone := collection.ShallowClone()
+	clone.RLSPolicies["policy"] = &RLSPolicy{PolicyName: "updated-policy"}
+
+	assert.Same(t, policy, collection.RLSPolicies["policy"])
+}
+
+func TestApplyUpdates_DBUpdatesRLSMetadata(t *testing.T) {
+	collection := &Collection{
+		DBID:        10,
+		DBName:      "old_db",
+		RLSPolicies: map[string]*RLSPolicy{"policy": {DBID: 10, CollectionID: 20, PolicyID: 30}},
+	}
+
+	collection.ApplyUpdates(
+		&message.AlterCollectionMessageHeader{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskDB}}},
+		&message.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{DbId: 11, DbName: "new_db"}},
+	)
+
+	assert.Equal(t, int64(11), collection.DBID)
+	assert.Equal(t, "new_db", collection.DBName)
+	assert.Equal(t, int64(11), collection.RLSPolicies["policy"].DBID)
 }

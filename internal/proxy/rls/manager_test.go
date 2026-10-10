@@ -1,0 +1,1745 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package rls
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+func newManagerWithAlice() *manager {
+	return newManagerWithPrincipal(100, "alice")
+}
+
+func newManagerWithPrincipal(collectionID UniqueID, principalName string) *manager {
+	m := newManager()
+	if err := m.init(context.Background(), &metadataTestCoord{}); err != nil {
+		panic("failed to initialize manager test dependencies")
+	}
+	if !setManagerTestPrincipalTags(m, collectionID, principalName, nil) {
+		panic("failed to initialize manager test principal")
+	}
+	return m
+}
+
+func validateRows(ctx context.Context, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, expr string, operation string, exprKind string) error {
+	expr = strings.TrimSpace(expr)
+	if expr == "" || rowNum == 0 {
+		return nil
+	}
+	parsedExpr, err := planparserv2.ParseExpr(schemaHelper, expr, nil)
+	if err != nil {
+		return merr.Wrapf(err, "failed to parse RLS %s expression for %s", exprKind, operation)
+	}
+	return rlsutil.ValidateRowsByPredicate(ctx, fieldsData, rowNum, parsedExpr, operation, exprKind)
+}
+
+func TestReferencedFieldIDs(t *testing.T) {
+	helper := newManagerTestPrincipalSchemaHelper(t)
+	expr, err := planparserv2.ParseExpr(helper, `dept in ["sales", "support"] and owner == "alice"`, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{101, 102}, rlsutil.ReferencedFieldIDs(expr))
+}
+
+func TestManagerRejectsInvalidPredicateStateAsInternal(t *testing.T) {
+	helper := newManagerTestSchemaHelper(t)
+	var nilManager *manager
+
+	_, err := nilManager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	_, err = newManager().resolveUsingPredicate(context.Background(), 0, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestCompiledExpressionDistinguishesUnloadedFromEmptyPolicies(t *testing.T) {
+	state := newCollectionState()
+	expr, loaded, err := state.getCompiledExpression(rlsutil.PolicyActionQuery, usingExprKind, nil)
+	require.NoError(t, err)
+	require.False(t, loaded)
+	require.Nil(t, expr)
+
+	state.mu.Lock()
+	state.setPreparedPolicySnapshotLocked(time.Now(), map[string]*rlsutil.RowPolicy{})
+	state.mu.Unlock()
+	expr, loaded, err = state.getCompiledExpression(rlsutil.PolicyActionQuery, usingExprKind, nil)
+	require.NoError(t, err)
+	require.True(t, loaded)
+	require.Nil(t, expr)
+}
+
+func TestManagerPolicyCombination(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "engineering",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "engineering"`,
+			},
+			{
+				PolicyName: "sales",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+			{
+				PolicyName: "existing_ids",
+				PolicyType: rlsutil.PolicyTypeRestrictive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `id in [1, 2]`,
+			},
+			{
+				PolicyName: "search_only",
+				PolicyType: rlsutil.PolicyTypeRestrictive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionSearch},
+				UsingExpr:  `dept == "ignored"`,
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(1, "sales"), 1, expr, "query", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(2, "engineering"), 1, expr, "query", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(3, "sales"), 1, expr, "query", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(1, "product"), 1, expr, "query", "using"))
+
+	_, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionDelete, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestManagerRestrictiveOnlyIsFalse(t *testing.T) {
+	ctx := context.Background()
+	manager := newManager()
+	coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+	require.NoError(t, manager.init(ctx, coord))
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "restrictive_only",
+				PolicyType: rlsutil.PolicyTypeRestrictive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == $current_principal_tags['dept']`,
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+	require.Zero(t, coord.principalCalls.Load())
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+}
+
+func TestManagerPolicyTagsAndPrincipal(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestPrincipalSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "dept == $current_principal_tags['dept']",
+			},
+			{
+				PolicyName: "owner",
+				PolicyType: rlsutil.PolicyTypeRestrictive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "owner == $current_principal",
+			},
+			{
+				PolicyName: "region",
+				PolicyType: rlsutil.PolicyTypeRestrictive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "region == $current_principal_tags['region']",
+			},
+		},
+	}))
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+		"dept":   rlsutil.NewStringTagValue("sales"),
+		"region": rlsutil.NewStringTagValue("us"),
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "alice", "us"), 1, expr, "query", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "bob", "us"), 1, expr, "query", "using"))
+
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+		"dept": rlsutil.NewStringTagValue("sales"),
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "alice", "us"), 1, expr, "query", "using"))
+}
+
+func TestManagerMissingTagOnlyDeniesReferencingPolicy(t *testing.T) {
+	oldOptimize := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+	defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(oldOptimize)
+
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "principal_dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "dept == $current_principal_tags['dept']",
+			},
+			{
+				PolicyName: "public_dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "public"`,
+			},
+		},
+	}))
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", nil))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	_, combined := expr.GetExpr().(*planpb.Expr_BinaryExpr)
+	require.False(t, combined)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("public"), 1, expr, "query", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+}
+
+func TestManagerMissingTagsShortCircuitPolicyGroups(t *testing.T) {
+	oldOptimize := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+	defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(oldOptimize)
+
+	policy := func(name string, policyType rlsutil.PolicyType, expr string) *rlsutil.RowPolicy {
+		return &rlsutil.RowPolicy{
+			PolicyName: name,
+			PolicyType: policyType,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  expr,
+		}
+	}
+	tests := []struct {
+		name     string
+		policies []*rlsutil.RowPolicy
+	}{
+		{
+			name: "all permissive policies are false",
+			policies: []*rlsutil.RowPolicy{
+				policy("dept", rlsutil.PolicyTypePermissive, "dept == $current_principal_tags['dept']"),
+				policy("team", rlsutil.PolicyTypePermissive, "dept == $current_principal_tags['team']"),
+			},
+		},
+		{
+			name: "restrictive false dominates",
+			policies: []*rlsutil.RowPolicy{
+				policy("public", rlsutil.PolicyTypePermissive, `dept == "public"`),
+				policy("region", rlsutil.PolicyTypeRestrictive, "dept == $current_principal_tags['region']"),
+				policy("sales", rlsutil.PolicyTypeRestrictive, `dept == "sales"`),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := newManagerWithAlice()
+			require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: test.policies}))
+
+			expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+			require.NoError(t, err)
+			require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+		})
+	}
+}
+
+func TestManagerTaglessPrincipalDoesNotLoadTags(t *testing.T) {
+	ctx := context.Background()
+	manager := newManager()
+	coord := &metadataTestCoord{principalTags: map[string]map[string]string{}}
+	require.NoError(t, manager.init(ctx, coord))
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "owner",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  "owner == $current_principal",
+		}},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, newManagerTestPrincipalSchemaHelper(t))
+	require.NoError(t, err)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "alice", "us"), 1, expr, "query", "using"))
+	require.Zero(t, coord.principalCalls.Load())
+}
+
+func TestManagerTypedPrincipalTagMatching(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	testCases := []struct {
+		name       string
+		field      string
+		tag        rlsutil.TagValue
+		fieldsData []*schemapb.FieldData
+		allowed    bool
+	}{
+		{name: "matching string", field: "dept", tag: rlsutil.NewStringTagValue("sales"), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75), allowed: true},
+		{name: "matching int", field: "age", tag: rlsutil.NewInt64TagValue(18), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75), allowed: true},
+		{name: "matching double", field: "score", tag: rlsutil.NewDoubleTagValue(0.75), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75), allowed: true},
+		{name: "string mismatch", field: "age", tag: rlsutil.NewStringTagValue("18"), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75)},
+		{name: "integral double on integer", field: "age", tag: rlsutil.NewDoubleTagValue(18), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75), allowed: true},
+		{name: "int on floating", field: "score", tag: rlsutil.NewInt64TagValue(0), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0), allowed: true},
+		{name: "fractional double on integer", field: "age", tag: rlsutil.NewDoubleTagValue(18.5), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 0.75)},
+		{name: "large int loses floating precision", field: "score", tag: rlsutil.NewInt64TagValue(9007199254740993), fieldsData: managerTestFieldsDataWithAgeAndScore("sales", 18, 9007199254740992)},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+				Policies: []*rlsutil.RowPolicy{{
+					PolicyName: "typed",
+					PolicyType: rlsutil.PolicyTypePermissive,
+					Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+					UsingExpr:  testCase.field + " == $current_principal_tags['value']",
+				}},
+			}))
+			require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{"value": testCase.tag}))
+			expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+			require.NoError(t, err)
+			require.NotNil(t, expr)
+			err = rlsutil.ValidateRowsByPredicate(ctx, testCase.fieldsData, 1, expr, "query", "using")
+			if testCase.allowed {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+			}
+		})
+	}
+}
+
+func TestManagerReusesOnlyStaticCompiledPredicates(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+
+	t.Run("static", func(t *testing.T) {
+		helper := newManagerTestSchemaHelper(t)
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "static",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "sales"`,
+		}}}))
+
+		first, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		second, err := manager.resolveUsingPredicate(ctx, 100, "bob", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.Same(t, first, second)
+
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "static",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "engineering"`,
+		}}}))
+		updated, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.NotSame(t, first, updated)
+		require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("engineering"), 1, updated, "query", "using"))
+	})
+
+	t.Run("principal template", func(t *testing.T) {
+		helper := newManagerTestPrincipalSchemaHelper(t)
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "principal",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `owner == $current_principal`,
+		}}}))
+
+		alice, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		bob, err := manager.resolveUsingPredicate(ctx, 100, "bob", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.NotSame(t, alice, bob)
+		require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "alice", "us"), 1, alice, "query", "using"))
+		require.ErrorIs(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "bob", "us"), 1, alice, "query", "using"), merr.ErrPrivilegeNotPermitted)
+	})
+}
+
+func TestManagerRejectsInexactDoubleToFloatTag(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_float_tag_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "score", DataType: schemapb.DataType_Float},
+			{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	for _, usingExpr := range []string{
+		"score == $current_principal_tags['value']",
+		"array_contains(scores, $current_principal_tags['value'])",
+	} {
+		t.Run(usingExpr, func(t *testing.T) {
+			manager := newManagerWithAlice()
+			require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+				Policies: []*rlsutil.RowPolicy{{
+					PolicyName: "typed",
+					PolicyType: rlsutil.PolicyTypePermissive,
+					Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+					UsingExpr:  usingExpr,
+				}},
+			}))
+			require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+				"value": rlsutil.NewDoubleTagValue(16777217),
+			}))
+
+			expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+			require.NoError(t, err)
+			require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+		})
+	}
+}
+
+func TestManagerRejectsOutOfRangeIntegerTag(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "level", DataType: schemapb.DataType_Int8},
+	}}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	manager := newManagerWithAlice()
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "narrow_integer",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:  "level == $current_principal_tags['level']",
+	}}}))
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+		"level": rlsutil.NewInt64TagValue(256),
+	}))
+
+	expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+}
+
+func TestManagerRejectsPersistedPoliciesOutsideRuntimeContract(t *testing.T) {
+	t.Run("deprecated string field", func(t *testing.T) {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:  100,
+			Name:     "legacy",
+			DataType: schemapb.DataType_String,
+		}}})
+		require.NoError(t, err)
+		manager := newManagerWithAlice()
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "legacy_string",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
+			CheckExpr:  `legacy == "value"`,
+		}}}))
+
+		expr, err := manager.resolveCheckPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionInsert, helper)
+		require.Nil(t, expr)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("unsupported operator", func(t *testing.T) {
+		manager := newManagerWithAlice()
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "not_equal",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept != "blocked"`,
+		}}}))
+
+		expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+		require.Nil(t, expr)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		state := manager.getCollectionState(100)
+		state.mu.RLock()
+		entry := state.compiled[compiledKey{action: rlsutil.PolicyActionQuery, kind: usingExprKind}]
+		state.mu.RUnlock()
+		require.NotNil(t, entry)
+		require.ErrorIs(t, entry.err, merr.ErrDataIntegrity)
+
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "equal",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "sales"`,
+		}}}))
+		expr, err = manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+	})
+
+	t.Run("floating literal on integer array", func(t *testing.T) {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:     100,
+			Name:        "values",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Int64,
+		}}})
+		require.NoError(t, err)
+		manager := newManagerWithAlice()
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "mixed_numeric_array",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  "array_contains_any(values, [1, 1.5])",
+		}}}))
+
+		expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.Nil(t, expr)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	})
+
+	t.Run("internal compiler error is not cached", func(t *testing.T) {
+		manager := newManagerWithAlice()
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "equal",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "sales"`,
+		}}}))
+
+		expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, nil)
+		require.Nil(t, expr)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		state := manager.getCollectionState(100)
+		state.mu.RLock()
+		_, cached := state.compiled[compiledKey{action: rlsutil.PolicyActionQuery, kind: usingExprKind}]
+		state.mu.RUnlock()
+		require.False(t, cached)
+
+		expr, err = manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+	})
+}
+
+func TestManagerSnapshotReplace(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	policy := &rlsutil.RowPolicy{
+		PolicyName: "p1",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:  "dept == $current_principal_tags['dept']",
+	}
+	tags := map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{policy},
+	}))
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", tags))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", nil))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: nil,
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Nil(t, expr)
+}
+
+func TestManagerEmptyPolicySnapshotFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	require.Nil(t, expr)
+}
+
+func TestManagerCombinedExpressionLengthLimit(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.Key, "1024")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.Key)
+	})
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "p1",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "dept == 'sales'",
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.Key, "8")
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+	require.Nil(t, expr)
+	state := manager.getCollectionState(100)
+	state.mu.RLock()
+	entry := state.compiled[compiledKey{action: rlsutil.PolicyActionQuery, kind: usingExprKind}]
+	state.mu.RUnlock()
+	require.NotNil(t, entry)
+	require.ErrorIs(t, entry.err, merr.ErrServiceQuotaExceeded)
+
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.Key, "1024")
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	state.mu.RLock()
+	entry = state.compiled[compiledKey{action: rlsutil.PolicyActionQuery, kind: usingExprKind}]
+	state.mu.RUnlock()
+	require.NotNil(t, entry)
+	require.NoError(t, entry.err)
+}
+
+func TestManagerAlwaysTruePredicateReturnsNil(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "full_access",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "true",
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.Nil(t, expr)
+}
+
+func TestManagerConstantPoliciesShortCircuitTagRefresh(t *testing.T) {
+	oldOptimize := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+	defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(oldOptimize)
+
+	policy := func(name string, policyType rlsutil.PolicyType, expr string) *rlsutil.RowPolicy {
+		return &rlsutil.RowPolicy{
+			PolicyName: name,
+			PolicyType: policyType,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  expr,
+		}
+	}
+	tests := []struct {
+		name            string
+		policies        []*rlsutil.RowPolicy
+		wantError       bool
+		wantAlwaysFalse bool
+	}{
+		{
+			name: "permissive true",
+			policies: []*rlsutil.RowPolicy{
+				policy("all", rlsutil.PolicyTypePermissive, "true"),
+				policy("public", rlsutil.PolicyTypePermissive, `dept == "public"`),
+				policy("tag", rlsutil.PolicyTypePermissive, `dept == $current_principal_tags['dept']`),
+			},
+		},
+		{
+			name: "restrictive false",
+			policies: []*rlsutil.RowPolicy{
+				policy("tag", rlsutil.PolicyTypePermissive, `dept == $current_principal_tags['dept']`),
+				policy("blocked", rlsutil.PolicyTypeRestrictive, `dept == "blocked"`),
+				policy("none", rlsutil.PolicyTypeRestrictive, "false"),
+			},
+			wantAlwaysFalse: true,
+		},
+		{
+			name: "restrictive tag remains required",
+			policies: []*rlsutil.RowPolicy{
+				policy("all", rlsutil.PolicyTypePermissive, "true"),
+				policy("tag", rlsutil.PolicyTypeRestrictive, `dept == $current_principal_tags['dept']`),
+			},
+			wantError: true,
+		},
+		{
+			name: "permissive tag remains required",
+			policies: []*rlsutil.RowPolicy{
+				policy("none", rlsutil.PolicyTypePermissive, "false"),
+				policy("tag", rlsutil.PolicyTypePermissive, `dept == $current_principal_tags['dept']`),
+			},
+			wantError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			coord := &metadataTestCoord{principalErr: merr.WrapErrServiceUnavailableMsg("principal metadata unavailable")}
+			manager := newManager()
+			require.NoError(t, manager.init(context.Background(), coord))
+			require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: test.policies}))
+
+			expr, err := manager.resolveUsingPredicate(context.Background(), 100, "alice", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+			if test.wantError {
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.Equal(t, int32(1), coord.principalCalls.Load())
+				return
+			}
+			require.NoError(t, err)
+			require.Zero(t, coord.principalCalls.Load())
+			if test.wantAlwaysFalse {
+				require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+			} else {
+				require.Nil(t, expr)
+			}
+		})
+	}
+}
+
+func TestManagerRequestPathLoadsMissingStartupState(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = UniqueID(104)
+
+	manager := newManager()
+	helper := newManagerTestSchemaHelper(t)
+	coord := &managerTestCoordClient{
+		getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+			require.NotNil(t, req)
+			require.Equal(t, collectionID, req.GetCollectionId())
+			if req.GetPrincipalName() != "" {
+				require.Equal(t, "alice", req.GetPrincipalName())
+				payload, err := rlsutil.TagsToJSON(map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")})
+				require.NoError(t, err)
+				return &rootcoordpb.GetRLSMetadataResponse{
+					Status:       merr.Success(),
+					CollectionId: collectionID,
+					Principals: []*rootcoordpb.RLSPrincipalInfo{{
+						CollectionId:  collectionID,
+						PrincipalName: "alice",
+						Tags:          payload,
+					}},
+				}, nil
+			}
+			return &rootcoordpb.GetRLSMetadataResponse{
+				Status:       merr.Success(),
+				CollectionId: collectionID,
+				Policies: []*rootcoordpb.RLSPolicyInfo{
+					{
+						CollectionId: collectionID,
+						PolicyId:     1,
+						PolicyName:   "dept",
+						PolicyType:   milvuspb.RowPolicyType(rlsutil.PolicyTypePermissive),
+						Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction(rlsutil.PolicyActionQuery)},
+						UsingExpr:    "dept == $current_principal_tags['dept']",
+					},
+				},
+			}, nil
+		},
+	}
+
+	require.NoError(t, manager.init(ctx, coord))
+
+	expr, err := manager.resolveUsingPredicate(ctx, collectionID, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+}
+
+func TestManagerRequestPathRefreshFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = UniqueID(105)
+
+	manager := newManager()
+	helper := newManagerTestSchemaHelper(t)
+	staleRefresh := time.Now().Add(-2 * time.Hour)
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+		RefreshedAt: staleRefresh,
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "stale-allow",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+		},
+	}))
+	coord := &managerTestCoordClient{
+		getRLSMetadata: func(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+			return &rootcoordpb.GetRLSMetadataResponse{
+				Status: merr.Status(merr.WrapErrServiceUnavailableMsg("rootcoord unavailable")),
+			}, nil
+		},
+	}
+
+	require.NoError(t, manager.init(ctx, coord))
+	expr, err := manager.resolveUsingPredicate(ctx, collectionID, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Nil(t, expr)
+}
+
+func TestManagerCollectionStateIsScopedByCollectionID(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+		},
+	}))
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	require.True(t, setPolicySnapshotForTest(manager, 101, policySnapshot{}))
+	expr, err = manager.resolveUsingPredicate(ctx, 101, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	require.Nil(t, expr)
+}
+
+func TestManagerCollectionPredicateLocksAreIndependent(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	for _, collectionID := range []UniqueID{100, 200} {
+		require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+			Policies: []*rlsutil.RowPolicy{
+				{
+					PolicyName: "dept",
+					PolicyType: rlsutil.PolicyTypePermissive,
+					Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+					UsingExpr:  `dept == "sales"`,
+				},
+			},
+		}))
+		require.True(t, setManagerTestPrincipalTags(manager, collectionID, "alice", nil))
+	}
+
+	state := manager.getCollectionState(100)
+	require.NotNil(t, state)
+	state.mu.Lock()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		firstDone <- err
+	}()
+	select {
+	case err := <-firstDone:
+		state.mu.Unlock()
+		require.Failf(t, "predicate unexpectedly bypassed its collection lock", "error: %v", err)
+		return
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := manager.resolveUsingPredicate(ctx, 200, "alice", rlsutil.PolicyActionQuery, helper)
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		state.mu.Unlock()
+		t.Fatal("predicate for one collection waited for another collection's lock")
+	}
+
+	state.mu.Unlock()
+	require.NoError(t, <-firstDone)
+}
+
+func TestManagerDefaultDatabaseNameDoesNotAffectLookup(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+		},
+	}))
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+}
+
+func TestManagerMissingEntriesFailClosed(t *testing.T) {
+	ctx := context.Background()
+	manager := newManager()
+	helper := newManagerTestSchemaHelper(t)
+	require.NoError(t, manager.init(ctx, &metadataTestCoord{}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Nil(t, expr)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "p1",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "dept == $current_principal_tags['dept']",
+			},
+		},
+	}))
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", nil))
+
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+		"region": rlsutil.NewStringTagValue("us"),
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+
+	require.True(t, setManagerTestPrincipalTags(manager, 100, "alice", map[string]rlsutil.TagValue{
+		"dept": rlsutil.NewStringTagValue("sales"),
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+}
+
+func TestManagerPolicySnapshotReplacesByName(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "sales",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+			{
+				PolicyName: "engineering",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "engineering"`,
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("engineering"), 1, expr, "query", "using"))
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "sales",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "sales"`,
+			},
+			{
+				PolicyName: "engineering",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "product"`,
+			},
+		},
+	}))
+
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("engineering"), 1, expr, "query", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("product"), 1, expr, "query", "using"))
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "engineering",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  `dept == "product"`,
+			},
+		},
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("sales"), 1, expr, "query", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsData("product"), 1, expr, "query", "using"))
+
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{
+		Policies: nil,
+	}))
+	expr, err = manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Nil(t, expr)
+}
+
+func TestResolveRuntimePrincipal(t *testing.T) {
+	principal, enforce, err := rlsutil.ResolveRuntimePrincipal(false, "", "query")
+	require.NoError(t, err)
+	assert.Empty(t, principal)
+	assert.False(t, enforce)
+
+	_, _, err = rlsutil.ResolveRuntimePrincipal(true, "", "query")
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "rls_principal")
+	_, _, err = rlsutil.ResolveRuntimePrincipal(true, " \t ", "query")
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	assert.Contains(t, err.Error(), "rls_principal")
+
+	principal, enforce, err = rlsutil.ResolveRuntimePrincipal(true, "alice", "query")
+	require.NoError(t, err)
+	assert.Equal(t, "alice", principal)
+	assert.True(t, enforce)
+
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxPrincipalNameLength.Key, "3")
+	t.Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxPrincipalNameLength.Key)
+	})
+	principal, enforce, err = rlsutil.ResolveRuntimePrincipal(true, "alice", "query")
+	require.NoError(t, err)
+	assert.Equal(t, "alice", principal)
+	assert.True(t, enforce)
+
+	_, _, err = rlsutil.ResolveRuntimePrincipal(true, strings.Repeat("a", rlsutil.MaxTransportIdentifierLength+1), "query")
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+}
+
+func TestResolvePredicateRequiresPrincipal(t *testing.T) {
+	manager := newManagerWithAlice()
+	require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "allow_all",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:  "true",
+	}}}))
+
+	expr, err := manager.resolveUsingPredicate(context.Background(), 100, "", rlsutil.PolicyActionQuery, newManagerTestSchemaHelper(t))
+	require.Nil(t, expr)
+	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+}
+
+func TestResolvePredicatesRetryPolicyChangeDuringTagLoad(t *testing.T) {
+	for _, action := range []rlsutil.PolicyAction{rlsutil.PolicyActionQuery, rlsutil.PolicyActionInsert, rlsutil.PolicyActionUpsert} {
+		for _, budget := range []string{"67108864", "1"} {
+			t.Run(action.String()+"/cache-bytes-"+budget, func(t *testing.T) {
+				oldBudget := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.SwapTempValue(budget)
+				defer paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.SwapTempValue(oldBudget)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				m := newManager()
+				policy := func(expr string) policySnapshot {
+					return policySnapshot{Policies: []*rlsutil.RowPolicy{{
+						PolicyName: "tenant", PolicyType: rlsutil.PolicyTypePermissive,
+						Actions: []rlsutil.PolicyAction{action}, UsingExpr: expr, CheckExpr: expr,
+					}}}
+				}
+				calls := 0
+				coord := &managerTestCoordClient{getRLSMetadata: func(_ context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+					calls++
+					if calls == 1 {
+						setPolicySnapshotForTest(m, 100, policy("id == $current_principal_tags['id']"))
+					}
+					return &rootcoordpb.GetRLSMetadataResponse{
+						Status: merr.Success(), CollectionId: 100,
+						Principals: []*rootcoordpb.RLSPrincipalInfo{{PrincipalName: "alice", Tags: `{"dept":"sales","id":2}`}},
+					}, nil
+				}}
+				require.NoError(t, m.init(context.Background(), coord))
+				require.True(t, setPolicySnapshotForTest(m, 100, policy("dept == $current_principal_tags['dept']")))
+				helper := newManagerTestSchemaHelper(t)
+				var predicates []*planpb.Expr
+				switch action {
+				case rlsutil.PolicyActionUpsert:
+					using, check, err := m.resolveUpsertPredicates(ctx, 100, "alice", helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{using, check}
+				case rlsutil.PolicyActionInsert:
+					expr, err := m.resolveCheckPredicate(ctx, 100, "alice", action, helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{expr}
+				default:
+					expr, err := m.resolveUsingPredicate(ctx, 100, "alice", action, helper)
+					require.NoError(t, err)
+					predicates = []*planpb.Expr{expr}
+				}
+				for _, expr := range predicates {
+					require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(2, "sales"), 1, expr, "test", "check"))
+					require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, managerTestFieldsDataWithID(1, "sales"), 1, expr, "test", "check"))
+				}
+				if budget == "1" {
+					require.Equal(t, 2, calls)
+					require.Nil(t, m.getPrincipalTagsEntry(principalKey{collectionID: 100, principalName: "alice"}))
+				} else {
+					require.Equal(t, 1, calls)
+				}
+			})
+		}
+	}
+}
+
+func TestResolveUpsertPredicatesStayOnOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	const collectionID = UniqueID(100)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "old",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 1",
+		CheckExpr:  "id == 1",
+	}}}))
+	using, check, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "new",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 2",
+		CheckExpr:  "id == 2",
+	}}}))
+	fields := managerTestFieldsDataWithID(1, "sales")
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, fields, 1, using, "upsert", "using"))
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, fields, 1, check, "upsert", "check"))
+
+	currentUsing, currentCheck, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, fields, 1, currentUsing, "upsert", "using"))
+	require.Error(t, rlsutil.ValidateRowsByPredicate(ctx, fields, 1, currentCheck, "upsert", "check"))
+}
+
+func TestValidateCheckForWriteUsesSchemaTimezone(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(987654322)
+	manager := newManagerWithPrincipal(collectionID, "alice")
+
+	schema := &schemapb.CollectionSchema{
+		Name:       "rls_timestamptz_test",
+		Properties: []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Asia/Shanghai"}},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "insert_at_midnight",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
+				CheckExpr:  "ts == ISO '2025-01-01 00:00:00'",
+			},
+		},
+	}))
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldId:   100,
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}},
+		},
+		{
+			FieldId:   101,
+			FieldName: "ts",
+			Type:      schemapb.DataType_Timestamptz,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_TimestamptzData{
+				TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{1735660800000000}},
+			}}},
+		},
+	}
+	require.NoError(t, validateCheckForWrite(ctx, manager, collectionID, "alice", rlsutil.PolicyActionInsert, fieldsData, helper, 1, "insert"))
+}
+
+func TestManagerReadPredicateUsesSchemaTimezone(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(987654323)
+	manager := newManagerWithPrincipal(collectionID, "alice")
+
+	schema := &schemapb.CollectionSchema{
+		Name:       "rls_read_timestamptz_test",
+		Properties: []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: "Asia/Shanghai"}},
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "read_at_midnight",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "ts == ISO '2025-01-01 00:00:00'",
+			},
+		},
+	}))
+
+	expr, err := manager.resolveUsingPredicate(
+		ctx,
+		collectionID,
+		"alice",
+		rlsutil.PolicyActionQuery,
+		helper,
+	)
+	require.NoError(t, err)
+
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldId:   101,
+			FieldName: "ts",
+			Type:      schemapb.DataType_Timestamptz,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_TimestamptzData{
+				TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{1735660800000000}},
+			}}},
+		},
+	}
+	require.NoError(t, rlsutil.ValidateRowsByPredicate(ctx, fieldsData, 1, expr, "query", "using"))
+}
+
+func TestManagerCompiledPredicateCacheUsesSchemaContext(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(987654324)
+	manager := newManagerWithPrincipal(collectionID, "alice")
+
+	newHelper := func(version int32, timezone string) *typeutil.SchemaHelper {
+		helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+			Name:       "rls_compiled_cache_schema_context_test",
+			Version:    version,
+			Properties: []*commonpb.KeyValuePair{{Key: common.TimezoneKey, Value: timezone}},
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+			},
+		})
+		require.NoError(t, err)
+		return helper
+	}
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "read_at_midnight",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  "ts == ISO '2025-01-01 00:00:00'",
+			},
+		},
+	}))
+
+	getPredicateValue := func(helper *typeutil.SchemaHelper) int64 {
+		expr, err := manager.resolveUsingPredicate(
+			ctx,
+			collectionID,
+			"alice",
+			rlsutil.PolicyActionQuery,
+			helper,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, expr.GetUnaryRangeExpr())
+		return expr.GetUnaryRangeExpr().GetValue().GetInt64Val()
+	}
+
+	shanghaiV1 := newHelper(1, "Asia/Shanghai")
+	assert.Equal(t, int64(1735660800000000), getPredicateValue(shanghaiV1))
+
+	// A real schema evolution must use a distinct compiled entry even when the
+	// collection timezone remains unchanged.
+	shanghaiV2 := newHelper(2, "Asia/Shanghai")
+	assert.Equal(t, int64(1735660800000000), getPredicateValue(shanghaiV2))
+
+	// Collection property alters, including timezone changes, do not increment
+	// schema version. Timezone therefore has to be part of the cache identity.
+	utcV2 := newHelper(2, "UTC")
+	assert.Equal(t, int64(1735689600000000), getPredicateValue(utcV2))
+
+	state := manager.getCollectionState(collectionID)
+	require.NotNil(t, state)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	require.Len(t, state.compiled, 1)
+	entry := state.compiled[compiledKey{action: rlsutil.PolicyActionQuery, kind: usingExprKind}]
+	require.NotNil(t, entry)
+	assert.Equal(t, int32(2), entry.schemaVersion)
+	assert.Equal(t, "UTC", entry.timezone)
+	require.NotNil(t, entry.expression)
+}
+
+func TestValidateRowsUsesFieldPrecisionForFloat(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_float_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "score", DataType: schemapb.DataType_Float},
+			{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	t.Run("scalar", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{{
+			FieldId:   100,
+			FieldName: "score",
+			Type:      schemapb.DataType_Float,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{Data: []float32{0.1}},
+			}}},
+		}}
+		require.NoError(t, validateRows(context.Background(), fieldsData, helper, 1, "score == 0.1", "insert", "check"))
+		require.NoError(t, validateRows(context.Background(), fieldsData, helper, 1, "score in [0.1, 0.2]", "insert", "check"))
+	})
+
+	t.Run("array", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{{
+			FieldId:   101,
+			FieldName: "scores",
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+				ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Float,
+					Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{0.1}}},
+					}},
+				},
+			}}},
+		}}
+		require.NoError(t, validateRows(context.Background(), fieldsData, helper, 1, "array_contains(scores, 0.1)", "insert", "check"))
+		require.NoError(t, validateRows(context.Background(), fieldsData, helper, 1, "array_contains_all(scores, [0.1])", "insert", "check"))
+		require.NoError(t, validateRows(context.Background(), fieldsData, helper, 1, "array_contains_any(scores, [0.1, 0.2])", "insert", "check"))
+	})
+}
+
+func TestValidateRowsTreatsEmptyValidDataAsDense(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_default_value_test",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:  100,
+			Name:     "score",
+			DataType: schemapb.DataType_Float,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_FloatData{FloatData: 0.1},
+			},
+		}},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	fieldsData := []*schemapb.FieldData{{
+		FieldId:   100,
+		FieldName: "score",
+		Type:      schemapb.DataType_Float,
+		ValidData: []bool{},
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{
+			FloatData: &schemapb.FloatArray{Data: []float32{0.1}},
+		}}},
+	}}
+
+	require.NotPanics(t, func() {
+		err = validateRows(context.Background(), fieldsData, helper, 1, "score == 0.1", "insert", "check")
+	})
+	require.NoError(t, err)
+}
+
+func newManagerTestSchemaHelper(t *testing.T) *typeutil.SchemaHelper {
+	t.Helper()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_manager_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "dept", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "age", DataType: schemapb.DataType_Int64},
+			{FieldID: 103, Name: "score", DataType: schemapb.DataType_Double},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+func managerTestFieldsDataWithAgeAndScore(dept string, age int64, score float64) []*schemapb.FieldData {
+	fields := managerTestFieldsData(dept)
+	return append(fields,
+		&schemapb.FieldData{
+			FieldId:   102,
+			FieldName: "age",
+			Type:      schemapb.DataType_Int64,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{age}}}}},
+		},
+		&schemapb.FieldData{
+			FieldId:   103,
+			FieldName: "score",
+			Type:      schemapb.DataType_Double,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: []float64{score}},
+			}}},
+		},
+	)
+}
+
+func newManagerTestPrincipalSchemaHelper(t *testing.T) *typeutil.SchemaHelper {
+	t.Helper()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_manager_principal_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "dept", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "owner", DataType: schemapb.DataType_VarChar},
+			{FieldID: 103, Name: "region", DataType: schemapb.DataType_VarChar},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+func managerTestFieldsData(dept string) []*schemapb.FieldData {
+	return managerTestFieldsDataWithID(1, dept)
+}
+
+func managerTestFieldsDataWithID(id int64, dept string) []*schemapb.FieldData {
+	return []*schemapb.FieldData{
+		{
+			FieldId:   100,
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{id}}}}},
+		},
+		{
+			FieldId:   101,
+			FieldName: "dept",
+			Type:      schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{dept}}}}},
+		},
+	}
+}
+
+func managerTestPrincipalFieldsData(dept string, owner string, region string) []*schemapb.FieldData {
+	return []*schemapb.FieldData{
+		{
+			FieldId:   100,
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}},
+		},
+		{
+			FieldId:   101,
+			FieldName: "dept",
+			Type:      schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{dept}}}}},
+		},
+		{
+			FieldId:   102,
+			FieldName: "owner",
+			Type:      schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{owner}}}}},
+		},
+		{
+			FieldId:   103,
+			FieldName: "region",
+			Type:      schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{region}}}}},
+		},
+	}
+}
+
+func TestMergePredicateToPlan(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_plan_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "owner", DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, Name: "age", DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  103,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				},
+			},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	visitorArgs := &planparserv2.ParserVisitorArgs{}
+
+	retrievePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18", nil, visitorArgs)
+	require.NoError(t, err)
+	rlsPredicate, err := planparserv2.ParseExpr(helper, `owner == "alice"`, nil)
+	require.NoError(t, err)
+	require.NoError(t, MergePredicateToPlan(retrievePlan, rlsPredicate))
+	assertPredicateMerged(t, retrievePlan.GetQuery().GetPredicates())
+
+	searchPlan, err := planparserv2.CreateSearchPlanArgs(helper, "age > 18", "vec", &planpb.QueryInfo{
+		Topk:           10,
+		MetricType:     "L2",
+		SearchParams:   "{}",
+		GroupByFieldId: -1,
+	}, nil, nil, visitorArgs)
+	require.NoError(t, err)
+	rlsPredicate, err = planparserv2.ParseExpr(helper, `owner == "alice"`, nil)
+	require.NoError(t, err)
+	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
+	assertPredicateMerged(t, searchPlan.GetVectorAnns().GetPredicates())
+
+	normalizedPlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age in [18, 21, 30]", nil, visitorArgs)
+	require.NoError(t, err)
+	normalizedRLS, err := planparserv2.ParseExpr(helper, "age in [21, 30, 40]", nil)
+	require.NoError(t, err)
+	expectedPlan := proto.Clone(normalizedPlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedPlan, proto.Clone(normalizedRLS).(*planpb.Expr)))
+	userPredicate := normalizedPlan.GetQuery().GetPredicates()
+	userBefore := proto.Clone(userPredicate).(*planpb.Expr)
+	rlsBefore := proto.Clone(normalizedRLS).(*planpb.Expr)
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedPlan, normalizedRLS))
+	require.True(t, proto.Equal(expectedPlan.GetQuery().GetPredicates(), normalizedPlan.GetQuery().GetPredicates()))
+	require.True(t, proto.Equal(userBefore, userPredicate))
+	require.True(t, proto.Equal(rlsBefore, normalizedRLS))
+
+	// Requery IDs may be large. Attaching RLS must preserve the ID term without
+	// sorting, deduplicating, or intersecting it with a same-field policy.
+	requeryPlan := planparserv2.CreateRequeryPlan(schema.GetFields()[0], &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1, 3}}},
+	})
+	requeryPredicate := requeryPlan.GetQuery().GetPredicates()
+	requeryRLS, err := planparserv2.ParseExpr(helper, "id in [1, 3]", nil)
+	require.NoError(t, err)
+	require.NoError(t, AttachPredicateToRequeryPlan(requeryPlan, requeryRLS))
+	mergedRequery := requeryPlan.GetQuery().GetPredicates().GetBinaryExpr()
+	require.NotNil(t, mergedRequery)
+	require.Same(t, requeryPredicate, mergedRequery.GetLeft())
+	require.Same(t, requeryRLS, mergedRequery.GetRight())
+	values := mergedRequery.GetLeft().GetTermExpr().GetValues()
+	require.Equal(t, []int64{3, 1, 3}, []int64{
+		values[0].GetInt64Val(), values[1].GetInt64Val(), values[2].GetInt64Val(),
+	})
+
+	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
+	require.NoError(t, err)
+	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()
+	require.NotNil(t, randomSample)
+	expectedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates()
+	normalizedRandomSampleBefore := proto.Clone(normalizedRandomSamplePredicate).(*planpb.Expr)
+	rlsBefore = proto.Clone(rlsPredicate).(*planpb.Expr)
+	require.NoError(t, MergePredicateToPlan(expectedRandomSamplePlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedRandomSamplePlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedRandomSamplePlan, normalizedRandomSamplePlan))
+	require.NotSame(t, normalizedRandomSamplePredicate, normalizedRandomSamplePlan.GetQuery().GetPredicates())
+	require.True(t, proto.Equal(normalizedRandomSampleBefore, normalizedRandomSamplePredicate))
+	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr().GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedRandomSamplePredicate)
+	require.True(t,
+		mergedRandomSamplePredicate.GetLeft() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate() ||
+			mergedRandomSamplePredicate.GetRight() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate(),
+	)
+	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
+	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
+	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
+	assertPredicateMerged(t, randomSample.GetPredicate())
+}
+
+func assertPredicateMerged(t *testing.T, expr *planpb.Expr) {
+	t.Helper()
+
+	binaryExpr := expr.GetBinaryExpr()
+	require.NotNil(t, binaryExpr)
+	assert.Equal(t, planpb.BinaryExpr_LogicalAnd, binaryExpr.GetOp())
+	assert.NotNil(t, binaryExpr.GetLeft())
+	assert.NotNil(t, binaryExpr.GetRight())
+}
+
+func TestValidateWritePredicatesUseThreeValuedLogic(t *testing.T) {
+	ctx := context.Background()
+	const collectionID = int64(987654323)
+	manager := newManagerWithPrincipal(collectionID, "alice")
+
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_three_valued_logic_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "dept", DataType: schemapb.DataType_VarChar, Nullable: true},
+			{FieldID: 102, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{
+		Policies: []*rlsutil.RowPolicy{
+			{
+				PolicyName: "allowed_dept",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
+				CheckExpr:  `dept == "allowed"`,
+			},
+		},
+	}))
+
+	newFieldsData := func(fullSize bool) []*schemapb.FieldData {
+		deptData := []string(nil)
+		arrayData := []*schemapb.ScalarField(nil)
+		if fullSize {
+			deptData = []string{""}
+			arrayData = []*schemapb.ScalarField{{
+				Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}},
+			}}
+		}
+		return []*schemapb.FieldData{
+			{
+				FieldId:   100,
+				FieldName: "id",
+				Type:      schemapb.DataType_Int64,
+				Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}},
+			},
+			{
+				FieldId:   101,
+				FieldName: "dept",
+				Type:      schemapb.DataType_VarChar,
+				ValidData: []bool{false},
+				Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: deptData}}}},
+			},
+			{
+				FieldId:   102,
+				FieldName: "tags",
+				Type:      schemapb.DataType_Array,
+				ValidData: []bool{false},
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_VarChar,
+					Data:        arrayData,
+				}}}},
+			},
+		}
+	}
+
+	for _, fullSize := range []bool{false, true} {
+		name := "compact"
+		if fullSize {
+			name = "full_size"
+		}
+		t.Run(name, func(t *testing.T) {
+			fieldsData := newFieldsData(fullSize)
+			err := validateCheckForWrite(ctx, manager, collectionID, "alice", rlsutil.PolicyActionInsert, fieldsData, helper, 1, "insert")
+			require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		})
+	}
+
+	fieldsData := newFieldsData(false)
+	tests := []struct {
+		name    string
+		expr    string
+		allowed bool
+	}{
+		{name: "unknown and false", expr: `dept == "blocked" and id == 0`},
+		{name: "unknown and true", expr: `dept == "blocked" and id == 1`},
+		{name: "unknown or true", expr: `dept == "blocked" or id == 1`, allowed: true},
+		{name: "unknown or false", expr: `dept == "blocked" or id == 0`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parsedExpr, err := planparserv2.ParseExpr(helper, test.expr, nil)
+			require.NoError(t, err)
+			err = rlsutil.ValidateRowsByPredicate(ctx, fieldsData, 1, parsedExpr, "upsert", "using")
+			if test.allowed {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		})
+	}
+}

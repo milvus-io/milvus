@@ -646,6 +646,10 @@ func (coord *MixCoordMock) ShowCollectionIDs(ctx context.Context, req *rootcoord
 	panic("implements me")
 }
 
+func (coord *MixCoordMock) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{}, nil
+}
+
 func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -1237,6 +1241,38 @@ func (coord *MixCoordMock) ListPrivilegeGroups(ctx context.Context, req *milvusp
 }
 
 func (coord *MixCoordMock) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	return &milvuspb.ListRowPoliciesResponse{}, nil
+}
+
+func (coord *MixCoordMock) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return &milvuspb.GetRLSPrincipalTagsResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return &milvuspb.ListRLSPrincipalsResponse{}, nil
+}
+
+func (coord *MixCoordMock) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
 

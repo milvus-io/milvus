@@ -91,7 +91,7 @@ type Cache interface {
 
 	// RemoveAlias removes a cached alias entry.
 	RemoveAlias(ctx context.Context, database, alias string)
-	RemoveDatabase(ctx context.Context, database string)
+	RemoveDatabase(ctx context.Context, database string) []int64
 	HasDatabase(ctx context.Context, database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
@@ -100,6 +100,7 @@ type Cache interface {
 
 type collectionInfo struct {
 	collID                typeutil.UniqueID
+	dbName                string
 	schema                *schemaInfo
 	partInfo              *partitionInfos
 	createdTimestamp      uint64
@@ -107,6 +108,8 @@ type collectionInfo struct {
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
 	queryMode             string
+	rlsEnabled            bool
+	rlsForce              bool
 	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
@@ -507,6 +510,18 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
+	rlsEnabled, err := common.IsRLSEnabled(collection.Properties...)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.GetCollectionID())
+	}
+	rlsForce, err := common.IsRLSForce(collection.Properties...)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.GetCollectionID())
+	}
+	canonicalDBName := collection.GetDbName()
+	if canonicalDBName == "" {
+		canonicalDBName = database
+	}
 
 	schemaInfo := newSchemaInfo(collection.Schema)
 
@@ -514,6 +529,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		replicateID, _ := common.GetReplicateID(collection.Properties)
 		return &collectionInfo{
 			collID:                collection.CollectionID,
+			dbName:                canonicalDBName,
 			schema:                schemaInfo,
 			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
@@ -521,6 +537,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			queryMode:             queryMode,
+			rlsEnabled:            rlsEnabled,
+			rlsForce:              rlsForce,
 			replicateID:           replicateID,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
@@ -543,6 +561,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
 			collID:                collection.CollectionID,
+			dbName:                canonicalDBName,
 			schema:                schemaInfo,
 			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 			createdTimestamp:      collection.CreatedTimestamp,
@@ -550,6 +569,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
 			queryMode:             queryMode,
+			rlsEnabled:            rlsEnabled,
+			rlsForce:              rlsForce,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
@@ -577,6 +598,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
+		dbName:                canonicalDBName,
 		schema:                schemaInfo,
 		partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
 		createdTimestamp:      collection.CreatedTimestamp,
@@ -584,6 +606,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
 		queryMode:             queryMode,
+		rlsEnabled:            rlsEnabled,
+		rlsForce:              rlsForce,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
@@ -1105,13 +1129,18 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 	return collNames
 }
 
-func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
+func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) []int64 {
 	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	collectionIDs := make([]int64, 0, len(m.collInfo[database]))
+	for _, collection := range m.collInfo[database] {
+		collectionIDs = append(collectionIDs, collection.collID)
+	}
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
 	delete(m.aliasInfo, database)
+	m.mu.Unlock()
+	return collectionIDs
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
