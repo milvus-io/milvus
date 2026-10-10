@@ -419,3 +419,83 @@ func TestPackedManifestRecordWriter_LocalStorageBasePath(t *testing.T) {
 	assert.Equal(t, root+"/insert_log/1/2/3", w.basePath)
 	assert.Equal(t, root+"/insert_log/1/2/3", gotBasePath)
 }
+
+// TestNewPackedRecordBatchWriter_MultiPartUploadSizeProperty guards the P1
+// regression: the configured part size must be handed to the storage library
+// under the fs-scoped key it actually consumes. A writer-scoped key would be
+// silently ignored by the pinned milvus-storage, leaving uploads on the
+// 10 MiB default with no error.
+func TestNewPackedRecordBatchWriter_MultiPartUploadSizeProperty(t *testing.T) {
+	require.Equal(t, "fs.multi_part_upload_size", packed.PropertyFSMultiPartUploadSize)
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_Int64},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2}, Fields: []int64{common.TimeStampField, common.RowIDField, 101}},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotExtra map[string]string
+	patch := mockey.Mock(packed.NewFFIPackedWriter).To(
+		func(_ string, _ *arrow.Schema, _ []storagecommon.ColumnGroup,
+			_ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext,
+			extraProperties ...map[string]string,
+		) (*packed.FFIPackedWriter, error) {
+			if len(extraProperties) > 0 {
+				gotExtra = extraProperties[0]
+			}
+			return &packed.FFIPackedWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	const customSize = int64(209715200) // 200 MiB
+	_, err := NewPartialPackedRecordBatchWriter(
+		t.TempDir(), schema, 0, customSize, columnGroups, cfg, nil, "", nil,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, gotExtra)
+	require.Equal(t, strconv.FormatInt(customSize, 10), gotExtra[packed.PropertyFSMultiPartUploadSize])
+}
+
+// TestNewPackedTextBatchWriter_MultiPartUploadSize verifies that the TEXT
+// writer receives the configured part size before it converts the config to
+// storage-library properties.
+func TestNewPackedTextBatchWriter_MultiPartUploadSize(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+		{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, DataType: schemapb.DataType_Text, Name: "text"},
+	}}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2}, Fields: []int64{common.TimeStampField, common.RowIDField, 101}},
+	}
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+
+	var gotConfig *packed.SegmentWriterConfig
+	patch := mockey.Mock(packed.NewFFISegmentWriter).To(
+		func(_ *arrow.Schema, config *packed.SegmentWriterConfig, _ *indexpb.StorageConfig) (*packed.FFISegmentWriter, error) {
+			gotConfig = config
+			return &packed.FFISegmentWriter{}, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	const customSize = int64(209715200) // 200 MiB
+	_, err := NewPackedTextBatchWriter(
+		"bucket",
+		t.TempDir(),
+		schema,
+		0,
+		customSize,
+		columnGroups,
+		cfg,
+		nil,
+		"",
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, gotConfig)
+	require.Equal(t, customSize, gotConfig.MultiPartUploadSize)
+}

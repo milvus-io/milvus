@@ -235,6 +235,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		}),
 		storage.WithVersion(st.req.GetStorageVersion()),
 		storage.WithStorageConfig(st.req.GetStorageConfig()),
+		storage.WithMultiPartUploadSize(paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64()),
 	)
 	if err != nil {
 		mlog.Warn(ctx,
