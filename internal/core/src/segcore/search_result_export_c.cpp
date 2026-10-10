@@ -632,18 +632,14 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
             auto& field_meta = plan->schema_->operator[](field_id);
-            std::unique_ptr<milvus::DataArray> field_data;
-            if (!segment->is_field_exist(field_id)) {
-                field_data =
-                    segment->bulk_subscript_not_exist_field(field_meta, size);
-            } else {
-                field_data =
-                    segment->bulk_subscript(&op_ctx,
-                                            field_id,
-                                            search_result->seg_offsets_.data(),
-                                            size);
-            }
-            extra_fields[field_id] = std::move(field_data);
+            extra_fields[field_id] = milvus::segcore::BulkSubscriptWithSnapshot(
+                segment,
+                search_result->read_snapshot_,
+                &op_ctx,
+                field_id,
+                field_meta,
+                search_result->seg_offsets_.data(),
+                size);
         }
         search_result->search_storage_cost_.scanned_remote_bytes +=
             op_ctx.storage_usage.scanned_cold_bytes.load();
@@ -1305,6 +1301,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 OrderedSegmentFields& materialized) {
                 SearchResult temp_result;
                 temp_result.segment_ = materialized.search_result->segment_;
+                temp_result.read_snapshot_ =
+                    materialized.search_result->read_snapshot_;
                 temp_result.seg_offsets_ = materialized.segment_offsets;
                 temp_result.distances_.resize(
                     materialized.segment_offsets.size(), 0.0f);
@@ -1440,18 +1438,15 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                 for (auto field_id : requested_field_ids) {
                     milvus::futures::throwIfCancelled(cancel_token);
                     auto& field_meta = plan->schema_->operator[](field_id);
-                    std::unique_ptr<milvus::DataArray> data;
-                    if (!segment->is_field_exist(field_id)) {
-                        data = segment->bulk_subscript_not_exist_field(
-                            field_meta, materialized.segment_offsets.size());
-                    } else {
-                        data = segment->bulk_subscript(
+                    materialized.fields[field_id] =
+                        milvus::segcore::BulkSubscriptWithSnapshot(
+                            segment,
+                            materialized.search_result->read_snapshot_,
                             &op_ctx,
                             field_id,
+                            field_meta,
                             materialized.segment_offsets.data(),
                             materialized.segment_offsets.size());
-                    }
-                    materialized.fields[field_id] = std::move(data);
                 }
                 materialized.scanned_remote_bytes =
                     op_ctx.storage_usage.scanned_cold_bytes.load();
