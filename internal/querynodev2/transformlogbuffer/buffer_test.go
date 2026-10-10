@@ -452,7 +452,8 @@ func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *t
 	segment := &fakeSegment{id: 10, vchannel: "v1", startAfter: 80}
 	reg, err := buffer.RegisterSegment(context.Background(), segment)
 	require.NoError(t, err)
-	require.NoError(t, reg.WaitCatchup(context.Background()))
+	caughtUp := startCatchup(reg)
+	require.NoError(t, awaitCatchup(t, caughtUp))
 	assert.Equal(t, []uint64{90}, segment.appliedTicks())
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 
@@ -480,13 +481,14 @@ func TestBufferRegistrationKeepsApplyingLiveEntriesAfterSyncUp(t *testing.T) {
 	segment := &fakeSegment{id: 10, vchannel: "v1", startAfter: 50}
 	reg, err := buffer.RegisterSegment(context.Background(), segment)
 	require.NoError(t, err)
+	caughtUp := startCatchup(reg)
 	defer reg.Unregister()
 
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
-	require.NoError(t, reg.WaitCatchup(context.Background()))
+	require.NoError(t, awaitCatchup(t, caughtUp))
 
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", Entry: &streamingpb.TransformLogEntry{TimeTick: 60}})
 	require.Eventually(t, func() bool {
@@ -494,7 +496,7 @@ func TestBufferRegistrationKeepsApplyingLiveEntriesAfterSyncUp(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
+func TestBufferRegistrationStartsReplayOnlyWhenSubmitted(t *testing.T) {
 	streams := newFakeStreamManager()
 	buffer := New(streams, 4)
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("p_1v0", 50))
@@ -519,28 +521,31 @@ func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 		applyStarted: applyStarted,
 		applyBlock:   applyBlock,
 	}
-	defer close(applyBlock)
 
-	type registerResult struct {
-		reg qnview.TransformRegistration
-		err error
-	}
-	registerDone := make(chan registerResult, 1)
-	go func() {
-		reg, err := buffer.RegisterSegment(context.Background(), segment)
-		registerDone <- registerResult{reg: reg, err: err}
-	}()
-
+	reg, err := buffer.RegisterSegment(context.Background(), segment)
+	require.NoError(t, err)
+	defer reg.Unregister()
+	var release sync.Once
+	defer release.Do(func() { close(applyBlock) })
 	select {
-	case result := <-registerDone:
-		require.NoError(t, result.err)
-		require.NotNil(t, result.reg)
-		defer result.reg.Unregister()
 	case <-applyStarted:
-		t.Fatal("RegisterSegment blocked while draining transform log backlog")
-	case <-time.After(time.Second):
-		t.Fatal("RegisterSegment did not return")
+		t.Fatal("registration must not start replay before submission")
+	default:
 	}
+	caughtUp := startCatchup(reg)
+	select {
+	case <-applyStarted:
+	case <-time.After(time.Second):
+		t.Fatal("submitted replay did not start")
+	}
+	select {
+	case <-caughtUp:
+		t.Fatal("catchup completed before Apply returned")
+	default:
+	}
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 60}})
+	release.Do(func() { close(applyBlock) })
+	require.NoError(t, awaitCatchup(t, caughtUp))
 }
 
 func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach(t *testing.T) {
@@ -570,6 +575,7 @@ func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach
 	}
 	reg, err := buffer.RegisterSegment(context.Background(), segment)
 	require.NoError(t, err)
+	caughtUp := startCatchup(reg)
 	defer reg.Unregister()
 
 	<-applyStarted
@@ -583,7 +589,7 @@ func TestBufferRegisterSegmentDrainsEntriesArrivingDuringCatchupBeforeLiveAttach
 	})
 
 	close(applyBlock)
-	require.NoError(t, reg.WaitCatchup(context.Background()))
+	require.NoError(t, awaitCatchup(t, caughtUp))
 	require.NoError(t, guard.WaitTransformVisible(context.Background(), 70))
 	assert.Equal(t, []uint64{60, 70}, segment.appliedTicks())
 
@@ -646,13 +652,14 @@ func TestGuardWaitTransformVisibleWaitsForLiveApply(t *testing.T) {
 	}
 	reg, err := buffer.RegisterSegment(context.Background(), segment)
 	require.NoError(t, err)
+	caughtUp := startCatchup(reg)
 	defer reg.Unregister()
 
 	stream := streams.stream("v1")
 	require.NotNil(t, stream)
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
-	require.NoError(t, reg.WaitCatchup(context.Background()))
+	require.NoError(t, awaitCatchup(t, caughtUp))
 
 	waitDone := make(chan error, 1)
 	go func() {
@@ -725,4 +732,21 @@ func newTestQueryView(vchannel string, startAfter uint64) *qviews.QueryViewAtQue
 		},
 		&viewpb.QueryViewOfQueryNode{NodeId: 1},
 	).(*qviews.QueryViewAtQueryNode)
+}
+
+func startCatchup(reg qnview.TransformRegistration) <-chan error {
+	done := make(chan error, 1)
+	reg.Catchup(context.Background(), func(err error) { done <- err })
+	return done
+}
+
+func awaitCatchup(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("catchup did not complete")
+		return nil
+	}
 }

@@ -22,8 +22,8 @@ func (*lifetimeSubscription) Close() { panic("mockey") }
 
 type lifetimeRegistration struct{ TransformRegistration }
 
-func (*lifetimeRegistration) WaitCatchup(context.Context) error { panic("mockey") }
-func (*lifetimeRegistration) Unregister()                       { panic("mockey") }
+func (*lifetimeRegistration) Catchup(context.Context, func(error)) { panic("mockey") }
+func (*lifetimeRegistration) Unregister()                          { panic("mockey") }
 
 func patchLifetime(t *testing.T, mock *mockey.Mocker) {
 	t.Helper()
@@ -55,14 +55,16 @@ func TestSharedSegmentRetainsPhysicalSubscription(t *testing.T) {
 			updated := make(chan SegmentLoadInfoSnapshot, 1)
 			patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).Acquire).Return(instantTransformGuard{}, nil).Build())
 			patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(&lifetimeRegistration{}, nil).Build())
-			patchLifetime(t, mockey.Mock((*lifetimeRegistration).WaitCatchup).To(func(_ *lifetimeRegistration, ctx context.Context) error {
+			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Catchup).To(func(_ *lifetimeRegistration, ctx context.Context, done func(error)) {
 				registered <- struct{}{}
-				select {
-				case <-catchup:
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+				go func() {
+					select {
+					case <-catchup:
+						done(nil)
+					case <-ctx.Done():
+						done(ctx.Err())
+					}
+				}()
 			}).Build())
 			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Unregister).To(func(*lifetimeRegistration) {}).Build())
 			patchLifetime(t, mockey.Mock((*fakePhysicalLoader).Load).To(func(*fakePhysicalLoader, context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (TransformSegment, error) {
@@ -85,7 +87,7 @@ func TestSharedSegmentRetainsPhysicalSubscription(t *testing.T) {
 			scheduler := nodescheduler.New(4)
 			t.Cleanup(scheduler.Close)
 			physical := newTestSegmentPreparerWithStream(scheduler, &fakePhysicalLoader{}, &fakeSegmentLoadInfoStream{})
-			mgr := newTestManagerWithPreparation(t, scheduler, physical, &fakeTransformLogBuffer{}, 1, &fakeQueryViewCollectionRuntimeManager{})
+			mgr := newTestManagerWithPreparation(t, scheduler, physical, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{})
 			view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 			acquire := func(version int64) (qviews.QueryViewKey, chan struct{}) {
 				meta := buildHandlerTestMeta(version)
@@ -142,7 +144,7 @@ func TestReleaseCancelsPendingPreparation(t *testing.T) {
 	}).Build())
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	mgr := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}, CatchupConcurrency: 1})
+	mgr := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}})
 	meta, view := buildHandlerTestMeta(1), buildHandlerTestQNView(1)
 	key := qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey()
 	mgr.Acquire(AcquireSegments{Key: key, Meta: meta, View: view})
@@ -201,7 +203,7 @@ func TestPendingViewOwnsSharedSegment(t *testing.T) {
 			patchLifetime(t, mockey.Mock((*lifetimeSubscription).Close).To(func(*lifetimeSubscription) { closes.Add(1) }).Build())
 			scheduler := nodescheduler.New(4)
 			t.Cleanup(scheduler.Close)
-			manager := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: &fakePhysicalLoader{}, LoadInfoStream: &fakeSegmentLoadInfoStream{}, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}, CatchupConcurrency: 1})
+			manager := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: &fakePhysicalLoader{}, LoadInfoStream: &fakeSegmentLoadInfoStream{}, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}})
 			view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 			acquire := func(version int64, ready, failed chan struct{}) qviews.QueryViewKey {
 				meta := buildHandlerTestMeta(version)
@@ -290,7 +292,7 @@ func TestPendingSubscriptionRetainsPredecessorGuard(t *testing.T) {
 	}).Build())
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	manager := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}, CatchupConcurrency: 1})
+	manager := NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: &fakeTransformLogBuffer{}, Collections: &fakeQueryViewCollectionRuntimeManager{}})
 	first, _, _ := acquireGenerationView(manager, 1)
 	waitGenerationEvent(t, oldPrepared)
 	second, _, _ := acquireGenerationView(manager, 2)

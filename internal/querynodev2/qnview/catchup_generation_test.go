@@ -61,19 +61,23 @@ func TestCatchupCallbackKeepsReplacementGeneration(t *testing.T) {
 				return newReg, nil
 			}).Build())
 			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Unregister).Return().Build())
-			patchLifetime(t, mockey.Mock((*lifetimeRegistration).WaitCatchup).To(func(r *lifetimeRegistration, ctx context.Context) error {
-				if r == newReg {
-					close(newEntered)
-					<-finishNew
-					return nil
-				}
-				close(oldEntered)
-				<-ctx.Done()
-				<-finishOld
-				if stage == "catchup-success" {
-					return nil
-				}
-				return ctx.Err()
+			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Catchup).To(func(r *lifetimeRegistration, ctx context.Context, done func(error)) {
+				go func() {
+					if r == newReg {
+						close(newEntered)
+						<-finishNew
+						done(nil)
+						return
+					}
+					close(oldEntered)
+					<-ctx.Done()
+					<-finishOld
+					if stage == "catchup-success" {
+						done(nil)
+					} else {
+						done(ctx.Err())
+					}
+				}()
 			}).Build())
 			patchLifetime(t, mockey.Mock(preparationStub.Acquire).To(func(_ preparationStub, req segmentPreparationRequest) {
 				s := newSegment
@@ -82,16 +86,16 @@ func TestCatchupCallbackKeepsReplacementGeneration(t *testing.T) {
 				}
 				req.OnLoaded([]TransformSegment{s})
 			}).Build())
-			var origin func(*QueryViewSegmentManager, segmentCatchupTask)
-			patchLifetime(t, mockey.Mock((*QueryViewSegmentManager).registerAndCatchup).To(func(m *QueryViewSegmentManager, task segmentCatchupTask) {
-				origin(m, task)
+			var origin func(*QueryViewSegmentManager, segmentCatchupTask, error)
+			patchLifetime(t, mockey.Mock((*QueryViewSegmentManager).completeCatchup).To(func(m *QueryViewSegmentManager, task segmentCatchupTask, err error) {
+				origin(m, task, err)
 				if task.segment == oldSegment {
 					close(oldFinished)
 				}
 			}).Origin(&origin).Build())
 			sched := nodescheduler.New(4)
 			t.Cleanup(sched.Close)
-			mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{}, 2)
+			mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{})
 			first, _, _ := acquireGenerationView(mgr, 1)
 			waitGenerationEvent(t, oldEntered)
 			releaseLifetimeView(t, mgr, first)
@@ -152,7 +156,7 @@ func TestFailedSegmentWaitsForItsOwnQueryHandles(t *testing.T) {
 	}).Build())
 	sched := nodescheduler.New(4)
 	t.Cleanup(sched.Close)
-	mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{}, 2)
+	mgr := newTestManagerWithPreparation(t, sched, preparationStub{}, &fakeTransformLogBuffer{})
 	first, view, ready := acquireGenerationView(mgr, 1)
 	waitGenerationEvent(t, ready)
 	handles, err := mgr.AcquireSealedSegmentHandles(context.Background(), first, view)

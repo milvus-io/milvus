@@ -23,7 +23,7 @@ type Buffer struct {
 	streamsByPChannel map[string]*streamState
 	channels          map[string]*vchannelBuffer
 
-	drainTasks chan *registration
+	drainTasks chan catchupTask
 }
 
 func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
@@ -34,7 +34,7 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 		streams:           streams,
 		streamsByPChannel: make(map[string]*streamState),
 		channels:          make(map[string]*vchannelBuffer),
-		drainTasks:        make(chan *registration, 1024),
+		drainTasks:        make(chan catchupTask, 1024),
 	}
 	for i := 0; i < drainConcurrency; i++ {
 		go b.drainWorker()
@@ -95,22 +95,19 @@ func (b *Buffer) RegisterSegment(ctx context.Context, segment qnview.TransformSe
 	return buf.registerSegment(ctx, segment)
 }
 
-func (b *Buffer) scheduleDrain(ctx context.Context, reg *registration) error {
-	select {
-	case b.drainTasks <- reg:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+type catchupTask struct {
+	ctx        context.Context
+	reg        *registration
+	onComplete func(error)
 }
 
 func (b *Buffer) drainWorker() {
-	for reg := range b.drainTasks {
-		err := reg.buffer.drainRegistration(reg.ctx, reg)
+	for task := range b.drainTasks {
+		err := task.reg.buffer.drainRegistration(task.ctx, task.reg)
 		if err != nil {
-			reg.buffer.removeRegistration(reg)
+			task.reg.Unregister()
 		}
-		reg.finish(err)
+		task.onComplete(err)
 	}
 }
 
@@ -413,16 +410,14 @@ func (b *vchannelBuffer) registerSegment(ctx context.Context, segment qnview.Tra
 	)
 	b.mu.Unlock()
 
-	if err := b.owner.scheduleDrain(ctx, reg); err != nil {
-		b.removeRegistration(reg)
-		reg.finish(err)
-		return nil, err
-	}
 	return reg, nil
 }
 
 func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registration) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		batch, done, notify, err := b.nextCatchupBatch(reg)
 		if err != nil || done {
 			return err
@@ -431,6 +426,8 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 			select {
 			case <-notify:
 				continue
+			case <-reg.ctx.Done():
+				return reg.ctx.Err()
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -543,10 +540,6 @@ func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint
 }
 
 func (b *vchannelBuffer) unregister(reg *registration) {
-	b.removeRegistration(reg)
-}
-
-func (b *vchannelBuffer) removeRegistration(reg *registration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pending[reg.segment.ID()] == reg {
@@ -699,18 +692,7 @@ func (b *vchannelBuffer) fail(err error) {
 	}
 	b.err = err
 	b.notifyVisibilityLocked()
-	regs := make([]*registration, 0, len(b.live)+len(b.pending))
-	for _, reg := range b.live {
-		regs = append(regs, reg)
-	}
-	for _, reg := range b.pending {
-		regs = append(regs, reg)
-	}
 	b.mu.Unlock()
-
-	for _, reg := range regs {
-		reg.finish(err)
-	}
 }
 
 func (b *vchannelBuffer) notifyVisibilityLocked() {
@@ -719,19 +701,15 @@ func (b *vchannelBuffer) notifyVisibilityLocked() {
 }
 
 type registration struct {
-	buffer     *vchannelBuffer
-	segment    qnview.TransformSegment
-	startFrom  uint64
-	drainedTo  atomic.Uint64
-	ctx        context.Context
-	cancel     context.CancelFunc
-	applyMu    sync.Mutex
-	poisoned   bool
-	done       chan struct{}
-	err        error
-	errMu      sync.Mutex
-	once       sync.Once
-	finishOnce sync.Once
+	buffer    *vchannelBuffer
+	segment   qnview.TransformSegment
+	startFrom uint64
+	drainedTo atomic.Uint64
+	ctx       context.Context
+	cancel    context.CancelFunc
+	applyMu   sync.Mutex
+	poisoned  bool
+	once      sync.Once
 }
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
@@ -742,38 +720,19 @@ func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *r
 		startFrom: segment.TransformStartAfterTimeTick(),
 		ctx:       ctx,
 		cancel:    cancel,
-		done:      make(chan struct{}),
 	}
 	reg.drainedTo.Store(reg.startFrom)
 	return reg
 }
 
-func (r *registration) WaitCatchup(ctx context.Context) error {
+func (r *registration) Catchup(ctx context.Context, onComplete func(error)) {
 	select {
-	case <-r.done:
-		r.errMu.Lock()
-		defer r.errMu.Unlock()
-		if r.err != nil {
-			mlog.Debug(ctx, "querynode transform log buffer segment catchup failed",
-				mlog.FieldPChannel(r.buffer.pchannel),
-				mlog.FieldVChannel(r.buffer.vchannel),
-				mlog.FieldSegmentID(r.segment.ID()),
-				mlog.Uint64("startAfterTimeTick", r.startFrom),
-				mlog.Uint64("drainedTo", r.drainedTo.Load()),
-				mlog.Err(r.err),
-			)
-		}
-		return r.err
+	case r.buffer.owner.drainTasks <- catchupTask{ctx: ctx, reg: r, onComplete: onComplete}:
+	case <-r.ctx.Done():
+		onComplete(r.ctx.Err())
 	case <-ctx.Done():
-		mlog.Debug(ctx, "querynode transform log buffer segment catchup canceled",
-			mlog.FieldPChannel(r.buffer.pchannel),
-			mlog.FieldVChannel(r.buffer.vchannel),
-			mlog.FieldSegmentID(r.segment.ID()),
-			mlog.Uint64("startAfterTimeTick", r.startFrom),
-			mlog.Uint64("drainedTo", r.drainedTo.Load()),
-			mlog.Err(ctx.Err()),
-		)
-		return ctx.Err()
+		r.Unregister()
+		onComplete(ctx.Err())
 	}
 }
 
@@ -809,13 +768,4 @@ func (r *registration) applyEntry(entry *streamingpb.TransformLogEntry) error {
 			mlog.FieldSegmentID(r.segment.ID()), mlog.Uint64("timeTick", entry.GetTimeTick()), mlog.Err(err))
 	}
 	return nil
-}
-
-func (r *registration) finish(err error) {
-	r.finishOnce.Do(func() {
-		r.errMu.Lock()
-		r.err = err
-		r.errMu.Unlock()
-		close(r.done)
-	})
 }

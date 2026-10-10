@@ -40,7 +40,7 @@ func TestQueryViewSegmentManager_AcquireUsesNodeScheduler(t *testing.T) {
 	physical := preparationStub{
 		acquire: func(segmentPreparationRequest) { physicalCalled <- struct{}{} },
 	}
-	mgr := newTestManagerWithPreparation(t, nodeScheduler, physical, &fakeTransformLogBuffer{}, 4, collections)
+	mgr := newTestManagerWithPreparation(t, nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
 
 	mgr.Acquire(AcquireSegments{
 		Key: key, Meta: meta, View: view,
@@ -309,7 +309,7 @@ func TestQueryViewSegmentManager_RetriesRetryableCollectionAcquireInNodeSchedule
 	physical := preparationStub{
 		acquire: func(segmentPreparationRequest) { physicalCalled <- struct{}{} },
 	}
-	mgr := newTestManagerWithPreparation(t, nodeScheduler, physical, &fakeTransformLogBuffer{}, 4, collections)
+	mgr := newTestManagerWithPreparation(t, nodeScheduler, physical, &fakeTransformLogBuffer{}, collections)
 
 	unrecoverable := make(chan struct{}, 1)
 	mgr.Acquire(AcquireSegments{

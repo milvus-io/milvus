@@ -4660,8 +4660,7 @@ type queryNodeConfig struct {
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
 
-	// query view recovery
-	QueryViewSegmentCatchupConcurrency    ParamItem `refreshable:"false"`
+	// query view resource preparation
 	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"false"`
 }
 
@@ -6292,21 +6291,6 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
-
-	p.QueryViewSegmentCatchupConcurrency = ParamItem{
-		Key:          "queryNode.queryView.segmentCatchupConcurrency",
-		Version:      "3.0.0",
-		DefaultValue: "4",
-		Doc:          "Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.",
-		Export:       true,
-		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
-				return "1"
-			}
-			return v
-		},
-	}
-	p.QueryViewSegmentCatchupConcurrency.Init(base.mgr)
 
 	p.QueryViewTransformLogDrainConcurrency = ParamItem{
 		Key:          "queryNode.queryView.transformLogDrainConcurrency",

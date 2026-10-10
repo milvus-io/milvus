@@ -78,7 +78,7 @@ func TestOldRegistrationCannotRemoveReplacement(t *testing.T) {
 	defer current.Unregister()
 	b.pending[1] = current
 	old.Unregister()
-	b.removeRegistration(old) // late drain cleanup
+	b.unregister(old) // late drain cleanup
 	require.Same(t, current, b.pending[1])
 	_, done, _, err := b.nextCatchupBatch(old)
 	require.ErrorIs(t, err, context.Canceled)

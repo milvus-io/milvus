@@ -28,9 +28,14 @@ type TransformLogGuard interface {
 	Release()
 }
 
-// TransformRegistration is a live segment registration in the TransformLogBuffer.
+// TransformRegistration pins segment replay history and owns subsequent live delivery.
 type TransformRegistration interface {
-	WaitCatchup(ctx context.Context) error
+	// Catchup must be called exactly once, after the owner has stored
+	// this registration. It submits replay; onComplete runs once, outside buffer/apply locks, after
+	// replay has stopped. It may run before Catchup returns (e.g. cancellation).
+	// Unregister cancels replay and joins any native Apply, but does not wait
+	// for onComplete, which may itself unregister the segment.
+	Catchup(ctx context.Context, onComplete func(error))
 	Unregister()
 }
 

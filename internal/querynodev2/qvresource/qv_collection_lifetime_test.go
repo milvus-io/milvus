@@ -72,8 +72,8 @@ func (*lifetimeTransformGuard) Release() { panic("mockey") }
 
 type lifetimeTransformRegistration struct{ qnview.TransformRegistration }
 
-func (*lifetimeTransformRegistration) WaitCatchup(context.Context) error { panic("mockey") }
-func (*lifetimeTransformRegistration) Unregister()                       { panic("mockey") }
+func (*lifetimeTransformRegistration) Catchup(context.Context, func(error)) { panic("mockey") }
+func (*lifetimeTransformRegistration) Unregister()                          { panic("mockey") }
 
 func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 	collections, runtime := pinnedCollectionForTest(t)
@@ -91,7 +91,7 @@ func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformBuffer).Acquire).Return(&lifetimeTransformGuard{}, nil).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformGuard).Release).Return().Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformBuffer).RegisterSegment).Return(&lifetimeTransformRegistration{}, nil).Build())
-	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformRegistration).WaitCatchup).Return(nil).Build())
+	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformRegistration).Catchup).To(func(_ *lifetimeTransformRegistration, _ context.Context, done func(error)) { done(nil) }).Build())
 	patchCollectionLifetime(t, mockey.Mock((*lifetimeTransformRegistration).Unregister).Return().Build())
 	streamPatch := mockey.Mock((*lifetimeLoadInfoStream).Subscribe).To(func(_ *lifetimeLoadInfoStream, opt qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
 		require.NoError(t, opt.Handler.Handle(qnview.SegmentLoadInfoSnapshot{CollectionID: opt.CollectionID, SegmentID: opt.SegmentID, DataVersion: opt.DataVersion, Revision: qnview.SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: opt.SegmentID}}))
@@ -100,7 +100,7 @@ func TestQueryHandlesKeepPinnedCollectionAfterLastViewDrops(t *testing.T) {
 	defer streamPatch.UnPatch()
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: &lifetimePhysicalLoader{}, LoadInfoStream: &lifetimeLoadInfoStream{}, Buffer: &lifetimeTransformBuffer{}, CatchupConcurrency: 1, Collections: &lifetimeCollectionManager{}})
+	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: &lifetimePhysicalLoader{}, LoadInfoStream: &lifetimeLoadInfoStream{}, Buffer: &lifetimeTransformBuffer{}, Collections: &lifetimeCollectionManager{}})
 	meta := &viewpb.QueryViewMeta{
 		CollectionId: 1,
 		Vchannel:     "p_1v0",
