@@ -788,6 +788,11 @@ func TestQueryViewSegmentManager_RetriesPhysicalLoadAfterSchedulerFailure(t *tes
 }
 
 func TestQueryViewSegmentManager_SegmentFailureDetachesFailedViewRef(t *testing.T) {
+	released := make(chan *fakeTransformSegment, 1)
+	patchLifetime(t, mockey.Mock((*fakeTransformSegment).Release).To(func(segment *fakeTransformSegment, _ context.Context) error {
+		released <- segment
+		return nil
+	}).Build())
 	meta1 := buildHandlerTestMeta(1)
 	meta1.Version.DataVersion = &viewpb.DataVersion{}
 	view := &viewpb.QueryViewOfQueryNode{
@@ -845,7 +850,14 @@ func TestQueryViewSegmentManager_SegmentFailureDetachesFailedViewRef(t *testing.
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for second view release")
 	}
-	assert.True(t, segment.released, "failed first view must not keep a stale ref after segment-scoped failure")
+	// Ready may be observed before the catch-up callback returns its task ref.
+	// Wait for physical release independently of logical view removal.
+	select {
+	case got := <-released:
+		require.Same(t, segment, got)
+	case <-time.After(time.Second):
+		t.Fatal("failed first view must not keep a stale ref after segment-scoped failure")
+	}
 }
 
 func TestQueryViewSegmentManager_KeepsEnsureRegisterVChannelTogether(t *testing.T) {

@@ -350,5 +350,7 @@ func TestLastViewReleaseWaitsForNativeReopen(t *testing.T) {
 	}
 	close(resume)
 	waitGenerationEvent(t, dropped)
-	require.EqualValues(t, 1, released.Load())
+	// Load-attempt completion may schedule OnDropped before its final physical
+	// cleanup returns. Native Reopen must finish first, and release must follow.
+	require.Eventually(t, func() bool { return released.Load() == 1 }, time.Second, time.Millisecond)
 }
