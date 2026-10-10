@@ -1620,7 +1620,7 @@ func (m *ClientTelemetryManager) handleGetConfig(cmd *ClientCommand) *CommandRep
 		// Password and APIKey are excluded for security
 		response.UserConfig["db_name"] = cfg.DBName
 		response.UserConfig["enable_tls_auth"] = cfg.EnableTLSAuth
-		response.UserConfig["server_version"] = cfg.ServerVersion
+		response.UserConfig["server_version"] = cfg.GetServerVersion()
 
 		// RetryRateLimit settings
 		if cfg.RetryRateLimit != nil {
