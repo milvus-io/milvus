@@ -82,6 +82,9 @@ type BaseTable struct {
 	// etcd users (e.g. the version gate confirmator); it lives for the process
 	// lifetime and is never closed by the source.
 	etcdClient *clientv3.Client
+	// etcdSourceInitialized is set only after the initial etcd configuration load succeeds.
+	// AddSource may register the source even when that load fails.
+	etcdSourceInitialized bool
 }
 
 type baseTableConfig struct {
@@ -244,8 +247,19 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		mlog.Info(context.TODO(), "init with etcd failed", mlog.Err(err))
 		return
 	}
-	bt.mgr.AddSource(s)
+	err = bt.mgr.AddSource(s)
 	s.SetEventHandler(bt.mgr)
+	if err != nil {
+		// Source errors can contain protected configuration values.
+		mlog.Warn(context.TODO(), "init with etcd source failed", mlog.String("error", config.RedactedValue))
+		return
+	}
+	bt.etcdSourceInitialized = true
+}
+
+// EtcdSourceInitialized reports whether the etcd source completed its initial load.
+func (bt *BaseTable) EtcdSourceInitialized() bool {
+	return bt.etcdSourceInitialized
 }
 
 // GetConfigDir returns the config directory
