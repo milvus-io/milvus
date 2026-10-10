@@ -4,8 +4,14 @@ import (
 	"context"
 	"math"
 	"sync"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Stream adapts the shared summary reader to bounded query bootstrap reads.
@@ -65,7 +71,7 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 	}
 	after := opt.StartAfterTimeTick
 	for {
-		batch, err := s.reader.ReadTransform(ctx, opt.VChannel, after, through, ReadLimits{MaxRows: 4096, MaxBytes: 4 << 20})
+		batch, err := s.readBatch(ctx, opt.VChannel, after, through)
 		if err != nil {
 			return err
 		}
@@ -98,6 +104,50 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 		}
 	}
 }
+
+// readBatch retries storage failures without advancing the delivery cursor.
+// Retry outside ReadTransform so its snapshot lock and GC pin are released
+// during backoff. Handler failures are deliberately outside this retry loop.
+func (s *Stream) readBatch(ctx context.Context, vchannel string, after, through uint64) (TransformBatch, error) {
+	var retryBackoff *backoff.ExponentialBackOff
+	for {
+		if err := ctx.Err(); err != nil {
+			return TransformBatch{}, err
+		}
+		batch, err := s.reader.ReadTransform(ctx, vchannel, after, through, ReadLimits{MaxRows: 4096, MaxBytes: 4 << 20})
+		if err == nil {
+			return batch, nil
+		}
+		if ctx.Err() != nil {
+			return TransformBatch{}, ctx.Err()
+		}
+		// A retained chunk is pinned against GC during the read. Its absence or
+		// corruption cannot be repaired by retrying this subscription. Unknown
+		// read failures, including operation-local timeouts, remain retryable.
+		if errors.Is(err, ErrStoreCorrupted) || errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrDataIntegrity) {
+			return TransformBatch{}, err
+		}
+		if retryBackoff == nil {
+			retryBackoff = backoff.NewExponentialBackOff()
+			retryBackoff.InitialInterval = 100 * time.Millisecond
+			retryBackoff.MaxInterval = 10 * time.Second
+			retryBackoff.MaxElapsedTime = 0
+			retryBackoff.Reset()
+		}
+		delay := retryBackoff.NextBackOff()
+		mlog.RatedWarn(ctx, 1, "retrying transform log read",
+			mlog.FieldVChannel(vchannel), mlog.Uint64("startAfterTimeTick", after),
+			mlog.Duration("backoff", delay), mlog.Err(err))
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return TransformBatch{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (s *Stream) Done() <-chan struct{} { return s.ctx.Done() }
 func (s *Stream) Error() error          { return s.ctx.Err() }
 func (s *Stream) Close() error {

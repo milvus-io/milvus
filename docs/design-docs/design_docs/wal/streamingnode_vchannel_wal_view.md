@@ -238,7 +238,10 @@ not a new preparation failure to retry indefinitely.
 
 **Implementation gap / TODO:** the current `retryablePreparationError` allowlist
 does not fully implement this ownership contract. Some transient object-storage
-failures reach it as non-retryable `ErrIoFailed` and can make a view Unrecoverable.
+failures outside TransformLog reads can reach it as non-retryable `ErrIoFailed`
+and make a view Unrecoverable. TransformLog reads now retry temporary and unknown
+storage failures within the subscription, without discarding accepted replay
+entries or advancing SyncUp on failure; see [local read recovery](transform_log.md#local-read-recovery).
 Conversely, it treats gRPC `ResourceExhausted` as retryable without distinguishing
 temporary throttling from capacity that requires Coord intervention. Error
 classification must reflect whether this node can recover, rather than relying

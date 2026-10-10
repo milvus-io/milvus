@@ -221,6 +221,45 @@ corrupt retained objects still fail the read; they are never converted into empt
 history, fast-forward, or SyncUp. Correct replay of all query-required effects
 depends on the reliable-retention TODO, not on accepting an older cursor.
 
+### Local read recovery
+
+The SN adaptor retries temporary and unclassified `ReadTransform` failures in
+the same subscription, including ordinary `ErrIoFailed` and operation-local
+timeouts. It uses exponential backoff with a 100 ms initial interval, a 10 s
+maximum base interval and jitter, without a retry-count or elapsed-time limit.
+A successful read resets backoff; successful reads allocate no retry timer.
+Retries emit rate-limited warnings with the unchanged read cursor.
+
+Each failed read returns no deliverable batch. The adaptor keeps its previous
+cursor, delivers no partial entries and sends no SyncUp for that attempt. It
+retries only the read, not handler delivery or Segment application. After success,
+it delivers complete entries before advancing coverage, following the same
+bounded/unbounded rules as a read that never failed.
+
+The retry loop sits outside `ReadTransform`, releasing its snapshot lock and
+local GC pin before waiting. Chunk-cache and Store reads retain their single
+attempt semantics. Subscription cancellation and stream closure cancel both
+backoff and context-aware storage reads. Only the subscription context ending
+means cancellation; a timeout or cancellation of a lower-level attempt while
+that context is active remains retryable.
+
+Known store corruption (`ErrStoreCorrupted`), data-integrity failures and a
+missing object still referenced by the retained index terminate the read
+explicitly. Summary's terminal state also returns `ErrStoreCorrupted`; it must
+not enter an indefinite retry loop. These errors and consumer-handler failures
+keep the existing terminal notification path. Unknown read failures are not
+classified as permanent merely because the generic error lacks a retryable flag.
+
+Remote Provider integration must preserve this distinction: owner shutdown,
+migration and PChannel unavailability end the physical stream for PChannel-level
+reconnection; only explicit logical terminal failures become SubscriptionError.
+That transport wiring remains outside the local SN implementation. Segment
+application failure handling is unchanged by read recovery.
+
+This retry policy does not alter the lower-bound compatibility rule above or
+implement reliable retention. It preserves delivery across transient failures
+within retained history; it cannot reconstruct Deletes already retired by GC.
+
 ## 6. Retention Prerequisite
 
 QueryView/DataView integration must protect
