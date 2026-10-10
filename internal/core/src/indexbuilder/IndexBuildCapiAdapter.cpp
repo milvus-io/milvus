@@ -407,20 +407,17 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
             index::PackedScalarIndexFileName(adapted.artifact_type);
     }
 
-    auto source = AdaptSource(info);
-    const bool legacy_binlog_source =
-        std::holds_alternative<V1BinlogBuildSource>(source);
     BuildRequest request{
         .family = adapted.family,
         .params = std::move(adapted.params),
         .value_type = adapted.value_type,
         .field_id = FieldId(info.field_schema().fieldid()),
-        .source = std::move(source),
+        .source = AdaptSource(info),
+        // lack_binlog_rows is not consumed: it is computed from binlog
+        // EntriesNum, which pre-2.2.1 binlogs leave at 0, and the stats text
+        // job does not set it. The session derives the missing prefix from the
+        // rows it decodes.
         .expected_rows = info.num_rows(),
-        // lack_binlog_rows describes legacy per-field binlogs and cannot
-        // describe StorageV2 column groups. Columnar source handling decides
-        // missing-row semantics from the field data it visits instead.
-        .missing_rows = legacy_binlog_source ? info.lack_binlog_rows() : 0,
         .staging_parent = staging_parent,
         .output = std::move(output),
         .json_path = json_path,
