@@ -113,9 +113,20 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	s.collectionLocks.Lock(collectionID)
 	defer s.collectionLocks.Unlock(collectionID)
 
+	return s.putLocked(ctx, cfg)
+}
+
+func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error {
+	collectionID := cfg.CollectionID
 	s.mu.RLock()
 	existing := s.configs[collectionID]
 	s.mu.RUnlock()
+
+	// A placement-only update must not roll back an acknowledged schema.
+	if existing != nil && cfg.SchemaVersion < existing.SchemaVersion {
+		cfg = cfg.Clone()
+		cfg.SchemaVersion = existing.SchemaVersion
+	}
 
 	// Delete orphans (items present in existing but absent from cfg) first,
 	// so stale ETCD keys do not linger after partition / replica removal.
@@ -342,4 +353,21 @@ func (s *LoadConfigStore) publishConfigLocked(collectionID int64) {
 	for _, listener := range s.listeners {
 		listener(collectionID, s.configs[collectionID], s.versions[collectionID])
 	}
+}
+
+// UpdateSchema publishes a schema requirement only for a currently loaded
+// collection. The collection guard serializes it with release and load updates.
+func (s *LoadConfigStore) UpdateSchema(ctx context.Context, collectionID int64, version int32) (bool, error) {
+	s.collectionLocks.Lock(collectionID)
+	defer s.collectionLocks.Unlock(collectionID)
+	cfg := s.GetConfig(collectionID)
+	if cfg == nil {
+		return false, nil
+	}
+	if cfg.SchemaVersion >= version {
+		return true, nil
+	}
+	next := cfg.Clone()
+	next.SchemaVersion = version
+	return true, s.putLocked(ctx, next)
 }

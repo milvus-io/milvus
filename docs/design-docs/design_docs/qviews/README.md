@@ -84,6 +84,42 @@ clears those fields in the temporary request. No optimizer retains these slices
 after the transfer. Phase 2 expands independent sub-requests again for concurrent
 execution; the ownership transfer changes no RPC fields or query semantics.
 
+### Schema handoff
+
+Each QueryView carries `schema_version`, the logical `CollectionSchema.version`
+required by its query resources. This is distinct from DataVersion and from
+RootCoord's timestamp barrier. The durable collection load configuration also
+records this version; its content identity includes the schema requirement.
+Consequently a schema-only update creates a new QueryVersion even when the
+DataView and segment placement remain unchanged, and existing loading/readiness
+checks cannot mistake an old-schema Up view for completion.
+
+The AlterCollection acknowledgement follows this order:
+
+1. RootCoord persists and publishes the new schema in MetaTable.
+2. RootCoord refreshes DataCoord metadata and applies bound index metadata.
+3. RootCoord sends the published schema requirement to QueryCoord through
+   `UpdateLoadConfig.schema_version`. This path updates desired state directly;
+   it must not acquire another collection broadcast lock inside the callback.
+4. QueryCoord reconciles the new target. QN describes the collection and checks
+   the exact target schema revision before acquiring collection/segment resources.
+   SN applies AlterCollection to its shared query collection on the serialized
+   WAL path, including the Go schema used for insert conversion. An event barrier
+   and applied-version check precede SN Ready.
+5. RootCoord waits until every expected vchannel/replica has a matching Up view,
+   then completes the acknowledgement and expires Proxy caches. A released
+   collection has no serving obligation; a subsequent load reads published metadata.
+
+New Search/Retrieve plans carry their schema version. Phase 1 rejects an Up view
+whose schema requirement is older, allowing the existing view retry path to wait
+for handoff. WAL consumption itself never waits for this handoff: Flush and
+resource events needed to prepare the new view must continue to advance.
+
+This reuses legacy collection/segcore schema transitions and lazy segment reopen.
+It does not introduce immutable physical schema resources for every retained
+QueryView. Field-removal MVCC boundary handling and runtime BM25 function changes
+need separate validation; a version requirement alone is not proof of either.
+
 ### Advantages
 
 - StreamingNode logic is simplified; no need to migrate Load/Release and other QueryNode interfaces.

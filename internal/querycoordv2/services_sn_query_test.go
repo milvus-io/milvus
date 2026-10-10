@@ -26,7 +26,7 @@ func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
 		return &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}}, 3
 	}).Build()
 	defer patch.UnPatch()
-	resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
+	resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 3})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	require.Equal(t, int64(1), resp.GetCollectionID())
@@ -34,7 +34,10 @@ func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
 	require.Len(t, resp.GetLoadFields(), 2)
 	require.Equal(t, int64(100), resp.LoadFields[0].FieldId)
 	require.Equal(t, int64(102), resp.LoadFields[1].FieldId)
-	require.Equal(t, uint64(3), resp.GetVersion(), "return the actual current version, not the requested historical version")
+	require.Equal(t, uint64(3), resp.GetVersion(), "return the requested current configuration")
+	stale, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(stale.GetStatus()), merr.ErrServiceNotReady)
 	for _, id := range []int64{0, 2} {
 		resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: id})
 		require.NoError(t, err)

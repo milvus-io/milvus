@@ -815,6 +815,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	schema := colInfo.Schema
 	t.schema = schema
+	t.SchemaVersion = schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}

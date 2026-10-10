@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
@@ -494,6 +495,15 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			}
 			// Properties are already persisted; still invalidate Proxy caches.
 			mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
+		}
+	}
+	if messageutil.IsSchemaChange(header) {
+		version := body.GetUpdates().GetSchema().GetVersion()
+		status, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			CollectionIDs: []int64{header.CollectionId}, SchemaVersion: &version,
+		})
+		if err := merr.CheckRPCCall(status, err); err != nil {
+			return merr.Wrap(err, "wait for schema QueryView handoff")
 		}
 	}
 	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {

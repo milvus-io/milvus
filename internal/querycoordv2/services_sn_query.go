@@ -30,6 +30,10 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
 		return resp, nil
 	}
+	if req.GetVersion() != 0 && req.GetVersion() != version {
+		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("query view load configuration changed"))
+		return resp, nil
+	}
 	resp.Version = version
 	resp.PartitionIDs = append([]int64(nil), cfg.PartitionIDs...)
 	resp.LoadFields = cloneLoadFields(cfg.LoadFields)

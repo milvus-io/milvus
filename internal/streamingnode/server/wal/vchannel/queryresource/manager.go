@@ -411,15 +411,15 @@ func (m *Manager) submitReady(key qviews.QueryViewKey, onReady func()) {
 
 func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
 	m.mu.Lock()
-	_, ok := m.refs[key]
+	ref, ok := m.refs[key]
 	runtime := m.runtime
 	ready := ok && runtime != nil && m.task == nil && m.err == nil
 	m.mu.Unlock()
 	if !ready {
 		return nil
 	}
-	// TODO(#40451): bind/reprepare resources when load_info_version or schema
-	// changes. Reusing this runtime currently preserves its initial load scope.
+	// Schema transitions are applied on the WAL path; fence that path before
+	// checking the target revision. Load-scope changes still need reprepare.
 	if err := runtime.PrepareQueryView(ctx, key.QueryViewVersion.DataVersion); err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return err
@@ -442,6 +442,9 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	m.mu.Unlock()
 	if !ready {
 		return nil
+	}
+	if err := runtime.CheckSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
+		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	onReady()
 	return nil

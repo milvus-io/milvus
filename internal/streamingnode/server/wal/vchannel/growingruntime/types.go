@@ -193,3 +193,13 @@ func (r *Runtime) releaseCollectionIfIdleLocked() *segcore.CCollection {
 	r.collection = nil
 	return collection
 }
+
+// SchemaVersion is the schema already applied on the serialized WAL path.
+func (r *Runtime) SchemaVersion() int32 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.collection == nil {
+		return 0
+	}
+	return r.collection.Schema().GetVersion()
+}

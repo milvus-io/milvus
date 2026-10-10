@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1478,12 +1479,22 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
 		MustBuildBroadcast()
 
+	published, waited := false, false
 	meta := &mockMetaTable{}
 	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		published = true
 		return nil
 	}
 
 	mixc := imocks.NewMixCoord(t)
+	handoff := mockey.Mock(mockey.GetMethod(mixc, "UpdateLoadConfig")).To(func(_ context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
+		require.True(t, published, "metadata must be visible before QueryView preparation")
+		require.Equal(t, []int64{1}, req.CollectionIDs)
+		require.Equal(t, int32(2), req.GetSchemaVersion())
+		waited = true
+		return merr.Success(), nil
+	}).Build()
+	defer handoff.UnPatch()
 	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
 		&indexpb.DescribeIndexResponse{
 			Status: merr.Success(),
@@ -1503,6 +1514,7 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	require.True(t, waited)
 }
 
 func newBoundIndexTestPlan() (*model.Collection, *schemautil.AlterSchemaAddPlan) {

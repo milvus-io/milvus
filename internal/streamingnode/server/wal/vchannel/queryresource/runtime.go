@@ -346,3 +346,15 @@ func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelR
 		}
 	}
 }
+
+// CheckSchemaVersion is called after the event barrier, before reporting Ready.
+func (r *QueryRuntime) CheckSchemaVersion(version int32) error {
+	var err error
+	r.RangeModules(func(module QueryRuntimeModule) bool {
+		if resource, ok := module.(interface{ SchemaVersion() int32 }); ok && resource.SchemaVersion() < version {
+			err = merr.WrapErrServiceNotReadyMsg("query runtime schema %d has not reached %d", resource.SchemaVersion(), version)
+		}
+		return err == nil
+	})
+	return err
+}

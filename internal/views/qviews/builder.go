@@ -15,6 +15,7 @@ type QueryViewAtCoordBuilder struct {
 	queryVersion                int64
 	transformStartAfterTimetick uint64
 	loadInfoVersion             uint64
+	schemaVersion               int32
 	assignments                 map[int64]map[int64][]int64
 	segmentTransformStarts      map[int64]uint64
 }
@@ -64,6 +65,11 @@ func (b *QueryViewAtCoordBuilder) SetLoadInfoVersion(version uint64) *QueryViewA
 	return b
 }
 
+func (b *QueryViewAtCoordBuilder) SetSchemaVersion(version int32) *QueryViewAtCoordBuilder {
+	b.schemaVersion = version
+	return b
+}
+
 func (b *QueryViewAtCoordBuilder) SetAssignments(assignments map[int64]map[int64][]int64) *QueryViewAtCoordBuilder {
 	b.assignments = assignments
 	return b
@@ -81,6 +87,7 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		State:                       viewpb.QueryViewState_QueryViewStatePreparing,
 		TransformStartAfterTimetick: b.transformStartAfterTimetick,
 		LoadInfoVersion:             b.loadInfoVersion,
+		SchemaVersion:               b.schemaVersion,
 	}
 
 	nodeIDs := make([]int64, 0, len(b.assignments))

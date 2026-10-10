@@ -175,3 +175,21 @@ func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesPinnedCollection(t *
 	assert.Zero(t, collection.putCount)
 	assert.Zero(t, collection.unrefCount)
 }
+
+func TestQueryViewCollectionRuntimeWaitsForPublishedSchema(t *testing.T) {
+	provider := &fakeQVLoadMetadataProvider{}
+	schema := &schemapb.CollectionSchema{Version: 1}
+	patch := mockey.Mock((*fakeQVLoadMetadataProvider).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{Schema: schema}, nil).Build()
+	defer patch.UnPatch()
+	manager := newQueryViewCollectionRuntimeManager(provider, &fakeQVCollectionManager{})
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, SchemaVersion: 2}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
+	guard, retryable, err := manager.Acquire(t.Context(), view)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	require.True(t, retryable)
+	require.Nil(t, guard)
+	schema.Version = 2
+	guard, retryable, err = manager.Acquire(t.Context(), view)
+	require.NoError(t, err)
+	require.False(t, retryable)
+	require.NotNil(t, guard)
+}

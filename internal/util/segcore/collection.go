@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"context"
+	"sync"
 	"unsafe"
 
 	"google.golang.org/protobuf/proto"
@@ -74,10 +75,12 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 // CCollection is just a wrapper of the underlying C-structure CCollection.
 // Contains some additional immutable properties of collection.
 type CCollection struct {
-	ptr          C.CCollection
-	collectionID int64
-	schema       *schemapb.CollectionSchema
-	indexMeta    *segcorepb.CollectionIndexMeta
+	ptr           C.CCollection
+	collectionID  int64
+	schemaMu      sync.RWMutex
+	schemaVersion uint64
+	schema        *schemapb.CollectionSchema
+	indexMeta     *segcorepb.CollectionIndexMeta
 }
 
 // ID returns the collection ID.
@@ -91,6 +94,8 @@ func (c *CCollection) rawPointer() C.CCollection {
 }
 
 func (c *CCollection) Schema() *schemapb.CollectionSchema {
+	c.schemaMu.RLock()
+	defer c.schemaMu.RUnlock()
 	return c.schema
 }
 
@@ -121,13 +126,23 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return merr.WrapErrServiceInternal("update collection schema with nil")
 	}
 
+	c.schemaMu.Lock()
+	defer c.schemaMu.Unlock()
+	if version <= c.schemaVersion {
+		return nil
+	}
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err
 	}
 
 	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
-	return ConsumeCStatusIntoError(&status)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.schema = sch
+	c.schemaVersion = version
+	return nil
 }
 
 // Release releases the underlying collection

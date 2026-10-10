@@ -93,6 +93,9 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		if request.LegacySearchRequest == nil {
 			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
 		}
+		if request.LegacySearchRequest.GetSchemaVersion() > lease.Meta.GetSchemaVersion() {
+			return nil, viewerror.NewViewNotFound("query view schema is not ready")
+		}
 		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
 		if len(searchReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {
 			searchReq.PartitionIDs = append([]int64(nil), req.GetPartitionIds()...)
@@ -108,6 +111,9 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		if request.LegacyRetrieveRequest == nil {
 			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")
+		}
+		if request.LegacyRetrieveRequest.GetSchemaVersion() > lease.Meta.GetSchemaVersion() {
+			return nil, viewerror.NewViewNotFound("query view schema is not ready")
 		}
 		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
 		if len(retrieveReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {

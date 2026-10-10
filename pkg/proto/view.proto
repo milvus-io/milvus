@@ -87,6 +87,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Required logical collection schema revision.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

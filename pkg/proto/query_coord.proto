@@ -845,6 +845,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    int32 schema_version = 11;
 }
 
 message PartitionLoadInfo {
@@ -1130,6 +1131,9 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+    // RootCoord sends this only after publishing the schema. No WAL broadcast
+    // is needed here: the AlterCollection callback already owns the DDL lock.
+    optional int32 schema_version = 6;
 }
 
 message UpdateSchemaRequest {

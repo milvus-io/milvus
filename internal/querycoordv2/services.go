@@ -1103,6 +1103,10 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
 
+	if req.SchemaVersion != nil {
+		return merr.Status(s.updateQueryViewSchema(ctx, req)), nil
+	}
+
 	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups())
 	if err != nil {
 		msg := "failed to update load config"

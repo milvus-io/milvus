@@ -24,6 +24,7 @@ func loadInfoVersion(config *LoadConfig) uint64 {
 	add := func(value int64) { data = binary.LittleEndian.AppendUint64(data, uint64(value)) }
 	add(cfg.DbID)
 	add(cfg.CollectionID)
+	add(int64(cfg.SchemaVersion))
 	if cfg.UserSpecifiedReplicaMode {
 		add(1)
 	} else {

@@ -236,6 +236,7 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 	}
 	header := &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     coll.GetDbId(),
+		SchemaVersion:            coll.GetSchema().GetVersion(),
 		CollectionId:             coll.GetCollectionID(),
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
 		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
@@ -315,6 +316,7 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 	})
 	return &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     cfg.DbID,
+		SchemaVersion:            cfg.SchemaVersion,
 		CollectionId:             cfg.CollectionID,
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
 		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
@@ -424,7 +426,7 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 	if cfg == nil {
 		return current
 	}
-	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
+	info := &querypb.CollectionLoadInfo{SchemaVersion: cfg.SchemaVersion, CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
 	for _, field := range cfg.LoadFields {
 		info.LoadFields = append(info.LoadFields, field.GetFieldId())
 		if field.GetIndexId() != 0 {

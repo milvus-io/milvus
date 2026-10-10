@@ -63,3 +63,18 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		require.True(t, released)
 	}
 }
+
+func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}}}
+	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { t.Fatal("incompatible view must not renew a serving lease") }, Release: func() {}}
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+	defer patch.UnPatch()
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+	req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 2}}
+	_, err := w.GetQueryPlan(t.Context(), req)
+	require.True(t, viewerror.AsViewError(err).IsRetryable())
+	req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 2}}
+	_, err = w.GetQueryPlan(t.Context(), req)
+	require.True(t, viewerror.AsViewError(err).IsRetryable())
+}

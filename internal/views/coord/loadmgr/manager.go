@@ -70,3 +70,12 @@ func (m *CollectionLoadManager) notifyCollection(collectionID int64) {
 		m.notify(collectionID)
 	}
 }
+
+// UpdateSchema is called after RootCoord has committed its schema metadata.
+func (m *CollectionLoadManager) UpdateSchema(ctx context.Context, collectionID int64, version int32) (bool, error) {
+	loaded, err := m.store.UpdateSchema(ctx, collectionID, version)
+	if err == nil && loaded {
+		m.notifyCollection(collectionID)
+	}
+	return loaded, err
+}
