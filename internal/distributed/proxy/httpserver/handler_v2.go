@@ -559,13 +559,13 @@ func hasExprParams(subReqs []SubSearchReq) bool {
 	return false
 }
 
-func redactExprParams(params map[string]interface{}) map[string]interface{} {
+func redactExprParams(params map[string]json.RawMessage) map[string]json.RawMessage {
 	if len(params) == 0 {
 		return params
 	}
-	redacted := make(map[string]interface{}, len(params))
+	redacted := make(map[string]json.RawMessage, len(params))
 	for name := range params {
-		redacted[name] = proxy.RedactedValue
+		redacted[name] = json.RawMessage(strconv.Quote(proxy.RedactedValue))
 	}
 	return redacted
 }
@@ -1572,7 +1572,16 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		})
 		return nil, err
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -1633,7 +1642,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
-	filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+	filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
 		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1642,13 +1651,14 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
-		OutputFields:   httpReq.OutputFields,
-		PartitionNames: httpReq.PartitionNames,
-		Expr:           filter,
+		DbName:             dbName,
+		CollectionName:     httpReq.CollectionName,
+		RlsPrincipal:       httpReq.RlsPrincipal,
+		SkipRls:            httpReq.SkipRls,
+		OutputFields:       httpReq.OutputFields,
+		PartitionNames:     httpReq.PartitionNames,
+		Expr:               filter,
+		ExprTemplateValues: idTemplateValues,
 	}
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
@@ -1710,11 +1720,20 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -1723,6 +1742,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, err
 		}
 		req.Expr = filter
+		req.ExprTemplateValues = idTemplateValues
 	}
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Delete", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
@@ -2203,7 +2223,16 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.SearchParams = searchParams
-	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
+	templateValues, err := generateExpressionTemplate(httpReq.ExprParams)
+	if err != nil {
+		mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	req.ExprTemplateValues = templateValues
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -2382,7 +2411,16 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 				return nil, err
 			}
 		}
-		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
+		subTemplateValues, err := generateExpressionTemplate(subReq.ExprParams)
+		if err != nil {
+			mlog.Warn(ctx, "high level restful api, invalid expression template parameter", mlog.Err(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
+		searchReq.ExprTemplateValues = subTemplateValues
 		req.Requests = append(req.Requests, searchReq)
 	}
 
