@@ -125,9 +125,48 @@ ReadRawHeader(const std::string& path) {
     return header;
 }
 
+// Owns a staging-file descriptor and closes it best-effort on unwind.
+// storage::FileDescriptorGuard is not used because its checked close reports
+// FileReadFailed; a close failure on this written file is a write failure.
+class StagingFileDescriptor {
+ public:
+    explicit StagingFileDescriptor(int fd) : fd_(fd) {
+    }
+
+    ~StagingFileDescriptor() {
+        if (fd_ != -1) {
+            ::close(fd_);
+        }
+    }
+
+    StagingFileDescriptor(const StagingFileDescriptor&) = delete;
+    StagingFileDescriptor&
+    operator=(const StagingFileDescriptor&) = delete;
+
+    int
+    Get() const {
+        return fd_;
+    }
+
+    // close releases the descriptor even when it fails, so it is never
+    // retried.
+    void
+    CloseChecked(const std::string& path) {
+        if (::close(std::exchange(fd_, -1)) != 0) {
+            ThrowInfo(FileWriteFailed,
+                      "failed to close vector staging file {}: {}",
+                      path,
+                      std::strerror(errno));
+        }
+    }
+
+ private:
+    int fd_{-1};
+};
+
 void
 WriteFile(const std::string& path, const void* data, size_t size) {
-    auto fd =
+    const auto fd =
         ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         ThrowInfo(FileCreateFailed,
@@ -135,31 +174,23 @@ WriteFile(const std::string& path, const void* data, size_t size) {
                   path,
                   std::strerror(errno));
     }
-    try {
-        storage::WriteAll(
-            fd, data, size, path, "failed to write vector staging file");
-        if (::fsync(fd) != 0) {
-            ThrowInfo(FileWriteFailed,
-                      "failed to flush vector staging file {}: {}",
+    // O_EXCL makes this call the file's creator, so only a file created here
+    // is removed when a later step fails.
+    StagingFileDescriptor descriptor(fd);
+    storage::LocalEntryGuard staged(path);
+    storage::WriteAll(descriptor.Get(),
+                      data,
+                      size,
                       path,
-                      std::strerror(errno));
-        }
-        const auto close_result = ::close(fd);
-        const auto close_error = errno;
-        fd = -1;
-        if (close_result != 0) {
-            ThrowInfo(FileWriteFailed,
-                      "failed to close vector staging file {}: {}",
-                      path,
-                      std::strerror(close_error));
-        }
-    } catch (...) {
-        if (fd >= 0) {
-            ::close(fd);
-        }
-        ::unlink(path.c_str());
-        throw;
+                      "failed to write vector staging file");
+    if (::fsync(descriptor.Get()) != 0) {
+        ThrowInfo(FileWriteFailed,
+                  "failed to flush vector staging file {}: {}",
+                  path,
+                  std::strerror(errno));
     }
+    descriptor.CloseChecked(path);
+    static_cast<void>(staged.Release());
 }
 
 DiskValidity
