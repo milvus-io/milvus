@@ -52,6 +52,54 @@ func TestFutureWithConcurrentReleaseAndCancel(t *testing.T) {
 	wg.Wait()
 }
 
+func TestFutureReadyCallbackHandle(t *testing.T) {
+	t.Run("already ready", func(t *testing.T) {
+		future := createFutureWithTestCase(context.Background(), testCase{
+			caseNo: 100,
+		})
+		defer future.Release()
+
+		require.Eventually(t, func() bool {
+			return isUnderlyingFutureReadyForTest(future)
+		}, time.Second, 10*time.Millisecond)
+
+		// Registering after the C++ future is ready invokes the callback inline.
+		future.BlockUntilReady()
+		result, err := future.BlockAndLeakyGet()
+		require.NoError(t, err)
+		assert.Equal(t, 100, getCInt(result))
+		freeCInt(result)
+	})
+
+	t.Run("concurrent waiters", func(t *testing.T) {
+		future := createFutureWithTestCase(context.Background(), testCase{
+			interval: 10 * time.Millisecond,
+			loopCnt:  100,
+			caseNo:   100,
+		})
+		defer future.Release()
+
+		const waiterCount = 32
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(waiterCount)
+		for i := 0; i < waiterCount; i++ {
+			go func() {
+				defer wg.Done()
+				<-start
+				future.BlockUntilReady()
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		result, err := future.BlockAndLeakyGet()
+		require.NoError(t, err)
+		assert.Equal(t, 100, getCInt(result))
+		freeCInt(result)
+	})
+}
+
 func TestFutureWithSuccessCase(t *testing.T) {
 	// Test success case.
 	future := createFutureWithTestCase(context.Background(), testCase{
