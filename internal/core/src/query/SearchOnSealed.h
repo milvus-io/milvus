@@ -24,6 +24,7 @@
 #include "common/protobuf_utils.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SealedIndexingRecord.h"
+#include "query/CachedSearchIterator.h"
 
 namespace milvus::query {
 
@@ -36,7 +37,8 @@ SearchOnSealedIndex(const Schema& schema,
                     int64_t num_queries,
                     const BitsetView& view,
                     milvus::OpContext* op_context,
-                    SearchResult& search_result);
+                    SearchResult& search_result,
+                    CachedSearchIterator::PrimaryKeyGetter pk_getter = {});
 
 void
 SearchOnSealedColumn(const Schema& schema,
@@ -49,6 +51,7 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t row_count,
                      const BitsetView& bitset,
                      milvus::OpContext* op_context,
-                     SearchResult& result);
+                     SearchResult& result,
+                     CachedSearchIterator::PrimaryKeyGetter pk_getter = {});
 
 }  // namespace milvus::query

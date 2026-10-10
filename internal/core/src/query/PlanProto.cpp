@@ -262,6 +262,44 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
             search_info.iterator_v2_info_->last_bound =
                 iterator_v2_info_proto.last_bound();
         }
+        auto& iterator_info = *search_info.iterator_v2_info_;
+        iterator_info.cursor_version = iterator_v2_info_proto.cursor_version();
+        AssertInfo(iterator_info.cursor_version == 0 ||
+                       iterator_info.cursor_version == 2,
+                   "unsupported search iterator cursor version: {}",
+                   iterator_info.cursor_version);
+        if (iterator_info.cursor_version == 2 &&
+            search_info.metric_type_ == knowhere::metric::BM25) {
+            // Data timestamps do not freeze the IDF/avgdl rebuilt for each
+            // RPC. Reject during parsing, including plans with no active rows.
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Strict iterator requires frozen BM25 statistics; live "
+                      "IDF and avgdl cannot be paginated");
+        }
+        if (iterator_v2_info_proto.has_last_pk()) {
+            const auto& pk = iterator_v2_info_proto.last_pk();
+            switch (pk.val_case()) {
+                case planpb::GenericValue::kInt64Val:
+                    iterator_info.last_pk = pk.int64_val();
+                    break;
+                case planpb::GenericValue::kStringVal:
+                    iterator_info.last_pk = pk.string_val();
+                    break;
+                default:
+                    ThrowInfo(ErrorCode::UnexpectedError,
+                              "search iterator primary-key cursor has an "
+                              "invalid internal value type");
+            }
+        }
+        AssertInfo(iterator_info.cursor_version == 2 ||
+                       !iterator_info.last_pk.has_value(),
+                   "primary-key cursor requires search iterator cursor "
+                   "version 2");
+        AssertInfo(iterator_info.cursor_version != 2 ||
+                       iterator_info.last_bound.has_value() ==
+                           iterator_info.last_pk.has_value(),
+                   "search iterator cursor requires both score and primary "
+                   "key, or neither for the first page");
     }
 
     return search_info;

@@ -34,6 +34,10 @@
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
 
+namespace milvus::segcore {
+class SegmentInternalInterface;
+}
+
 namespace milvus::query {
 
 // This class is used to cache the search results from Knowhere
@@ -49,12 +53,41 @@ namespace milvus::query {
 // TODO: replace VectorIterator class
 class CachedSearchIterator {
  public:
+    using PrimaryKeyGetter =
+        std::function<std::vector<PkType>(const std::vector<int64_t>&)>;
+    using RawVectorGetter =
+        std::function<std::unique_ptr<DataArray>(const std::vector<int64_t>&)>;
+
+    // The callback is consumed synchronously. Its segment, OpContext and
+    // SearchResult must outlive NextBatch(); returned PK values are owned.
+    static PrimaryKeyGetter
+    MakePrimaryKeyGetter(const segcore::SegmentInternalInterface& segment,
+                         milvus::OpContext* op_context,
+                         SearchResult& search_result);
+    static RawVectorGetter
+    MakeRawVectorGetter(const segcore::SegmentInternalInterface& segment,
+                        FieldId field_id,
+                        milvus::OpContext* op_context,
+                        SearchResult& search_result);
+
+    // Strict cursors score every visible logical row, independently of graph
+    // reachability. Both getters are synchronous and own their returned data.
+    CachedSearchIterator(const dataset::SearchDataset& dataset,
+                         int64_t row_count,
+                         const SearchInfo& search_info,
+                         const std::map<std::string, std::string>& index_info,
+                         const BitsetView& bitset,
+                         DataType data_type,
+                         RawVectorGetter vector_getter,
+                         PrimaryKeyGetter pk_getter,
+                         milvus::OpContext* op_context = nullptr);
     // For sealed segment with vector index
     CachedSearchIterator(const milvus::index::VectorIndex& index,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
                          const BitsetView& bitset,
-                         milvus::OpContext* op_context = nullptr);
+                         milvus::OpContext* op_context = nullptr,
+                         PrimaryKeyGetter pk_getter = {});
 
     // For growing segment with chunked data, BF.
     //
@@ -70,7 +103,9 @@ class CachedSearchIterator {
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
-                         const milvus::DataType& data_type);
+                         const milvus::DataType& data_type,
+                         PrimaryKeyGetter pk_getter = {},
+                         milvus::OpContext* op_context = nullptr);
 
     // For sealed segment with chunked data, BF
     CachedSearchIterator(ChunkedColumnInterface* column,
@@ -78,7 +113,9 @@ class CachedSearchIterator {
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
-                         const milvus::DataType& data_type);
+                         const milvus::DataType& data_type,
+                         PrimaryKeyGetter pk_getter = {},
+                         milvus::OpContext* op_context = nullptr);
 
     // This method fetches the next batch of search results based on the provided search information
     // and updates the search_result object with the new batch of results.
@@ -115,6 +152,13 @@ class CachedSearchIterator {
     int8_t sign_ = 1;
     size_t num_chunks_ = 1;
     size_t nq_ = 0;
+    PrimaryKeyGetter pk_getter_;
+    milvus::OpContext* op_context_ = nullptr;
+    using ScoredOffset = std::pair<int64_t, float>;
+    std::function<std::vector<ScoredOffset>(const std::vector<int64_t>&)>
+        exact_candidates_;
+    int64_t exact_row_count_ = 0;
+    BitsetView exact_bitset_;
 
     struct IterIdDisIdPairComparator {
         bool
@@ -185,6 +229,9 @@ class CachedSearchIterator {
 
     std::vector<DisIdPair>
     GetBatchedNextResults(size_t query_idx, const SearchInfo& search_info);
+
+    std::vector<DisIdPair>
+    GetPkOrderedResults(const SearchInfo& search_info);
 
     void
     WriteSingleQuerySearchResult(SearchResult& search_result,

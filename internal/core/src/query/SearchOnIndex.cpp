@@ -36,7 +36,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const BitsetView& bitset,
               milvus::OpContext* op_context,
               SearchResult& search_result,
-              bool is_sparse) {
+              bool is_sparse,
+              CachedSearchIterator::PrimaryKeyGetter pk_getter) {
     auto num_queries = search_dataset.num_queries;
     auto dim = search_dataset.dim;
     auto metric_type = search_dataset.metric_type;
@@ -57,6 +58,9 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     // prefix stays in logical row space.
     if (active_count >= 0 && active_count == 0) {
         FillEmptySearchResult(search_result, num_queries, search_conf.topk_);
+        search_result.iterator_pk_cursor_executed_ =
+            search_conf.iterator_v2_info_.has_value() &&
+            search_conf.iterator_v2_info_->cursor_version == 2;
         return;
     }
 
@@ -100,8 +104,12 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter = CachedSearchIterator(
-            indexing, dataset, search_conf, search_bitset, op_context);
+        auto iter = CachedSearchIterator(indexing,
+                                         dataset,
+                                         search_conf,
+                                         search_bitset,
+                                         op_context,
+                                         std::move(pk_getter));
         iter.NextBatch(search_conf, search_result);
         return;
     }

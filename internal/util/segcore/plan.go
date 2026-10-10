@@ -67,6 +67,10 @@ func (plan *SearchPlan) GetGroupSize() int64 {
 	return int64(groupSize)
 }
 
+func (plan *SearchPlan) IteratorPKCursorVersion() uint32 {
+	return uint32(C.GetSearchIteratorPkCursorVersion(plan.cSearchPlan))
+}
+
 func (plan *SearchPlan) SetTakeForOutputAllowed(allowed bool) {
 	C.SetSearchPlanTakeForOutputAllowed(plan.cSearchPlan, C.bool(allowed))
 }

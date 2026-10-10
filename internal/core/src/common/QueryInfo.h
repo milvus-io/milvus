@@ -32,6 +32,8 @@ struct SearchIteratorV2Info {
     std::string token = "";
     uint32_t batch_size = 0;
     std::optional<float> last_bound = std::nullopt;
+    uint32_t cursor_version = 0;
+    std::optional<PkType> last_pk = std::nullopt;
 };
 
 // Brute-force index params sourced from the collection-level index metadata at

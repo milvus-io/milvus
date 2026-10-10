@@ -57,7 +57,8 @@ SearchOnSealedIndex(const Schema& schema,
                     int64_t num_queries,
                     const BitsetView& bitset,
                     milvus::OpContext* op_context,
-                    SearchResult& search_result) {
+                    SearchResult& search_result,
+                    CachedSearchIterator::PrimaryKeyGetter pk_getter) {
     const auto* schema_ptr = &schema;
     const auto* entry_ptr = &entry;
     auto register_vector_search_provider = [&] {
@@ -135,8 +136,12 @@ SearchOnSealedIndex(const Schema& schema,
     BitsetView search_bitset = bitset;
 
     if (search_info.iterator_v2_info_.has_value()) {
-        CachedSearchIterator cached_iter(
-            *vec_index, dataset, search_info, search_bitset, op_context);
+        CachedSearchIterator cached_iter(*vec_index,
+                                         dataset,
+                                         search_info,
+                                         search_bitset,
+                                         op_context,
+                                         std::move(pk_getter));
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());
@@ -177,7 +182,8 @@ SearchOnSealedColumn(const Schema& schema,
                      int64_t row_count,
                      const BitsetView& bitview,
                      milvus::OpContext* op_context,
-                     SearchResult& result) {
+                     SearchResult& result,
+                     CachedSearchIterator::PrimaryKeyGetter pk_getter) {
     const auto* schema_ptr = &schema;
     auto register_vector_search_provider = [&] {
         if (!result.allow_filtered_vector_search_ ||
@@ -259,6 +265,9 @@ SearchOnSealedColumn(const Schema& schema,
         if (offset_mapping.GetValidCount() == 0) {
             // All vectors are null, return empty result
             FillEmptySearchResult(result, num_queries, search_info.topk_);
+            result.iterator_pk_cursor_executed_ =
+                search_info.iterator_v2_info_.has_value() &&
+                search_info.iterator_v2_info_->cursor_version == 2;
             return;
         }
     }
@@ -284,7 +293,9 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_info,
                                          index_info,
                                          search_bitview,
-                                         data_type);
+                                         data_type,
+                                         std::move(pk_getter),
+                                         op_context);
         cached_iter.NextBatch(search_info, result);
         FinalizeVectorSearchOffsets(result,
                                     search_info.struct_element_offsets_.get());

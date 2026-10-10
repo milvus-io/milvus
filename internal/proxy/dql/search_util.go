@@ -439,7 +439,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	if token == "" {
 		generatedToken, err := uuid.NewRandom()
 		if err != nil {
-			return nil, err
+			return nil, merr.WrapErrServiceInternalErr(err, "generate search iterator token")
 		}
 		token = generatedToken.String()
 	} else {
@@ -628,7 +628,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, largeTopKEnabled)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("parse iterator v2 info failed: %v", err)
+		return nil, merr.Wrap(err, "parse iterator v2 info failed")
+	}
+	if err := configureIteratorPKCursor(searchParamsPair, planSearchIteratorV2Info, schema); err != nil {
+		return nil, err
+	}
+	if roundDecimal != -1 || isIterativeFilter {
+		if err := declineIteratorPKCursor(planSearchIteratorV2Info, "rounded scores or iterative filtering"); err != nil {
+			return nil, err
+		}
 	}
 
 	// 7. parse order_by_fields

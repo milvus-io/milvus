@@ -962,7 +962,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 
-	ret.Status = merr.Success()
+	if ret.Status == nil {
+		ret.Status = merr.Success()
+	}
 
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))

@@ -1342,6 +1342,14 @@ func (t *SearchTask) tryGeneratePlan(
 	}
 
 	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+	if err := validateIteratorPKScoring(searchInfo.planInfo, annField, t.schema.CollectionSchema); err != nil {
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
+	}
+	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		if err := declineIteratorPKCursor(searchInfo.planInfo.GetSearchIteratorV2Info(), "vector-array search"); err != nil {
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
+		}
+	}
 	if searchInfo.planInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("not support search_group_by operation based on binary vector column")
 	}
@@ -1642,6 +1650,9 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 			t.result.Results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{
 				Token:     iterInfo.GetToken(),
 				LastBound: getLastBound(t.result, iterInfo.LastBound, getMetricType(toReduceResults)),
+			}
+			if err := attachIteratorPKCursor(t.result, iterInfo, toReduceResults); err != nil {
+				return err
 			}
 		}
 	}

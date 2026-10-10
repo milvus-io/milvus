@@ -238,6 +238,54 @@ TEST(SearchResultExport, SortEqualScoresByPks_MixedScores) {
     EXPECT_FLOAT_EQ(sr.distances_[3], 3.0f);
 }
 
+TEST(SearchResultExport, SortEqualScoresByPks_DistinctNearbyScores) {
+    // Adjacent float scores near zero differ by less than EPSILON, but still
+    // have a strict score order. PK sorting must not swap their identities.
+    const float worse_score = 0.01f;
+    const float better_score = std::nextafter(worse_score, 1.0f);
+    ASSERT_GT(better_score, worse_score);
+    ASSERT_LT(better_score - worse_score, EPSILON);
+
+    for (const auto& pks :
+         {std::vector<PkType>{int64_t(200), int64_t(100)},
+          std::vector<PkType>{std::string("pk-200"), std::string("pk-100")}}) {
+        SearchResult sr;
+        sr.total_nq_ = 1;
+        sr.unity_topK_ = 2;
+        sr.distances_ = {better_score, worse_score};
+        sr.seg_offsets_ = {20, 10};
+        sr.primary_keys_ = pks;
+        sr.topk_per_nq_prefix_sum_ = {0, 2};
+
+        SortEqualScoresByPks(&sr);
+
+        EXPECT_EQ(sr.primary_keys_, pks);
+        EXPECT_EQ(sr.seg_offsets_, (std::vector<int64_t>{20, 10}));
+        EXPECT_EQ(sr.distances_,
+                  (std::vector<float>{better_score, worse_score}));
+    }
+}
+
+TEST(SearchResultExport, SortEqualScoresByPks_SignedZeroStaysWithPk) {
+    SearchResult sr;
+    sr.total_nq_ = 1;
+    sr.unity_topK_ = 2;
+    // Signed zeros compare equal, but the original score must stay attached
+    // to its PK when the equal-score run is permuted.
+    sr.distances_ = {0.0f, -0.0f};
+    sr.seg_offsets_ = {20, 10};
+    sr.primary_keys_ = {PkType(int64_t(200)), PkType(int64_t(100))};
+    sr.topk_per_nq_prefix_sum_ = {0, 2};
+
+    SortEqualScoresByPks(&sr);
+
+    EXPECT_EQ(std::get<int64_t>(sr.primary_keys_[0]), 100);
+    EXPECT_EQ(std::get<int64_t>(sr.primary_keys_[1]), 200);
+    EXPECT_EQ(sr.seg_offsets_, (std::vector<int64_t>{10, 20}));
+    EXPECT_TRUE(std::signbit(sr.distances_[0]));
+    EXPECT_FALSE(std::signbit(sr.distances_[1]));
+}
+
 TEST(SearchResultExport, SortEqualScoresByPks_WithElementIndices) {
     SearchResult sr;
     sr.total_nq_ = 1;

@@ -79,6 +79,10 @@ message SearchIteratorV2Info {
   string token = 1;
   uint32 batch_size = 2;
   optional float last_bound = 3;
+  // Zero preserves the legacy distance-only cursor. Version 2 orders and
+  // resumes by the exact raw score and the typed primary key together.
+  uint32 cursor_version = 4;
+  GenericValue last_pk = 5;
 }
 
 message QueryInfo {

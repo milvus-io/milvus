@@ -383,6 +383,12 @@ GetSearchResultValidCount(CSearchResult search_result) {
     return res->valid_count_;
 }
 
+bool
+GetSearchResultIteratorPkCursorExecuted(CSearchResult search_result) {
+    auto res = static_cast<milvus::SearchResult*>(search_result);
+    return res != nullptr && res->iterator_pk_cursor_executed_;
+}
+
 // Verifies the plan's external field references against the loaded manifest,
 // after LazyCheckSchema refreshed the segment schema and manifest view.
 // Optionally ignores fields that the current execution path will not access.

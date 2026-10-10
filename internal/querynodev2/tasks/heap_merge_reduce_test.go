@@ -21,6 +21,7 @@ package tasks
 import (
 	"container/heap"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -1923,7 +1924,7 @@ func TestMergeHeapAdvanceRoot(t *testing.T) {
 	})
 }
 
-func TestMergeHeapAdvanceRoot_NearEpsilonLegacyParity(t *testing.T) {
+func TestMergeHeapAdvanceRoot_DistinctNearbyScores(t *testing.T) {
 	const (
 		high float32 = 0.0999999717
 		mid  float32 = 0.0999999642
@@ -2001,6 +2002,69 @@ func TestMergeHeapAdvanceRoot_NearEpsilonLegacyParity(t *testing.T) {
 		assert.Equal(t, wantScores, gotScores)
 		assert.Equal(t, wantSources, gotSources)
 	})
+}
+
+func TestMergeEntryComparator_StrictScoreAndPkOrder(t *testing.T) {
+	const (
+		high float32 = 0.0999999717
+		mid  float32 = 0.0999999642
+		low  float32 = 0.0999999568
+	)
+	pool := memory.NewGoAllocator()
+	for _, stringPK := range []bool{false, true} {
+		t.Run(fmt.Sprintf("StringPk=%v", stringPK), func(t *testing.T) {
+			for _, tc := range []struct {
+				name   string
+				scores []float32
+				pkAsc  bool
+			}{
+				{name: "nearby-distinct", scores: []float32{high, mid, low}},
+				{name: "exact-ties", scores: []float32{high, high, high}, pkAsc: true},
+				{name: "positive-infinity", scores: []float32{float32(math.Inf(1)), float32(math.Inf(1)), float32(math.Inf(1))}, pkAsc: true},
+				{name: "negative-infinity", scores: []float32{float32(math.Inf(-1)), float32(math.Inf(-1)), float32(math.Inf(-1))}, pkAsc: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var dfs []*chain.DataFrame
+					for i, score := range tc.scores {
+						// Reverse PK order makes nearby-score comparisons distinguish
+						// strict score ordering from the old epsilon tie rule.
+						pk := int64(3 - i)
+						if tc.pkAsc {
+							pk = int64(i + 1)
+						}
+						if stringPK {
+							dfs = append(dfs, buildTestDFWithStringPK(pool, [][]string{{fmt.Sprint(pk)}}, [][]float32{{score}}))
+						} else {
+							dfs = append(dfs, buildTestDF(pool, [][]int64{{pk}}, [][]float32{{score}}))
+						}
+					}
+					defer func() {
+						for _, df := range dfs {
+							df.Release()
+						}
+					}()
+					entries, err := buildMergeEntries(resolveInputCols(dfs, nil, false), 0, false, stringPK)
+					require.NoError(t, err)
+					greater := (*mergeEntry).greaterInt64Pk
+					if stringPK {
+						greater = (*mergeEntry).greaterStringPk
+					}
+					// All three ordered pairs, including the transitive first/last
+					// pair, must agree; the former epsilon comparator made a cycle.
+					for i := range entries {
+						assert.False(t, greater(entries[i], entries[i]))
+						duplicate := *entries[i]
+						assert.False(t, greater(entries[i], &duplicate))
+						assert.False(t, greater(&duplicate, entries[i]))
+						for j := i + 1; j < len(entries); j++ {
+							assert.True(t, greater(entries[i], entries[j]), "pair (%d,%d)", i, j)
+							assert.False(t, greater(entries[j], entries[i]), "pair (%d,%d)", j, i)
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func legacyMergeStandardInt64Pk(h *mergeHeapInt64Pk, topK int64) ([]int64, []float32, []segmentSource) {

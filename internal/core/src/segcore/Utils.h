@@ -276,7 +276,8 @@ GetEffectiveSearchTopk(const SearchInfo& search_info) {
 }
 
 // SortEqualScoresByPks normalizes the in-segment ordering by sorting
-// equal-score runs by PK ASC, in place. The C++ search engine returns rows in
+// exactly equal-score runs by PK ASC, in place. Near-but-distinct scores retain
+// their score order. The C++ search engine returns rows in
 // score DESC order but with undefined PK order within equal-score runs; the
 // Go reduce path requires a deterministic order so PK dedup picks the same
 // row across runs. Operates on seg_offsets_, distances_, primary_keys_, and
