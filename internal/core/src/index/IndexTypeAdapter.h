@@ -18,6 +18,7 @@
 
 #include <string>
 
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/Families.h"
 #include "index/contracts/Registry.h"
@@ -55,6 +56,14 @@ struct AdaptedIndexType {
 
 AdaptedIndexType
 AdaptIndexType(const IndexTypeAdapterRequest& request);
+
+// The cast a JSON index with this persisted index type and cast runs with.
+// AdaptIndexType writes it to JSON_CAST_TYPE; segment index registration must
+// use it instead of the persisted cast so that the registered cast, family and
+// value type describe the same reader.
+JsonCastType
+RuntimeJsonCastType(const std::string& index_type,
+                    const JsonCastType& persisted_cast);
 
 // Resolve the legacy HYBRID selector without opening an index. For V1/V2 this
 // reads only the existing one-byte `index_type` entry; for V3 it reads the

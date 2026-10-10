@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,6 +31,22 @@
 #include "nlohmann/json.hpp"
 
 namespace milvus::index {
+
+std::string
+GetMetricTypeFromConfig(const Config& config);
+
+// Return a registry family while accepting the legacy HYBRID internal-type
+// spellings. The HYBRID artifact still persists its established one-byte
+// ScalarIndexType selector; these helpers only normalize runtime config.
+std::string
+GetLowCardinalityFamilyFromConfig(const Config& config);
+
+std::string
+GetHighCardinalityFamilyFromConfig(const Config& config);
+
+Config
+ParseConfigFromIndexParams(
+    const std::map<std::string, std::string>& index_params);
 
 // Parses only the int64 syntaxes accepted by normalized index parameters.
 // Callers own missing/null policy and diagnostics.

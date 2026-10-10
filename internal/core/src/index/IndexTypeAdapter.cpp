@@ -110,30 +110,44 @@ ScalarFamily(const std::string& index_type,
     if (index_type == HYBRID_INDEX_TYPE) {
         return families::kHybrid;
     }
+    // An index type this node cannot serve for the value type throws
+    // Unsupported: the Go index scheduler fails such a build once, while it
+    // re-dispatches an assertion failure without limit.
     if (index_type == NGRAM_INDEX_TYPE) {
-        AssertInfo(IsStringType(value_type),
-                   "NGRAM index requires a string value type");
+        if (!IsStringType(value_type)) {
+            ThrowInfo(Unsupported,
+                      "NGRAM index requires a string value type, got {}",
+                      value_type);
+        }
         return families::kNgram;
     }
     if (index_type == FMINDEX_INDEX_TYPE) {
-        AssertInfo(IsStringType(value_type),
-                   "FMINDEX requires a string value type");
+        if (!IsStringType(value_type)) {
+            ThrowInfo(Unsupported,
+                      "FMINDEX requires a string value type, got {}",
+                      value_type);
+        }
         return families::kFmIndex;
     }
     if (index_type == MARISA_TRIE || index_type == MARISA_TRIE_UPPER) {
-        AssertInfo(IsStringType(value_type),
-                   "Trie index requires a string value type");
+        if (!IsStringType(value_type)) {
+            ThrowInfo(Unsupported,
+                      "Trie index requires a string value type, got {}",
+                      value_type);
+        }
         return families::kMarisa;
     }
     if (index_type == ASCENDING_SORT) {
         return families::kSort;
     }
 
-    // Unknown non-string scalar index types fall back to sort; string index
-    // types must use a recognized spelling.
-    AssertInfo(!IsStringType(value_type),
-               "unsupported string index type: {}",
-               index_type);
+    // Unknown non-string scalar index types fall back to sort, as the legacy
+    // factory did. String index types must use a recognized spelling;
+    // indexparamcheck still accepts the legacy names "Asceneding" and
+    // "marisa-trie", which the legacy factory rejected as Unsupported.
+    if (IsStringType(value_type)) {
+        ThrowInfo(Unsupported, "unsupported string index type: {}", index_type);
+    }
     return families::kSort;
 }
 
@@ -228,6 +242,21 @@ FamilyFromPhysicalMetaKeys(const nlohmann::json& metadata) {
 
 }  // namespace
 
+JsonCastType
+RuntimeJsonCastType(const std::string& index_type,
+                    const JsonCastType& persisted_cast) {
+    if (index_type == NGRAM_INDEX_TYPE &&
+        persisted_cast.data_type() == JsonCastType::DataType::ARRAY &&
+        persisted_cast.element_type() == JsonCastType::DataType::VARCHAR) {
+        // The NGRAM checker accepted any JSON cast before #44157, and the
+        // legacy NgramInvertedIndex ignored the configured cast: its JSON
+        // writer hardcoded a scalar VARCHAR projection. An ARRAY_VARCHAR
+        // config therefore owns a scalar VARCHAR NGRAM artifact.
+        return JsonCastType::FromString("VARCHAR");
+    }
+    return persisted_cast;
+}
+
 AdaptedIndexType
 AdaptIndexType(const IndexTypeAdapterRequest& request) {
     AssertInfo(!request.index_type.empty(), "index type is empty");
@@ -280,7 +309,11 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
         result.family = families::kRTree;
         result.value_type = DataType::GEOMETRY;
     } else if (request.field_type == DataType::JSON) {
-        auto cast = JsonCast(request.params);
+        const auto cast =
+            RuntimeJsonCastType(request.index_type, JsonCast(request.params));
+        // ToString round-trips every accepted cast name, so only a cast that
+        // RuntimeJsonCastType rewrote changes this value.
+        result.params[JSON_CAST_TYPE] = cast.ToString();
         result.value_type = JsonCastValueType(cast);
         if (cast.element_type() == JsonCastType::DataType::JSON) {
             if (request.index_type != INVERTED_INDEX_TYPE &&
@@ -294,25 +327,40 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
             result.family = families::kJsonFlat;
         } else {
             const auto cast_type = cast.element_type();
-            if (request.index_type == ASCENDING_SORT) {
-                AssertInfo(cast_type == JsonCastType::DataType::DOUBLE ||
-                               cast_type == JsonCastType::DataType::VARCHAR,
-                           "JSON sort index requires DOUBLE or VARCHAR cast");
-            } else if (request.index_type == BITMAP_INDEX_TYPE) {
-                AssertInfo(cast_type == JsonCastType::DataType::BOOL ||
-                               cast_type == JsonCastType::DataType::VARCHAR,
-                           "JSON bitmap index requires BOOL or VARCHAR cast");
-            } else if (request.index_type == NGRAM_INDEX_TYPE) {
-                AssertInfo(cast_type == JsonCastType::DataType::VARCHAR,
-                           "JSON NGRAM index requires VARCHAR cast");
-            } else {
-                AssertInfo(request.index_type == INVERTED_INDEX_TYPE ||
-                               request.index_type == HYBRID_INDEX_TYPE,
-                           "unsupported JSON index type: {}",
-                           request.index_type);
+            auto index_type = request.index_type;
+            if (index_type == NGRAM_INDEX_TYPE &&
+                cast_type != JsonCastType::DataType::VARCHAR) {
+                // 2.6.0 and 2.6.1 accepted NGRAM with a BOOL or DOUBLE JSON
+                // cast (indexparamcheck requires VARCHAR since #44157), and
+                // the legacy factory built and loaded those indexes as JSON
+                // INVERTED indexes. Their artifacts are INVERTED, so build,
+                // V3 file naming and load all use the INVERTED type.
+                index_type = INVERTED_INDEX_TYPE;
+                result.params[INDEX_TYPE] = index_type;
             }
-            result.family =
-                ScalarFamily(request.index_type, result.value_type, false);
+            if (index_type == ASCENDING_SORT) {
+                if (cast_type != JsonCastType::DataType::DOUBLE &&
+                    cast_type != JsonCastType::DataType::VARCHAR) {
+                    ThrowInfo(Unsupported,
+                              "JSON sort index requires DOUBLE or VARCHAR "
+                              "cast, got {}",
+                              cast);
+                }
+            } else if (index_type == BITMAP_INDEX_TYPE) {
+                if (cast_type != JsonCastType::DataType::BOOL &&
+                    cast_type != JsonCastType::DataType::VARCHAR) {
+                    ThrowInfo(Unsupported,
+                              "JSON bitmap index requires BOOL or VARCHAR "
+                              "cast, got {}",
+                              cast);
+                }
+            } else if (index_type != NGRAM_INDEX_TYPE &&
+                       index_type != INVERTED_INDEX_TYPE &&
+                       index_type != HYBRID_INDEX_TYPE) {
+                ThrowInfo(
+                    Unsupported, "unsupported JSON index type: {}", index_type);
+            }
+            result.family = ScalarFamily(index_type, result.value_type, false);
         }
     } else if (request.field_type == DataType::ARRAY) {
         // ARRAY indexes expose predicates over their element type; field_type
@@ -326,11 +374,13 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
                     ? families::kInverted
                     : families::kSort;
         } else {
-            AssertInfo(request.index_type == HYBRID_INDEX_TYPE ||
-                           request.index_type == BITMAP_INDEX_TYPE ||
-                           request.index_type == INVERTED_INDEX_TYPE,
-                       "unsupported ARRAY index type: {}",
-                       request.index_type);
+            if (request.index_type != HYBRID_INDEX_TYPE &&
+                request.index_type != BITMAP_INDEX_TYPE &&
+                request.index_type != INVERTED_INDEX_TYPE) {
+                ThrowInfo(Unsupported,
+                          "unsupported ARRAY index type: {}",
+                          request.index_type);
+            }
             result.family =
                 ScalarFamily(request.index_type, request.element_type, false);
         }
