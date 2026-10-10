@@ -35,6 +35,10 @@ type pipeline struct {
 	collectionID UniqueID
 }
 
+type streamingUnavailableMarker interface {
+	MarkStreamingUnavailable(error)
+}
+
 func (p *pipeline) GetCollectionID() UniqueID {
 	return p.collectionID
 }
@@ -62,6 +66,11 @@ func NewPipeLine(
 			channel,
 			delegator,
 			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(paramtable.Get().QueryNodeCfg.DMLMicroBatchMaxMsgNum.GetAsInt)),
+			base.WithStreamErrorHandler(func(err error) {
+				if marker, ok := delegator.(streamingUnavailableMarker); ok {
+					marker.MarkStreamingUnavailable(err)
+				}
+			}),
 		),
 	}
 

@@ -527,6 +527,57 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 // flight) doesn't leave the node subscribed to a channel the coordinator has
 // already given up on. This asserts the rollback actually happens: the
 // delegator this call registers is not left behind on failure.
+// TestWatchDmChannels_RebuildsUnserviceableDelegator covers the check added at
+// services.go: a delegator whose stream terminated stays registered and nothing
+// else removes it, because it is skipped in the distribution report and so
+// QueryCoord stops seeing the channel on this node and never releases it. A
+// re-watch has to rebuild rather than report success over a dead shard.
+func (suite *ServiceSuite) TestWatchDmChannels_RebuildsUnserviceableDelegator() {
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
+	loadMeta := &querypb.LoadMetaInfo{MetricType: defaultMetricType}
+
+	// The watch that registered the stale delegator also referenced the
+	// collection, and the rebuild releases that reference, so take it here too.
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
+
+	stale := delegator.NewMockShardDelegator(suite.T())
+	stale.EXPECT().Serviceable().Return(false).Maybe()
+	stale.EXPECT().Close().Return().Once()
+	suite.node.delegators.Insert(suite.vchannel, stale)
+
+	// The channel carries no segments: this exercises the rebuild, and writing
+	// binlogs would tie the test to remote storage it does not need.
+	req := &querypb.WatchDmChannelsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_WatchDmChannels,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		NodeID:       suite.node.session.ServerID,
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		Infos: []*datapb.VchannelInfo{
+			{
+				CollectionID: suite.collectionID,
+				ChannelName:  suite.vchannel,
+				SeekPosition: suite.position,
+			},
+		},
+		Schema:        schema,
+		LoadMeta:      loadMeta,
+		IndexInfoList: indexInfos,
+	}
+
+	status, err := suite.node.WatchDmChannels(context.Background(), req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	rebuilt, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.True(ok, "the channel must still be registered after the rebuild")
+	suite.NotSame(stale, rebuilt, "the unserviceable delegator must have been replaced")
+}
+
 func (suite *ServiceSuite) TestWatchDmChannels_CanceledContextRollsBack() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)

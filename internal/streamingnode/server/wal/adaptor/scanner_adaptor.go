@@ -53,6 +53,13 @@ var (
 type scannerConfig struct {
 	writeAheadBuffer wab.ROWriteAheadBuffer
 	startupBarrier   *scannerStartupBarrier
+	// roOpener opens another WAL backend read-only so a position left by a
+	// previous backend can be replayed. It stays nil for recovery scanners: an
+	// AlterWAL recovery must keep reading the current WAL past the marker until a
+	// following TimeTick releases it from the reorder buffer, and switching to the
+	// target WAL there would wait for a WAL that the flusher checkpoint creates
+	// only afterwards.
+	roOpener roWALOpener
 }
 
 // scannerStartupBarrier pauses raw input after this exact barrier until the
@@ -89,6 +96,7 @@ func newScannerAdaptor(
 		logger:           logger,
 		writeAheadBuffer: config.writeAheadBuffer,
 		startupBarrier:   config.startupBarrier,
+		roOpener:         config.roOpener,
 		innerWAL:         l,
 		readOption:       readOption,
 		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
@@ -110,6 +118,7 @@ type scannerAdaptorImpl struct {
 	startupTxnBuffer *utility.TxnBuffer // published by delivery of the startup barrier
 	*helper.ScannerHelper
 	writeAheadBuffer wab.ROWriteAheadBuffer
+	roOpener         roWALOpener
 	logger           *mlog.Logger
 	innerWAL         walimpls.ROWALImpls
 	readOption       wal.ReadOption
@@ -208,7 +217,19 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		}
 	}
 
-	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan, s.startupBarrier)
+	scanner := newSwithableScanner(
+		s.Name(),
+		s.logger,
+		s.innerWAL,
+		wb,
+		s.readOption.DeliverPolicy,
+		msgChan,
+		s.startupBarrier,
+		s.roOpener,
+		func(walName message.WALName) {
+			s.metrics.SetReaderWALName(walName)
+		},
+	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
