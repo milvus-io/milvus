@@ -86,6 +86,7 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 	invalidNames := []string{
 		"123abc",
+		"-abc",
 		"$abc",
 		"abc$",
 		"_12 ac",
@@ -154,6 +155,8 @@ func TestValidateResourceGroupName(t *testing.T) {
 	assert.Nil(t, ValidateResourceGroupName("abc"))
 	assert.Nil(t, ValidateResourceGroupName("_123abc"))
 	assert.Nil(t, ValidateResourceGroupName("abc123_"))
+	assert.Nil(t, ValidateResourceGroupName("in01-3fa9c2"))
+	assert.Nil(t, ValidateResourceGroupName("a-b_c-"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
