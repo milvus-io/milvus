@@ -6323,6 +6323,8 @@ type dataCoordConfig struct {
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
 	DVForceAllIndexReady           ParamItem `refreshable:"true"`
 
+	ManifestCommitConcurrency ParamItem `refreshable:"false"`
+
 	// compaction
 	EnableCompaction                       ParamItem `refreshable:"false"`
 	EnableAutoCompaction                   ParamItem `refreshable:"true"`
@@ -6354,7 +6356,6 @@ type dataCoordConfig struct {
 	CompactionExpiryTolerance                  ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionEnabled         ParamItem `refreshable:"true"`
 	BumpSchemaVersionCompactionTriggerInterval ParamItem `refreshable:"true"`
-	L0ManifestUpdatePoolSize                   ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -6789,20 +6790,17 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	}
 	p.CompactionMaxParallelTasks.Init(base.mgr)
 
-	p.L0ManifestUpdatePoolSize = ParamItem{
-		Key:          "dataCoord.compaction.levelzero.manifestUpdatePoolSize",
+	p.ManifestCommitConcurrency = ParamItem{
+		Key:          "dataCoord.manifestCommitConcurrency",
 		Version:      "3.0.0",
 		DefaultValue: "16",
-		Doc:          "The goroutine pool size for committing L0 compaction manifest updates inside DataCoord meta update.",
-		Export:       false,
+		Doc:          "Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.",
+		Export:       true,
 		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
-				return "1"
-			}
-			return v
+			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
 	}
-	p.L0ManifestUpdatePoolSize.Init(base.mgr)
+	p.ManifestCommitConcurrency.Init(base.mgr)
 
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
@@ -7182,8 +7180,8 @@ The value must be exactly true or false. A value that does not parse as a boolea
 		Formatter: func(v string) string {
 			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
-		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
-Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
+		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
+Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)

@@ -557,7 +557,7 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 // extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
 // CommitSegmentManifests acquires all targets' manifest locks as a single atomic
 // operation, runs the loon transactions in parallel outside segMu (from the same
-// dataCoord.compaction.levelzero.manifestUpdatePoolSize pool), and lands every pointer
+// dataCoord.manifestCommitConcurrency executor), and lands every pointer
 // advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
 // Folding the input drops in makes the whole L0 result atomic — the targets gain their
 // merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —

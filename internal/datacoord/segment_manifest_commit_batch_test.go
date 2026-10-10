@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,9 +61,10 @@ func addV3Segment(t *testing.T, meta *meta, segmentID int64, basePath string, ve
 // bumpVersionMock mocks the loon transaction to return the next revision of the
 // base it was handed, so each segment advances independently and deterministically.
 func bumpVersionMock() *mockey.Mocker {
-	return mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
-			return packed.MarshalManifestPath(base, version+1), nil
+	return mockey.Mock(packed.SubmitManifestUpdates).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+			complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, version+1), nil), nil)
+			return nil
 		},
 	).Build()
 }
@@ -303,6 +305,7 @@ func TestCommitSegmentManifestsEmptyIsNoop(t *testing.T) {
 // built on the concurrent revision, so publishing any member would break batch
 // atomicity or drop that revision. Nothing from the batch reaches the catalog.
 func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	baseMoved := "/tmp/milvus/insert_log/1/10/390"
@@ -314,11 +317,11 @@ func TestCommitSegmentManifestsAbortsWhenPointerAdvancesDuringManifestIO(t *test
 
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	mock := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mock := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			entered <- struct{}{}
 			<-release
-			return packed.MarshalManifestPath(base, version+2), nil
+			return mockManifestUpdateResult(packed.MarshalManifestPath(base, version+2), nil), nil
 		},
 	).Build()
 	defer mock.UnPatch()
@@ -531,4 +534,109 @@ func TestCommitSegmentManifestsConcurrentOverlappingBatches(t *testing.T) {
 	require.Equal(t, packed.MarshalManifestPath(shared, 3), meta.GetSegment(context.Background(), 380).GetManifestPath())
 	require.Equal(t, packed.MarshalManifestPath(onlyA, 2), meta.GetSegment(context.Background(), 381).GetManifestPath())
 	require.Equal(t, packed.MarshalManifestPath(onlyB, 2), meta.GetSegment(context.Background(), 382).GetManifestPath())
+}
+
+func TestCommitSegmentManifestsDrainsCallbacksBeforeUnlock(t *testing.T) {
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	mt.manifestCommitExecutor.close()
+	mt.manifestCommitExecutor = newManifestCommitExecutor(1)
+	catalog := &countingAlterCatalog{DataCoordCatalog: mt.catalog}
+	mt.catalog = catalog
+	const base = "/tmp/milvus/batch-callback"
+	var commits []SegmentManifestCommit
+	for id := int64(1); id <= 3; id++ {
+		addV3Segment(t, mt, id, base, 7, commonpb.SegmentState_Flushed)
+		commits = append(commits, commitUpdates(id, base))
+	}
+	type submission struct {
+		ctx      context.Context
+		complete func(packed.ManifestUpdateResult, error)
+	}
+	submitted := make(chan submission, len(commits))
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+		submitted <- submission{ctx, complete}
+		return nil
+	}).Build()
+	defer mock.UnPatch()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- mt.CommitSegmentManifests(ctx, commits) }()
+	// A second batch worker limit of one would wait for the first completion
+	// instead of letting the submit API decide admission for all three requests.
+	pending := make([]submission, 0, len(commits))
+	for range commits {
+		select {
+		case request := <-submitted:
+			pending = append(pending, request)
+		case <-ctx.Done():
+			t.Fatal("batch waited for completion before submitting remaining work")
+		}
+	}
+	pending[0].complete(mockManifestUpdateResult(packed.MarshalManifestPath(base, 8), nil), nil)
+	pending[1].complete(packed.ManifestUpdateResult{}, merr.ErrServiceUnavailable)
+	require.ErrorIs(t, pending[2].ctx.Err(), context.Canceled)
+	select {
+	case err := <-done:
+		t.Fatalf("returned before final callback: %v", err)
+	default:
+	}
+	locks := mt.getSegmentManifestLocks()
+	for _, commit := range commits {
+		locked := locks.TryLock(commit.SegmentID)
+		if locked {
+			locks.Unlock(commit.SegmentID)
+		}
+		require.False(t, locked, "accepted work must retain every segment lock")
+	}
+	require.Zero(t, catalog.alterCalls.Load())
+	pending[2].complete(packed.ManifestUpdateResult{}, context.Canceled)
+	require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
+	for _, commit := range commits {
+		require.Equal(t, packed.MarshalManifestPath(base, 7), mt.GetSegment(ctx, commit.SegmentID).GetManifestPath())
+		require.True(t, locks.TryLock(commit.SegmentID))
+		locks.Unlock(commit.SegmentID)
+	}
+	require.Zero(t, catalog.alterCalls.Load())
+}
+
+func TestCommitSegmentManifestsSingleWorkerClearsIndexMarkers(t *testing.T) {
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	mt.manifestCommitExecutor.close()
+	mt.manifestCommitExecutor = newManifestCommitExecutor(1)
+	read := mockey.Mock(packed.SubmitManifestIndexInfos).Return(merr.ErrServiceInternal).Build()
+	defer read.UnPatch()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	var commits []SegmentManifestCommit
+	for id := int64(1); id <= 3; id++ {
+		base := fmt.Sprintf("%s/segment-%d", cfg.RootPath, id)
+		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+			Indexes: []packed.ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}},
+		})
+		require.NoError(t, err)
+		_, version, err := packed.UnmarshalManifestPath(manifest)
+		require.NoError(t, err)
+		addV3Segment(t, mt, id, base, version, commonpb.SegmentState_Flushed)
+		mt.segments.GetSegment(id).ManifestHasIndex = true
+		commits = append(commits, SegmentManifestCommit{
+			SegmentID:     id,
+			StorageConfig: cfg,
+			Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}},
+			}},
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, mt.CommitSegmentManifests(ctx, commits))
+	require.Zero(t, read.Times(), "commits must not reopen the final revision for its marker")
+	for _, commit := range commits {
+		segment := mt.GetSegment(ctx, commit.SegmentID)
+		require.False(t, segment.GetManifestHasIndex())
+		entries, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), cfg)
+		require.NoError(t, err)
+		require.Empty(t, entries)
+	}
 }

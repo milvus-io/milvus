@@ -38,6 +38,7 @@ import (
 // siblings in the same task. Their completed-worker output needs the durable
 // cleanup plan even though those segments never adopt a manifest pointer.
 func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	for _, legacyVersion := range []int64{storage.StorageV1, storage.StorageV2} {
 		t.Run(fmt.Sprintf("storage_%d", legacyVersion), func(t *testing.T) {
 			ctx := context.Background()
@@ -71,7 +72,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			require.NoError(t, m.chunkManager.Write(ctx, path.Join(root, "insert_log/100/10/2001/_data/data.parquet"), []byte("V3 output")))
 			artifact := path.Join(root, "index_v1/100/10/2002/6/1/index.bin")
 			require.NoError(t, m.chunkManager.Write(ctx, artifact, []byte("completed V2 copy artifact")))
-			patch := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrServiceUnavailable).Build()
+			patch := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
 			defer patch.UnPatch()
 			err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
 				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
@@ -93,9 +94,9 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: m.chunkManager})
 			defer gc.option.removeObjectPool.Release()
 			gc.recycleUnusedIndexFilesV1(ctx)
-			gc.recycleDroppedSegment(ctx, 2001, m.GetSegment(ctx, 2001))
+			gc.recycleDroppedSegment(ctx, newGCManifestReadIO(t), 2001, m.GetSegment(ctx, 2001))
 			require.Nil(t, m.GetSegment(ctx, 2001))
-			gc.recycleDroppedSegment(ctx, 2002, m.GetSegment(ctx, 2002))
+			gc.recycleDroppedSegment(ctx, newGCManifestReadIO(t), 2002, m.GetSegment(ctx, 2002))
 			require.Nil(t, m.GetSegment(ctx, 2002))
 			rebooted := bootMetaForRestart(t, catalog, 100)
 			require.Nil(t, rebooted.GetSegment(ctx, 2002))

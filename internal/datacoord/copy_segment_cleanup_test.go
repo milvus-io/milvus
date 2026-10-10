@@ -186,6 +186,7 @@ func TestRejectedCopyCleanupLateCompletion(t *testing.T) {
 }
 
 func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
+	mockManifestIndexSubmissions(t)
 	ctx := context.Background()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copies, m := newCopySegmentTaskTestMeta(t, task)
@@ -211,7 +212,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
-	patch := mockey.Mock(packed.GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 		close(entered)
 		<-release
 		return nil, nil
@@ -380,7 +381,7 @@ func retireRejectedCopyTargets(t *testing.T, m *meta, task CopySegmentTask) {
 	for _, mapping := range task.GetIdMappings() {
 		id := mapping.GetTargetSegmentId()
 		if segment := m.GetSegment(context.Background(), id); segment != nil {
-			gc.recycleDroppedSegment(context.Background(), id, segment)
+			gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), id, segment)
 		}
 		require.Nil(t, m.GetSegment(context.Background(), id))
 	}

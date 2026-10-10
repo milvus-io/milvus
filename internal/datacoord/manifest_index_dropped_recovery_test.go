@@ -126,7 +126,7 @@ func TestManifestDroppedRecoveryReadFailures(t *testing.T) {
 			m.segments.SetSegment(segment.GetID(), segment)
 			cm := &recoveryManifestExistence{ChunkManager: m.chunkManager, exists: tc.exists, err: tc.existenceErr}
 			m.chunkManager = cm
-			reader := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.WrapErrIoFailedReason("manifest read unavailable")).Build()
+			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.WrapErrIoFailedReason("manifest read unavailable")).Build()
 			defer reader.UnPatch()
 			err := m.reloadSegmentIndexesFromManifests(context.Background())
 			if tc.wantErr == nil {
@@ -148,7 +148,7 @@ func TestManifestDroppedRecoveryRejectsInvalidEntry(t *testing.T) {
 	m.segments.SetSegment(segment.GetID(), segment)
 	cm := &recoveryManifestExistence{ChunkManager: m.chunkManager}
 	m.chunkManager = cm
-	reader := mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{{BuildID: 5100}}, nil).Build()
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{{BuildID: 5100}}, nil).Build()
 	defer reader.UnPatch()
 	require.ErrorIs(t, m.reloadSegmentIndexesFromManifests(context.Background()), merr.ErrDataIntegrity)
 	require.Zero(t, cm.calls, "a decoded invalid entry must not use the missing-manifest exception")
@@ -184,7 +184,7 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	require.Empty(t, restarted.indexMeta.GetAllSegIndexes())
 	retryGC := newGarbageCollector(restarted, newMockHandler(), GcOption{cli: restarted.chunkManager})
 	defer retryGC.option.removeObjectPool.Release()
-	retryGC.recycleDroppedSegment(ctx, restartSegID, retained)
+	retryGC.recycleDroppedSegment(ctx, newGCManifestReadIO(t), restartSegID, retained)
 	require.Nil(t, restarted.GetSegment(ctx, restartSegID), "pending GC must remove the remaining catalog row")
 	again := bootMetaForRestart(t, catalog, restartCollID)
 	require.Nil(t, again.GetSegment(ctx, restartSegID))

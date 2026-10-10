@@ -898,6 +898,7 @@ dataCoord:
   # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
   targetScalarIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
+  manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
@@ -969,8 +970,8 @@ dataCoord:
     # The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
     writeSegmentIndexToManifest: false
-    # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
-    # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
+    # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
+    # Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:

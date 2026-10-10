@@ -593,7 +593,10 @@ func (s *statsTaskSuite) newMeta() *meta {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
+	executor := newManifestCommitExecutor(1)
+	s.T().Cleanup(executor.close)
 	return &meta{
+		manifestCommitExecutor: executor,
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -1277,8 +1280,8 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			}
 
 			commitCalled := false
-			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
-				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
@@ -1288,7 +1291,7 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 					s.Equal("json_stats.500", updates.Stats[0].Key)
 					// Manifest stores absolute paths reconstructed from the relative result.
 					s.Equal(absoluteFiles, updates.Stats[0].Files)
-					return committedManifest, nil
+					return mockManifestUpdateResult(committedManifest, updates), nil
 				}).Build()
 			defer mockCommit.UnPatch()
 
@@ -1397,8 +1400,8 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			}
 
 			commitCalled := false
-			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
-				func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
@@ -1409,7 +1412,7 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 					s.Equal(files, updates.Stats[0].Files)
 					// Scalar index version pinned to the value the worker built with.
 					s.Equal("7", updates.Stats[0].Metadata["current_scalar_index_version"])
-					return committedManifest, nil
+					return mockManifestUpdateResult(committedManifest, updates), nil
 				}).Build()
 			defer mockCommit.UnPatch()
 

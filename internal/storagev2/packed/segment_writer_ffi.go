@@ -216,6 +216,13 @@ func (f *SegmentOutput) applyTo(handle C.LoonTransactionHandle) error {
 	return nil
 }
 
+func (f *SegmentOutput) invalidatedIndexColumns() []string {
+	if f == nil {
+		return nil
+	}
+	return appendedIndexColumns(f.cOutput.column_groups)
+}
+
 // Close closes the underlying segment writer and returns the column-groups
 // + LOB payload. The writer never touches the manifest — the caller is
 // responsible for passing the returned handle to CommitManifestUpdates

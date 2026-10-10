@@ -41,6 +41,9 @@ type WriterOutput interface {
 	// applyTo stages the output onto a loon transaction handle. Called by
 	// applyManifestUpdates as part of CommitManifestUpdates.
 	applyTo(handle C.LoonTransactionHandle) error
+	// Appending files invalidates indexes on columns with new files. Adding new
+	// column groups and registering LOBs do not invalidate existing indexes.
+	invalidatedIndexColumns() []string
 }
 
 // ManifestUpdates bundles every data-file-level change a single caller
@@ -50,8 +53,8 @@ type WriterOutput interface {
 // one shot, and commits.
 //
 // NewFiles holds C memory produced by an FFI writer and MUST be released
-// by the caller via Destroy after CommitManifestUpdates returns (success
-// or failure).
+// by the caller via Destroy after the blocking commit returns (success or
+// failure), or after the terminal callback when using SubmitManifestUpdates.
 type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
@@ -138,7 +141,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_begin(cBasePath, cProperties,
+	res := C.loon_transaction_open(cBasePath, cProperties,
 		C.int64_t(baseVersion),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
@@ -226,6 +229,10 @@ func resolveDropIndexes(basePath string, baseVersion int64,
 	if err != nil {
 		return nil, merr.Wrap(err, "resolve manifest index drops")
 	}
+	return resolveManifestIndexDrops(manifestPath, current, drops)
+}
+
+func resolveManifestIndexDrops(manifestPath string, current []ManifestIndexInfo, drops []DropIndexEntry) ([]int64, error) {
 	buildIDs := make(map[int64]int64, len(current))
 	for _, index := range current {
 		buildIDs[index.IndexID] = index.BuildID
