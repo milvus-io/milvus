@@ -87,12 +87,14 @@ func TestBroadcaster(t *testing.T) {
 			}, nil
 		}).Times(1)
 	done := typeutil.NewConcurrentSet[uint64]()
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, broadcastID uint64, bt *streamingpb.BroadcastTask) error {
+	meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, tasks map[uint64]*streamingpb.BroadcastTask) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-			done.Insert(broadcastID)
+		for broadcastID, bt := range tasks {
+			if bt.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+				done.Insert(broadcastID)
+			}
 		}
 		return nil
 	})
@@ -231,7 +233,9 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 	if err != nil {
 		panic(err)
 	}
-	return msg.OverwriteBroadcastHeader(0, rks...)
+	header := msg.BroadcastHeader()
+	header.ResourceKeys = typeutil.NewSet(rks...)
+	return msg.OverwriteBroadcastHeader(header)
 }
 
 func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
@@ -260,7 +264,7 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 }
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
-	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, rks...)
+	msg := createNewBroadcastMsg(vchannels, rks...).WithBroadcastID(broadcastID)
 	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
@@ -398,7 +402,7 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	)
 	replicatedTask := newBroadcastTaskFromProto(replicatedProto, metrics, ackScheduler)
 
-	// Task 3: PENDING state but ALL vchannels acked -> should NOT be returned (no pending messages)
+	// Task 3: All vchannels ACKed but callback pending -> promotion must wait for it.
 	allAckedProto := createNewWaitAckBroadcastTaskFromMessage(
 		createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(3),
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -425,8 +429,8 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 
 	result := bm.getIncompleteBroadcastTasks()
 
-	// Should return exactly 2 tasks: the pending task (ID=1) and the replicated task (ID=2)
-	assert.Len(t, result, 2)
+	// Include the callback-pending task (ID=3) as well.
+	assert.Len(t, result, 3)
 
 	// Collect the broadcast IDs from the result
 	resultIDs := make(map[uint64]struct{})
@@ -435,7 +439,7 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	}
 	assert.Contains(t, resultIDs, uint64(1), "PENDING task with pending messages should be returned")
 	assert.Contains(t, resultIDs, uint64(2), "REPLICATED task with pending messages should be returned")
-	assert.NotContains(t, resultIDs, uint64(3), "PENDING task with all vchannels acked should not be returned")
+	assert.Contains(t, resultIDs, uint64(3), "callback-pending task must be drained before promotion")
 	assert.NotContains(t, resultIDs, uint64(4), "TOMBSTONE task should not be returned")
 }
 
@@ -510,7 +514,7 @@ func TestWithUnreplicableResourceKeys(t *testing.T) {
 
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 	meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	rc := idalloc.NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(rc)
@@ -552,7 +556,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -589,7 +593,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -626,7 +630,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -867,7 +871,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 			})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -928,7 +932,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -989,7 +993,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -1054,7 +1058,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -1111,7 +1115,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		registry.ResetRegistration()
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
@@ -1186,7 +1190,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		meta.EXPECT().SaveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 		rc := idalloc.NewMockRootCoordClient(t)
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)

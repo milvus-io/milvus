@@ -41,6 +41,9 @@ type ResourceKey struct {
 
 func (r ResourceKey) String() string {
 	domain, _ := strings.CutPrefix(r.Domain.String(), "ResourceDomain")
+	if r.Domain == messagespb.ResourceDomain_ResourceDomainIdempotency {
+		return "Idempotency:" + IdempotencyKeyFingerprint(r.Key) + "@X"
+	}
 	if r.Shared {
 		return fmt.Sprintf("%s:%s@R", domain, r.Key)
 	}

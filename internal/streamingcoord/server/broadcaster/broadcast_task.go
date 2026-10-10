@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -38,7 +39,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 	if isAllDone(bt.task) {
 		bt.closeAllAcked()
 	}
-	if proto.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+	if proto.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || proto.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT {
 		close(bt.done)
 	}
 	return bt
@@ -109,6 +110,7 @@ type broadcastTask struct {
 	allAcked                 chan struct{}
 	allAckedClosed           bool
 	guards                   *lockGuards
+	txn                      *broadcastTxn
 	ackCallbackScheduler     *ackCallbackScheduler
 	joinAckCallbackScheduled bool // a flag to indicate that the join ack callback is scheduled.
 }
@@ -228,7 +230,7 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i].GetTimeTick() != 0) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
@@ -350,6 +352,9 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 
 // ack acknowledges the message at the specified vchannel.
 func (b *broadcastTask) ack(ctx context.Context, msgs ...message.ImmutableMessage) (err error) {
+	if b.txn != nil && (b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT) {
+		return nil
+	}
 	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
 	if !b.dirty {
 		return nil
@@ -532,9 +537,11 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.txn != nil {
+		return b.completeTxnMember(ctx)
+	}
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
-		close(b.done)
 		b.dirty = true
 	}
 
@@ -548,6 +555,11 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 		// it doesn't hold the resource key lock, so skip it.
 		b.guards.Unlock()
 	}
+	select {
+	case <-b.done:
+	default:
+		close(b.done)
+	}
 	return nil
 }
 
@@ -556,9 +568,16 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	if !b.dirty {
 		return nil
 	}
+	if b.txn != nil {
+		if err := b.txn.saveMember(ctx, b.task, false); err != nil {
+			return err
+		}
+		b.dirty = false
+		return nil
+	}
 	b.dirty = false
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
-	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
+	if err := resource.Resource().StreamingCatalog().SaveBroadcastTasks(ctx, map[uint64]*streamingpb.BroadcastTask{b.header().BroadcastID: b.task}); err != nil {
 		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
@@ -567,5 +586,33 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	}
 	b.ObserveStateChanged(b.task.State)
 	logger.Info(ctx, "save broadcast task done")
+	return nil
+}
+
+// completeTxnMember runs with b.mu held. Completion is published only after the
+// candidate snapshot is durable; a failed save never closes done or releases locks.
+func (b *broadcastTask) completeTxnMember(ctx context.Context) error {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE || b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT {
+		return nil
+	}
+	next := proto.Clone(b.task).(*streamingpb.BroadcastTask)
+	next.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	if b.header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BEGIN {
+		next.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT
+	}
+	if err := b.txn.saveMember(ctx, next, true); err != nil {
+		return err
+	}
+	b.task = next
+	b.dirty = false
+	b.ObserveStateChanged(next.State)
+	if b.header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
+		begin := b.txn.members()[0]
+		begin.mu.Lock()
+		begin.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+		begin.ObserveStateChanged(begin.task.State)
+		begin.mu.Unlock()
+	}
+	close(b.done)
 	return nil
 }

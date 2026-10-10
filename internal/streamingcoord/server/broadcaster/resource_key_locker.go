@@ -45,7 +45,8 @@ type resourceKeyLocker struct {
 
 // lockGuards is the guards for multiple resource keys.
 type lockGuards struct {
-	guards []*lockGuard
+	guards      []*lockGuard
+	afterUnlock func()
 }
 
 // ResourceKeys returns the resource keys.
@@ -69,6 +70,10 @@ func (l *lockGuards) Unlock() {
 		l.guards[i].Unlock()
 	}
 	l.guards = nil
+	if done := l.afterUnlock; done != nil {
+		l.afterUnlock = nil
+		done()
+	}
 }
 
 // lockGuard is the guard for the resource key.

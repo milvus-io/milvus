@@ -197,6 +197,147 @@ func (_c *MockBroadcaster_LegacyAck_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// RecoverTxnBroadcast provides a mock function with given fields: ctx, txnID
+func (_m *MockBroadcaster) RecoverTxnBroadcast(ctx context.Context, txnID uint64) (broadcaster.TxnBroadcaster, error) {
+	ret := _m.Called(ctx, txnID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RecoverTxnBroadcast")
+	}
+
+	var r0 broadcaster.TxnBroadcaster
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) (broadcaster.TxnBroadcaster, error)); ok {
+		return rf(ctx, txnID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uint64) broadcaster.TxnBroadcaster); ok {
+		r0 = rf(ctx, txnID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(broadcaster.TxnBroadcaster)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uint64) error); ok {
+		r1 = rf(ctx, txnID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_RecoverTxnBroadcast_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RecoverTxnBroadcast'
+type MockBroadcaster_RecoverTxnBroadcast_Call struct {
+	*mock.Call
+}
+
+// RecoverTxnBroadcast is a helper method to define mock.On call
+//   - ctx context.Context
+//   - txnID uint64
+func (_e *MockBroadcaster_Expecter) RecoverTxnBroadcast(ctx interface{}, txnID interface{}) *MockBroadcaster_RecoverTxnBroadcast_Call {
+	return &MockBroadcaster_RecoverTxnBroadcast_Call{Call: _e.mock.On("RecoverTxnBroadcast", ctx, txnID)}
+}
+
+func (_c *MockBroadcaster_RecoverTxnBroadcast_Call) Run(run func(ctx context.Context, txnID uint64)) *MockBroadcaster_RecoverTxnBroadcast_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_RecoverTxnBroadcast_Call) Return(_a0 broadcaster.TxnBroadcaster, _a1 error) *MockBroadcaster_RecoverTxnBroadcast_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_RecoverTxnBroadcast_Call) RunAndReturn(run func(context.Context, uint64) (broadcaster.TxnBroadcaster, error)) *MockBroadcaster_RecoverTxnBroadcast_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StartTxnBroadcastWithResourceKey provides a mock function with given fields: ctx, keys
+func (_m *MockBroadcaster) StartTxnBroadcastWithResourceKey(ctx context.Context, keys ...message.ResourceKey) (broadcaster.TxnBroadcaster, *broadcaster.TxnBroadcastResult, error) {
+	_va := make([]interface{}, len(keys))
+	for _i := range keys {
+		_va[_i] = keys[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartTxnBroadcastWithResourceKey")
+	}
+
+	var r0 broadcaster.TxnBroadcaster
+	var r1 *broadcaster.TxnBroadcastResult
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) (broadcaster.TxnBroadcaster, *broadcaster.TxnBroadcastResult, error)); ok {
+		return rf(ctx, keys...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.ResourceKey) broadcaster.TxnBroadcaster); ok {
+		r0 = rf(ctx, keys...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(broadcaster.TxnBroadcaster)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...message.ResourceKey) *broadcaster.TxnBroadcastResult); ok {
+		r1 = rf(ctx, keys...)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*broadcaster.TxnBroadcastResult)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, ...message.ResourceKey) error); ok {
+		r2 = rf(ctx, keys...)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockBroadcaster_StartTxnBroadcastWithResourceKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StartTxnBroadcastWithResourceKey'
+type MockBroadcaster_StartTxnBroadcastWithResourceKey_Call struct {
+	*mock.Call
+}
+
+// StartTxnBroadcastWithResourceKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - keys ...message.ResourceKey
+func (_e *MockBroadcaster_Expecter) StartTxnBroadcastWithResourceKey(ctx interface{}, keys ...interface{}) *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call {
+	return &MockBroadcaster_StartTxnBroadcastWithResourceKey_Call{Call: _e.mock.On("StartTxnBroadcastWithResourceKey",
+		append([]interface{}{ctx}, keys...)...)}
+}
+
+func (_c *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call) Run(run func(ctx context.Context, keys ...message.ResourceKey)) *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]message.ResourceKey, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(message.ResourceKey)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call) Return(_a0 broadcaster.TxnBroadcaster, _a1 *broadcaster.TxnBroadcastResult, _a2 error) *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call) RunAndReturn(run func(context.Context, ...message.ResourceKey) (broadcaster.TxnBroadcaster, *broadcaster.TxnBroadcastResult, error)) *MockBroadcaster_StartTxnBroadcastWithResourceKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithResourceKeys provides a mock function with given fields: ctx, resourceKeys
 func (_m *MockBroadcaster) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 	_va := make([]interface{}, len(resourceKeys))

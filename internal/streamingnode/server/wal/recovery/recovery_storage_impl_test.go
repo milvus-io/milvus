@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type recordingRecoveryStreamBuilder struct {
@@ -1127,9 +1128,11 @@ func newBroadcastAckMessageWith(t *testing.T, builder interface {
 }, broadcastID, timeTick uint64, resourceKeys ...message.ResourceKey,
 ) message.ImmutableMessage {
 	t.Helper()
-	msgs := builder.MustBuildBroadcast().
-		OverwriteBroadcastHeader(broadcastID, resourceKeys...).
-		SplitIntoMutableMessage()
+	msg := builder.MustBuildBroadcast()
+	header := msg.BroadcastHeader()
+	header.BroadcastID = broadcastID
+	header.ResourceKeys = typeutil.NewSet(resourceKeys...)
+	msgs := msg.OverwriteBroadcastHeader(header).SplitIntoMutableMessage()
 	require.Len(t, msgs, 1)
 	return msgs[0].
 		WithTimeTick(timeTick).
