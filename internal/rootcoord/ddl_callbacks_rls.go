@@ -27,31 +27,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const unallocatedRLSPolicyID int64 = -1
-
-// Schema mutations must check preconfigured policies even after disabled recovery.
-func (c *Core) loadRLSPoliciesForSchema(ctx context.Context, coll *model.Collection) error {
-	if coll.RLSPoliciesCurrent() {
-		return nil
-	}
-	metadata, err := c.meta.GetRLSMetadata(ctx, coll.CollectionID, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, "")
-	if err != nil {
-		return err
-	}
-	coll.RLSPolicies = make(map[string]*model.RLSPolicy, len(metadata.Policies))
-	for _, policy := range metadata.Policies {
-		coll.RLSPolicies[policy.PolicyName] = policy
-	}
-	coll.RLSPoliciesUnloaded = false
-	coll.RLSPolicyGeneration = coll.RLSPolicyExpectedGeneration
-	return nil
-}
 
 func (c *Core) broadcastCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) error {
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())

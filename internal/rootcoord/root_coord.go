@@ -486,11 +486,6 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			return err
 		}
 		c.meta = meta
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			meta.warmupRLSPolicies(c.ctx)
-		}()
 
 		return nil
 	}

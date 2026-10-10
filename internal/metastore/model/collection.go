@@ -42,13 +42,8 @@ type Collection struct {
 	Fields            []*Field
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
-	// RLS policies are cached by RootCoord and persisted in their own KV namespace.
+	// RLS policies are owned by RootCoord and persisted in their own KV namespace.
 	RLSPolicies map[string]*RLSPolicy
-	// An unloaded snapshot is distinct from a successfully loaded empty policy set.
-	RLSPoliciesUnloaded bool
-	// In-memory cache generations; only persisted policy mutations advance the expectation.
-	RLSPolicyGeneration         uint64
-	RLSPolicyExpectedGeneration uint64
 
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
@@ -79,10 +74,6 @@ func (c *Collection) Available() bool {
 	return c.State == pb.CollectionState_CollectionCreated
 }
 
-func (c *Collection) RLSPoliciesCurrent() bool {
-	return !c.RLSPoliciesUnloaded && c.RLSPolicyGeneration >= c.RLSPolicyExpectedGeneration
-}
-
 func (c *Collection) ShallowClone() *Collection {
 	return &Collection{
 		TenantID:             c.TenantID,
@@ -108,16 +99,12 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		RLSPolicies:          maps.Clone(c.RLSPolicies),
-		RLSPoliciesUnloaded:  c.RLSPoliciesUnloaded,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-
-		RLSPolicyGeneration:         c.RLSPolicyGeneration,
-		RLSPolicyExpectedGeneration: c.RLSPolicyExpectedGeneration,
 	}
 }
 
@@ -154,16 +141,12 @@ func (c *Collection) Clone() *Collection {
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
-		RLSPoliciesUnloaded:  c.RLSPoliciesUnloaded,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-
-		RLSPolicyGeneration:         c.RLSPolicyGeneration,
-		RLSPolicyExpectedGeneration: c.RLSPolicyExpectedGeneration,
 	}
 }
 

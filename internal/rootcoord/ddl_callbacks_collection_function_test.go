@@ -360,7 +360,6 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAddFunction_NextFuncti
 func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollectionForAlterFunction() {
 	suite.Run("success", func() {
 		coll := suite.createTestCollection()
-		coll.RLSPoliciesUnloaded = true
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)

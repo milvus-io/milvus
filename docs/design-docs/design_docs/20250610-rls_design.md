@@ -215,22 +215,18 @@ functions such as `now()`.
 
 RootCoord owns policies and principal tag bindings. Records use globally unique
 collection IDs as identity; database and collection names are descriptive.
-RootCoord caches policies in a name-keyed map including their internal IDs.
-Startup optionally warms policies for enabled collections in the background,
-without delaying readiness; policy warmup is enabled by default. Missing
-policies load on demand. Disabled collections retain their stored metadata
-without startup reads; enabling loads deferred policies before publishing the
-switch. Management, schema-dependency checks, and collection
-drop read deferred policies on demand, so their guarantees also hold while
-disabled. Principal tag bindings remain in the catalog and are read by
-`(collectionID, principalName)` instead of being loaded during recovery.
+Like collection schemas, policies are recovered before RootCoord becomes ready
+and maintained in a name-keyed map including their internal IDs. Recovery
+includes stored policies on disabled collections; a recovery failure fails
+metadata initialization. Reads use the resident metadata, and successful
+persisted mutations update it. Enforcement changes neither load nor discard
+this metadata, so management and schema-dependency checks remain available
+while RLS is disabled.
 
-Policy loads share one result or error per collection and generation. Only
-persisted policy mutations advance the expected generation. Each caller uses
-the expectation captured on entry, without chasing later changes; cache
-publication never replaces a newer snapshot with an older result. Failed loads
-return errors without publishing a snapshot; collection drop prevents late
-cache publication.
+Principal tag bindings remain in the catalog and are read by
+`(collectionID, principalName)` instead of being loaded during recovery.
+Disabling enforcement stops execution-driven tag reads, not metadata
+management. Tag caches expire naturally without deleting stored bindings.
 
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same
@@ -265,7 +261,6 @@ recovery validation remains follow-up work.
 
 | Config | Meaning |
 | --- | --- |
-| `rootCoord.rls.policyWarmupEnabled` | Startup-only switch, default true: warm enabled collections' policies in the background. Tags remain demand-loaded with no warmup switch. |
 | `proxy.rls.maxPoliciesPerCollection` | Maximum policies on one collection. |
 | `proxy.rls.maxTagsPerPrincipal` | Maximum stored tags for one collection-scoped principal identifier. |
 | `proxy.rls.maxExpressionLength` | Maximum bytes in one policy expression. |
@@ -318,5 +313,6 @@ RLS uses an explicit application principal rather than the Milvus username,
 lazy principal-tag loading rather than collection-wide Proxy snapshots, and
 the existing broadcast/ACK path rather than direct catalog mutation.
 
-Follow-ups include an atomic tag patch API, high-frequency tag mutation,
-pagination for bulk principal APIs, and dedicated CDC validation.
+Follow-ups include a bounded, demand-loaded RootCoord tag cache, an atomic tag
+patch API, high-frequency tag mutation, pagination for bulk principal APIs,
+and dedicated CDC validation.

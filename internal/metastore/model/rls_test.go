@@ -48,23 +48,6 @@ func TestRLSPolicyModelCopiesActions(t *testing.T) {
 	}
 }
 
-func TestCollectionClonePreservesDeferredRLSPolicies(t *testing.T) {
-	collection := &Collection{
-		CollectionID: 20, RLSPoliciesUnloaded: true,
-		RLSPolicyGeneration: 1, RLSPolicyExpectedGeneration: 2,
-	}
-	for _, cloned := range []*Collection{collection.Clone(), collection.ShallowClone()} {
-		require.True(t, cloned.RLSPoliciesUnloaded)
-		require.Equal(t, uint64(1), cloned.RLSPolicyGeneration)
-		require.Equal(t, uint64(2), cloned.RLSPolicyExpectedGeneration)
-		require.False(t, cloned.RLSPoliciesCurrent())
-		cloned.RLSPoliciesUnloaded = false
-		require.False(t, cloned.RLSPoliciesCurrent())
-		cloned.RLSPolicyGeneration = 2
-		require.True(t, cloned.RLSPoliciesCurrent())
-	}
-}
-
 func TestRLSPolicyMapToSlice(t *testing.T) {
 	policyMap := map[string]*RLSPolicy{
 		"policy_b": {PolicyID: 2, PolicyName: "policy_b", Actions: []rlsutil.PolicyAction{rlsutil.PolicyActionSearch}},

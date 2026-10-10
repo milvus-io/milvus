@@ -116,17 +116,15 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, enabled)
 
-	// Disabled recovery skips policies; management and enable load them on demand.
+	// Recovery restores metadata even while enforcement is disabled.
 	coll = coll.Clone()
 	coll.RLSPolicies = nil
-	require.NoError(t, initRLSPolicyCache([]*model.Collection{coll}))
-	require.Empty(t, coll.RLSPolicies)
-	require.True(t, coll.RLSPoliciesUnloaded)
+	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
+	require.Len(t, coll.RLSPolicies, 1)
 	meta.ddLock.Lock()
 	meta.collID2Meta[id] = coll.Clone()
 	meta.ddLock.Unlock()
 	require.ErrorContains(t, core.broadcastCreateRLSPolicy(ctx, createPolicy), "already exists")
-	require.NoError(t, core.loadRLSPoliciesForSchema(ctx, coll))
 	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
 
 	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
@@ -136,7 +134,6 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
-	require.False(t, coll.RLSPoliciesUnloaded)
 	require.Len(t, coll.RLSPolicies, 1)
 	require.Equal(t, "field1 == 2", coll.RLSPolicies["tenant"].UsingExpr)
 	status, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
@@ -146,7 +143,7 @@ func TestRLSMetadataIndependentOfEnforcement(t *testing.T) {
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	coll, err = meta.GetCollectionByName(ctx, db, name, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
-	require.NoError(t, initRLSPolicyCache([]*model.Collection{coll}))
+	require.NoError(t, meta.reloadCollectionsRLSMetadata(ctx, []*model.Collection{coll}))
 	meta.ddLock.Lock()
 	meta.collID2Meta[id] = coll
 	meta.ddLock.Unlock()
