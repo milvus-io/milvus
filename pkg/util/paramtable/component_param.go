@@ -298,6 +298,8 @@ func (p *ComponentParam) CleanEvent() {
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
+	EnableFastPB ParamItem `refreshable:"true"`
+
 	ClusterPrefix ParamItem `refreshable:"false"`
 
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
@@ -442,6 +444,27 @@ type commonConfig struct {
 }
 
 func (p *commonConfig) init(base *BaseTable) {
+	p.EnableFastPB = ParamItem{
+		Key:          "common.enableFastPB",
+		DefaultValue: "true",
+		Doc:          "Use fastPB for supported protobuf decoding paths. Set false for an immediate fallback to the official protobuf decoder.",
+		Export:       true,
+	}
+	p.EnableFastPB.Init(base.mgr)
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		// The dispatcher matches normalized aliases, including etcd's key without
+		// separators. Refresh from the effective config rather than event.Value.
+		base.mgr.Dispatcher.Register(p.EnableFastPB.Key, config.NewHandler("common.enableFastPB.atomic", func(event *config.Event) {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType, config.DeleteType:
+				updateFastPBEnabled()
+			}
+		}))
+		updateFastPBEnabled()
+	}
+
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.cluster",

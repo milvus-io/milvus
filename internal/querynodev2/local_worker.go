@@ -19,8 +19,6 @@ package querynodev2
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -73,7 +71,8 @@ func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchReq
 	// use it directly), then release any pinned C memory.
 	if blob := resp.GetSlicedBlob(); len(blob) > 0 {
 		var resultData schemapb.SearchResultData
-		if unmarshalErr := proto.Unmarshal(blob, &resultData); unmarshalErr != nil {
+		// Decode with the configured protobuf path before releasing pinned memory.
+		if unmarshalErr := resource.UnmarshalSearchResultData(blob, &resultData); unmarshalErr != nil {
 			resource.MsgPins.Release(resp) // still release to avoid leak
 			return nil, merr.WrapErrServiceInternal("unmarshal SearchResultData from SlicedBlob", unmarshalErr.Error())
 		}
