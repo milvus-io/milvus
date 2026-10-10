@@ -1000,8 +1000,8 @@ message ReplicatePChannelMeta {
     bool skip_get_replicate_checkpoint  = 5;
 }
 
-// Analyzer execution is independent of segment queries. Errors use StreamingError
-// in gRPC status details; this response contains successful results only.
+// Analyzer execution is independent of segment queries. Streaming failures use
+// native gRPC errors; analyzer failures are carried by the response Status.
 message StreamingNodeRunAnalyzerRequest {
     repeated bytes placeholder = 1;
     bool with_detail = 2;
@@ -1024,4 +1024,5 @@ message StreamingFieldAnalyzer {
 }
 message StreamingNodeRunAnalyzerResponse {
     repeated milvus.AnalyzerResult results = 1;
+    common.Status status = 2;
 }

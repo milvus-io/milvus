@@ -43,8 +43,8 @@ func TestWALFieldAnalyzerAdmission(t *testing.T) {
 		require.Len(t, resp.GetResults()[0].Tokens, 2)
 		version = 4
 		resp, err = w.RunAnalyzer(context.Background(), req)
-		require.Nil(t, resp)
-		require.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionSchemaVersionNotReady)
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
@@ -87,13 +87,15 @@ func TestWALFieldAnalyzerLifetimeAndNames(t *testing.T) {
 		version := int32(3)
 		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("one"), []byte("two")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: 7, Vchannel: "p_7v0", SchemaVersion: &version}}}
 		req.GetFieldAnalyzer().AnalyzerNames = []string{"one", "two", "three"}
-		_, err := w.RunAnalyzer(context.Background(), req)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		resp, err := w.RunAnalyzer(context.Background(), req)
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 		require.Zero(t, batch.Times())
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err = w.RunAnalyzer(ctx, req)
-		require.ErrorIs(t, err, context.Canceled)
+		resp, err = w.RunAnalyzer(ctx, req)
+		require.NoError(t, err)
+		require.Equal(t, merr.Code(context.Canceled), resp.GetStatus().GetCode())
 		req.GetFieldAnalyzer().AnalyzerNames = []string{""}
 		done := make(chan error, 1)
 		go func() {

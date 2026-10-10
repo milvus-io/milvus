@@ -40,22 +40,24 @@ progress.
 
 ## Errors and retries
 
-`StreamingNodeHandlerService.RunAnalyzer` returns results only, with no response
-status or error code. Failures use native StreamingError in gRPC status details
-and the existing streaming interceptors. Public SDK responses keep their existing
-Status format through an adapter at Proxy.
+`StreamingNodeHandlerService.RunAnalyzer` separates two error domains:
 
-Invalid analyzer input uses native INVAILD_ARGUMENT. Schema mismatch uses native
-SCHEMA_VERSION_MISMATCH; Proxy refreshes metadata and re-resolves the field name
-at most three times. A collection ID change during retry fails rather than
-executing against a recreated collection. Missing runner resources use transient
-native errors. There is no historical schema lookup.
+- Streaming failures (discovery, assignment ownership, WAL shutdown and transport)
+  use native gRPC errors and the existing streaming interceptors. AnalyzerClient
+  allows at most three attempts for retryable failures; field attempts copy the
+  request and report only assignment errors to the balancer. Inline attempts use
+  the ready-connection picker.
+- Analyzer failures (parameters, schema admission, runner availability and
+  execution) use Milvus Status in the response. HandlerClient forwards these
+  responses without retrying or converting them to streaming errors. Proxy
+  preserves the Status, including its original code and retriability.
 
-AnalyzerClient allows at most three application attempts for transient failures.
-Field attempts copy the request and report only assignment errors to the balancer.
-Inline attempts use the ready-connection picker. Input errors, cancellation and
-Unimplemented are not application-retried. These budgets also respect the caller
-deadline; existing gRPC transport retry configuration is unchanged.
+On an analyzer schema-version mismatch, Proxy refreshes metadata and re-resolves
+the field name, with at most three attempts. A collection ID change during retry
+fails rather than executing against a recreated collection. When retries are
+exhausted, the final analyzer Status is preserved. Other analyzer failures are
+returned directly. There is no historical schema lookup. Retry budgets respect
+the caller deadline; existing gRPC transport retry configuration is unchanged.
 
 ## Compatibility
 

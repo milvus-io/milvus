@@ -3,10 +3,11 @@ package proxy
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/analyzerservice"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -18,6 +19,7 @@ func (t *RunAnalyzerTask) runFieldAnalyzer(ctx context.Context) (*milvuspb.RunAn
 	var result *milvuspb.RunAnalyzerResponse
 	originalID := t.collectionID
 	err := retry.Handle(ctx, func() (bool, error) {
+		result = nil
 		id, err := cache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			return false, err
@@ -47,14 +49,21 @@ func (t *RunAnalyzerTask) runFieldAnalyzer(ctx context.Context) (*milvuspb.RunAn
 			}},
 		})
 		if err != nil {
-			if streamingstatus.AsStreamingError(err).IsSchemaVersionMismatch() {
-				cache.RemoveCollection(ctx, req.GetDbName(), req.GetCollectionName())
-				return true, analyzerservice.PublicError(err)
-			}
 			return false, analyzerservice.PublicError(err)
 		}
-		result = &milvuspb.RunAnalyzerResponse{Status: merr.Success(), Results: response.GetResults()}
+		result = &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetResults()}
+		if analyzerErr := merr.Error(response.GetStatus()); errors.Is(analyzerErr, merr.ErrCollectionSchemaVersionNotReady) {
+			cache.RemoveCollection(ctx, req.GetDbName(), req.GetCollectionName())
+			return true, analyzerErr
+		}
 		return false, nil
 	}, retry.Attempts(3))
-	return result, err
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// Preserve the analyzer Status even when schema-refresh retries are exhausted.
+	if result != nil {
+		return result, nil
+	}
+	return nil, err
 }

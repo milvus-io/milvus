@@ -7387,7 +7387,10 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
 			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()}},
 		})
-		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err)), Results: resp.GetResults()}, nil
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err))}, nil
+		}
+		return &milvuspb.RunAnalyzerResponse{Status: resp.GetStatus(), Results: resp.GetResults()}, nil
 	}
 
 	// Run the field analyzer owned by the primary streaming node.

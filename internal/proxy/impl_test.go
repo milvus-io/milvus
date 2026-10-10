@@ -2067,7 +2067,7 @@ func TestRunAnalyzer(t *testing.T) {
 			called := mockey.Mock((*analyzerTestClient).RunAnalyzer).To(func(_ *analyzerTestClient, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 				require.NotNil(t, req.GetInlineAnalyzer())
 				require.Nil(t, req.GetFieldAnalyzer())
-				return &streamingpb.StreamingNodeRunAnalyzerResponse{}, rpcErr
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success()}, rpcErr
 			}).Build()
 			resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{Placeholder: [][]byte{[]byte("test doc")}})
 			require.NoError(t, err)
@@ -2079,6 +2079,18 @@ func TestRunAnalyzer(t *testing.T) {
 			require.Equal(t, 1, called.Times())
 		})
 	}
+
+	mockey.PatchConvey("inline analyzer status is forwarded unchanged", t, func() {
+		mockStreamingAnalyzerClient()
+		status := merr.Status(merr.WrapErrParameterInvalidMsg("unknown tokenizer"))
+		status.Detail = "analyzer detail"
+		status.ExtraInfo["analyzer"] = "original"
+		call := mockey.Mock((*analyzerTestClient).RunAnalyzer).Return(&streamingpb.StreamingNodeRunAnalyzerResponse{Status: status}, nil).Build()
+		resp, err := p.RunAnalyzer(ctx, &milvuspb.RunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello")}})
+		require.NoError(t, err)
+		require.Same(t, status, resp.GetStatus())
+		require.Equal(t, 1, call.Times())
+	})
 
 	mockey.PatchConvey("run analyzer from collection field", t, func() {
 		p.metaCache = &MetaCache{}

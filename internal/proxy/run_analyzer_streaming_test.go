@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,7 +24,7 @@ func (*analyzerTestClient) RunAnalyzer(context.Context, *streamingpb.StreamingNo
 }
 
 func TestFieldAnalyzerRoutingAndRefresh(t *testing.T) {
-	for _, scenario := range []string{"success", "schema refresh", "drop recreate", "resource group"} {
+	for _, scenario := range []string{"success", "schema refresh", "schema exhausted", "analyzer failure", "drop recreate", "resource group"} {
 		mockey.PatchConvey(scenario, t, func() {
 			// No Coordinator client or load configuration is needed.
 			task := &RunAnalyzerTask{baseTask: baseTask{MetaCache: &MetaCache{}}, collectionID: 7, RunAnalyzerRequest: &milvuspb.RunAnalyzerRequest{CollectionName: "c", FieldName: "text", Placeholder: [][]byte{[]byte("hello")}}}
@@ -51,10 +50,13 @@ func TestFieldAnalyzerRoutingAndRefresh(t *testing.T) {
 				require.Equal(t, "test_7v0", req.GetFieldAnalyzer().GetVchannel())
 				require.Equal(t, int64(100+version), req.GetFieldAnalyzer().GetFieldId())
 				require.Equal(t, version, req.GetFieldAnalyzer().GetSchemaVersion())
-				if calls == 1 && (scenario == "schema refresh" || scenario == "drop recreate") {
-					return nil, status.NewSchemaVersionMismatch("schema changed")
+				if scenario == "schema exhausted" || calls == 1 && (scenario == "schema refresh" || scenario == "drop recreate") {
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrCollectionSchemaVersionNotReady)}, nil
 				}
-				return &streamingpb.StreamingNodeRunAnalyzerResponse{Results: []*milvuspb.AnalyzerResult{{}}}, nil
+				if scenario == "analyzer failure" {
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrServiceInternal)}, nil
+				}
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: []*milvuspb.AnalyzerResult{{}}}, nil
 			}).Build()
 			ctx := context.Background()
 			if scenario == "resource group" {
@@ -62,6 +64,16 @@ func TestFieldAnalyzerRoutingAndRefresh(t *testing.T) {
 			}
 			resp, err := task.runFieldAnalyzer(ctx)
 			switch scenario {
+			case "schema exhausted":
+				require.NoError(t, err)
+				require.Equal(t, merr.Status(merr.ErrCollectionSchemaVersionNotReady), resp.GetStatus())
+				require.Equal(t, 3, calls)
+				require.Equal(t, 3, refresh.Times())
+			case "analyzer failure":
+				require.NoError(t, err)
+				require.Equal(t, merr.Status(merr.ErrServiceInternal), resp.GetStatus())
+				require.Equal(t, 1, calls)
+				require.Zero(t, refresh.Times())
 			case "drop recreate":
 				require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 				require.Equal(t, 1, calls)

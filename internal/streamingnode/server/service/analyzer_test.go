@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -51,11 +52,16 @@ func TestAnalyzerNativeTransport(t *testing.T) {
 	require.Equal(t, int64(0), resp.Results[0].Tokens[0].StartOffset)
 	require.NotZero(t, resp.Results[0].Tokens[0].Hash)
 	require.Empty(t, resp.Results[1].Tokens)
-	for _, req := range []*streamingpb.StreamingNodeRunAnalyzerRequest{{}, inlineAnalyzerRequest(`{"tokenizer":"not_a_tokenizer"}`)} {
-		resp, err = client.RunAnalyzer(ctx, req)
-		require.Error(t, err)
-		require.Nil(t, resp)
-		require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%v", err)
+	resp, err = client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{})
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.True(t, status.AsStreamingError(err).IsInvalidArgument(), "%v", err)
+	for _, params := range []string{`{"tokenizer":"not_a_tokenizer"}`, `{"tokenizer":`, `[]`} {
+		resp, err = client.RunAnalyzer(ctx, inlineAnalyzerRequest(params))
+		require.NoError(t, err)
+		require.Error(t, merr.Error(resp.GetStatus()))
+		_, analyzerErr := analyzer.Run(ctx, params, [][]byte{[]byte("Hello")}, false, false)
+		require.True(t, proto.Equal(merr.Status(analyzerErr), resp.GetStatus()), "%s: %v", params, resp.GetStatus())
 	}
 }
 
@@ -72,7 +78,7 @@ func (*fieldAnalyzerWAL) RunAnalyzer(context.Context, *streamingpb.StreamingNode
 }
 
 func TestAnalyzerFieldNativeTransport(t *testing.T) {
-	mockey.PatchConvey("field ownership and native error projection", t, func() {
+	mockey.PatchConvey("field ownership and analyzer response status", t, func() {
 		version := int32(3)
 		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
 			CollectionId: 7, Vchannel: "p_7v0", FieldId: 101, SchemaVersion: &version,
@@ -86,10 +92,7 @@ func TestAnalyzerFieldNativeTransport(t *testing.T) {
 		}).Build()
 		execute := mockey.Mock((*fieldAnalyzerWAL).RunAnalyzer).To(func(_ *fieldAnalyzerWAL, _ context.Context, got *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 			require.Equal(t, int64(7), got.GetFieldAnalyzer().GetCollectionId())
-			if executionErr != nil {
-				return nil, executionErr
-			}
-			return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
+			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(executionErr)}, nil
 		}).Build()
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
@@ -110,8 +113,9 @@ func TestAnalyzerFieldNativeTransport(t *testing.T) {
 		require.Equal(t, 1, execute.Times())
 		ownershipErr = nil
 		executionErr = merr.ErrCollectionSchemaVersionNotReady
-		_, err = client.RunAnalyzer(ctx, req)
-		require.True(t, status.AsStreamingError(err).IsSchemaVersionMismatch())
+		resp, err := client.RunAnalyzer(ctx, req)
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionSchemaVersionNotReady)
 		req.GetFieldAnalyzer().Pchannel.Name = "other"
 		_, err = client.RunAnalyzer(ctx, req)
 		require.True(t, status.AsStreamingError(err).IsInvalidArgument())
