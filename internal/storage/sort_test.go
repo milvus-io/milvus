@@ -110,6 +110,16 @@ func (r *sliceRecordReader) Next() (Record, error) {
 
 func (r *sliceRecordReader) Close() error { return nil }
 
+type columnCountingRecord struct {
+	Record
+	columnCalls map[FieldID]int
+}
+
+func (r *columnCountingRecord) Column(fieldID FieldID) arrow.Array {
+	r.columnCalls[fieldID]++
+	return r.Record.Column(fieldID)
+}
+
 func TestRadixSortByInt64(t *testing.T) {
 	t.Run("edge values across records", func(t *testing.T) {
 		// Keys laid out across 3 records, mixing negatives, zero, duplicates and
@@ -410,6 +420,99 @@ func TestMergeSort(t *testing.T) {
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
+}
+
+func TestMergeSortResolvesOutputColumnsOncePerRecord(t *testing.T) {
+	const (
+		pkField      = FieldID(100)
+		payloadField = FieldID(101)
+	)
+
+	base := mergeSortTestRec(t, map[FieldID][]int64{
+		pkField:      {1, 2, 3},
+		payloadField: {10, 20, 30},
+	}, nil)
+	defer base.Release()
+	record := &columnCountingRecord{Record: base, columnCalls: make(map[FieldID]int)}
+
+	writer := &MockRecordWriter{
+		writefn: func(Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+
+	rows, err := MergeSort(1024, schema, []RecordReader{&sliceRecordReader{recs: []Record{record}}}, writer,
+		func(Record, int, int) bool { return true }, []int64{pkField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, 2, record.columnCalls[pkField], "merge key and output binding should each resolve the PK once")
+	require.Equal(t, 1, record.columnCalls[payloadField], "output binding should resolve the payload once")
+}
+
+func TestMergeSortCachedColumnsPreserveTextAcrossRecords(t *testing.T) {
+	const pkField, textField = FieldID(100), FieldID(101)
+	makeRecord := func(pkValue int64, missingText bool) Record {
+		pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+		pkBuilder.Append(pkValue)
+		pkColumn := pkBuilder.NewArray()
+		pkBuilder.Release()
+		defer pkColumn.Release()
+		var textColumn arrow.Array
+		if missingText {
+			textColumn = array.MakeArrayOfNull(memory.DefaultAllocator, arrow.BinaryTypes.Binary, 1)
+		} else {
+			textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+			textBuilder.Append("decoded text")
+			textColumn = textBuilder.NewArray()
+			textBuilder.Release()
+		}
+		defer textColumn.Release()
+		return NewSimpleArrowRecord(array.NewRecord(
+			arrow.NewSchema([]arrow.Field{
+				{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "text", Type: textColumn.DataType(), Nullable: true},
+			}, nil), []arrow.Array{pkColumn, textColumn}, 1,
+		), map[FieldID]int{pkField: 0, textField: 1})
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: textField, Name: "text", DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	for _, tc := range []struct {
+		name         string
+		missingFirst bool
+	}{
+		{name: "null before text", missingFirst: true},
+		{name: "null after text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, second := makeRecord(1, tc.missingFirst), makeRecord(2, !tc.missingFirst)
+			defer first.Release()
+			defer second.Release()
+			writes := 0
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				writes++
+				require.Equal(t, 2, rec.Len())
+				text, ok := rec.Column(textField).(*array.String)
+				require.True(t, ok, "decoded TEXT must keep its UTF8 representation")
+				nullRow, textRow := 1, 0
+				if tc.missingFirst {
+					nullRow, textRow = 0, 1
+				}
+				require.True(t, text.IsNull(nullRow))
+				require.Equal(t, "decoded text", text.Value(textRow))
+				return nil
+			}, closefn: func() error { return nil }}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{&sliceRecordReader{recs: []Record{first, second}}}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			require.NoError(t, err)
+			require.Equal(t, 2, rows)
+			require.Equal(t, 1, writes)
+		})
+	}
 }
 
 func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
