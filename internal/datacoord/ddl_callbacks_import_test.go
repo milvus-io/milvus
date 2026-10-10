@@ -1861,7 +1861,7 @@ func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
 			}).
 			WithBroadcast([]string{"vchannel1"}).
 			MustBuildBroadcast().
-			OverwriteBroadcastHeader(1)
+			WithBroadcastID(1)
 
 		err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
 			Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
