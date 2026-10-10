@@ -10,10 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/segment_c.h"
+
+#include <arrow/api.h>
+#include <arrow/c/abi.h>
+#include <arrow/c/bridge.h>
+
+#include "common/SystemProperty.h"
+#include "common/arrow_c_data_c.h"
+#include "segcore/arrow_field_utils.h"
 #include "segcore/default_fs.h"
 
 #include <folly/CancellationToken.h>
 #include <folly/ExceptionWrapper.h>
+#include <folly/ScopeGuard.h>
 #include <folly/Try.h>
 #include <folly/futures/Promise.h>
 #include <algorithm>
@@ -635,6 +644,564 @@ AsyncRetrieve(CTraceContext c_trace,
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+namespace {
+
+// RowCountOfDataArray derives a column's row count from the column itself.
+//
+// offset_size() is NOT a safe substitute. ExecPlanNodeVisitor picks between two
+// shapes on `first_column->IsBitmap()` (ExecPlanNodeVisitor.cpp, setupRetrieveResult):
+// a bitmap output goes through find_first into result_offsets_, where
+// offset_size() IS the row count; a COLUMNAR output populates field_data_
+// directly and leaves result_offsets_ empty while the columns hold rows.
+// GetResultRowCount (SegmentInterface.cpp) is the same decision for the internal
+// struct -- there is no protobuf-side equivalent, which is why this exists.
+//
+// Today's routing only sends bitmap-shaped plans here (shouldUseArrowTransport
+// excludes aggregation and ORDER BY, which are what currently produce columnar
+// output), so offset_size() would in fact be correct. It is deliberately not
+// trusted: the real discriminator is the pipeline's output shape, not the
+// routing predicate, and if any non-bitmap plan ever reaches this export
+// offset_size() would build a zero-row batch and silently drop EVERY row --
+// the Arrow builders only assert when the source is SHORTER than the requested
+// count, so nothing would catch it. Deriving from the column converts that
+// silent data loss into a loud mismatch.
+int64_t
+RowCountOfDataArray(const milvus::DataArray& fd) {
+    const auto& valid = milvus::GetFieldDataRowValidData(fd);
+    if (!valid.empty()) {
+        return static_cast<int64_t>(valid.size());
+    }
+    if (fd.has_scalars()) {
+        const auto& sc = fd.scalars();
+        if (sc.has_bool_data())
+            return sc.bool_data().data_size();
+        if (sc.has_int_data())
+            return sc.int_data().data_size();
+        if (sc.has_long_data())
+            return sc.long_data().data_size();
+        if (sc.has_float_data())
+            return sc.float_data().data_size();
+        if (sc.has_double_data())
+            return sc.double_data().data_size();
+        if (sc.has_string_data())
+            return sc.string_data().data_size();
+        if (sc.has_json_data())
+            return sc.json_data().data_size();
+        if (sc.has_array_data())
+            return sc.array_data().data_size();
+        if (sc.has_geometry_data())
+            return sc.geometry_data().data_size();
+        if (sc.has_timestamptz_data())
+            return sc.timestamptz_data().data_size();
+    }
+    if (fd.has_vectors()) {
+        const auto& v = fd.vectors();
+        auto dim = v.dim();
+        if (v.has_float_vector() && dim > 0)
+            return v.float_vector().data_size() / dim;
+        // dim >= 8, not dim > 0: a binary vector packs 8 dimensions per byte,
+        // so each row occupies dim/8 bytes -- a divisor that would be zero,
+        // not merely wrong, for dim < 8.
+        if (!v.binary_vector().empty() && dim >= 8)
+            return static_cast<int64_t>(v.binary_vector().size()) / (dim / 8);
+        if (!v.float16_vector().empty() && dim > 0)
+            return static_cast<int64_t>(v.float16_vector().size()) / (dim * 2);
+        if (!v.bfloat16_vector().empty() && dim > 0)
+            return static_cast<int64_t>(v.bfloat16_vector().size()) / (dim * 2);
+        if (!v.int8_vector().empty() && dim > 0)
+            return static_cast<int64_t>(v.int8_vector().size()) / dim;
+        if (v.has_sparse_float_vector())
+            return v.sparse_float_vector().contents_size();
+        if (v.has_vector_array())
+            return v.vector_array().data_size();
+    }
+    return -1;  // unknown shape
+}
+
+// Schema-level metadata key carrying the original fields_data column order.
+constexpr const char* kRetrieveFieldOrderKey = "milvus.field_order";
+
+// Schema-level metadata key listing the field ids whose source DataArray
+// carried a valid_data bitmap, comma separated.
+//
+// Arrow cannot express the distinction on its own: an all-true bitmap and an
+// absent one both arrive as NullN() == 0, and the Go reconstruction otherwise
+// has to guess from schema nullability. Guessing diverges, because the ORDER
+// BY pipeline allocates valid_data for every scalar column regardless of
+// whether the field is nullable (ExecPlanNodeVisitor.cpp:364-374,
+// "Always allocate valid_data").
+//
+// The divergence is not cosmetic. AppendFieldData appends a validity bit only
+// for source columns that have one (schema.go:1367-1371), so merging an
+// Arrow-path result with a protobuf-path result for the same column yields a
+// ValidData shorter than the row count. The reachable mix is per-NODE config
+// differences across the proxy reduce; there is no per-segment fallback inside
+// one QueryNode, since RetrieveArrow has no fallback and the routing decision is
+// made once per request.
+constexpr const char* kRetrieveValidDataFieldsKey = "milvus.valid_data_fields";
+
+// RetrieveUserColumns owns the user output columns moved out of a retrieve
+// result, and is what makes it sound for the exported Arrow arrays to ALIAS
+// their protobuf buffers instead of copying them.
+//
+// Lifetime: the holder is handed to FieldDataToArrow as the arrays' owner, so
+// ExportRecordBatch's C release callback owns the RecordBatch, which owns the
+// ArrayData, which owns the aliasing buffers, which own this holder. The Go
+// side releasing the record unwinds the whole chain; nothing here is freed
+// before then.
+//
+// Storage choice matters: columns is a protobuf RepeatedPtrField, whose
+// elements are separately heap-allocated, so their addresses are stable. A
+// std::vector<DataArray> would move its elements on growth and invalidate
+// every pointer already handed to Arrow.
+struct RetrieveUserColumns : milvus::segcore::ProtoStorageOwner {
+    // The user columns, moved (not copied) out of the result.
+    milvus::proto::segcore::RetrieveResults columns;
+    // Field ids of `columns`, positionally aligned with it.
+    std::vector<milvus::FieldId> ids;
+    // Every column of the ORIGINAL fields_data in order, system ones included.
+    std::vector<milvus::FieldId> field_order;
+    // The subset of `ids` whose source DataArray carried a valid_data bitmap.
+    std::vector<milvus::FieldId> valid_data_fields;
+};
+
+// JoinFieldIds renders field ids as the comma-separated list the two schema
+// metadata keys carry.
+std::string
+JoinFieldIds(const std::vector<milvus::FieldId>& ids) {
+    std::string out;
+    for (const auto& id : ids) {
+        if (!out.empty()) {
+            out += ",";
+        }
+        out += std::to_string(id.get());
+    }
+    return out;
+}
+
+// MakeRetrieveBatch assembles the exported RecordBatch and attaches the two
+// schema metadata keys the Go side reads to recover column identity.
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+MakeRetrieveBatch(std::vector<std::shared_ptr<arrow::Field>> fields,
+                  std::vector<std::shared_ptr<arrow::Array>> arrays,
+                  const std::string& field_order,
+                  const std::string& valid_data_fields,
+                  int64_t total_rows) {
+    auto metadata = arrow::key_value_metadata(
+        {kRetrieveFieldOrderKey, kRetrieveValidDataFieldsKey},
+        {field_order, valid_data_fields});
+    auto schema = arrow::schema(std::move(fields), std::move(metadata));
+    return arrow::RecordBatch::Make(schema, total_rows, std::move(arrays));
+}
+
+// WorthCarryingAsArrow decides whether a column travels as Arrow or stays in
+// fields_data for the protobuf reduce to merge. The reduce addresses rows by
+// the same selection either way, so the result is identical.
+//
+// This is an ALLOW-list, and deliberately keyed on the same payload oneof that
+// FieldDataToArrow dispatches on -- not on fd.type(). Two reasons:
+//
+//   - Fail closed. There is no fallback behind this predicate: a column that is
+//     carried but cannot be exported reaches NotImplemented, and RetrieveArrow
+//     returns the error rather than retrying on the protobuf path. A deny-list
+//     over DataType would hand `true` to every type added to the enum later --
+//     Mol, Date, Time, Decimal, UUID and Struct are already in schema.proto
+//     with no exporter branch -- and turn each into a failed user query.
+//   - No level mismatch. fd.type() and the payload oneof are set independently,
+//     so a DataType-keyed check can pass a column whose actual payload the
+//     exporter has no branch for (bytes_data, geometry_wkt_data, mol_data).
+//
+// Keep the two lists in step: if FieldDataToArrow gains a branch, add it here.
+//
+// Element-level (ArrayOfVector) queries depend on this staying in step with the
+// GO routing too. They work today only because vector_array is excluded below:
+// the column stays in the protobuf header alongside element_indices, which the
+// reduce reads from the header and re-emits via buildMergedElementIndices. The
+// Arrow materializer has no ArrayOfVector case and no element-indices handling,
+// so admitting vector_array here without adding both would silently drop the
+// indices.
+//
+// Three types are excluded as POLICY even though the exporter handles them:
+//
+//   - array_data: exported as a protobuf blob SERIALIZED PER ROW (a
+//     SerializeToString into a BinaryBuilder), so carrying it would cost that
+//     serialize here plus a matching Unmarshal in Go to move bytes the
+//     protobuf path already had in final form. A property of this export, not
+//     of the type: a native Arrow list would remove the reason.
+//   - vector_array: already exports as a native list(fixed_size_binary) with no
+//     serialization, and arrowconv CAN read it back
+//     (arrowListToVectorArray). The gap is narrower than it looks -- the Go
+//     gathers accept only STRING/BINARY/BOOL and materializeColumn has no
+//     ArrayOfVector case -- so lifting it means adding a LIST case there, not
+//     writing a converter.
+//   - sparse_float_vector: a byte-identity reason. The protobuf reduce sets
+//     SparseFloatArray.Dim to the max over each contributing SEGMENT's
+//     DECLARED dim (queryutil buildMergedVectorField), which covers every row
+//     that segment retrieved; an Arrow column holds only the rows the reduce
+//     kept, so compactSparseVector computes the max over the SELECTED rows.
+//     Those differ whenever the selection is a strict subset. Downstream
+//     AppendFieldData recomputes Dim per appended row
+//     (appendSparseFloatArraySingleRow), so the difference does not survive
+//     that hop -- but MergeFieldData propagates the declared value, and this
+//     change holds itself to byte-identity AT THIS BOUNDARY. The deeper fix is
+//     to tighten buildMergedVectorField's maxDim to SparseFloatRowDim over the
+//     selected rows, which would align the two conventions; carrying a
+//     per-segment dim in the metadata would instead propagate the looser one.
+bool
+WorthCarryingAsArrow(const milvus::DataArray& fd) {
+    if (fd.has_scalars()) {
+        const auto& s = fd.scalars();
+        // Policy exclusion, not a capability one: FieldDataToArrow CAN export
+        // array_data, but only as a per-row SerializeToString blob.
+        if (s.has_array_data()) {
+            return false;
+        }
+        return s.has_bool_data() || s.has_int_data() || s.has_long_data() ||
+               s.has_timestamptz_data() || s.has_float_data() ||
+               s.has_double_data() || s.has_string_data() ||
+               s.has_json_data() || s.has_geometry_data();
+    }
+    if (fd.has_vectors()) {
+        const auto& v = fd.vectors();
+        // Policy exclusions, both exportable but not carried -- see above.
+        if (v.has_sparse_float_vector() || v.has_vector_array()) {
+            return false;
+        }
+        return v.has_float_vector() || v.has_binary_vector() ||
+               v.has_float16_vector() || v.has_bfloat16_vector() ||
+               v.has_int8_vector();
+    }
+    return false;
+}
+
+// PartitionRetrieveResult moves the user output columns out of `results` into a
+// holder, leaving only the system columns behind in their original relative
+// order.
+//
+// The system columns must stay in the protobuf header, for two reasons in the
+// reduce (internal/util/queryutil/reduce_by_pk_op.go):
+//   - a result with len(GetFieldsData()) == 0 is skipped outright, so moving
+//     EVERY column out would drop the segment's rows entirely;
+//   - newTimestampedResult finds the Timestamp column in fields_data by id. Its
+//     error is tolerated, not fatal -- the caller falls back to timestamps=nil,
+//     which makes every timestamp read 0 and silently changes how duplicate PKs
+//     break ties. A silent wrong answer, not a loud failure.
+//
+// Moving rather than copying is what the aliasing depends on: Swap transfers
+// the inner buffers, so the payload is never duplicated and its address is the
+// one Arrow will point at.
+std::shared_ptr<RetrieveUserColumns>
+PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
+    auto holder = std::make_shared<RetrieveUserColumns>();
+    auto* fields_data = results->mutable_fields_data();
+    milvus::proto::segcore::RetrieveResults retained;
+
+    // Decide up front whether ANY column will stay behind, because emptying
+    // fields_data entirely is a silent wrong answer rather than an error: the
+    // Go reduce skips a result with no fields_data, so this segment's rows
+    // would vanish while the Arrow batch still held the whole payload.
+    //
+    // The invariant holds today only because the proxy appends
+    // common.TimeStampField to every non-aggregation retrieve's
+    // output_field_ids (proxy/dql/task_query.go) -- three layers away, in
+    // another process, with nothing here depending on it visibly. Keep the
+    // first column in the header instead of trusting that. Degrading by one
+    // carried column is invisible in the result: Go derives the Arrow set as
+    // field_order minus whatever the header retained, so a retained user
+    // column is simply merged by the protobuf path as usual.
+    //
+    // This covers two or more columns. It cannot help a result that arrives with
+    // NO columns at all, and a single carryable column would still leave the
+    // Arrow set empty -- both unreachable for the same proxy reason, and neither
+    // is something this function can repair.
+    bool any_retained = false;
+    for (const auto& fd : *fields_data) {
+        if (milvus::SystemProperty::Instance().IsSystem(
+                milvus::FieldId(fd.field_id())) ||
+            !WorthCarryingAsArrow(fd)) {
+            any_retained = true;
+            break;
+        }
+    }
+
+    bool first = true;
+    for (auto& fd : *fields_data) {
+        auto field_id = milvus::FieldId(fd.field_id());
+        holder->field_order.push_back(field_id);
+        const bool force_retain = !any_retained && first;
+        first = false;
+
+        if (force_retain ||
+            milvus::SystemProperty::Instance().IsSystem(field_id) ||
+            !WorthCarryingAsArrow(fd)) {
+            retained.mutable_fields_data()->Add()->Swap(&fd);
+            continue;
+        }
+        if (!milvus::GetFieldDataRowValidData(fd).empty()) {
+            holder->valid_data_fields.push_back(field_id);
+        }
+        holder->ids.push_back(field_id);
+        holder->columns.mutable_fields_data()->Add()->Swap(&fd);
+    }
+    fields_data->Clear();
+    for (auto& fd : *retained.mutable_fields_data()) {
+        fields_data->Add()->Swap(&fd);
+    }
+    return holder;
+}
+
+arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+BuildRetrieveUserColumnBatch(const std::shared_ptr<RetrieveUserColumns>& holder,
+                             const milvus::query::RetrievePlan* plan,
+                             int64_t total_rows) {
+    std::vector<std::shared_ptr<arrow::Field>> fields;
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    const auto& columns = holder->columns.fields_data();
+    fields.reserve(columns.size());
+    arrays.reserve(columns.size());
+
+    for (int i = 0; i < columns.size(); ++i) {
+        const auto& field_data = columns.Get(i);
+        auto field_id = holder->ids[i];
+        auto& field_meta = plan->schema_->operator[](field_id);
+        auto name = std::string(field_meta.get_name().get());
+        // holder is passed as the owner, so every column whose protobuf payload
+        // already has Arrow's value-buffer layout is aliased rather than
+        // copied. See FieldDataToArrow's contract: the holder is kept alive by
+        // the returned arrays, and its storage must not be mutated after this.
+        ARROW_ASSIGN_OR_RAISE(auto converted,
+                              milvus::segcore::FieldDataToArrow(
+                                  name, field_data, total_rows, false, holder));
+        auto array = converted.second;
+        // Plain arrow::field, NOT MilvusField: no per-field metadata.
+        //
+        // MilvusField attaches milvus.field_id and milvus.data_type to every
+        // column, and on this path both are dead weight. milvus.data_type is
+        // never read for a retrieve result -- its only reader is the search
+        // path (querynodev2/tasks/arrow_import.go) -- and milvus.field_id is
+        // redundant with kRetrieveFieldOrderKey below, which already carries
+        // every id in order; the Arrow columns are the non-system subset in
+        // that same order, so Go matches them positionally via
+        // ArrowFieldsToProtoOrdered.
+        //
+        // This is not a micro-optimization. Profiling attributed ~44 of the
+        // ~126 extra allocations per call to that metadata, because Go decodes
+        // it per field and then arrow::StructOf clones each one again. It is a
+        // third of the Arrow path's fixed per-column cost, and the fixed cost
+        // is what decides the break-even point against protobuf.
+        //
+        // MilvusField is left alone: the search export depends on it.
+        fields.push_back(arrow::field(
+            std::move(name), array->type(), field_meta.is_nullable()));
+        arrays.push_back(std::move(array));
+    }
+
+    return MakeRetrieveBatch(std::move(fields),
+                             std::move(arrays),
+                             JoinFieldIds(holder->field_order),
+                             JoinFieldIds(holder->valid_data_fields),
+                             total_rows);
+}
+
+}  // namespace
+
+// CRetrieveArrowResult owns its header blob and both Arrow C structs through
+// raw pointers, so the default `delete` in ~LeakyResult would free the struct
+// and leak everything it points at -- including the RecordBatch buffers, which
+// are the whole result set. Route it to the real free function.
+//
+// This must precede the Future<CRetrieveArrowResult> instantiation below.
+namespace milvus::futures {
+template <>
+inline void
+DestroyLeakyResult<CRetrieveArrowResult>(CRetrieveArrowResult* r) {
+    DeleteRetrieveArrowResult(r);
+}
+}  // namespace milvus::futures
+
+CFuture*  // Future<CRetrieveArrowResult>
+AsyncRetrieveAsArrow(CTraceContext c_trace,
+                     CSegmentInterface c_segment,
+                     CRetrievePlan c_plan,
+                     uint64_t timestamp,
+                     int64_t limit_size,
+                     int32_t consistency_level,
+                     uint64_t collection_ttl,
+                     uint64_t entity_ttl_physical_time_us) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
+    auto future = milvus::futures::Future<CRetrieveArrowResult>::async(
+        milvus::futures::getSearchCPUExecutor(),
+        milvus::futures::ExecutePriority::HIGH,
+        [c_trace,
+         segment,
+         plan,
+         timestamp,
+         limit_size,
+         consistency_level,
+         collection_ttl,
+         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
+            auto trace_ctx = milvus::tracer::TraceContext{
+                c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+            milvus::tracer::AutoSpan span(
+                "SegCoreRetrieveAsArrow", &trace_ctx, true);
+
+            milvus::OpContext op_ctx(cancel_token);
+            segment->LazyCheckSchema(plan->schema_, &op_ctx);
+            auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
+            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            auto internal_segment =
+                static_cast<milvus::segcore::SegmentInternalInterface*>(
+                    segment);
+            CheckExternalFieldsInLoadedManifest(
+                plan->schema_, internal_segment, plan->access_entries_);
+
+            // ignore_non_pk is fixed false: with it set every user column is
+            // withheld and the Arrow batch would carry nothing. The Go caller
+            // routes that case to the protobuf path.
+            auto results =
+                internal_segment->Retrieve(&trace_ctx,
+                                           plan,
+                                           timestamp,
+                                           limit_size,
+                                           /*ignore_non_pk=*/false,
+                                           cancel_token,
+                                           consistency_level,
+                                           collection_ttl,
+                                           entity_ttl_physical_time_us);
+
+            // The routing precondition -- no aggregation, no
+            // ignore_non_pk -- is enforced in Go by
+            // shouldUseArrowTransport, with a backstop duplicate-field-id
+            // check in MaterializeArrowSelection.
+            //
+            // It deliberately is NOT re-asserted here: Go decides the
+            // routing, so a C++ copy of the same predicate could only go
+            // stale against it. The backstop that matters is on the
+            // consuming side, where a violation would actually corrupt
+            // output, and that is where it lives.
+            //
+            // An AssertInfo here would also be the wrong tool: a routing
+            // mistake is a caller contract violation, not data corruption,
+            // and throwing on it would turn a Go-side bug into a QueryNode
+            // crash.
+
+            // Derive the row count from the columns, not from offset. See
+            // RowCountOfDataArray: offset is empty on the aggregation branch
+            // while the columns hold rows, and trusting it there drops every
+            // row silently. Fall back to offset_size() only when there are no
+            // columns to measure.
+            int64_t total_rows = results->offset_size();
+            bool measured = false;
+            for (const auto& fd : results->fields_data()) {
+                auto n = RowCountOfDataArray(fd);
+                if (n < 0) {
+                    continue;  // unknown shape: leave the offset-derived value
+                }
+                // Adopt the first measurement only when the offset-derived
+                // seed told us nothing (no offsets). After that every column
+                // must agree.
+                //
+                // `measured` is tracked separately rather than testing
+                // total_rows != 0 because overloading 0 to mean both "not yet
+                // measured" and "zero rows" made this one-sided:
+                // {col A = 0, col B = 5} was accepted while
+                // {col A = 5, col B = 0} threw. A column whose length
+                // disagrees with the batch's num_rows is precisely what lets
+                // materializeColumn index past that column's value buffer into
+                // aliased protobuf memory, so the check has to be
+                // order-independent.
+                if (!measured && total_rows == 0) {
+                    total_rows = n;
+                    measured = true;
+                    continue;
+                }
+                AssertInfo(n == total_rows,
+                           "retrieve column {} has {} rows but the result "
+                           "claims {}; the Arrow export cannot reconcile them",
+                           fd.field_id(),
+                           n,
+                           total_rows);
+                measured = true;
+            }
+            auto out = std::make_unique<CRetrieveArrowResult>();
+            out->header = nullptr;
+            out->schema = new ArrowSchema{};
+            out->array = new ArrowArray{};
+            auto cleanup = folly::makeGuard([&] {
+                MilvusGoArrowArrayRelease(out->array);
+                MilvusGoArrowSchemaRelease(out->schema);
+                delete out->array;
+                delete out->schema;
+            });
+
+            // Partition first, then build Arrow from the moved-out columns.
+            //
+            // The order is forced by the aliasing: the Arrow arrays point into
+            // the user columns' protobuf buffers, so those buffers must already
+            // be owned by something that outlives the export. Partitioning
+            // afterwards would free them while Arrow still referenced them.
+            auto user_columns = PartitionRetrieveResult(results.get());
+            auto batch_result =
+                BuildRetrieveUserColumnBatch(user_columns, plan, total_rows);
+            // Classify at the throw site. The copy paths -- every nullable
+            // column, BOOL, VARCHAR, JSON, geometry -- allocate through Arrow
+            // builders that RETURN Status::OutOfMemory rather than throwing, so
+            // this is the normal out-of-memory route here, and
+            // MemAllocateFailed is retriable where UnexpectedError is not.
+            // Status text goes through a {} placeholder, never concatenated
+            // into the format string: ThrowInfo expands to
+            // fmt::format(fmt::runtime(info), ...), so a '{' anywhere in
+            // third-party text would raise fmt::format_error instead -- which
+            // is not a SegcoreError, so Future.h's std::exception arm would
+            // flatten it to UnexpectedError and destroy the retriable
+            // MemAllocateFailed this call exists to carry.
+            if (!batch_result.ok()) {
+                ThrowInfo(milvus::segcore::ArrowExportErrorCode(
+                              batch_result.status()),
+                          "failed to build Arrow batch for retrieve result: {}",
+                          batch_result.status().ToString());
+            }
+            auto export_status = arrow::ExportRecordBatch(
+                **batch_result, out->array, out->schema);
+            if (!export_status.ok()) {
+                ThrowInfo(milvus::segcore::ArrowExportErrorCode(export_status),
+                          "failed to export retrieve RecordBatch: {}",
+                          export_status.ToString());
+            }
+
+            // The user columns are already out of the header: dropping them
+            // is now PartitionRetrieveResult's job, above, because the aliasing
+            // needs it to happen before the export rather than after.
+            out->header =
+                CreateLeakedCRetrieveResultFromProto(std::move(results));
+            cleanup.dismiss();
+            read_lease.reset();
+            return out.release();
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+void
+DeleteRetrieveArrowResult(CRetrieveArrowResult* result) {
+    if (result == nullptr) {
+        return;
+    }
+    // Null-safe: importing the Arrow structs on the Go side nulls their
+    // release callbacks, so these become no-ops. Releasing unconditionally
+    // matters for the paths where Go errors out before importing them.
+    MilvusGoArrowArrayRelease(result->array);
+    MilvusGoArrowSchemaRelease(result->schema);
+    delete result->array;
+    delete result->schema;
+    // DeleteRetrieveResult is NOT null-safe: it dereferences proto_blob.
+    if (result->header != nullptr) {
+        DeleteRetrieveResult(result->header);
+    }
+    delete result;
 }
 
 CFuture*  // Future<CRetrieveResult>

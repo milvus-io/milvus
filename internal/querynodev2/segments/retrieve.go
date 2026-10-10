@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -37,6 +39,25 @@ import (
 type RetrieveSegmentResult struct {
 	Result  *segcorepb.RetrieveResults
 	Segment Segment
+
+	// Record carries the user output columns when the Arrow transport was used;
+	// nil otherwise. Result then holds only the system columns, so the two are
+	// read together. The RECEIVER owns it: whoever consumes a
+	// []RetrieveSegmentResult must Release every non-nil Record once it has
+	// materialized the selection, including on error paths.
+	Record arrow.Record
+}
+
+// ReleaseRecords releases every Arrow record held by results. Safe to call
+// more than once and on results that carry none, so callers can defer it
+// immediately after the retrieve without tracking which path ran.
+func ReleaseRecords(results []RetrieveSegmentResult) {
+	for i := range results {
+		if results[i].Record != nil {
+			results[i].Record.Release()
+			results[i].Record = nil
+		}
+	}
 }
 
 // retrieveOnSegments performs retrieve on listed segments
@@ -45,6 +66,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
 	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
+	// A local, not a field on the shared plan type: nothing outside this
+	// function reads it, and it is never passed to C.
+	useArrow := shouldUseArrowTransport(req, plan)
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -53,7 +77,16 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 
 	retriever := func(ctx context.Context, s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-		result, err := s.Retrieve(ctx, plan)
+		var (
+			result *segcorepb.RetrieveResults
+			record arrow.Record
+			err    error
+		)
+		if useArrow {
+			result, record, err = s.RetrieveArrow(ctx, plan)
+		} else {
+			result, err = s.Retrieve(ctx, plan)
+		}
 		if err != nil {
 			return err
 		}
@@ -83,8 +116,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}
 		}
 		resultCh <- RetrieveSegmentResult{
-			result,
-			s,
+			Result:  result,
+			Segment: s,
+			Record:  record,
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
@@ -93,13 +127,20 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 
 	err := doOnSegments(ctx, mgr, segments, retriever)
 	close(resultCh)
-	if err != nil {
-		return nil, err
-	}
 
 	results := make([]RetrieveSegmentResult, 0, len(segments))
 	for r := range resultCh {
 		results = append(results, r)
+	}
+	if err != nil {
+		// Drain first, then release. The segments that DID succeed have
+		// already pushed their results, and on the Arrow path each one holds a
+		// cdata-imported record whose C memory is freed by a release callback,
+		// not by the GC -- so returning without draining leaks the entire
+		// payload of every surviving segment. A canceled context or a segment
+		// released mid-query is routine, so this accumulates.
+		ReleaseRecords(results)
+		return nil, err
 	}
 	return results, nil
 }
@@ -128,6 +169,51 @@ func getCountRet(result *segcorepb.RetrieveResults) (int64, bool) {
 func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShouldIgnoreNonPk bool) bool {
 	hasGroupBy := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
 	return !hasGroupBy && segmentNum > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && planShouldIgnoreNonPk
+}
+
+// shouldUseArrowTransport decides, per request, whether the retrieve CGO
+// boundary returns user output columns as Arrow instead of a protobuf blob.
+//
+// Two shapes are excluded:
+//
+//   - aggregation: its columns all carry field_id 0 and are identified by
+//     position, so the Go side cannot match them by id. THIS is the guard;
+//     MaterializeArrowSelection's duplicate-id check is only a backstop, and a
+//     late one -- it fires after the retrieve and the reduce, and its only
+//     outcome is failing the user's query, since there is no fallback by then.
+//   - ignore_non_pk: every user column is withheld, so there is nothing to
+//     carry and the Arrow batch would be pure overhead.
+//
+// count(*) needs no exclusion of its own: the proxy compiles it to an
+// aggregate (dql/task_query.go:658 sets Query.Aggregates from
+// translateOutputFields), so hasAggregation below already excludes it. An
+// earlier explicit exclusion keyed off internalpb.RetrieveRequest.IsCount,
+// which no writer ever sets -- createCntPlan sets planpb.QueryPlanNode.IsCount
+// instead, and is itself referenced only by its own unit test -- so it was dead
+// code twice over.
+func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan) bool {
+	// Same switch as the IgnoreNonPk Arrow path (ignore_non_pk_ops.go): both are
+	// the "hand Arrow across the CGO boundary instead of protobuf" interface, so
+	// they share one operator-facing knob rather than accumulating one per call
+	// site.
+	if !paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.GetAsBool() {
+		return false
+	}
+	hasAggregation := len(req.GetReq().GetGroupByFieldIds()) > 0 ||
+		len(req.GetReq().GetAggregates()) > 0
+	// ORDER BY is excluded because OrderByLimitOperator sorts by field VALUES
+	// (compareFieldValuesAt reads them out of FieldsData) and reorderResult
+	// re-slices every column, so unlike the plain reduce it genuinely needs the
+	// payload materialized. Carrying a selection there needs an Arrow-valued
+	// comparator, which is real work rather than plumbing.
+	//
+	// Structurally it has MORE to gain than the plain reduce, not less: that
+	// pipeline copies the payload twice today (buildMergedRetrieveResults then
+	// sliceFieldData), where reorderResult under a selection would permute the
+	// selection's row refs and copy nothing. Unmeasured -- the claim is from
+	// reading the two pipelines, not from a benchmark.
+	hasOrderBy := len(req.GetReq().GetOrderByFields()) > 0
+	return !hasAggregation && !hasOrderBy && !plan.IsIgnoreNonPk()
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {

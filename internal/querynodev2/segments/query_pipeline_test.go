@@ -261,7 +261,7 @@ func TestRunQNQueryPipeline(t *testing.T) {
 			},
 		}
 
-		out, err := RunQNQueryPipeline(ctx, req, schema, plan, segcoreResults, nil, nil, rp)
+		out, _, err := RunQNQueryPipeline(ctx, req, schema, plan, segcoreResults, nil, nil, nil, rp)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1, 2, 3}, out.GetIds().GetIntId().GetData())
 		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
@@ -271,7 +271,7 @@ func TestRunQNQueryPipeline(t *testing.T) {
 		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Limit: 2, OutputFieldsId: []int64{100}}}
 		rp := &segcore.RetrievePlan{}
 
-		out, err := RunQNQueryPipeline(ctx, req, schema, plan, []*segcorepb.RetrieveResults{nil, {Ids: &schemapb.IDs{}}}, nil, nil, rp)
+		out, _, err := RunQNQueryPipeline(ctx, req, schema, plan, []*segcorepb.RetrieveResults{nil, {Ids: &schemapb.IDs{}}}, nil, nil, nil, rp)
 		require.NoError(t, err)
 		assert.NotNil(t, out)
 		assert.NotNil(t, out.GetFieldsData())
@@ -285,8 +285,8 @@ func TestRunQNQueryPipeline(t *testing.T) {
 		req := buildQueryReqForDelegator(-1, nil, nil, nil, countAgg)
 		rp := &segcore.RetrievePlan{}
 
-		out, err := RunQNQueryPipeline(ctx, req, schema, plan,
-			[]*segcorepb.RetrieveResults{nil, {Ids: &schemapb.IDs{}}}, nil, nil, rp)
+		out, _, err := RunQNQueryPipeline(ctx, req, schema, plan,
+			[]*segcorepb.RetrieveResults{nil, {Ids: &schemapb.IDs{}}}, nil, nil, nil, rp)
 		require.NoError(t, err)
 		require.Len(t, out.GetFieldsData(), 1, "count(*) should produce exactly 1 fieldData")
 		countVal := out.GetFieldsData()[0].GetScalars().GetLongData().GetData()
