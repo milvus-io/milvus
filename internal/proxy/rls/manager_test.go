@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1574,6 +1575,64 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
 	assertPredicateMerged(t, searchPlan.GetVectorAnns().GetPredicates())
+
+	normalizedPlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age in [18, 21, 30]", nil, visitorArgs)
+	require.NoError(t, err)
+	normalizedRLS, err := planparserv2.ParseExpr(helper, "age in [21, 30, 40]", nil)
+	require.NoError(t, err)
+	expectedPlan := proto.Clone(normalizedPlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedPlan, proto.Clone(normalizedRLS).(*planpb.Expr)))
+	userPredicate := normalizedPlan.GetQuery().GetPredicates()
+	userBefore := proto.Clone(userPredicate).(*planpb.Expr)
+	rlsBefore := proto.Clone(normalizedRLS).(*planpb.Expr)
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedPlan, normalizedRLS))
+	require.True(t, proto.Equal(expectedPlan.GetQuery().GetPredicates(), normalizedPlan.GetQuery().GetPredicates()))
+	require.True(t, proto.Equal(userBefore, userPredicate))
+	require.True(t, proto.Equal(rlsBefore, normalizedRLS))
+
+	// Requery IDs may be large. Attaching RLS must preserve the ID term without
+	// sorting, deduplicating, or intersecting it with a same-field policy.
+	requeryPlan := planparserv2.CreateRequeryPlan(schema.GetFields()[0], &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1, 3}}},
+	})
+	requeryPredicate := requeryPlan.GetQuery().GetPredicates()
+	requeryRLS, err := planparserv2.ParseExpr(helper, "id in [1, 3]", nil)
+	require.NoError(t, err)
+	require.NoError(t, AttachPredicateToRequeryPlan(requeryPlan, requeryRLS))
+	mergedRequery := requeryPlan.GetQuery().GetPredicates().GetBinaryExpr()
+	require.NotNil(t, mergedRequery)
+	require.Same(t, requeryPredicate, mergedRequery.GetLeft())
+	require.Same(t, requeryRLS, mergedRequery.GetRight())
+	values := mergedRequery.GetLeft().GetTermExpr().GetValues()
+	require.Equal(t, []int64{3, 1, 3}, []int64{
+		values[0].GetInt64Val(), values[1].GetInt64Val(), values[2].GetInt64Val(),
+	})
+
+	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
+	require.NoError(t, err)
+	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()
+	require.NotNil(t, randomSample)
+	expectedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates()
+	normalizedRandomSampleBefore := proto.Clone(normalizedRandomSamplePredicate).(*planpb.Expr)
+	rlsBefore = proto.Clone(rlsPredicate).(*planpb.Expr)
+	require.NoError(t, MergePredicateToPlan(expectedRandomSamplePlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedRandomSamplePlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedRandomSamplePlan, normalizedRandomSamplePlan))
+	require.NotSame(t, normalizedRandomSamplePredicate, normalizedRandomSamplePlan.GetQuery().GetPredicates())
+	require.True(t, proto.Equal(normalizedRandomSampleBefore, normalizedRandomSamplePredicate))
+	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr().GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedRandomSamplePredicate)
+	require.True(t,
+		mergedRandomSamplePredicate.GetLeft() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate() ||
+			mergedRandomSamplePredicate.GetRight() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate(),
+	)
+	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
+	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
+	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
+	assertPredicateMerged(t, randomSample.GetPredicate())
 }
 
 func assertPredicateMerged(t *testing.T, expr *planpb.Expr) {
