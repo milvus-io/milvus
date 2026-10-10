@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
@@ -261,12 +262,25 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
+	configured, err := Params.ParseRequestBudgetPolicy()
+	if err != nil {
+		errChan <- err
+		return
+	}
+	policy := requestbudget.Policy{
+		OverallTimeoutBudget:      configured.OverallTimeoutBudget,
+		ReadHeaderTimeout:         configured.ReadHeaderTimeout,
+		MaxConnectionIdleInterval: configured.MaxConnectionIdleInterval,
+	}
+	restHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := requestbudget.Run(w, r, policy, time.Now(), ginHandler); err != nil {
+			httpserver.WriteRequestBudgetError(w, err)
+		}
+	})
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
-		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
-		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
-		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
-		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
+		Handler:           h2c.NewHandler(s.httpHandler(restHandler), http2Server),
+		ReadHeaderTimeout: policy.ReadHeaderTimeout,
+		IdleTimeout:       policy.MaxConnectionIdleInterval,
 		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
 	}
 	if err := http2.ConfigureServer(s.httpServer, http2Server); err != nil {

@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -437,7 +438,17 @@ type (
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
 		req := newReq()
-		if err := gCtx.ShouldBindBodyWith(req, binding.JSON); err != nil {
+		var bindErr error
+		if _, bulk := req.(*CollectionDataReq); bulk && requestbudget.Active(gCtx.Request.Context()) {
+			var rows []string
+			rows, bindErr = requestbudget.BindBulkJSON(gCtx, req, requestbudget.MaxJSONUnitBytes, requestbudget.MaxJSONBodyBytes)
+			if bindErr == nil {
+				gCtx.Set(budgetDataRowsKey, rows)
+			}
+		} else {
+			bindErr = gCtx.ShouldBindBodyWith(req, binding.JSON)
+		}
+		if err := bindErr; err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, read parameters from request body fail", mlog.Err(err),
 				mlog.Any("url", gCtx.Request.URL.Path))
 			if _, ok := err.(validator.ValidationErrors); ok {
@@ -1608,9 +1619,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithContext(ctx, int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
+			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
@@ -1679,9 +1690,9 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithContext(ctx, int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
 		if err != nil {
-			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
+			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: resultErrMessage(err),
@@ -1776,11 +1787,11 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	body, _ := c.Get(gin.BodyBytesKey)
+	rows := collectionDataRows(c)
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), collSchema, false)
+	httpReq.Data, validDataMap, err = checkAndSetDataRows(ctx, rows, collSchema, false)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err), mlog.String("body", string(body.([]byte))))
+		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1789,9 +1800,9 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
+	req.FieldsData, err = anyToColumnsWithContext(ctx, httpReq.Data, validDataMap, collSchema, true, false)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with insert data", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1865,8 +1876,8 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if err != nil {
 		return nil, err
 	}
-	body, _ := c.Get(gin.BodyBytesKey)
-	requestSchema, err := schemaForPathReplaceOperands(body.([]byte), collSchema, fieldOps)
+	rows := collectionDataRows(c)
+	requestSchema, err := schemaForPathReplaceOperandsRows(ctx, rows, collSchema, fieldOps)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to resolve PATH_REPLACE operand", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1876,9 +1887,9 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
+	httpReq.Data, validDataMap, err = checkAndSetDataRows(ctx, rows, requestSchema, req.GetPartialUpdate(), fieldOps...)
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -1887,9 +1898,9 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, requestSchema, false, req.GetPartialUpdate())
+	req.FieldsData, err = anyToColumnsWithContext(ctx, httpReq.Data, validDataMap, requestSchema, false, req.GetPartialUpdate())
 	if err != nil {
-		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("data", httpReq.Data), mlog.Err(err))
+		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
@@ -2358,9 +2369,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithContext(ctx, 0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
@@ -2549,9 +2560,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithContext(ctx, 0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
 			if err != nil {
-				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
+				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: resultErrMessage(err),
