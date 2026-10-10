@@ -223,7 +223,7 @@ var (
 
 	// field related
 	ErrFieldNotFound    = newMilvusError("field not found", 1700, false) // SystemError by default; proxy boundaries stamp InputError where the field name is user-supplied (e.g. group_by/anns field), while result-assembly lookups stay system.
-	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
+	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false, WithErrorType(InputError))
 
 	// high-level restful api related
 	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false, WithErrorType(InputError))

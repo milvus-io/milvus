@@ -324,25 +324,24 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
-// validateFieldName validates names from user schema requests. Mark failures
-// here rather than changing ErrFieldInvalidName's classification globally.
+// validateFieldName validates names from user schema requests.
 func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
 	if fieldName == "" {
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNameInvalid(fieldName, "field name should not be empty"))
+		return merr.WrapErrFieldNameInvalid(fieldName, "field name should not be empty")
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
 	if len(fieldName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
 		msg := invalidMsg + "The length of a field name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNameInvalid(fieldName, msg))
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 
 	firstChar := fieldName[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
 		msg := invalidMsg + "The first character of a field name must be an underscore or letter."
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNameInvalid(fieldName, msg))
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 
 	fieldNameSize := len(fieldName)
@@ -350,12 +349,12 @@ func validateFieldName(fieldName string) error {
 		c := fieldName[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
 			msg := invalidMsg + "Field name can only contain numbers, letters, and underscores."
-			return merr.WrapErrAsInputError(merr.WrapErrFieldNameInvalid(fieldName, msg))
+			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
 	if common.IsFieldNameKeyword(fieldName) {
 		msg := invalidMsg + fmt.Sprintf("%s is keyword in milvus.", fieldName)
-		return merr.WrapErrAsInputError(merr.WrapErrFieldNameInvalid(fieldName, msg))
+		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}
 	return nil
 }
@@ -827,6 +826,12 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 	if err := validateFieldName(structArrayField.GetName()); err != nil {
 		return err
 	}
+	return validateStructArrayField(structArrayField, schema)
+}
+
+// validateStructArrayField validates the remaining schema after the parent name
+// has been checked. Add-field validation checks the name before reserved fields.
+func validateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return merr.WrapErrParameterInvalidMsg("struct array field %s has no sub-fields", structArrayField.Name)
 	}

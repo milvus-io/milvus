@@ -216,23 +216,30 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 	})
 }
 
-func TestFieldNameErrorClassificationBoundary(t *testing.T) {
-	// The global factory also represents internal schema failures. Its default
-	// must stay SystemError; only request-name validation stamps InputError.
-	internalErr := merr.WrapErrFieldNameInvalid("Like", "Invalid field name: Like. Like is keyword in milvus.")
-	require.Equal(t, merr.SystemError, merr.GetErrorType(internalErr))
-	internalStatus := merr.Status(internalErr)
-	require.Equal(t, int32(1701), internalStatus.GetCode())
-	require.False(t, internalStatus.GetRetriable())
-	require.Empty(t, internalStatus.GetExtraInfo())
-	label, cause := requestutil.ParseMetricLabel(internalStatus, nil)
-	require.Equal(t, metrics.FailLabel, label)
-	require.Equal(t, metrics.CauseSystem, cause)
+func TestFieldNameErrorClassification(t *testing.T) {
+	// Every invalid field name originates from user-supplied schema input.
+	// Factory and validation paths must agree on the wire and metric cause.
+	factoryErr := merr.WrapErrFieldNameInvalid("Like", "Invalid field name: Like. Like is keyword in milvus.")
+	requireKeywordValidationForTest(t, factoryErr, true)
+	validationErr := validateFieldName("Like")
+	requireKeywordValidationForTest(t, validationErr, true)
+	require.Equal(t, factoryErr.Error(), validationErr.Error())
+	require.Equal(t, merr.Status(factoryErr).GetErrorCode(), merr.Status(validationErr).GetErrorCode())
 
-	inputErr := validateFieldName("Like")
-	requireKeywordValidationForTest(t, inputErr, true)
-	require.Equal(t, internalErr.Error(), inputErr.Error())
-	require.Equal(t, internalStatus.GetErrorCode(), merr.Status(inputErr).GetErrorCode())
+	for _, name := range []string{common.RowIDFieldName, common.TimeStampFieldName, common.VirtualPKFieldName} {
+		t.Run("reserved_"+name, func(t *testing.T) {
+			for _, structField := range []bool{false, true} {
+				schema := keywordValidationSchemaForTest()
+				if structField {
+					schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{keywordStructFieldForTest(name)}
+				} else {
+					schema.Fields = append(schema.Fields, &schemapb.FieldSchema{Name: name, DataType: schemapb.DataType_Int64})
+				}
+				requireKeywordValidationForTest(t, validateReservedFieldNames(schema), true)
+				requireKeywordValidationForTest(t, createKeywordSchemaForTest(t, schema), true)
+			}
+		})
+	}
 
 	t.Run("meta_keeps_existing_api_error_codes", func(t *testing.T) {
 		// Creation and direct name validation reject '$' with 1701. AddField
