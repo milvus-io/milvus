@@ -937,6 +937,44 @@ func TestGetSegmentsByStates(t *testing.T) {
 		assert.ElementsMatch(t, []int64{5, 8, 12}, resp.GetSegments())
 	})
 
+	t.Run("collection not found", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		mixCoord := mocks.NewMixCoord(t)
+		svr.mixCoord = mixCoord
+		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+			return req.GetCollectionID() == 0
+		})).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(0)),
+		}, nil)
+
+		for _, segment := range []*datapb.SegmentInfo{
+			{
+				ID:           1,
+				CollectionID: 1,
+				PartitionID:  1,
+				State:        commonpb.SegmentState_Dropped,
+			},
+			{
+				ID:           2,
+				CollectionID: 2,
+				PartitionID:  2,
+				State:        commonpb.SegmentState_Dropped,
+			},
+		} {
+			assert.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(segment)))
+		}
+
+		resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
+			CollectionID: 0,
+			PartitionID:  -1,
+			States:       []commonpb.SegmentState{commonpb.SegmentState_Dropped},
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotFound)
+		assert.Empty(t, resp.GetSegments())
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		t.Run("with closed server", func(t *testing.T) {
 			svr := newTestServer(t)
