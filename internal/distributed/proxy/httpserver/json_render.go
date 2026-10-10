@@ -17,8 +17,12 @@
 package httpserver
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/requestbudget"
 	"github.com/milvus-io/milvus/internal/json"
 )
 
@@ -41,4 +45,20 @@ func (r jsonRender) WriteContentType(w http.ResponseWriter) {
 	if val := header["Content-Type"]; len(val) == 0 {
 		header["Content-Type"] = jsonContentType
 	}
+}
+
+// jsonRowsRender is selected only for budgeted row responses. It avoids a
+// single non-cancellable Sonic call over the complete result array.
+type jsonRowsRender struct {
+	Context context.Context
+	Data    gin.H
+}
+
+func (r jsonRowsRender) Render(w http.ResponseWriter) error {
+	r.WriteContentType(w)
+	return requestbudget.EncodeResponseRows(r.Context, w, map[string]any(r.Data), requestbudget.MaxJSONUnitBytes)
+}
+
+func (r jsonRowsRender) WriteContentType(w http.ResponseWriter) {
+	jsonRender{}.WriteContentType(w)
 }
