@@ -302,9 +302,8 @@ TEST(FmIndexArtifactTest, RejectsSetBitmapPaddingBits) {
 TEST(FmIndexArtifactTest, LibraryGuardClassifiesEscapingExceptions) {
     auto code_of = [](auto&& fn, ErrorCode fallback) {
         try {
-            GuardFmIndexLibrary(std::forward<decltype(fn)>(fn),
-                                fallback,
-                                "load");
+            GuardFmIndexLibrary(
+                std::forward<decltype(fn)>(fn), fallback, "load");
         } catch (const SegcoreError& error) {
             return error.get_error_code();
         }

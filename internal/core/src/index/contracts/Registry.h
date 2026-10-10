@@ -77,17 +77,16 @@ struct LoaderEntry {
 /** @brief Compile-time contract for a family registered in LoaderRegistry. */
 template <typename Provider>
 concept StaticLoaderProvider =
-    std::derived_from<Provider, IndexLoader>&& requires(
-        const Config& params,
-        OpenedIndexSource source,
-        storage::LoadOptions options) {
-    { Provider::kFamily }
-    ->std::convertible_to<std::string_view>;
-    { Provider::DeriveCaps(params) }
-    ->std::same_as<ReaderCaps>;
-    { Provider::Create(std::move(source), std::move(options)) }
-    ->std::same_as<folly::coro::Task<std::unique_ptr<IndexLoader>>>;
-};
+    std::derived_from<Provider, IndexLoader> &&
+    requires(const Config& params,
+             OpenedIndexSource source,
+             storage::LoadOptions options) {
+        { Provider::kFamily } -> std::convertible_to<std::string_view>;
+        { Provider::DeriveCaps(params) } -> std::same_as<ReaderCaps>;
+        {
+            Provider::Create(std::move(source), std::move(options))
+            } -> std::same_as<folly::coro::Task<std::unique_ptr<IndexLoader>>>;
+    };
 
 /**
  * @brief Select complete family factories and metadata-only capability

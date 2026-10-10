@@ -220,535 +220,526 @@ VectorDiskBuildMaterializer::InitializeStaging(std::string staging_parent,
                                                bool nullable,
                                                int64_t expected_rows,
                                                bool side_input_declared) {
-        owner_ = storage::LocalDirectory::CreateOwned(
-            staging_parent, "vector_disk_XXXXXX", "vector disk");
-        field_type_ = field_type;
-        value_type_ = value_type;
-        dim_ = dim;
-        raw_dim_ = value_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : dim;
-        nullable_ = nullable;
-        expected_rows_ = expected_rows;
-        side_input_declared_ = side_input_declared;
-        state_ = State::Feeding;
-        AssertInfo(IsVectorDataType(field_type_),
-                   "disk vector materializer received non-vector field type {}",
-                   field_type_);
-        AssertInfo(expected_rows_ >= 0,
-                   "disk vector expected row count is negative: {}",
-                   expected_rows_);
-        AssertInfo(
-            static_cast<uint64_t>(expected_rows_) <=
-                static_cast<uint64_t>(std::numeric_limits<size_t>::max()),
-            "disk vector expected row count exceeds size_t: {}",
-            expected_rows_);
-        embedding_list_ = field_type_ == DataType::VECTOR_ARRAY;
-        if (embedding_list_) {
-            AssertInfo(value_type_ != DataType::VECTOR_ARRAY &&
-                           value_type_ != DataType::VECTOR_SPARSE_U32_F32 &&
-                           IsVectorDataType(value_type_),
-                       "disk VECTOR_ARRAY has invalid element type {}",
-                       value_type_);
-        } else {
-            AssertInfo(field_type_ == value_type_,
-                       "disk vector field type {} disagrees with value type {}",
-                       field_type_,
-                       value_type_);
-        }
-        AssertInfo(
-            dim_ >= 0 &&
-                (dim_ > 0 || value_type_ == DataType::VECTOR_SPARSE_U32_F32),
-            "disk vector dimension {} is invalid for type {}",
-            dim_,
-            value_type_);
-        if (side_input_declared_) {
-            AssertInfo(!embedding_list_,
-                       "VECTOR_ARRAY optional scalar input is unsupported");
-            primary_layout_.emplace();
-        }
-
-        raw_path_ = (std::filesystem::path(owner_->Path()) /
-                     (value_type_ == DataType::VECTOR_SPARSE_U32_F32
-                          ? "raw_data.sparse_u32_f32"
-                          : "raw_data"))
-                        .string();
-        raw_file_ = std::make_unique<OutputFile>(raw_path_);
-        const uint32_t empty_header[2] = {0, 0};
-        raw_file_->Write(empty_header, sizeof(empty_header));
-        if (embedding_list_) {
-            offsets_.push_back(0);
-        }
+    owner_ = storage::LocalDirectory::CreateOwned(
+        staging_parent, "vector_disk_XXXXXX", "vector disk");
+    field_type_ = field_type;
+    value_type_ = value_type;
+    dim_ = dim;
+    raw_dim_ = value_type == DataType::VECTOR_SPARSE_U32_F32 ? 0 : dim;
+    nullable_ = nullable;
+    expected_rows_ = expected_rows;
+    side_input_declared_ = side_input_declared;
+    state_ = State::Feeding;
+    AssertInfo(IsVectorDataType(field_type_),
+               "disk vector materializer received non-vector field type {}",
+               field_type_);
+    AssertInfo(expected_rows_ >= 0,
+               "disk vector expected row count is negative: {}",
+               expected_rows_);
+    AssertInfo(static_cast<uint64_t>(expected_rows_) <=
+                   static_cast<uint64_t>(std::numeric_limits<size_t>::max()),
+               "disk vector expected row count exceeds size_t: {}",
+               expected_rows_);
+    embedding_list_ = field_type_ == DataType::VECTOR_ARRAY;
+    if (embedding_list_) {
+        AssertInfo(value_type_ != DataType::VECTOR_ARRAY &&
+                       value_type_ != DataType::VECTOR_SPARSE_U32_F32 &&
+                       IsVectorDataType(value_type_),
+                   "disk VECTOR_ARRAY has invalid element type {}",
+                   value_type_);
+    } else {
+        AssertInfo(field_type_ == value_type_,
+                   "disk vector field type {} disagrees with value type {}",
+                   field_type_,
+                   value_type_);
     }
+    AssertInfo(dim_ >= 0 &&
+                   (dim_ > 0 || value_type_ == DataType::VECTOR_SPARSE_U32_F32),
+               "disk vector dimension {} is invalid for type {}",
+               dim_,
+               value_type_);
+    if (side_input_declared_) {
+        AssertInfo(!embedding_list_,
+                   "VECTOR_ARRAY optional scalar input is unsupported");
+        primary_layout_.emplace();
+    }
+
+    raw_path_ = (std::filesystem::path(owner_->Path()) /
+                 (value_type_ == DataType::VECTOR_SPARSE_U32_F32
+                      ? "raw_data.sparse_u32_f32"
+                      : "raw_data"))
+                    .string();
+    raw_file_ = std::make_unique<OutputFile>(raw_path_);
+    const uint32_t empty_header[2] = {0, 0};
+    raw_file_->Write(empty_header, sizeof(empty_header));
+    if (embedding_list_) {
+        offsets_.push_back(0);
+    }
+}
 
 void
 VectorDiskBuildMaterializer::Add(const FieldDataPtr& batch) {
-        AssertState(State::Feeding, "add primary input to");
-        try {
-            if (batch == nullptr) {
-                ThrowInfo(
-                    DataFormatBroken,
-                    "disk vector source produced a null field-data batch");
-            }
-            if (!CompatibleVectorType(batch->get_data_type(), field_type_)) {
-                ThrowInfo(DataFormatBroken,
-                          "disk vector source type {} disagrees with {}",
-                          batch->get_data_type(),
-                          field_type_);
-            }
-            if (!nullable_ && batch->IsNullable()) {
-                ThrowInfo(DataFormatBroken,
-                          "non-nullable disk vector source produced nullable "
-                          "field data");
-            }
-            const auto logical_rows = batch->Length();
-            const auto next_logical = CheckedAdd(
-                logical_rows_, logical_rows, "disk vector logical row");
-            if (static_cast<uint64_t>(next_logical) >
-                static_cast<uint64_t>(expected_rows_)) {
-                ThrowInfo(DataFormatBroken,
-                          "disk vector source exceeds expected row count {}",
-                          expected_rows_);
-            }
-
-            const auto physical_rows =
-                batch->IsNullable() ? CheckedSize(batch->get_valid_rows(),
-                                                  "valid vector row count")
-                                    : logical_rows;
-            if (physical_rows > logical_rows) {
-                ThrowInfo(DataFormatBroken,
-                          "disk vector batch has {} physical rows for {} "
-                          "logical rows",
-                          physical_rows,
-                          logical_rows);
-            }
-            const auto* valid = UnpackValidity(*batch, logical_rows);
-            size_t counted_valid = logical_rows;
-            if (valid != nullptr) {
-                counted_valid = 0;
-                for (size_t row = 0; row < logical_rows; ++row) {
-                    counted_valid += valid[row] ? 1 : 0;
-                }
-            }
-            if (counted_valid != physical_rows) {
-                ThrowInfo(DataFormatBroken,
-                          "disk vector validity has {} rows, field data has {} "
-                          "physical rows",
-                          counted_valid,
-                          physical_rows);
-            }
-
-            size_t batch_vectors = physical_rows;
-            if (embedding_list_) {
-                batch_vectors = ValidateEmbeddingList(*batch, physical_rows);
-            } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
-                ValidateSparse(*batch, physical_rows);
-                const auto* sparse =
-                    dynamic_cast<const FieldData<SparseFloatVector>*>(
-                        batch.get());
-                raw_dim_ = std::max(raw_dim_, sparse->Dim());
-            } else {
-                ValidateDense(*batch, physical_rows);
-            }
-            const auto next_physical = CheckedAdd(
-                physical_rows_, batch_vectors, "disk vector physical row");
-            if (next_physical > std::numeric_limits<uint32_t>::max()) {
-                ThrowInfo(Unsupported,
-                          "disk vector physical row count {} exceeds uint32 "
-                          "wire format",
-                          next_physical);
-            }
-
-            AppendValidity(logical_rows, valid);
-            if (primary_layout_.has_value()) {
-                primary_layout_->Append(logical_rows,
-                                        ValidityView::FromExpanded(valid));
-            }
-            if (embedding_list_) {
-                WriteEmbeddingList(*batch, physical_rows);
-            } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
-                WriteSparse(*batch, physical_rows);
-            } else {
-                raw_file_->Write(batch->Data(),
-                                 static_cast<size_t>(batch->DataSize()));
-            }
-            logical_rows_ = next_logical;
-            physical_rows_ = next_physical;
-        } catch (...) {
-            state_ = State::Failed;
-            throw;
+    AssertState(State::Feeding, "add primary input to");
+    try {
+        if (batch == nullptr) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector source produced a null field-data batch");
         }
+        if (!CompatibleVectorType(batch->get_data_type(), field_type_)) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector source type {} disagrees with {}",
+                      batch->get_data_type(),
+                      field_type_);
+        }
+        if (!nullable_ && batch->IsNullable()) {
+            ThrowInfo(DataFormatBroken,
+                      "non-nullable disk vector source produced nullable "
+                      "field data");
+        }
+        const auto logical_rows = batch->Length();
+        const auto next_logical =
+            CheckedAdd(logical_rows_, logical_rows, "disk vector logical row");
+        if (static_cast<uint64_t>(next_logical) >
+            static_cast<uint64_t>(expected_rows_)) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector source exceeds expected row count {}",
+                      expected_rows_);
+        }
+
+        const auto physical_rows =
+            batch->IsNullable()
+                ? CheckedSize(batch->get_valid_rows(), "valid vector row count")
+                : logical_rows;
+        if (physical_rows > logical_rows) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector batch has {} physical rows for {} "
+                      "logical rows",
+                      physical_rows,
+                      logical_rows);
+        }
+        const auto* valid = UnpackValidity(*batch, logical_rows);
+        size_t counted_valid = logical_rows;
+        if (valid != nullptr) {
+            counted_valid = 0;
+            for (size_t row = 0; row < logical_rows; ++row) {
+                counted_valid += valid[row] ? 1 : 0;
+            }
+        }
+        if (counted_valid != physical_rows) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector validity has {} rows, field data has {} "
+                      "physical rows",
+                      counted_valid,
+                      physical_rows);
+        }
+
+        size_t batch_vectors = physical_rows;
+        if (embedding_list_) {
+            batch_vectors = ValidateEmbeddingList(*batch, physical_rows);
+        } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
+            ValidateSparse(*batch, physical_rows);
+            const auto* sparse =
+                dynamic_cast<const FieldData<SparseFloatVector>*>(batch.get());
+            raw_dim_ = std::max(raw_dim_, sparse->Dim());
+        } else {
+            ValidateDense(*batch, physical_rows);
+        }
+        const auto next_physical = CheckedAdd(
+            physical_rows_, batch_vectors, "disk vector physical row");
+        if (next_physical > std::numeric_limits<uint32_t>::max()) {
+            ThrowInfo(Unsupported,
+                      "disk vector physical row count {} exceeds uint32 "
+                      "wire format",
+                      next_physical);
+        }
+
+        AppendValidity(logical_rows, valid);
+        if (primary_layout_.has_value()) {
+            primary_layout_->Append(logical_rows,
+                                    ValidityView::FromExpanded(valid));
+        }
+        if (embedding_list_) {
+            WriteEmbeddingList(*batch, physical_rows);
+        } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
+            WriteSparse(*batch, physical_rows);
+        } else {
+            raw_file_->Write(batch->Data(),
+                             static_cast<size_t>(batch->DataSize()));
+        }
+        logical_rows_ = next_logical;
+        physical_rows_ = next_physical;
+    } catch (...) {
+        state_ = State::Failed;
+        throw;
     }
+}
 
 void
 VectorDiskBuildMaterializer::FinishPrimary() {
-        AssertState(State::Feeding, "finish primary input on");
-        try {
-            if (logical_rows_ != static_cast<size_t>(expected_rows_)) {
-                ThrowInfo(DataFormatBroken,
-                          "disk vector source produced {} rows, expected {}",
-                          logical_rows_,
-                          expected_rows_);
-            }
-            if (logical_rows_ == 0) {
-                ThrowInfo(DataIsEmpty,
-                          "cannot build an empty disk vector index");
-            }
-            AssertInfo(raw_dim_ <= std::numeric_limits<uint32_t>::max(),
-                       "disk vector dimension {} exceeds uint32 wire format",
-                       raw_dim_);
-            const uint32_t header[2] = {static_cast<uint32_t>(physical_rows_),
-                                        static_cast<uint32_t>(raw_dim_)};
-            raw_file_->WriteAt(header, sizeof(header), 0);
-            raw_file_->Close();
-            raw_file_.reset();
-
-            if (nullable_) {
-                valid_path_ = (std::filesystem::path(owner_->Path()) /
-                               "valid_data_input")
-                                  .string();
-                const auto logical = static_cast<uint64_t>(logical_rows_);
-                WriteWholeFile(valid_path_,
-                               &logical,
-                               sizeof(logical),
-                               validity_.data(),
-                               validity_.size());
-            }
-
-            all_null_ = nullable_ && physical_valid_parents_ == 0;
-            empty_embedding_list_ =
-                embedding_list_ && !all_null_ && physical_rows_ == 0;
-            if (embedding_list_ && !all_null_) {
-                AssertInfo(offsets_.size() == physical_valid_parents_ + 1 &&
-                               offsets_.front() == 0 &&
-                               offsets_.back() == physical_rows_,
-                           "disk VECTOR_ARRAY offsets disagree with primary "
-                           "row counts");
-                offsets_path_ = (std::filesystem::path(owner_->Path()) /
-                                 "emb_list_offsets_input")
-                                    .string();
-                const auto count = offsets_.size();
-                AssertInfo(count <= std::numeric_limits<size_t>::max() /
-                                        sizeof(size_t),
-                           "disk VECTOR_ARRAY offset bytes overflow size_t");
-                WriteWholeFile(offsets_path_,
-                               &count,
-                               sizeof(count),
-                               offsets_.data(),
-                               count * sizeof(size_t));
-            }
-            state_ = State::PrimaryFinished;
-        } catch (...) {
-            state_ = State::Failed;
-            throw;
+    AssertState(State::Feeding, "finish primary input on");
+    try {
+        if (logical_rows_ != static_cast<size_t>(expected_rows_)) {
+            ThrowInfo(DataFormatBroken,
+                      "disk vector source produced {} rows, expected {}",
+                      logical_rows_,
+                      expected_rows_);
         }
+        if (logical_rows_ == 0) {
+            ThrowInfo(DataIsEmpty, "cannot build an empty disk vector index");
+        }
+        AssertInfo(raw_dim_ <= std::numeric_limits<uint32_t>::max(),
+                   "disk vector dimension {} exceeds uint32 wire format",
+                   raw_dim_);
+        const uint32_t header[2] = {static_cast<uint32_t>(physical_rows_),
+                                    static_cast<uint32_t>(raw_dim_)};
+        raw_file_->WriteAt(header, sizeof(header), 0);
+        raw_file_->Close();
+        raw_file_.reset();
+
+        if (nullable_) {
+            valid_path_ =
+                (std::filesystem::path(owner_->Path()) / "valid_data_input")
+                    .string();
+            const auto logical = static_cast<uint64_t>(logical_rows_);
+            WriteWholeFile(valid_path_,
+                           &logical,
+                           sizeof(logical),
+                           validity_.data(),
+                           validity_.size());
+        }
+
+        all_null_ = nullable_ && physical_valid_parents_ == 0;
+        empty_embedding_list_ =
+            embedding_list_ && !all_null_ && physical_rows_ == 0;
+        if (embedding_list_ && !all_null_) {
+            AssertInfo(offsets_.size() == physical_valid_parents_ + 1 &&
+                           offsets_.front() == 0 &&
+                           offsets_.back() == physical_rows_,
+                       "disk VECTOR_ARRAY offsets disagree with primary "
+                       "row counts");
+            offsets_path_ = (std::filesystem::path(owner_->Path()) /
+                             "emb_list_offsets_input")
+                                .string();
+            const auto count = offsets_.size();
+            AssertInfo(
+                count <= std::numeric_limits<size_t>::max() / sizeof(size_t),
+                "disk VECTOR_ARRAY offset bytes overflow size_t");
+            WriteWholeFile(offsets_path_,
+                           &count,
+                           sizeof(count),
+                           offsets_.data(),
+                           count * sizeof(size_t));
+        }
+        state_ = State::PrimaryFinished;
+    } catch (...) {
+        state_ = State::Failed;
+        throw;
     }
+}
 
 bool
 VectorDiskBuildMaterializer::RequiresEngineBuild() const {
-        AssertState(State::PrimaryFinished, "inspect primary input on");
-        return !all_null_ && !empty_embedding_list_;
-    }
+    AssertState(State::PrimaryFinished, "inspect primary input on");
+    return !all_null_ && !empty_embedding_list_;
+}
 
 const VectorPrimaryLayout&
 VectorDiskBuildMaterializer::PrimaryLayout() const {
-        AssertState(State::PrimaryFinished, "read primary layout from");
-        AssertInfo(primary_layout_.has_value(),
-                   "disk vector materializer did not declare side input");
-        return *primary_layout_;
-    }
+    AssertState(State::PrimaryFinished, "read primary layout from");
+    AssertInfo(primary_layout_.has_value(),
+               "disk vector materializer did not declare side input");
+    return *primary_layout_;
+}
 
 void
 VectorDiskBuildMaterializer::SetScalarInfo(VectorScalarInfo scalar_info) {
-        AssertState(State::PrimaryFinished, "set scalar info on");
-        try {
-            AssertInfo(side_input_declared_,
-                       "disk vector materializer did not declare side input");
-            AssertInfo(!scalar_info_path_.has_value(),
-                       "disk vector scalar info was already delivered");
-            AssertInfo(RequiresEngineBuild(),
-                       "disk vector scalar info is unnecessary for an empty "
-                       "engine build");
-            if (scalar_info.empty()) {
-                scalar_info_path_ = std::string();
-                return;
-            }
-            if (scalar_info.size() != 1) {
-                ThrowInfo(Unsupported,
-                          "disk vector optional format supports one field");
-            }
-            if (scalar_info.begin()->second.empty()) {
-                scalar_info_path_ = std::string();
-                return;
-            }
-            const auto& [field_id, groups] = *scalar_info.begin();
-            if (groups.size() > std::numeric_limits<uint32_t>::max()) {
-                ThrowInfo(Unsupported,
-                          "disk vector optional category count exceeds uint32");
-            }
-            for (const auto& group : groups) {
-                if (group.size() > std::numeric_limits<uint32_t>::max()) {
-                    ThrowInfo(Unsupported,
-                              "disk vector optional category size exceeds "
-                              "uint32");
-                }
-            }
-
-            auto path = (std::filesystem::path(owner_->Path()) /
-                         "opt_fields_input")
-                            .string();
-            OutputFile file(path);
-            const uint8_t version = 0;
-            const uint32_t field_count = 1;
-            const auto category_count = static_cast<uint32_t>(groups.size());
-            file.Write(&version, sizeof(version));
-            file.Write(&field_count, sizeof(field_count));
-            file.Write(&field_id, sizeof(field_id));
-            file.Write(&category_count, sizeof(category_count));
-            for (const auto& group : groups) {
-                const auto count = static_cast<uint32_t>(group.size());
-                file.Write(&count, sizeof(count));
-                file.Write(group.data(), group.size() * sizeof(uint32_t));
-            }
-            file.Close();
-            scalar_info_path_ = std::move(path);
-        } catch (...) {
-            state_ = State::Failed;
-            throw;
+    AssertState(State::PrimaryFinished, "set scalar info on");
+    try {
+        AssertInfo(side_input_declared_,
+                   "disk vector materializer did not declare side input");
+        AssertInfo(!scalar_info_path_.has_value(),
+                   "disk vector scalar info was already delivered");
+        AssertInfo(RequiresEngineBuild(),
+                   "disk vector scalar info is unnecessary for an empty "
+                   "engine build");
+        if (scalar_info.empty()) {
+            scalar_info_path_ = std::string();
+            return;
         }
+        if (scalar_info.size() != 1) {
+            ThrowInfo(Unsupported,
+                      "disk vector optional format supports one field");
+        }
+        if (scalar_info.begin()->second.empty()) {
+            scalar_info_path_ = std::string();
+            return;
+        }
+        const auto& [field_id, groups] = *scalar_info.begin();
+        if (groups.size() > std::numeric_limits<uint32_t>::max()) {
+            ThrowInfo(Unsupported,
+                      "disk vector optional category count exceeds uint32");
+        }
+        for (const auto& group : groups) {
+            if (group.size() > std::numeric_limits<uint32_t>::max()) {
+                ThrowInfo(Unsupported,
+                          "disk vector optional category size exceeds "
+                          "uint32");
+            }
+        }
+
+        auto path = (std::filesystem::path(owner_->Path()) / "opt_fields_input")
+                        .string();
+        OutputFile file(path);
+        const uint8_t version = 0;
+        const uint32_t field_count = 1;
+        const auto category_count = static_cast<uint32_t>(groups.size());
+        file.Write(&version, sizeof(version));
+        file.Write(&field_count, sizeof(field_count));
+        file.Write(&field_id, sizeof(field_id));
+        file.Write(&category_count, sizeof(category_count));
+        for (const auto& group : groups) {
+            const auto count = static_cast<uint32_t>(group.size());
+            file.Write(&count, sizeof(count));
+            file.Write(group.data(), group.size() * sizeof(uint32_t));
+        }
+        file.Close();
+        scalar_info_path_ = std::move(path);
+    } catch (...) {
+        state_ = State::Failed;
+        throw;
     }
+}
 
 VectorDiskBuildInputs
 VectorDiskBuildMaterializer::TakeInputs() {
-        AssertState(State::PrimaryFinished, "take inputs from");
-        if (RequiresEngineBuild() && side_input_declared_) {
-            AssertInfo(scalar_info_path_.has_value(),
-                       "disk vector scalar info was not delivered");
-        }
-        state_ = State::Consumed;
-        VectorDiskBuildInputs result{
-            .owner = std::move(owner_),
-            .raw_path = std::move(raw_path_),
-            .valid_path = valid_path_.empty() ? std::nullopt
-                                              : std::optional<std::string>(
-                                                    std::move(valid_path_)),
-            .offsets_path =
-                offsets_path_.empty()
-                    ? std::nullopt
-                    : std::optional<std::string>(std::move(offsets_path_)),
-            .scalar_info_path = std::move(scalar_info_path_)};
-        std::vector<uint8_t>().swap(validity_);
-        std::vector<size_t>().swap(offsets_);
-        primary_layout_.reset();
-        validity_scratch_.reset();
-        validity_scratch_capacity_ = 0;
-        return result;
+    AssertState(State::PrimaryFinished, "take inputs from");
+    if (RequiresEngineBuild() && side_input_declared_) {
+        AssertInfo(scalar_info_path_.has_value(),
+                   "disk vector scalar info was not delivered");
     }
+    state_ = State::Consumed;
+    VectorDiskBuildInputs result{
+        .owner = std::move(owner_),
+        .raw_path = std::move(raw_path_),
+        .valid_path = valid_path_.empty()
+                          ? std::nullopt
+                          : std::optional<std::string>(std::move(valid_path_)),
+        .offsets_path = offsets_path_.empty() ? std::nullopt
+                                              : std::optional<std::string>(
+                                                    std::move(offsets_path_)),
+        .scalar_info_path = std::move(scalar_info_path_)};
+    std::vector<uint8_t>().swap(validity_);
+    std::vector<size_t>().swap(offsets_);
+    primary_layout_.reset();
+    validity_scratch_.reset();
+    validity_scratch_capacity_ = 0;
+    return result;
+}
 
 void
 VectorDiskBuildMaterializer::AssertState(State expected,
                                          const char* operation) const {
-        AssertInfo(state_ != State::MovedFrom,
-                   "disk vector materializer was moved from");
-        AssertInfo(state_ == expected,
-                   "cannot {} a disk vector materializer in state {}",
-                   operation,
-                   static_cast<int>(state_));
-    }
+    AssertInfo(state_ != State::MovedFrom,
+               "disk vector materializer was moved from");
+    AssertInfo(state_ == expected,
+               "cannot {} a disk vector materializer in state {}",
+               operation,
+               static_cast<int>(state_));
+}
 
 const bool*
 VectorDiskBuildMaterializer::UnpackValidity(FieldDataBase& batch,
                                             size_t logical_rows) {
-        const auto* packed = batch.IsNullable() ? batch.ValidData() : nullptr;
-        AssertInfo(
-            !batch.IsNullable() || logical_rows == 0 || packed != nullptr,
-            "nullable disk vector batch has no validity bitmap");
-        if (!batch.IsNullable()) {
-            return nullptr;
-        }
-        if (logical_rows > validity_scratch_capacity_) {
-            validity_scratch_ = std::make_unique<bool[]>(logical_rows);
-            validity_scratch_capacity_ = logical_rows;
-        }
-        for (size_t row = 0; row < logical_rows; ++row) {
-            validity_scratch_[row] =
-                ((packed[row >> 3] >> static_cast<unsigned>(row & 7)) & 1U) !=
-                0;
-        }
-        return validity_scratch_.get();
+    const auto* packed = batch.IsNullable() ? batch.ValidData() : nullptr;
+    AssertInfo(!batch.IsNullable() || logical_rows == 0 || packed != nullptr,
+               "nullable disk vector batch has no validity bitmap");
+    if (!batch.IsNullable()) {
+        return nullptr;
     }
+    if (logical_rows > validity_scratch_capacity_) {
+        validity_scratch_ = std::make_unique<bool[]>(logical_rows);
+        validity_scratch_capacity_ = logical_rows;
+    }
+    for (size_t row = 0; row < logical_rows; ++row) {
+        validity_scratch_[row] =
+            ((packed[row >> 3] >> static_cast<unsigned>(row & 7)) & 1U) != 0;
+    }
+    return validity_scratch_.get();
+}
 
 void
 VectorDiskBuildMaterializer::AppendValidity(size_t logical_rows,
                                             const bool* valid) {
-        if (!nullable_) {
-            physical_valid_parents_ = CheckedAdd(
-                physical_valid_parents_, logical_rows, "valid parent row");
-            return;
-        }
-        const auto next_rows =
-            CheckedAdd(logical_rows_, logical_rows, "disk vector validity row");
-        if (next_rows > std::numeric_limits<size_t>::max() - 7) {
-            ThrowInfo(DataFormatBroken,
-                      "disk vector validity byte count overflows size_t");
-        }
-        validity_.resize((next_rows + 7) / 8, 0);
-        size_t added_valid = 0;
-        for (size_t row = 0; row < logical_rows; ++row) {
-            if (valid == nullptr || valid[row]) {
-                const auto bit = logical_rows_ + row;
-                validity_[bit >> 3] |=
-                    static_cast<uint8_t>(1U << static_cast<unsigned>(bit & 7));
-                ++added_valid;
-            }
-        }
+    if (!nullable_) {
         physical_valid_parents_ = CheckedAdd(
-            physical_valid_parents_, added_valid, "valid parent row");
+            physical_valid_parents_, logical_rows, "valid parent row");
+        return;
     }
+    const auto next_rows =
+        CheckedAdd(logical_rows_, logical_rows, "disk vector validity row");
+    if (next_rows > std::numeric_limits<size_t>::max() - 7) {
+        ThrowInfo(DataFormatBroken,
+                  "disk vector validity byte count overflows size_t");
+    }
+    validity_.resize((next_rows + 7) / 8, 0);
+    size_t added_valid = 0;
+    for (size_t row = 0; row < logical_rows; ++row) {
+        if (valid == nullptr || valid[row]) {
+            const auto bit = logical_rows_ + row;
+            validity_[bit >> 3] |=
+                static_cast<uint8_t>(1U << static_cast<unsigned>(bit & 7));
+            ++added_valid;
+        }
+    }
+    physical_valid_parents_ =
+        CheckedAdd(physical_valid_parents_, added_valid, "valid parent row");
+}
 
 void
 VectorDiskBuildMaterializer::ValidateDense(FieldDataBase& batch,
                                            size_t physical_rows) const {
-        if (batch.get_dim() != dim_) {
-            ThrowInfo(DataFormatBroken,
-                      "disk vector dimension {} disagrees with {}",
-                      batch.get_dim(),
-                      dim_);
-        }
-        const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
-        if (physical_rows != 0 &&
-            row_bytes > std::numeric_limits<size_t>::max() / physical_rows) {
-            ThrowInfo(DataFormatBroken,
-                      "disk vector batch byte count overflows size_t");
-        }
-        const auto expected = physical_rows * row_bytes;
-        if (batch.DataSize() < 0 ||
-            static_cast<uint64_t>(batch.DataSize()) != expected) {
-            ThrowInfo(DataFormatBroken,
-                      "disk vector batch has {} bytes, expected {}",
-                      batch.DataSize(),
-                      expected);
-        }
-        AssertInfo(batch.Data() != nullptr || expected == 0,
-                   "disk vector batch has null data for {} bytes",
-                   expected);
+    if (batch.get_dim() != dim_) {
+        ThrowInfo(DataFormatBroken,
+                  "disk vector dimension {} disagrees with {}",
+                  batch.get_dim(),
+                  dim_);
     }
+    const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
+    if (physical_rows != 0 &&
+        row_bytes > std::numeric_limits<size_t>::max() / physical_rows) {
+        ThrowInfo(DataFormatBroken,
+                  "disk vector batch byte count overflows size_t");
+    }
+    const auto expected = physical_rows * row_bytes;
+    if (batch.DataSize() < 0 ||
+        static_cast<uint64_t>(batch.DataSize()) != expected) {
+        ThrowInfo(DataFormatBroken,
+                  "disk vector batch has {} bytes, expected {}",
+                  batch.DataSize(),
+                  expected);
+    }
+    AssertInfo(batch.Data() != nullptr || expected == 0,
+               "disk vector batch has null data for {} bytes",
+               expected);
+}
 
 void
 VectorDiskBuildMaterializer::ValidateSparse(FieldDataBase& batch,
                                             size_t physical_rows) const {
-        auto* sparse = dynamic_cast<FieldData<SparseFloatVector>*>(&batch);
-        AssertInfo(sparse != nullptr,
-                   "sparse disk vector field-data has the wrong layout");
-        if (sparse->Dim() < 0 || (dim_ > 0 && sparse->Dim() > dim_)) {
-            ThrowInfo(DataFormatBroken,
-                      "sparse disk vector dimension {} exceeds {}",
-                      sparse->Dim(),
-                      dim_);
-        }
-        const auto* rows = static_cast<
-            const knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>*>(
-            batch.Data());
-        AssertInfo(rows != nullptr || physical_rows == 0,
-                   "sparse disk vector batch has null physical data");
-        size_t data_bytes = 0;
-        for (size_t row = 0; row < physical_rows; ++row) {
-            if (rows[row].size() > std::numeric_limits<uint32_t>::max()) {
-                ThrowInfo(Unsupported,
-                          "sparse disk vector row {} nnz exceeds uint32",
-                          row);
-            }
-            data_bytes = CheckedAdd(
-                data_bytes, rows[row].data_byte_size(), "sparse vector byte");
-        }
-        if (batch.DataSize() < 0 ||
-            static_cast<uint64_t>(batch.DataSize()) != data_bytes) {
-            ThrowInfo(DataFormatBroken,
-                      "sparse disk vector batch has {} bytes, expected {}",
-                      batch.DataSize(),
-                      data_bytes);
-        }
+    auto* sparse = dynamic_cast<FieldData<SparseFloatVector>*>(&batch);
+    AssertInfo(sparse != nullptr,
+               "sparse disk vector field-data has the wrong layout");
+    if (sparse->Dim() < 0 || (dim_ > 0 && sparse->Dim() > dim_)) {
+        ThrowInfo(DataFormatBroken,
+                  "sparse disk vector dimension {} exceeds {}",
+                  sparse->Dim(),
+                  dim_);
     }
+    const auto* rows = static_cast<
+        const knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>*>(
+        batch.Data());
+    AssertInfo(rows != nullptr || physical_rows == 0,
+               "sparse disk vector batch has null physical data");
+    size_t data_bytes = 0;
+    for (size_t row = 0; row < physical_rows; ++row) {
+        if (rows[row].size() > std::numeric_limits<uint32_t>::max()) {
+            ThrowInfo(Unsupported,
+                      "sparse disk vector row {} nnz exceeds uint32",
+                      row);
+        }
+        data_bytes = CheckedAdd(
+            data_bytes, rows[row].data_byte_size(), "sparse vector byte");
+    }
+    if (batch.DataSize() < 0 ||
+        static_cast<uint64_t>(batch.DataSize()) != data_bytes) {
+        ThrowInfo(DataFormatBroken,
+                  "sparse disk vector batch has {} bytes, expected {}",
+                  batch.DataSize(),
+                  data_bytes);
+    }
+}
 
 size_t
 VectorDiskBuildMaterializer::ValidateEmbeddingList(
     FieldDataBase& batch, size_t physical_parents) const {
-        auto* arrays = dynamic_cast<FieldData<VectorArray>*>(&batch);
-        AssertInfo(arrays != nullptr,
-                   "disk VECTOR_ARRAY field-data has the wrong layout");
-        if (arrays->get_element_type() != value_type_ ||
-            arrays->get_dim() != dim_) {
-            ThrowInfo(DataFormatBroken,
-                      "disk VECTOR_ARRAY element type/dimension disagrees "
-                      "with the request");
-        }
-        const auto* values = static_cast<const VectorArray*>(batch.Data());
-        AssertInfo(values != nullptr || physical_parents == 0,
-                   "disk VECTOR_ARRAY batch has null compact values");
-        size_t vectors = 0;
-        size_t bytes = 0;
-        const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
-        for (size_t row = 0; row < physical_parents; ++row) {
-            const auto& value = values[row];
-            if (value.get_element_type() != value_type_ ||
-                value.dim() != dim_ || value.physical_length() < 0) {
-                ThrowInfo(DataFormatBroken,
-                          "disk VECTOR_ARRAY value {} has invalid shape",
-                          row);
-            }
-            const auto count = static_cast<size_t>(value.physical_length());
-            if (count != 0 &&
-                row_bytes > std::numeric_limits<size_t>::max() / count) {
-                ThrowInfo(DataFormatBroken,
-                          "disk VECTOR_ARRAY value {} byte count overflows",
-                          row);
-            }
-            const auto expected = count * row_bytes;
-            if (value.byte_size() != expected ||
-                (value.data() == nullptr && expected != 0)) {
-                ThrowInfo(DataFormatBroken,
-                          "disk VECTOR_ARRAY value {} has {} bytes, expected "
-                          "{}",
-                          row,
-                          value.byte_size(),
-                          expected);
-            }
-            vectors = CheckedAdd(vectors, count, "VECTOR_ARRAY vector");
-            bytes = CheckedAdd(bytes, expected, "VECTOR_ARRAY byte");
-        }
-        if (batch.DataSize() < 0 ||
-            static_cast<uint64_t>(batch.DataSize()) != bytes) {
-            ThrowInfo(DataFormatBroken,
-                      "disk VECTOR_ARRAY batch has {} bytes, expected {}",
-                      batch.DataSize(),
-                      bytes);
-        }
-        return vectors;
+    auto* arrays = dynamic_cast<FieldData<VectorArray>*>(&batch);
+    AssertInfo(arrays != nullptr,
+               "disk VECTOR_ARRAY field-data has the wrong layout");
+    if (arrays->get_element_type() != value_type_ ||
+        arrays->get_dim() != dim_) {
+        ThrowInfo(DataFormatBroken,
+                  "disk VECTOR_ARRAY element type/dimension disagrees "
+                  "with the request");
     }
+    const auto* values = static_cast<const VectorArray*>(batch.Data());
+    AssertInfo(values != nullptr || physical_parents == 0,
+               "disk VECTOR_ARRAY batch has null compact values");
+    size_t vectors = 0;
+    size_t bytes = 0;
+    const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
+    for (size_t row = 0; row < physical_parents; ++row) {
+        const auto& value = values[row];
+        if (value.get_element_type() != value_type_ || value.dim() != dim_ ||
+            value.physical_length() < 0) {
+            ThrowInfo(DataFormatBroken,
+                      "disk VECTOR_ARRAY value {} has invalid shape",
+                      row);
+        }
+        const auto count = static_cast<size_t>(value.physical_length());
+        if (count != 0 &&
+            row_bytes > std::numeric_limits<size_t>::max() / count) {
+            ThrowInfo(DataFormatBroken,
+                      "disk VECTOR_ARRAY value {} byte count overflows",
+                      row);
+        }
+        const auto expected = count * row_bytes;
+        if (value.byte_size() != expected ||
+            (value.data() == nullptr && expected != 0)) {
+            ThrowInfo(DataFormatBroken,
+                      "disk VECTOR_ARRAY value {} has {} bytes, expected "
+                      "{}",
+                      row,
+                      value.byte_size(),
+                      expected);
+        }
+        vectors = CheckedAdd(vectors, count, "VECTOR_ARRAY vector");
+        bytes = CheckedAdd(bytes, expected, "VECTOR_ARRAY byte");
+    }
+    if (batch.DataSize() < 0 ||
+        static_cast<uint64_t>(batch.DataSize()) != bytes) {
+        ThrowInfo(DataFormatBroken,
+                  "disk VECTOR_ARRAY batch has {} bytes, expected {}",
+                  batch.DataSize(),
+                  bytes);
+    }
+    return vectors;
+}
 
 void
 VectorDiskBuildMaterializer::WriteSparse(FieldDataBase& batch,
                                          size_t physical_rows) {
-        const auto* rows = static_cast<
-            const knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>*>(
-            batch.Data());
-        for (size_t row = 0; row < physical_rows; ++row) {
-            const auto nnz = static_cast<uint32_t>(rows[row].size());
-            raw_file_->Write(&nnz, sizeof(nnz));
-            raw_file_->Write(rows[row].data(), rows[row].data_byte_size());
-        }
+    const auto* rows = static_cast<
+        const knowhere::sparse::SparseRow<sparse_u32_f32::ValueType>*>(
+        batch.Data());
+    for (size_t row = 0; row < physical_rows; ++row) {
+        const auto nnz = static_cast<uint32_t>(rows[row].size());
+        raw_file_->Write(&nnz, sizeof(nnz));
+        raw_file_->Write(rows[row].data(), rows[row].data_byte_size());
     }
+}
 
 void
 VectorDiskBuildMaterializer::WriteEmbeddingList(FieldDataBase& batch,
                                                 size_t physical_parents) {
-        const auto* values = static_cast<const VectorArray*>(batch.Data());
-        for (size_t row = 0; row < physical_parents; ++row) {
-            raw_file_->Write(values[row].data(), values[row].byte_size());
-            offsets_.push_back(
-                CheckedAdd(offsets_.back(),
-                           static_cast<size_t>(values[row].physical_length()),
-                           "VECTOR_ARRAY offset"));
-        }
+    const auto* values = static_cast<const VectorArray*>(batch.Data());
+    for (size_t row = 0; row < physical_parents; ++row) {
+        raw_file_->Write(values[row].data(), values[row].byte_size());
+        offsets_.push_back(
+            CheckedAdd(offsets_.back(),
+                       static_cast<size_t>(values[row].physical_length()),
+                       "VECTOR_ARRAY offset"));
     }
+}
 
 VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
     std::string staging_parent,
@@ -770,12 +761,11 @@ VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
         input_spec_ = builder->InputSpec();
         builder_ = std::move(builder);
     };
-    index::DispatchPhysicalVectorDataType(
-        value_type, create_builder, [&] {
-            ThrowInfo(DataTypeInvalid,
-                      "unsupported disk vector build value type {}",
-                      value_type);
-        });
+    index::DispatchPhysicalVectorDataType(value_type, create_builder, [&] {
+        ThrowInfo(DataTypeInvalid,
+                  "unsupported disk vector build value type {}",
+                  value_type);
+    });
     InitializeStaging(std::move(staging_parent),
                       field_type,
                       value_type,
@@ -802,8 +792,7 @@ VectorDiskBuildMaterializer::operator=(
 }
 
 void
-VectorDiskBuildMaterializer::Swap(
-    VectorDiskBuildMaterializer& other) noexcept {
+VectorDiskBuildMaterializer::Swap(VectorDiskBuildMaterializer& other) noexcept {
     using std::swap;
     swap(owner_, other.owner_);
     swap(raw_file_, other.raw_file_);

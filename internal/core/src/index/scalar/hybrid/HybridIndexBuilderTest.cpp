@@ -311,8 +311,7 @@ TEST(HybridIndexBuilderTest, JsonProjectionCountsOnlyCastableValidRows) {
         const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
         ASSERT_NE(json, nullptr);
         EXPECT_EQ(json->Exists("/a").count(), distinct + 10);
-        auto resolved =
-            json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
+        auto resolved = json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
         ASSERT_TRUE(resolved);
         const auto* predicate =
             dynamic_cast<const IScalarPredicateReader<double>*>(resolved.get());

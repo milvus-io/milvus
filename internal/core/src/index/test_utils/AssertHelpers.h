@@ -62,8 +62,7 @@ ExpectBitmap(TargetBitmap&& actual, const TargetBitmap& expected) {
 // IPatternMatchReader::PatternMatchIsExact): every expected row must be
 // present; extra rows are allowed because the consumer rechecks them.
 inline void
-ExpectBitmapSuperset(const TargetBitmap& actual,
-                     const TargetBitmap& expected) {
+ExpectBitmapSuperset(const TargetBitmap& actual, const TargetBitmap& expected) {
     ASSERT_EQ(actual.size(), expected.size());
     for (size_t i = 0; i < expected.size(); ++i) {
         if (expected[i]) {

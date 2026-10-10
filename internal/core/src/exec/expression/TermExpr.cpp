@@ -963,13 +963,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         arg_set_ = std::make_shared<FlatVectorElement<ReaderType>>(vals);
         arg_inited_ = true;
     }
-    auto execute_sub_batch = [](
-                                 const index::IScalarPredicateReader<ReaderType>*
-                                     reader,
-                                 const std::vector<ReaderType>& vals) {
-        TermIndexFunc<ReaderType> func;
-        return func(reader, vals.size(), vals.data());
-    };
+    auto execute_sub_batch =
+        [](const index::IScalarPredicateReader<ReaderType>* reader,
+           const std::vector<ReaderType>& vals) {
+            TermIndexFunc<ReaderType> func;
+            return func(reader, vals.size(), vals.data());
+        };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<ReaderType>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
@@ -978,8 +977,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    auto res =
-        ProcessIndexChunks<ReaderType>(execute_sub_batch, args->values_);
+    auto res = ProcessIndexChunks<ReaderType>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1010,13 +1008,14 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         arg_set_ = std::make_shared<FlatVectorElement<uint8_t>>(vals);
         arg_inited_ = true;
     }
-    auto execute_sub_batch = [](const index::IScalarPredicateReader<bool>* reader,
-                                const std::vector<uint8_t>& vals) {
-        TermIndexFunc<bool> func;
-        return func(reader,
-                    vals.size(),
-                    reinterpret_cast<const bool*>(vals.data()));
-    };
+    auto execute_sub_batch =
+        [](const index::IScalarPredicateReader<bool>* reader,
+           const std::vector<uint8_t>& vals) {
+            TermIndexFunc<bool> func;
+            return func(reader,
+                        vals.size(),
+                        reinterpret_cast<const bool*>(vals.data()));
+        };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
         MoveCursor();

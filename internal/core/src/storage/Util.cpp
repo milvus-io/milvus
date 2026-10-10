@@ -1743,9 +1743,8 @@ VisitFieldDataFromStorageV2Paged(
         // [offset, offset + max_rows) (#50088).
         std::vector<int64_t> selected_row_groups(row_group_num);
         if (max_rows == 0) {
-            std::iota(selected_row_groups.begin(),
-                      selected_row_groups.end(),
-                      0);
+            std::iota(
+                selected_row_groups.begin(), selected_row_groups.end(), 0);
         } else {
             selected_row_groups.clear();
             // Find the starting row group by walking through cumulative row
@@ -1811,8 +1810,7 @@ VisitFieldDataFromStorageV2Paged(
                                  channel,
                                  DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                  std::move(strategy),
-                                 std::vector<std::vector<int64_t>>{
-                                     {row_group}},
+                                 std::vector<std::vector<int64_t>>{{row_group}},
                                  fs,
                                  nullptr,
                                  milvus::proto::common::LoadPriority::HIGH);

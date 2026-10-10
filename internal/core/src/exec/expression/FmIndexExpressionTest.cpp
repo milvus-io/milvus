@@ -84,30 +84,36 @@ LoadSealedFMMatch(const std::vector<std::string>& rows,
     SealedFMMatch out;
     out.raw_files = std::make_unique<test::expr_index::RawFieldFiles>();
     out.schema = std::make_shared<Schema>();
-    out.varchar_id = out.schema->AddDebugField(
-        "fm_match", DataType::VARCHAR, nullable);
+    out.varchar_id =
+        out.schema->AddDebugField("fm_match", DataType::VARCHAR, nullable);
     if (ints != nullptr) {
         out.int_id = out.schema->AddDebugField("fm_int", DataType::INT64);
     }
     out.segment = segcore::CreateSealedSegment(out.schema);
     auto chunks = varchar_chunks;
     if (chunks.empty()) {
-        chunks.push_back(test::expr_index::StringField(rows, nullable,
-                                                       valid_bitmap));
+        chunks.push_back(
+            test::expr_index::StringField(rows, nullable, valid_bitmap));
     }
     auto raw_info = out.raw_files->Prepare(out.varchar_id, chunks);
     out.segment->LoadFieldData(raw_info);
     if (ints != nullptr) {
-        auto field = std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+        auto field =
+            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
         field->FillFieldData(ints->data(), ints->size());
         auto info = out.raw_files->Prepare(out.int_id, {field});
         out.segment->LoadFieldData(info);
     }
-    auto opened = test::expr_index::BuildIndex(
-        out.varchar_id, DataType::VARCHAR, index::FMINDEX_INDEX_TYPE, chunks,
-        {{index::FM_SA_SAMPLE_RATE, 8}}, DataType::NONE, false, true);
-    test::expr_index::InstallIndex(*out.segment, out.varchar_id,
-                                   DataType::VARCHAR, std::move(opened));
+    auto opened = test::expr_index::BuildIndex(out.varchar_id,
+                                               DataType::VARCHAR,
+                                               index::FMINDEX_INDEX_TYPE,
+                                               chunks,
+                                               {{index::FM_SA_SAMPLE_RATE, 8}},
+                                               DataType::NONE,
+                                               false,
+                                               true);
+    test::expr_index::InstallIndex(
+        *out.segment, out.varchar_id, DataType::VARCHAR, std::move(opened));
     return out;
 }
 
@@ -243,8 +249,8 @@ TEST(FmIndexExpressionTest, MatchCandidatesAreRecheckedAndSyntaxIsValidated) {
         auto parser = milvus::query::ProtoParser(schema);
         return parser.ParseExprs(*expr);
     };
-    EXPECT_TRUE(CompiledUseIndexCursor(
-        make_typed_expr("%ZEBRA%"), segment.get(), nb));
+    EXPECT_TRUE(
+        CompiledUseIndexCursor(make_typed_expr("%ZEBRA%"), segment.get(), nb));
     EXPECT_TRUE(CompiledUseIndexCursor(
         make_typed_expr("QOP%ZEBRA"), segment.get(), nb));
     auto run = [&](const std::string& value) {
@@ -304,8 +310,7 @@ TEST(FmIndexExpressionTest, RecheckHonorsBatchesAndConjunctionBitmap) {
     for (size_t i = 0; i < nb; i++) {
         ints[i] = static_cast<int64_t>(i);
     }
-    auto loaded =
-        LoadSealedFMMatch(rows, {}, false, nullptr, &ints);
+    auto loaded = LoadSealedFMMatch(rows, {}, false, nullptr, &ints);
 
     auto match_expr = MakeMatchTypedExpr(
         loaded.schema, loaded.varchar_id, "QOP%ZEBRA", false);
@@ -369,8 +374,7 @@ TEST(FmIndexExpressionTest, RecheckVisitsCandidatesAcrossRawChunks) {
     };
     std::vector<FieldDataPtr> chunks{
         chunk_of(0, 100), chunk_of(100, 200), chunk_of(200, 300)};
-    auto loaded = LoadSealedFMMatch(
-        rows, chunks, false, nullptr, nullptr);
+    auto loaded = LoadSealedFMMatch(rows, chunks, false, nullptr, nullptr);
     ASSERT_EQ(loaded.segment->num_chunk_data(loaded.varchar_id), 3);
 
     auto match_expr =
@@ -414,8 +418,8 @@ TEST(FmIndexExpressionTest, RecheckPreservesNullsAndSelectedOffsets) {
         }
     }
     rows[52] = filler + "ZEBRA";
-    auto loaded = LoadSealedFMMatch(
-        rows, {}, true, valid_bitmap.data(), nullptr);
+    auto loaded =
+        LoadSealedFMMatch(rows, {}, true, valid_bitmap.data(), nullptr);
     const size_t nb = rows.size();
     auto match_expr =
         MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", true);

@@ -81,9 +81,10 @@ class ScalarArtifactTransportTest : public ::testing::Test {
     ArtifactPtr
     Build(const std::vector<std::string_view>& values) const {
         const index::ScalarBuildBatch<std::string_view> batch{values, {}};
-        auto builder = index::BuilderRegistry<
-                           index::ScalarBuildInput<std::string_view>>::Instance()
-                           .Create(index::families::kMarisa, {});
+        auto builder =
+            index::BuilderRegistry<
+                index::ScalarBuildInput<std::string_view>>::Instance()
+                .Create(index::families::kMarisa, {});
         return std::move(*builder).Build({std::span(&batch, 1)});
     }
 
@@ -91,7 +92,8 @@ class ScalarArtifactTransportTest : public ::testing::Test {
     FileManagerContext context_;
 };
 
-TEST_F(ScalarArtifactTransportTest, MarisaCreatesMissingPublicationAndMmapParents) {
+TEST_F(ScalarArtifactTransportTest,
+       MarisaCreatesMissingPublicationAndMmapParents) {
     const std::vector<std::string_view> values{"alpha", "beta", "alpha"};
     auto artifact = Build(values);
     ASSERT_FALSE(std::filesystem::exists(root_->Path() + "/remote"));
@@ -100,9 +102,11 @@ TEST_F(ScalarArtifactTransportTest, MarisaCreatesMissingPublicationAndMmapParent
     ASSERT_FALSE(std::filesystem::exists(root_->Path() + "/missing"));
     auto reader = Load(path, true);
     ASSERT_NE(reader, nullptr);
-    ASSERT_TRUE(std::filesystem::is_directory(root_->Path() + "/missing/staging"));
-    const auto* predicate = dynamic_cast<
-        const index::IScalarPredicateReader<std::string_view>*>(reader.get());
+    ASSERT_TRUE(
+        std::filesystem::is_directory(root_->Path() + "/missing/staging"));
+    const auto* predicate =
+        dynamic_cast<const index::IScalarPredicateReader<std::string_view>*>(
+            reader.get());
     ASSERT_NE(predicate, nullptr);
     const std::string_view key = "alpha";
     const auto hits = predicate->In(1, &key);
@@ -122,20 +126,27 @@ TEST_F(ScalarArtifactTransportTest, MarisaPackedCodecPreservesQueries) {
         auto reader = Load(path, mmap);
         ASSERT_EQ(reader->Count(), values.size());
         const auto* predicate = dynamic_cast<
-            const index::IScalarPredicateReader<std::string_view>*>(reader.get());
+            const index::IScalarPredicateReader<std::string_view>*>(
+            reader.get());
         const auto* pattern =
             dynamic_cast<const index::IPatternMatchReader*>(reader.get());
         ASSERT_NE(predicate, nullptr);
         ASSERT_NE(pattern, nullptr);
-        EXPECT_EQ(predicate->In(values.size(), values.data()).count(), values.size());
+        EXPECT_EQ(predicate->In(values.size(), values.data()).count(),
+                  values.size());
         EXPECT_EQ(predicate->NotIn(values.size(), values.data()).count(), 0);
         const std::string_view absent = "100";
         EXPECT_EQ(predicate->In(1, &absent).count(), 0);
-        EXPECT_EQ(predicate->Range("0", index::CompareOp::GreaterEqual).count(), values.size());
-        EXPECT_EQ(predicate->Range("90", index::CompareOp::LessThan).count(), values.size());
-        EXPECT_EQ(predicate->Range("9", index::CompareOp::LessEqual).count(), values.size());
-        EXPECT_EQ(predicate->Range("0", true, "9", true).count(), values.size());
-        EXPECT_EQ(predicate->Range("0", true, "90", false).count(), values.size());
+        EXPECT_EQ(predicate->Range("0", index::CompareOp::GreaterEqual).count(),
+                  values.size());
+        EXPECT_EQ(predicate->Range("90", index::CompareOp::LessThan).count(),
+                  values.size());
+        EXPECT_EQ(predicate->Range("9", index::CompareOp::LessEqual).count(),
+                  values.size());
+        EXPECT_EQ(predicate->Range("0", true, "9", true).count(),
+                  values.size());
+        EXPECT_EQ(predicate->Range("0", true, "90", false).count(),
+                  values.size());
         for (size_t row = 0; row < values.size(); ++row) {
             const auto hits = pattern->PatternMatch(
                 values[row], index::PatternOp::PrefixMatch);

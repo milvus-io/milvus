@@ -37,8 +37,7 @@ namespace {
 TEST(TextIndexArtifactTest, WriterBudgetConstantsMatchBuildAndGrowingModes) {
     EXPECT_EQ(tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
               500UL * 1024 * 1024);
-    EXPECT_EQ(tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
-              15UL * 1024 * 1024);
+    EXPECT_EQ(tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES, 15UL * 1024 * 1024);
 }
 
 storage::ArtifactPtr

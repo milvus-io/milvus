@@ -60,7 +60,8 @@ DiskParams() {
 knowhere::DataSetPtr
 EmbeddingQueries(const std::vector<float>& values,
                  const std::vector<size_t>& offsets) {
-    auto dataset = knowhere::GenDataSet(values.size() / kDim, kDim, values.data());
+    auto dataset =
+        knowhere::GenDataSet(values.size() / kDim, kDim, values.data());
     dataset->Set(knowhere::meta::EMB_LIST_OFFSET, offsets.data());
     const auto count = static_cast<int64_t>(offsets.size() - 1);
     dataset->Set(knowhere::meta::EMB_LIST_COUNT, count);
@@ -98,11 +99,10 @@ ExpectEmptySearch(const index::IVectorReader& reader,
     reader.Search(queries, params, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, count);
     EXPECT_EQ(result.seg_offsets_.size(), count * params.topk_);
-    EXPECT_TRUE(std::all_of(result.seg_offsets_.begin(),
-                            result.seg_offsets_.end(),
-                            [](int64_t offset) {
-                                return offset == INVALID_SEG_OFFSET;
-                            }));
+    EXPECT_TRUE(std::all_of(
+        result.seg_offsets_.begin(),
+        result.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 }
 
 class VectorArrayBuildSessionTest : public SourceBuildTest {
@@ -110,17 +110,15 @@ class VectorArrayBuildSessionTest : public SourceBuildTest {
     PreparedBuild
     PrepareEmpty(bool nullable, bool disk) {
         auto prepared = Prepare(DataType::VECTOR_ARRAY,
-                                 DataType::VECTOR_FLOAT,
-                                 nullable,
-                                 disk ? knowhere::IndexEnum::INDEX_DISKANN
-                                      : knowhere::IndexEnum::INDEX_HNSW,
-                                 kEmptyRows,
-                                 kDim,
-                                 disk ? DiskParams() : HnswParams());
-        auto data = storage::CreateFieldData(DataType::VECTOR_ARRAY,
-                                             DataType::VECTOR_FLOAT,
-                                             nullable,
-                                             kDim);
+                                DataType::VECTOR_FLOAT,
+                                nullable,
+                                disk ? knowhere::IndexEnum::INDEX_DISKANN
+                                     : knowhere::IndexEnum::INDEX_HNSW,
+                                kEmptyRows,
+                                kDim,
+                                disk ? DiskParams() : HnswParams());
+        auto data = storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, nullable, kDim);
         std::vector<VectorArray> arrays;
         arrays.reserve(kEmptyRows);
         for (int64_t row = 0; row < kEmptyRows; ++row) {
@@ -165,9 +163,9 @@ TEST_F(VectorArrayBuildSessionTest, HnswAllNullParentsFromBinlog) {
     const std::vector<float> single_values(kDim, 0.1F);
     const std::vector<size_t> single_offsets{0, 1};
     ExpectEmptySearch(*reader,
-                       EmbeddingQueries(single_values, single_offsets),
-                       knowhere::metric::MAX_SIM,
-                       1);
+                      EmbeddingQueries(single_values, single_offsets),
+                      knowhere::metric::MAX_SIM,
+                      1);
 
     SearchInfo search;
     search.topk_ = 3;
@@ -185,17 +183,17 @@ TEST_F(VectorArrayBuildSessionTest, HnswAllNullParentsFromBinlog) {
     search.iterator_v2_info_ = SearchIteratorV2Info{"", 2};
     const std::vector<size_t> cached_offsets{0, 3};
     const auto cached_queries = EmbeddingQueries(values, cached_offsets);
-    query::CachedSearchIterator iterator(*reader, cached_queries, search, nullptr);
+    query::CachedSearchIterator iterator(
+        *reader, cached_queries, search, nullptr);
     SearchResult batch;
     iterator.NextBatch(search, batch);
     EXPECT_EQ(batch.total_nq_, 1);
     EXPECT_EQ(batch.unity_topK_, 2);
     ASSERT_EQ(batch.seg_offsets_.size(), 2);
-    EXPECT_TRUE(std::all_of(batch.seg_offsets_.begin(),
-                            batch.seg_offsets_.end(),
-                            [](int64_t offset) {
-                                return offset == INVALID_SEG_OFFSET;
-                            }));
+    EXPECT_TRUE(std::all_of(
+        batch.seg_offsets_.begin(),
+        batch.seg_offsets_.end(),
+        [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 }
 
 TEST_F(VectorArrayBuildSessionTest, HnswValidEmptyListsFromBinlog) {
@@ -226,9 +224,9 @@ TEST_F(VectorArrayBuildSessionTest, HnswValidEmptyListsFromBinlog) {
     const std::vector<size_t> single_offsets{0, 1};
     const std::vector<float> single_values(kDim, 0.1F);
     ExpectEmptySearch(*reader,
-                       EmbeddingQueries(single_values, single_offsets),
-                       knowhere::metric::MAX_SIM,
-                       1);
+                      EmbeddingQueries(single_values, single_offsets),
+                      knowhere::metric::MAX_SIM,
+                      1);
 }
 
 #ifdef BUILD_DISK_ANN
@@ -236,12 +234,12 @@ TEST_F(VectorArrayBuildSessionTest, DiskAnnNonemptyListsFromBinlog) {
     constexpr int64_t rows = 100;
     constexpr int64_t topk = 4;
     auto prepared = Prepare(DataType::VECTOR_ARRAY,
-                             DataType::VECTOR_FLOAT,
-                             false,
-                             knowhere::IndexEnum::INDEX_DISKANN,
-                             rows,
-                             kDim,
-                             DiskParams());
+                            DataType::VECTOR_FLOAT,
+                            false,
+                            knowhere::IndexEnum::INDEX_DISKANN,
+                            rows,
+                            kDim,
+                            DiskParams());
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
     std::vector<VectorArray> arrays;

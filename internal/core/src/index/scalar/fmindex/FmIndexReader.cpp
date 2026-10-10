@@ -447,9 +447,8 @@ FmIndexReader::RarestMatchFragment(std::string_view pattern) const {
     }
     RarestFragment rarest;
     rarest.literal = parts[0];
-    rarest.occurrences =
-        SaturatingSize(storage_->Engine().Count(Bytes(parts[0]),
-                                                parts[0].size()));
+    rarest.occurrences = SaturatingSize(
+        storage_->Engine().Count(Bytes(parts[0]), parts[0].size()));
     for (size_t i = 1; i < parts.size(); ++i) {
         const auto occurrences = SaturatingSize(
             storage_->Engine().Count(Bytes(parts[i]), parts[i].size()));

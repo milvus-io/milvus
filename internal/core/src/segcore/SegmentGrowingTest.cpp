@@ -306,11 +306,12 @@ TEST(Growing, InsertSkipsMissingFunctionOutputField) {
     constexpr int64_t row_count = 5;
     auto dataset = DataGen(insert_schema, row_count);
     segment->PreInsert(row_count);
-    ASSERT_NO_THROW(segment->Insert(0,
-                                    row_count,
-                                    dataset.row_ids_.data(),
-                                    dataset.timestamps_.data(),
-                                    std::make_shared<InsertRecordProto>(*dataset.raw_)));
+    ASSERT_NO_THROW(
+        segment->Insert(0,
+                        row_count,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        std::make_shared<InsertRecordProto>(*dataset.raw_)));
     EXPECT_EQ(segment->get_row_count(), row_count);
     EXPECT_TRUE(segment->FieldAccessible(pk));
     EXPECT_FALSE(segment->HasFieldData(sparse));
@@ -328,8 +329,8 @@ TEST(Growing, AllNullVectorFieldIsAccessibleWithoutRawChunks) {
     ASSERT_NE(segment_impl, nullptr);
 
     constexpr int64_t row_count = 5;
-    auto dataset = DataGen(
-        schema, row_count, 42, 0, 1, 10, 1, false, true, false, 100);
+    auto dataset =
+        DataGen(schema, row_count, 42, 0, 1, 10, 1, false, true, false, 100);
     EXPECT_FALSE(segment->FieldAccessible(vec));
     auto offset = segment->PreInsert(row_count);
     segment->Insert(offset,
@@ -394,11 +395,8 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
         auto offset = segment->PreInsert(row_count);
 
         try {
-            segment->Insert(offset,
-                            row_count,
-                            row_ids.data(),
-                            timestamps.data(),
-                            record);
+            segment->Insert(
+                offset, row_count, row_ids.data(), timestamps.data(), record);
             FAIL() << "expected malformed geometry insert to be rejected";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
@@ -1454,11 +1452,8 @@ TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
     std::vector<int64_t> row_ids = {0, 1};
     std::vector<Timestamp> timestamps = {100, 101};
     auto offset = segment->PreInsert(2);
-    segment->Insert(offset,
-                    2,
-                    row_ids.data(),
-                    timestamps.data(),
-                    insert_record_proto);
+    segment->Insert(
+        offset, 2, row_ids.data(), timestamps.data(), insert_record_proto);
 
     std::array<int64_t, 2> offsets = {0, 1};
     std::unique_ptr<DataArray> result;
@@ -1529,11 +1524,8 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
     std::vector<int64_t> row_ids = {0, 1};
     std::vector<Timestamp> timestamps = {100, 101};
     auto offset = segment->PreInsert(2);
-    segment->Insert(offset,
-                    2,
-                    row_ids.data(),
-                    timestamps.data(),
-                    insert_record_proto);
+    segment->Insert(
+        offset, 2, row_ids.data(), timestamps.data(), insert_record_proto);
 
     std::array<int64_t, 2> offsets = {0, 1};
     std::unique_ptr<DataArray> result;
@@ -2526,8 +2518,11 @@ TEST(Growing, ReopenRetryAfterTextIndexFailureBackfillsOnce) {
     // appends right after the backfilled prefix.
     auto more = DataGen(v3, N, 43, N);
     ASSERT_EQ(segment->PreInsert(N), N);
-    segment->Insert(
-        N, N, more.row_ids_.data(), more.timestamps_.data(), std::make_shared<InsertRecordProto>(*more.raw_));
+    segment->Insert(N,
+                    N,
+                    more.row_ids_.data(),
+                    more.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*more.raw_));
     EXPECT_EQ(segment->get_row_count(), 2 * N);
     EXPECT_EQ(segment_impl->get_insert_record()
                   .get_data_base(nvec_fid)

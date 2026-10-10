@@ -162,13 +162,12 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
                   "milvus_tokenizer");
         EXPECT_EQ(prepared.request.params.at("analyzer_params"), analyzer);
         EXPECT_EQ(prepared.request.params.at("analyzer_extra_info"), "{}");
-        EXPECT_EQ(prepared.request.output.generation,
-                  storage::Generation::V3);
+        EXPECT_EQ(prepared.request.output.generation, storage::Generation::V3);
         EXPECT_EQ(prepared.request.output.storage_namespace,
                   storage::ArtifactStorageNamespace::TextLog);
 
-        auto data = storage::CreateFieldData(
-            DataType::TEXT, DataType::NONE, false);
+        auto data =
+            storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
         data->FillFieldData(texts.data(), texts.size());
         WriteInsert(prepared.file_manager_context, data);
 
@@ -188,11 +187,10 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
             index::LoaderRegistry::Instance().Lookup(index::families::kText);
         ASSERT_TRUE(static_cast<bool>(loader));
         auto reader = loader.Load(
-            {index::IndexFiles{
-                 prepared.file_manager_context,
-                 {stats.Files()[0].file_name},
-                 index::PackedIndexStorageConfig{
-                     storage::ArtifactStorageNamespace::TextLog}},
+            {index::IndexFiles{prepared.file_manager_context,
+                               {stats.Files()[0].file_name},
+                               index::PackedIndexStorageConfig{
+                                   storage::ArtifactStorageNamespace::TextLog}},
              options});
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);
@@ -221,9 +219,8 @@ TEST_F(BuildSessionTest, EmptyNestedSourceSkipsPersistence) {
              {schemapb::DataType::Int32, schemapb::DataType::String}) {
             for (const auto engine_version : {1, 3}) {
                 SCOPED_TRACE(::testing::Message()
-                             << "index=" << index_type
-                             << ", element=" << element_type
-                             << ", version=" << engine_version);
+                             << "index=" << index_type << ", element="
+                             << element_type << ", version=" << engine_version);
                 auto info = BuildInfo(schemapb::DataType::Array,
                                       index_type,
                                       row_count,
@@ -255,7 +252,9 @@ TEST_F(BuildSessionTest, EmptyNestedSourceSkipsPersistence) {
                     arrays.emplace_back(scalar);
                 }
                 auto data = storage::CreateFieldData(
-                    DataType::ARRAY, static_cast<DataType>(element_type), false);
+                    DataType::ARRAY,
+                    static_cast<DataType>(element_type),
+                    false);
                 data->FillFieldData(arrays.data(), arrays.size());
                 WriteInsert(prepared.file_manager_context, data);
 

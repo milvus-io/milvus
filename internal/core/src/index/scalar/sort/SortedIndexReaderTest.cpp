@@ -73,8 +73,9 @@ TEST(SortedIndexReaderTest, ProvidesInt64Queries) {
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_TRUE(reader->Caps().value_lookup);
-    EXPECT_NE(dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get()),
-              nullptr);
+    EXPECT_NE(
+        dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get()),
+        nullptr);
     EXPECT_NE(dynamic_cast<const IScalarValueReader<int64_t>*>(reader.get()),
               nullptr);
 }

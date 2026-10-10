@@ -1269,10 +1269,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     };
 
     ValidResult
-    FilterVectorValidOffsetsFromIndex(
-        const index::IVectorReader& reader,
-        const int64_t* seg_offsets,
-        int64_t count) const;
+    FilterVectorValidOffsetsFromIndex(const index::IVectorReader& reader,
+                                      const int64_t* seg_offsets,
+                                      int64_t count) const;
 
     ValidResult
     FilterVectorValidOffsetsFromColumn(milvus::OpContext* op_ctx,
@@ -1418,10 +1417,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id);
 
     IndexPin
-    PinVectorIndex(
-        const std::shared_ptr<const RuntimeResourceState>& runtime,
-        milvus::OpContext* op_ctx,
-        FieldId field_id) const;
+    PinVectorIndex(const std::shared_ptr<const RuntimeResourceState>& runtime,
+                   milvus::OpContext* op_ctx,
+                   FieldId field_id) const;
 
     static std::vector<IndexInventory::RootSlot>
     EraseJsonIndexesAtPath(RuntimeResourceState& runtime,

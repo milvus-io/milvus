@@ -33,9 +33,8 @@ RunWithIsolatedExpressionCache(const std::function<void()>& test_case) {
     // Re-execution isolates its singleton, configuration, entries and metrics
     // from the parent test process, including fatal assertion exits.
     const auto previous_style = ::testing::FLAGS_gtest_death_test_style;
-    auto restore_style = folly::makeGuard([&] {
-        ::testing::FLAGS_gtest_death_test_style = previous_style;
-    });
+    auto restore_style = folly::makeGuard(
+        [&] { ::testing::FLAGS_gtest_death_test_style = previous_style; });
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
@@ -132,7 +131,8 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
         query_context->set_enable_expr_cache(true);
         query_context->set_enable_sub_expr_cache_write(false);
 
-        auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+        auto row =
+            ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
         ASSERT_NE(row, nullptr);
         ASSERT_EQ(mgr.GetEntryCount(), 1);
 
@@ -243,7 +243,8 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
 
         auto schema = std::make_shared<Schema>();
         auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-        auto ttl_fid = schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
+        auto ttl_fid =
+            schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ);
         schema->set_primary_field_id(pk_fid);
         schema->set_ttl_field_id(ttl_fid);
 
@@ -264,13 +265,13 @@ TEST(TextMatchCacheTest, ExprResCacheFilterBitsIncludesEntityTTLPhysicalTime) {
         auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                            always_true_expr);
 
-        auto before_expire =
-            ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 100);
+        auto before_expire = ExecuteFilterBitsWithFullCache(
+            plan, seg.get(), N, MAX_TIMESTAMP, 100);
         ASSERT_TRUE(before_expire[0]);
         ASSERT_TRUE(before_expire[1]);
 
-        auto after_expire =
-            ExecuteFilterBitsWithFullCache(plan, seg.get(), N, MAX_TIMESTAMP, 200);
+        auto after_expire = ExecuteFilterBitsWithFullCache(
+            plan, seg.get(), N, MAX_TIMESTAMP, 200);
         ASSERT_FALSE(after_expire[0]);
         ASSERT_TRUE(after_expire[1]);
     });

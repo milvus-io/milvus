@@ -84,11 +84,10 @@ namespace {
 
 template <typename T>
 void
-InstallNestedInvertedIndex(
-    SegmentSealed& segment,
-    FieldId field_id,
-    const std::vector<boost::container::vector<T>>& rows,
-    DataType element_type) {
+InstallNestedInvertedIndex(SegmentSealed& segment,
+                           FieldId field_id,
+                           const std::vector<boost::container::vector<T>>& rows,
+                           DataType element_type) {
     std::vector<Array> arrays;
     arrays.reserve(rows.size());
     for (const auto& row : rows) {
@@ -110,9 +109,13 @@ InstallNestedInvertedIndex(
     // reader answers in element coordinates, including valid empty rows.
     auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
     field->FillFieldData(arrays.data(), arrays.size());
-    auto opened = test::expr_index::BuildIndex(
-        field_id, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-        Config::object(), element_type, true);
+    auto opened = test::expr_index::BuildIndex(field_id,
+                                               DataType::ARRAY,
+                                               index::INVERTED_INDEX_TYPE,
+                                               {field},
+                                               Config::object(),
+                                               element_type,
+                                               true);
     test::expr_index::InstallIndex(
         segment, field_id, DataType::ARRAY, std::move(opened), element_type);
 }

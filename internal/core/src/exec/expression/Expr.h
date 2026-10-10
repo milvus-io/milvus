@@ -113,7 +113,8 @@ ToIndexCompareOp(proto::plan::OpType op) {
         case proto::plan::OpType::LessEqual:
             return index::CompareOp::LessEqual;
         default:
-            ThrowInfo(OpTypeInvalid, "operator {} is not an index comparison", op);
+            ThrowInfo(
+                OpTypeInvalid, "operator {} is not an index comparison", op);
     }
 }
 
@@ -1077,7 +1078,8 @@ class SegmentExpr : public Expr {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         TargetBitmap valid_res(input->size());
         const auto* reader = PredicateReader<T>();
-        AssertInfo(reader != nullptr, "selected predicate reader type mismatch");
+        AssertInfo(reader != nullptr,
+                   "selected predicate reader type mismatch");
         const auto& valid_result = GetCachedIndexValidBitmap();
         if (cached_index_all_valid_) {
             valid_res.set();
@@ -1157,8 +1159,7 @@ class SegmentExpr : public Expr {
                 std::move(*cached_index_chunk_valid_res_));
         } else {
             const auto data_pos = current_index_chunk_pos_;
-            const auto size =
-                std::min(active_count_ - data_pos, batch_size_);
+            const auto size = std::min(active_count_ - data_pos, batch_size_);
             AssertInfo(
                 int64_t(cached_index_chunk_res_->size()) >= data_pos + size,
                 "index bitmap covers {} rows, batch needs rows [{}, {})",
@@ -1197,11 +1198,12 @@ class SegmentExpr : public Expr {
                 func(reader, static_cast<size_t>(value_count), values...));
             cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
                 GetCachedIndexValidBitmap().clone());
-            AssertInfo(cached_index_chunk_res_->size() ==
-                           static_cast<size_t>(value_count),
-                       "value lookup result size {} disagrees with reader count {}",
-                       cached_index_chunk_res_->size(),
-                       value_count);
+            AssertInfo(
+                cached_index_chunk_res_->size() ==
+                    static_cast<size_t>(value_count),
+                "value lookup result size {} disagrees with reader count {}",
+                cached_index_chunk_res_->size(),
+                value_count);
             AssertInfo(cached_index_chunk_valid_res_->size() ==
                            static_cast<size_t>(value_count),
                        "value validity size {} disagrees with reader count {}",
@@ -2845,19 +2847,20 @@ class SegmentExpr : public Expr {
                     if (multi_path_json) {
                         const bool exact_path =
                             validity_mode == IndexValidityMode::JsonExactPath;
-                        auto family =
-                            static_cast<unsigned int>(DataType::JSON);
+                        auto family = static_cast<unsigned int>(DataType::JSON);
                         if (!exact_path) {
                             if constexpr (std::is_same_v<T, bool>) {
                                 family =
                                     static_cast<unsigned int>(DataType::BOOL);
                             } else if constexpr (std::is_integral_v<T> ||
                                                  std::is_floating_point_v<T>) {
-                                family = static_cast<unsigned int>(
-                                    DataType::DOUBLE);
-                            } else if constexpr (
-                                std::is_same_v<T, std::string> ||
-                                std::is_same_v<T, std::string_view>) {
+                                family =
+                                    static_cast<unsigned int>(DataType::DOUBLE);
+                            } else if constexpr (std::is_same_v<T,
+                                                                std::string> ||
+                                                 std::is_same_v<
+                                                     T,
+                                                     std::string_view>) {
                                 family = static_cast<unsigned int>(
                                     DataType::VARCHAR);
                             }
@@ -2880,9 +2883,11 @@ class SegmentExpr : public Expr {
                             for (const auto* cast :
                                  {"BOOL", "DOUBLE", "VARCHAR"}) {
                                 auto resolved = json_reader_->Resolve(
-                                    json_pointer, JsonCastType::FromString(cast));
-                                const auto* nulls = dynamic_cast<
-                                    const index::INullReader*>(resolved.get());
+                                    json_pointer,
+                                    JsonCastType::FromString(cast));
+                                const auto* nulls =
+                                    dynamic_cast<const index::INullReader*>(
+                                        resolved.get());
                                 AssertInfo(nulls != nullptr,
                                            "JSON flat path lacks {} validity",
                                            cast);
@@ -2904,8 +2909,9 @@ class SegmentExpr : public Expr {
                                func_returns_row_level) {
                         valid_res = GetFieldRowValidity(active_count_);
                     } else {
-                        AssertInfo(null_reader_ != nullptr,
-                                   "selected predicate reader has no null reader");
+                        AssertInfo(
+                            null_reader_ != nullptr,
+                            "selected predicate reader has no null reader");
                         valid_res = null_reader_->IsNotNull();
                     }
                     return {std::move(res), std::move(valid_res)};
@@ -3169,8 +3175,8 @@ class SegmentExpr : public Expr {
         if (cached_index_chunk_id_ != 0) {
             AssertInfo(null_reader_ != nullptr,
                        "selected index does not expose null predicates");
-            cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
-                null_reader_->IsNotNull());
+            cached_index_chunk_valid_res_ =
+                std::make_shared<TargetBitmap>(null_reader_->IsNotNull());
             cached_index_chunk_id_ = 0;
         }
 
@@ -3379,8 +3385,7 @@ class SegmentExpr : public Expr {
             selected_reader_ = &growing_index_pin_.Reader();
             selected_covered_row_end_ =
                 std::min(active_count_, growing_index_pin_.CoveredRowEnd());
-            AssertInfo(segcore::SameCaps(entry->caps,
-                                        selected_reader_->Caps()),
+            AssertInfo(segcore::SameCaps(entry->caps, selected_reader_->Caps()),
                        "growing index metadata does not match reader caps");
         } else {
             selected_root_pin_ = segment_->PinIndex(op_ctx_, *decision.key);
@@ -3458,8 +3463,9 @@ class SegmentExpr : public Expr {
                 }
             }
             if (reader_caps.pattern_match) {
-                pattern_reader_ = dynamic_cast<const index::IPatternMatchReader*>(
-                    selected_reader_);
+                pattern_reader_ =
+                    dynamic_cast<const index::IPatternMatchReader*>(
+                        selected_reader_);
             }
             if (reader_caps.text_match) {
                 text_reader_ = dynamic_cast<const index::ITextMatchReader*>(
@@ -3470,8 +3476,8 @@ class SegmentExpr : public Expr {
                     dynamic_cast<const index::INgramReader*>(selected_reader_);
             }
             if (reader_caps.spatial) {
-                spatial_reader_ =
-                    dynamic_cast<const index::ISpatialReader*>(selected_reader_);
+                spatial_reader_ = dynamic_cast<const index::ISpatialReader*>(
+                    selected_reader_);
             }
             null_reader_ =
                 dynamic_cast<const index::INullReader*>(selected_reader_);
@@ -3506,8 +3512,9 @@ class SegmentExpr : public Expr {
                 exec_path_ = ExprExecPath::RawData;
                 return false;
             }
-            AssertInfo(interface_available,
-                       "selected index metadata does not match reader interfaces");
+            AssertInfo(
+                interface_available,
+                "selected index metadata does not match reader interfaces");
             AssertInfo(!needs_null || null_reader_ != nullptr,
                        "selected scalar reader has no null interface");
         }
@@ -3516,7 +3523,8 @@ class SegmentExpr : public Expr {
     }
 
     ExprIndexRequirement
-    MakeIndexRequirement(RequiredReader reader = RequiredReader::Predicate) const {
+    MakeIndexRequirement(
+        RequiredReader reader = RequiredReader::Predicate) const {
         return {
             .field_id = field_id_,
             .reader = reader,
@@ -3601,10 +3609,8 @@ class SegmentExpr : public Expr {
     template <typename T>
     bool
     IndexHasRawData() const {
-        using ReaderType =
-            std::conditional_t<std::is_same_v<T, std::string>,
-                               std::string_view,
-                               T>;
+        using ReaderType = std::
+            conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
         return ValueReader<ReaderType>() != nullptr;
     }
 
@@ -4053,8 +4059,7 @@ class SegmentExpr : public Expr {
                    "selected index does not expose typed value lookup");
         const bool has_candidate_mask = !candidate_mask.empty();
         AssertInfo(!has_candidate_mask ||
-                       candidate_mask.size() ==
-                           static_cast<size_t>(batch_size),
+                       candidate_mask.size() == static_cast<size_t>(batch_size),
                    "candidate mask size {} does not match offset batch size {}",
                    candidate_mask.size(),
                    batch_size);

@@ -42,9 +42,9 @@ TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
             storage::FileManagerContext{});
         const auto [loaded, overhead] =
             translator.estimated_byte_size_of_cell(0);
-        EXPECT_EQ(loaded.memory_bytes,
-                  (mmap ? 0 : index_size) +
-                      index::kScalarIndexFixedResidentBytes);
+        EXPECT_EQ(
+            loaded.memory_bytes,
+            (mmap ? 0 : index_size) + index::kScalarIndexFixedResidentBytes);
         EXPECT_EQ(loaded.file_bytes, mmap ? index_size : 0);
         EXPECT_EQ(overhead.memory_bytes, mmap ? index_size : 0);
         EXPECT_EQ(overhead.file_bytes, mmap ? 0 : index_size);
@@ -53,10 +53,12 @@ TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
 
 class ScalarIndexTranslatorTest : public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         root_ = storage::LocalDirectory::CreateOwned(
             std::filesystem::temp_directory_path().string(),
-            "scalar-translator-XXXXXX", "scalar translator test");
+            "scalar-translator-XXXXXX",
+            "scalar translator test");
         storage::StorageConfig storage;
         storage.storage_type = "local";
         storage.root_path = root_->Path();
@@ -64,13 +66,15 @@ class ScalarIndexTranslatorTest : public ::testing::Test {
         field.field_schema.set_name("profile[values]");
         field.field_schema.set_data_type(proto::schema::DataType::Array);
         field.field_schema.set_element_type(proto::schema::DataType::VarChar);
-        context_ = storage::FileManagerContext(field,
-                                               storage::IndexMeta{3, 101, 1, 1},
-                                               storage::CreateChunkManager(storage),
-                                               storage::InitArrowFileSystem(storage));
+        context_ =
+            storage::FileManagerContext(field,
+                                        storage::IndexMeta{3, 101, 1, 1},
+                                        storage::CreateChunkManager(storage),
+                                        storage::InitArrowFileSystem(storage));
     }
 
-    LoadIndexInfo Info() const {
+    LoadIndexInfo
+    Info() const {
         LoadIndexInfo info{};
         info.collection_id = 1;
         info.partition_id = 2;
@@ -84,7 +88,7 @@ class ScalarIndexTranslatorTest : public ::testing::Test {
         info.index_engine_version = 3;
         info.num_rows = 4;
         info.index_params = {{index::INDEX_TYPE, index::HYBRID_INDEX_TYPE},
-                              {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+                             {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
         info.warmup_policy = "disable";
         return info;
     }
@@ -93,24 +97,32 @@ class ScalarIndexTranslatorTest : public ::testing::Test {
     storage::FileManagerContext context_;
 };
 
-TEST_F(ScalarIndexTranslatorTest, NestedHybridMetadataResolvesStandaloneAndSelectedSortFiles) {
-    const std::vector<std::string_view> values{"alpha", "beta", "beta", "gamma"};
+TEST_F(ScalarIndexTranslatorTest,
+       NestedHybridMetadataResolvesStandaloneAndSelectedSortFiles) {
+    const std::vector<std::string_view> values{
+        "alpha", "beta", "beta", "gamma"};
     const index::ScalarBuildBatch<std::string_view> batch{values, {}};
     const Config params{{"field_type", DataType::ARRAY},
-                         {"value_type", DataType::VARCHAR},
-                         {"element_type", DataType::VARCHAR},
-                         {"nested", true},
-                         {"nullable", false}};
-    auto builder = index::BuilderRegistry<index::ScalarBuildInput<std::string_view>>::
-        Instance().Create(index::families::kSort, params);
+                        {"value_type", DataType::VARCHAR},
+                        {"element_type", DataType::VARCHAR},
+                        {"nested", true},
+                        {"nullable", false}};
+    auto builder = index::BuilderRegistry<
+                       index::ScalarBuildInput<std::string_view>>::Instance()
+                       .Create(index::families::kSort, params);
     auto artifact = std::move(*builder).Build({std::span(&batch, 1)});
     storage::MemFileManagerImpl manager(context_);
     for (const bool selector : {false, true}) {
         SCOPED_TRACE(selector);
-        const auto name = index::PackedScalarIndexFileName(selector ? index::ScalarIndexType::HYBRID : index::ScalarIndexType::STLSORT);
+        const auto name = index::PackedScalarIndexFileName(
+            selector ? index::ScalarIndexType::HYBRID
+                     : index::ScalarIndexType::STLSORT);
         auto writer = manager.CreateIndexEntryWriterUnified(name);
         artifact->Serialize(*writer);
-        if (selector) writer->PutMeta(index::INDEX_TYPE, static_cast<uint8_t>(index::ScalarIndexType::STLSORT));
+        if (selector)
+            writer->PutMeta(
+                index::INDEX_TYPE,
+                static_cast<uint8_t>(index::ScalarIndexType::STLSORT));
         writer->Finish();
         auto info = Info();
         info.index_files = {manager.GetRemoteIndexObjectPrefix() + "/" + name};
@@ -123,7 +135,8 @@ TEST_F(ScalarIndexTranslatorTest, NestedHybridMetadataResolvesStandaloneAndSelec
             context_.use_async_load = async;
             Config config(info.index_params);
             config["nested"] = true;
-            SealedIndexTranslator translator(&info, tracer::TraceContext{}, context_, config);
+            SealedIndexTranslator translator(
+                &info, tracer::TraceContext{}, context_, config);
             EXPECT_EQ(translator.Family(), index::families::kSort);
             EXPECT_EQ(translator.ValueType(), DataType::VARCHAR);
             auto cells = translator.get_cells(nullptr, {0});
@@ -132,7 +145,8 @@ TEST_F(ScalarIndexTranslatorTest, NestedHybridMetadataResolvesStandaloneAndSelec
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
             EXPECT_EQ(reader->Count(), 4);
-            const auto* predicate = dynamic_cast<const index::IScalarPredicateReader<std::string_view>*>(reader);
+            const auto* predicate = dynamic_cast<
+                const index::IScalarPredicateReader<std::string_view>*>(reader);
             ASSERT_NE(predicate, nullptr);
             const std::string_view key = "beta";
             const auto hits = predicate->In(1, &key);
@@ -146,19 +160,26 @@ TEST_F(ScalarIndexTranslatorTest, NestedHybridMetadataResolvesStandaloneAndSelec
 }
 
 TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
-    for (const auto type : {DataType::INT16, DataType::INT32, DataType::INT64, DataType::VARCHAR}) {
+    for (const auto type : {DataType::INT16,
+                            DataType::INT32,
+                            DataType::INT64,
+                            DataType::VARCHAR}) {
         SCOPED_TRACE(static_cast<int>(type));
         auto info = Info();
         info.field_type = type;
         info.element_type = DataType::NONE;
         info.index_size = 1024;
-        info.load_resource_request = LoadResourceRequest{2048, 512, 1024, 128, true};
+        info.load_resource_request =
+            LoadResourceRequest{2048, 512, 1024, 128, true};
         Config config(info.index_params);
         try {
-            SealedIndexTranslator translator(&info, tracer::TraceContext{}, context_, config);
-            FAIL() << "an explicit resource estimate cannot replace packed file metadata";
+            SealedIndexTranslator translator(
+                &info, tracer::TraceContext{}, context_, config);
+            FAIL() << "an explicit resource estimate cannot replace packed "
+                      "file metadata";
         } catch (const SegcoreError& error) {
-            EXPECT_NE(std::string(error.what()).find("one V3 file"), std::string::npos);
+            EXPECT_NE(std::string(error.what()).find("one V3 file"),
+                      std::string::npos);
         }
     }
 }

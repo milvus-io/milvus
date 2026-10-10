@@ -422,8 +422,7 @@ RTreeQueryEngine::ByteSize() const {
 }
 
 void
-RTreeQueryEngine::AppendValues(
-    std::vector<rtree_detail::Value>& output) const {
+RTreeQueryEngine::AppendValues(std::vector<rtree_detail::Value>& output) const {
     if (rtree_.size() > std::numeric_limits<size_t>::max() - output.size()) {
         ThrowInfo(UnexpectedError,
                   "R-Tree compaction value count overflows size_t");

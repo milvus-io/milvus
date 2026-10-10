@@ -744,8 +744,8 @@ TEST(BoostScoreRunnerTest, NativeFilterExprSetReuseOnScalarIndexPath) {
     // DataGen fills the non-pk int64 column with the row index, so
     // `age >= 5000` matches exactly the rows past the midpoint.
     auto age_col = raw_data.get_col<int64_t>(age_fid);
-    auto age_index = milvus::BuildTestScalarIndex<int64_t>(
-        "sort", N, age_col.data());
+    auto age_index =
+        milvus::BuildTestScalarIndex<int64_t>("sort", N, age_col.data());
     segcore::LoadIndexInfo load_index_info{};
     load_index_info.field_id = age_fid.get();
     load_index_info.field_type = DataType::INT64;

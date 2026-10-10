@@ -819,15 +819,20 @@ TEST(Expr, TestArrayNullExprWithBitmapIndex) {
         storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
     field_data->FillFieldData(arrays.data(), valid_bitmap.data(), N, 0);
 
-    auto bitmap_index = test::expr_index::BuildIndex(
-        long_array_fid, DataType::ARRAY, index::BITMAP_INDEX_TYPE, {field_data},
-        Config::object(), DataType::INT64);
+    auto bitmap_index = test::expr_index::BuildIndex(long_array_fid,
+                                                     DataType::ARRAY,
+                                                     index::BITMAP_INDEX_TYPE,
+                                                     {field_data},
+                                                     Config::object(),
+                                                     DataType::INT64);
     ASSERT_EQ(bitmap_index.reader->CoordDomain(), index::Domain::Row);
     ASSERT_FALSE(bitmap_index.caps.nested);
     ASSERT_EQ(bitmap_index.reader->Count(), N);
-    test::expr_index::InstallIndex(
-        *segment, long_array_fid, DataType::ARRAY, std::move(bitmap_index),
-        DataType::INT64);
+    test::expr_index::InstallIndex(*segment,
+                                   long_array_fid,
+                                   DataType::ARRAY,
+                                   std::move(bitmap_index),
+                                   DataType::INT64);
 
     auto null_expr = std::make_shared<expr::NullExpr>(
         expr::ColumnInfo(
@@ -3135,12 +3140,19 @@ TEST(Expr, TestArrayContainsForStruct) {
         }
         auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
         field->FillFieldData(arrays.data(), arrays.size());
-        auto arr_index = test::expr_index::BuildIndex(
-            int_array_fid, DataType::ARRAY, index::INVERTED_INDEX_TYPE, {field},
-            Config::object(), DataType::INT32, true);
-        test::expr_index::InstallIndex(
-            *segment, int_array_fid, DataType::ARRAY, std::move(arr_index),
-            DataType::INT32);
+        auto arr_index =
+            test::expr_index::BuildIndex(int_array_fid,
+                                         DataType::ARRAY,
+                                         index::INVERTED_INDEX_TYPE,
+                                         {field},
+                                         Config::object(),
+                                         DataType::INT32,
+                                         true);
+        test::expr_index::InstallIndex(*segment,
+                                       int_array_fid,
+                                       DataType::ARRAY,
+                                       std::move(arr_index),
+                                       DataType::INT32);
 
         // Now search with index
         std::string expr = "array_contains_any(structA[price_array], [5])";

@@ -944,10 +944,7 @@ TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
     auto null_col = raw_data.get_col<int64_t>(i64_null_fid);
     auto null_valid = raw_data.get_col_valid(i64_null_fid);
     auto scalar_index = BuildTestScalarIndex<int64_t>(
-        milvus::index::families::kSort,
-        N,
-        null_col.data(),
-        null_valid.data());
+        milvus::index::families::kSort, N, null_col.data(), null_valid.data());
     LoadIndexInfo scalar_info{};
     scalar_info.field_id = i64_null_fid.get();
     scalar_info.field_type = DataType::INT64;

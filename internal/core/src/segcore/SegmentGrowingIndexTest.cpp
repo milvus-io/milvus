@@ -86,7 +86,9 @@ class FloatVectorBuildSource final : public index::GrowingVectorSource<float> {
     }
 
     void
-    CopyRows(int64_t physical_begin, int64_t row_count, float* output) const override {
+    CopyRows(int64_t physical_begin,
+             int64_t row_count,
+             float* output) const override {
         const auto values = ContiguousRows(physical_begin, row_count);
         std::copy(values.begin(), values.end(), output);
     }
@@ -619,9 +621,8 @@ TEST_F(GrowingIndexRawOwnershipTest,
     auto expected = second_batch.get_col(vec_);
     const auto& expected_valid_data = GetFieldDataRowValidData(*expected);
     ASSERT_EQ(expected_valid_data.size(), row_count);
-    ASSERT_EQ(std::count(expected_valid_data.begin(),
-                         expected_valid_data.end(),
-                         true),
+    ASSERT_EQ(std::count(
+                  expected_valid_data.begin(), expected_valid_data.end(), true),
               row_count / 2);
     ASSERT_EQ(expected->vectors().float_vector().data_size(),
               row_count / 2 * dim);
@@ -636,11 +637,10 @@ TEST_F(GrowingIndexRawOwnershipTest,
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_FLOAT, DataType::NONE, true, dim, row_count);
-    field_data->FillFieldData(
-        expected->vectors().float_vector().data().data(),
-        valid_bitmap.data(),
-        row_count,
-        0);
+    field_data->FillFieldData(expected->vectors().float_vector().data().data(),
+                              valid_bitmap.data(),
+                              row_count,
+                              0);
     auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
     auto load_info = PrepareInsertBinlog(kCollectionID,
@@ -650,12 +650,8 @@ TEST_F(GrowingIndexRawOwnershipTest,
                                          cm,
                                          "",
                                          {vec_.get()});
-    auto vector_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                           kPartitionID,
-                                                           kSegmentID,
-                                                           vec_.get(),
-                                                           {field_data},
-                                                           cm);
+    auto vector_load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, vec_.get(), {field_data}, cm);
     load_info.field_infos.merge(vector_load_info.field_infos);
     // Loading publishes the complete row range after staging all columns.
     // The column writer alone does not advance the frozen index reader.
@@ -710,12 +706,12 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
             knowhere::Version::GetCurrentVersion().VersionNumber(),
             false);
         ASSERT_FALSE(engine.UseBuildPool());
-        ASSERT_EQ(engine.native_index.Build(values, build_config,
-                                             engine.UseBuildPool()),
+        ASSERT_EQ(engine.native_index.Build(
+                      values, build_config, engine.UseBuildPool()),
                   knowhere::Status::success);
         for (int i = 0; i < add_cont; ++i) {
-            ASSERT_EQ(engine.native_index.Add(values, build_config,
-                                               engine.UseBuildPool()),
+            ASSERT_EQ(engine.native_index.Add(
+                          values, build_config, engine.UseBuildPool()),
                       knowhere::Status::success);
         }
         engine.SetDim(engine.native_index.Dim());
@@ -738,8 +734,10 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
             index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND
                 ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
                 : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
-        auto values = dataset.get_col<
-            knowhere::sparse::SparseRow<milvus::SparseValueType>>(vec);
+        auto values =
+            dataset
+                .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
+                    vec);
         auto input = knowhere::GenDataSet(N, dim, values.data());
         input->SetIsSparse(true);
         build_and_add(input, cc_index_type);
@@ -856,9 +854,8 @@ TEST(GrowingIndexBuildThreadRateTest, MultiThreadedBuildKeepsSearchCorrect) {
         auto* growing_segment =
             dynamic_cast<SegmentGrowingImpl*>(segment.get());
         EXPECT_NE(growing_segment, nullptr);
-        EXPECT_TRUE(
-            growing_segment != nullptr &&
-            static_cast<bool>(growing_segment->PinGrowingIndex(vec)));
+        EXPECT_TRUE(growing_segment != nullptr &&
+                    static_cast<bool>(growing_segment->PinGrowingIndex(vec)));
         if (growing_segment != nullptr) {
             const auto pin = growing_segment->PinGrowingIndex(vec);
             EXPECT_EQ(pin.CoveredRowEnd(), per_batch * n_batch);
@@ -913,9 +910,11 @@ TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
 
     const std::array<float, 4> initial_data = {0.0F, 0.0F, 2.0F, 0.0F};
     const std::array<bool, 3> initial_valid = {true, false, true};
-    owner.Append(0, index::VectorBatch<float>{initial_valid.size(),
-                                             initial_data.data(), dim,
-                                             initial_valid.data()});
+    owner.Append(0,
+                 index::VectorBatch<float>{initial_valid.size(),
+                                           initial_data.data(),
+                                           dim,
+                                           initial_valid.data()});
     auto initial = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(initial));
     EXPECT_EQ(initial.CoveredRowEnd(), 3);
@@ -929,8 +928,9 @@ TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
     EXPECT_TRUE(initial_reader->IsRowValid(2));
 
     const std::array<bool, 2> all_null_tail = {false, false};
-    owner.Append(3, index::VectorBatch<float>{all_null_tail.size(), nullptr,
-                                             dim, all_null_tail.data()});
+    owner.Append(3,
+                 index::VectorBatch<float>{
+                     all_null_tail.size(), nullptr, dim, all_null_tail.data()});
     auto null_tail = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(null_tail));
     EXPECT_EQ(null_tail.CoveredRowEnd(), 5);
@@ -943,15 +943,18 @@ TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
 
     const std::array<float, 4> appended_data = {5.0F, 0.0F, 7.0F, 0.0F};
     const std::array<bool, 3> appended_valid = {true, false, true};
-    owner.Append(5, index::VectorBatch<float>{appended_valid.size(),
-                                             appended_data.data(), dim,
-                                             appended_valid.data()});
+    owner.Append(5,
+                 index::VectorBatch<float>{appended_valid.size(),
+                                           appended_data.data(),
+                                           dim,
+                                           appended_valid.data()});
     owner.Flush();
     auto latest = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(latest));
     EXPECT_EQ(latest.CoveredRowEnd(), 8);
     EXPECT_EQ(latest.Reader().Count(), 4);
-    const auto* reader = dynamic_cast<const index::IVectorReader*>(&latest.Reader());
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(&latest.Reader());
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->ValidCount(), 4);
     EXPECT_TRUE(reader->IsRowValid(5));
@@ -965,8 +968,9 @@ TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
     ASSERT_EQ(raw.size(), 8 * sizeof(float));
     std::array<float, 8> decoded{};
     std::memcpy(decoded.data(), raw.data(), raw.size());
-    EXPECT_EQ(decoded, (std::array<float, 8>{0.0F, 0.0F, 2.0F, 0.0F,
-                                           5.0F, 0.0F, 7.0F, 0.0F}));
+    EXPECT_EQ(
+        decoded,
+        (std::array<float, 8>{0.0F, 0.0F, 2.0F, 0.0F, 5.0F, 0.0F, 7.0F, 0.0F}));
     EXPECT_EQ(initial.CoveredRowEnd(), 3);
     EXPECT_EQ(initial.Reader().Count(), 2);
     EXPECT_EQ(null_tail.CoveredRowEnd(), 5);

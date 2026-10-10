@@ -704,8 +704,7 @@ NgramIndexReader::ValueType() const {
 int64_t
 NgramIndexReader::MemoryUsage() const {
     constexpr size_t kKnownMetadataBytes =
-        sizeof(NgramIndexReader) +
-        sizeof(milvus::tantivy::TantivyIndexWrapper);
+        sizeof(NgramIndexReader) + sizeof(milvus::tantivy::TantivyIndexWrapper);
     const auto validity_bytes = valid_bitmap_.size_in_bytes();
     if (validity_bytes >
         std::numeric_limits<size_t>::max() - kKnownMetadataBytes) {

@@ -45,13 +45,13 @@ InstallJsonConsumerIndex(
         chunks,
         {{JSON_PATH, path}, {JSON_CAST_TYPE, cast_type.ToString()}});
     ASSERT_NE(opened.reader, nullptr);
-    const auto expected_rows = std::accumulate(
-        chunks.begin(),
-        chunks.end(),
-        int64_t{0},
-        [](int64_t count, const FieldDataPtr& chunk) {
-            return count + chunk->get_num_rows();
-        });
+    const auto expected_rows =
+        std::accumulate(chunks.begin(),
+                        chunks.end(),
+                        int64_t{0},
+                        [](int64_t count, const FieldDataPtr& chunk) {
+                            return count + chunk->get_num_rows();
+                        });
     ASSERT_EQ(opened.reader->Count(), expected_rows);
     ASSERT_EQ(opened.reader->CoordDomain(), index::Domain::Row);
     auto* router =
@@ -77,8 +77,9 @@ InstallJsonConsumerIndex(
                 break;
             case JsonCastType::DataType::VARCHAR:
                 ASSERT_NE(
-                    dynamic_cast<const index::IScalarPredicateReader<
-                        std::string_view>*>(resolved.get()),
+                    dynamic_cast<
+                        const index::IScalarPredicateReader<std::string_view>*>(
+                        resolved.get()),
                     nullptr);
                 break;
             default:
@@ -164,11 +165,8 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     }
     json_field->add_json_data(jsons);
 
-    InstallJsonConsumerIndex(*seg,
-                             json_fid,
-                             {json_field},
-                             this->json_path,
-                             this->cast_type);
+    InstallJsonConsumerIndex(
+        *seg, json_fid, {json_field}, this->json_path, this->cast_type);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -413,14 +411,12 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
         return segment;
     };
 
-    auto number_index_segment = make_index_segment(
-        JsonCastType::FromString("DOUBLE"), "/n");
-    auto string_index_segment = make_index_segment(
-        JsonCastType::FromString("VARCHAR"), "/s");
+    auto number_index_segment =
+        make_index_segment(JsonCastType::FromString("DOUBLE"), "/n");
+    auto string_index_segment =
+        make_index_segment(JsonCastType::FromString("VARCHAR"), "/s");
     auto precise_number_segment =
-        make_index_segment(JsonCastType::FromString("DOUBLE"),
-                           "/n",
-                           true);
+        make_index_segment(JsonCastType::FromString("DOUBLE"), "/n", true);
     auto evaluate = [&](const expr::TypedExprPtr& filter_expr,
                         const segcore::SegmentInternalInterface* segment,
                         exec::OffsetVector* offsets = nullptr) {
@@ -620,11 +616,8 @@ TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
               static_cast<uint8_t>(0));
     valid_data[0] = 0b00011111;
 
-    InstallJsonConsumerIndex(*seg,
-                             json_fid,
-                             {json_field},
-                             "/a",
-                             JsonCastType::FromString("BOOL"));
+    InstallJsonConsumerIndex(
+        *seg, json_fid, {json_field}, "/a", JsonCastType::FromString("BOOL"));
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -677,11 +670,8 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         jsons.emplace_back(simdjson::padded_string(json));
     }
     json_field->add_json_data(jsons);
-    InstallJsonConsumerIndex(*seg,
-                             json_fid,
-                             {json_field},
-                             "/a",
-                             JsonCastType::FromString("DOUBLE"));
+    InstallJsonConsumerIndex(
+        *seg, json_fid, {json_field}, "/a", JsonCastType::FromString("DOUBLE"));
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -976,7 +966,6 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
 
     auto seg = CreateSealedSegment(schema);
 
-
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
     std::vector<milvus::Json> jsons;
@@ -988,12 +977,12 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     json_valid_data[0] = 0xFF;
     json_valid_data[1] = 0xFE;
 
-    InstallJsonConsumerIndex(*seg,
-                             json_fid,
-                             {json_field},
-                             json_index_path,
-                             JsonCastType::FromString(
-                                 json_index_path.empty() ? "JSON" : "DOUBLE"));
+    InstallJsonConsumerIndex(
+        *seg,
+        json_fid,
+        {json_field},
+        json_index_path,
+        JsonCastType::FromString(json_index_path.empty() ? "JSON" : "DOUBLE"));
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -1175,8 +1164,7 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
         jsons.push_back(milvus::Json(simdjson::padded_string(json)));
     }
     json_field->add_json_data(jsons);
-    InstallJsonConsumerIndex(
-        *seg, json_fid, {json_field}, "/a", GetParam());
+    InstallJsonConsumerIndex(*seg, json_fid, {json_field}, "/a", GetParam());
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();

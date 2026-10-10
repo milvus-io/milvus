@@ -192,8 +192,7 @@ TEST(BitmapIndexArtifactTest, MalformedPostingsWithValidPackedCrcAreRejected) {
     posting.add(100);
     invalid.emplace_back(sizeof(key) + posting.getSizeInBytes());
     std::memcpy(invalid.back().data(), &key, sizeof(key));
-    posting.write(reinterpret_cast<char*>(invalid.back().data() +
-                                          sizeof(key)));
+    posting.write(reinterpret_cast<char*>(invalid.back().data() + sizeof(key)));
     const uint32_t malformed_header[] = {
         static_cast<uint32_t>(key),
         roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER,

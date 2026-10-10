@@ -78,11 +78,11 @@ BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
                 {load_info_.index_size, 0}};
     } else {
         // loaded: in memory; overhead: temp disk for local file before loading
-        return {{load_info_.index_size +
-                     static_cast<int64_t>(
-                         index::kScalarIndexFixedResidentBytes),
-                 0},
-                {0, load_info_.index_size}};
+        return {
+            {load_info_.index_size +
+                 static_cast<int64_t>(index::kScalarIndexFixedResidentBytes),
+             0},
+            {0, load_info_.index_size}};
     }
 }
 

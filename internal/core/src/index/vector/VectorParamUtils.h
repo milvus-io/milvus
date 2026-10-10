@@ -64,17 +64,13 @@ ReadRequiredString(const Config& params,
                    std::string_view key,
                    std::string_view diagnostic_prefix) {
     if (!params.contains(key) || !params.at(key).is_string()) {
-        ThrowInfo(UnexpectedError,
-                  "{} {} must be a string",
-                  diagnostic_prefix,
-                  key);
+        ThrowInfo(
+            UnexpectedError, "{} {} must be a string", diagnostic_prefix, key);
     }
     auto value = params.at(key).get<std::string>();
     if (value.empty()) {
-        ThrowInfo(UnexpectedError,
-                  "{} {} must not be empty",
-                  diagnostic_prefix,
-                  key);
+        ThrowInfo(
+            UnexpectedError, "{} {} must not be empty", diagnostic_prefix, key);
     }
     return value;
 }

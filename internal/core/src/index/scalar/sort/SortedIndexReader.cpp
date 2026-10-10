@@ -379,8 +379,7 @@ PrefixRange(const SortedStringLayout& layout, std::string_view prefix) {
 }
 
 void
-SetPosting(TargetBitmap& result,
-           const SortedStringPostingView& posting) {
+SetPosting(TargetBitmap& result, const SortedStringPostingView& posting) {
     for (size_t i = 0; i < posting.size; ++i) {
         const auto row = posting.At(i);
         AssertInfo(static_cast<size_t>(row) < result.size(),
@@ -392,8 +391,7 @@ SetPosting(TargetBitmap& result,
 }
 
 void
-ClearPosting(TargetBitmap& result,
-             const SortedStringPostingView& posting) {
+ClearPosting(TargetBitmap& result, const SortedStringPostingView& posting) {
     for (size_t i = 0; i < posting.size; ++i) {
         const auto row = posting.At(i);
         AssertInfo(static_cast<size_t>(row) < result.size(),
@@ -472,17 +470,16 @@ SortedStringLayout::BuildOffsets(size_t total_num_rows) const {
 }
 
 std::shared_ptr<const SortedStringLayout>
-SortedStringLayout::FromHeap(
-    std::vector<std::string> unique_values,
-    std::vector<std::vector<uint32_t>> posting_lists,
-    size_t total_num_rows) {
+SortedStringLayout::FromHeap(std::vector<std::string> unique_values,
+                             std::vector<std::vector<uint32_t>> posting_lists,
+                             size_t total_num_rows) {
     return std::make_shared<HeapStringLayout>(
         std::move(unique_values), std::move(posting_lists), total_num_rows);
 }
 
 std::shared_ptr<const SortedStringLayout>
 SortedStringLayout::FromPackedHeap(std::vector<uint8_t> packed,
-                                  size_t total_num_rows) {
+                                   size_t total_num_rows) {
     auto owner = std::make_shared<std::vector<uint8_t>>(std::move(packed));
     return std::make_shared<PackedStringLayout>(owner,
                                                 owner->data(),
@@ -493,8 +490,8 @@ SortedStringLayout::FromPackedHeap(std::vector<uint8_t> packed,
 }
 
 std::shared_ptr<const SortedStringLayout>
-SortedStringLayout::FromPackedMmap(
-    std::shared_ptr<SortedMmapOwner> owner, size_t total_num_rows) {
+SortedStringLayout::FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner,
+                                   size_t total_num_rows) {
     AssertInfo(owner != nullptr, "sorted string mmap owner must not be null");
     return std::make_shared<PackedStringLayout>(owner,
                                                 owner->Data(),
@@ -610,8 +607,7 @@ SortedStorageView<T>::Range(size_t count,
                             const T& hi,
                             bool hi_inc) const {
     TargetBitmap result(count, false);
-    if (data_.size == 0 || hi < lo ||
-        (lo == hi && !(lo_inc && hi_inc)) ||
+    if (data_.size == 0 || hi < lo || (lo == hi && !(lo_inc && hi_inc)) ||
         ShouldSkip(lo, hi, CompareOp::Equal)) {
         return result;
     }
@@ -712,9 +708,9 @@ SortedIndexReader<T>::SortedIndexReader(OpenArgs args)
             state_.value_type = CppDataType<T>(DataType::NONE);
         }
     }
-    AssertInfo(state_.idx_to_offsets_size == 0 ||
-                   state_.idx_to_offsets != nullptr,
-               "sorted reader offset pointer is null");
+    AssertInfo(
+        state_.idx_to_offsets_size == 0 || state_.idx_to_offsets != nullptr,
+        "sorted reader offset pointer is null");
     AssertInfo(!state_.value_lookup ||
                    state_.idx_to_offsets_size == state_.total_num_rows,
                "sorted reader reverse offsets do not cover every row");
@@ -768,8 +764,7 @@ template <typename T>
 cachinglayer::ResourceUsage
 SortedIndexReader<T>::CellByteSize() const {
     return {MemoryUsage(),
-            ToInt64(state_.idx_to_offsets_file_bytes) +
-                storage_.FileUsage()};
+            ToInt64(state_.idx_to_offsets_file_bytes) + storage_.FileUsage()};
 }
 
 template <typename T>
@@ -939,12 +934,11 @@ SortedStorageView<std::string_view>::ClearEqual(
 }
 
 TargetBitmap
-SortedStorageView<std::string_view>::Range(
-    size_t count,
-    const TargetBitmap& validity,
-    bool,
-    const std::string_view& value,
-    CompareOp op) const {
+SortedStorageView<std::string_view>::Range(size_t count,
+                                           const TargetBitmap& validity,
+                                           bool,
+                                           const std::string_view& value,
+                                           CompareOp op) const {
     if (op == CompareOp::Equal) {
         TargetBitmap result(count, false);
         SetEqual(result, value);
@@ -982,14 +976,13 @@ SortedStorageView<std::string_view>::Range(
 }
 
 TargetBitmap
-SortedStorageView<std::string_view>::Range(
-    size_t count,
-    const TargetBitmap&,
-    bool,
-    const std::string_view& lo,
-    bool lo_inc,
-    const std::string_view& hi,
-    bool hi_inc) const {
+SortedStorageView<std::string_view>::Range(size_t count,
+                                           const TargetBitmap&,
+                                           bool,
+                                           const std::string_view& lo,
+                                           bool lo_inc,
+                                           const std::string_view& hi,
+                                           bool hi_inc) const {
     TargetBitmap result(count, false);
     if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
         return result;
@@ -1011,8 +1004,7 @@ SortedStorageView<std::string_view>::ValueAt(size_t index) const {
 
 bool
 SortedStorageView<std::string_view>::ValidReverseIndex(int32_t index) const {
-    return index >= 0 &&
-           static_cast<size_t>(index) < layout_->UniqueCount();
+    return index >= 0 && static_cast<size_t>(index) < layout_->UniqueCount();
 }
 
 int64_t
@@ -1026,8 +1018,9 @@ SortedStorageView<std::string_view>::FileUsage() const {
 }
 
 TargetBitmap
-SortedStorageView<std::string_view>::PatternMatch(
-    size_t count, std::string_view pattern, PatternOp op) const {
+SortedStorageView<std::string_view>::PatternMatch(size_t count,
+                                                  std::string_view pattern,
+                                                  PatternOp op) const {
     TargetBitmap result(count, false);
     if (op == PatternOp::PrefixMatch) {
         const auto range = PrefixRange(*layout_, pattern);
@@ -1083,7 +1076,7 @@ SortedStorageView<std::string_view>::PatternMatch(
 
 }  // namespace sorted_reader_detail
 
-#define INSTANTIATE_SORTED_READER(T)               \
+#define INSTANTIATE_SORTED_READER(T)                           \
     template class sorted_reader_detail::SortedStorageView<T>; \
     template class SortedIndexReader<T>;
 INSTANTIATE_SORTED_READER(bool)

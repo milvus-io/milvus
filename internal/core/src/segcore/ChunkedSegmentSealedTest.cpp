@@ -1496,8 +1496,12 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
                   data.begin() + i * test_data_count);
     }
 
-    auto opened = test::consumer::BuildScalarReader<int64_t>(
-        fid, DataType::INT64, index::INVERTED_INDEX_TYPE, data.size(), data.data());
+    auto opened =
+        test::consumer::BuildScalarReader<int64_t>(fid,
+                                                   DataType::INT64,
+                                                   index::INVERTED_INDEX_TYPE,
+                                                   data.size(),
+                                                   data.data());
     auto load_index_info = test::consumer::MakeLoadIndexInfo(
         std::move(opened), DataType::INT64, fid.get());
     segment->LoadIndex(load_index_info);
@@ -1516,7 +1520,7 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
 
 TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
-using namespace milvus::test::consumer;
+    using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
     auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
@@ -1573,7 +1577,7 @@ using namespace milvus::test::consumer;
 
 TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
     using namespace milvus::segcore;
-using namespace milvus::test::consumer;
+    using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
@@ -1697,7 +1701,7 @@ using namespace milvus::test::consumer;
 
 TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     using namespace milvus::segcore;
-using namespace milvus::test::consumer;
+    using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);

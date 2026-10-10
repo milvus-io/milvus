@@ -43,8 +43,7 @@ constexpr bool kSparseVector = std::is_same_v<T, sparse_u32_f32>;
 
 int64_t
 CheckedLogicalRows(size_t rows) {
-    AssertInfo(rows <=
-                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+    AssertInfo(rows <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
                "growing vector logical row count exceeds int64");
     return static_cast<int64_t>(rows);
 }
@@ -125,8 +124,8 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
     int64_t build_threshold,
     knowhere::Json build_params,
     knowhere::Json search_defaults,
-    std::shared_ptr<
-        const GrowingVectorSource<GrowingVectorStorageType<T>>> source,
+    std::shared_ptr<const GrowingVectorSource<GrowingVectorStorageType<T>>>
+        source,
     bool retain_source_as_data_view,
     std::function<int64_t()> build_thread_num)
     : value_type_(value_type),
@@ -149,11 +148,9 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
     AssertInfo(build_threshold_ > 0,
                "growing vector build threshold must be positive");
     if constexpr (kSparseVector<T>) {
-        AssertInfo(dim_ >= 0,
-                   "growing sparse vector dimension is negative");
+        AssertInfo(dim_ >= 0, "growing sparse vector dimension is negative");
     } else {
-        AssertInfo(dim_ > 0,
-                   "growing dense vector dimension must be positive");
+        AssertInfo(dim_ > 0, "growing dense vector dimension must be positive");
     }
     engine_.emplace(CreateEngine());
 }
@@ -276,8 +273,8 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
             const auto dataset_dim =
                 kSparseVector<T> ? SparseDimension<T>(values) : dim_;
             next.SetDim(dataset_dim);
-            auto dataset =
-                knowhere::GenDataSet(physical_count, dataset_dim, values.data());
+            auto dataset = knowhere::GenDataSet(
+                physical_count, dataset_dim, values.data());
             if constexpr (kSparseVector<T>) {
                 dataset->SetIsSparse(true);
             }
@@ -289,10 +286,11 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
             const auto status = next.native_index.Build(
                 dataset, build_config, next.UseBuildPool());
             if (status != knowhere::Status::success) {
-                ThrowInfo(KnowhereBuildStatusToErrorCode(status),
-                          "failed to build growing vector index: status {} ({})",
-                          static_cast<int>(status),
-                          knowhere::Status2String(status));
+                ThrowInfo(
+                    KnowhereBuildStatusToErrorCode(status),
+                    "failed to build growing vector index: status {} ({})",
+                    static_cast<int>(status),
+                    knowhere::Status2String(status));
             }
         });
     next.SetDim(next.native_index.Dim());
@@ -361,20 +359,20 @@ KnowhereGrowingVectorIndex<T>::AddFromSource(int64_t physical_begin,
         AddBatch(nullptr, 0, dim_, validity_bitmap.data(), logical_count);
         return;
     }
-    WithSourceRows<T>(
-        source_,
-        physical_begin,
-        physical_count,
-        dim_,
-        [&](std::span<const GrowingVectorStorageType<T>> values) {
-            const auto dataset_dim =
-                kSparseVector<T> ? SparseDimension<T>(values) : dim_;
-            AddBatch(values.data(),
-                     physical_count,
-                     dataset_dim,
-                     nullable ? validity_bitmap.data() : nullptr,
-                     logical_count);
-        });
+    WithSourceRows<T>(source_,
+                      physical_begin,
+                      physical_count,
+                      dim_,
+                      [&](std::span<const GrowingVectorStorageType<T>> values) {
+                          const auto dataset_dim =
+                              kSparseVector<T> ? SparseDimension<T>(values)
+                                               : dim_;
+                          AddBatch(values.data(),
+                                   physical_count,
+                                   dataset_dim,
+                                   nullable ? validity_bitmap.data() : nullptr,
+                                   logical_count);
+                      });
 }
 
 template <typename T>
@@ -491,19 +489,18 @@ KnowhereGrowingVectorIndex<T>::Flush() {
 
 template <typename T>
 void
-KnowhereGrowingVectorIndex<T>::Append(int64_t row_begin,
-                                      const VectorBatch<
-                                          GrowingVectorStorageType<T>>& batch) {
+KnowhereGrowingVectorIndex<T>::Append(
+    int64_t row_begin, const VectorBatch<GrowingVectorStorageType<T>>& batch) {
     std::lock_guard<std::mutex> lock(writer_mutex_);
     RethrowIfPoisoned();
 
     const int64_t logical_rows = CheckedLogicalRows(batch.row_count);
-    AssertInfo(row_begin >= 0 &&
-                   logical_rows <=
-                       std::numeric_limits<int64_t>::max() - row_begin,
-               "invalid growing vector logical range [{}, +{})",
-               row_begin,
-               logical_rows);
+    AssertInfo(
+        row_begin >= 0 &&
+            logical_rows <= std::numeric_limits<int64_t>::max() - row_begin,
+        "invalid growing vector logical range [{}, +{})",
+        row_begin,
+        logical_rows);
     const int64_t row_end = row_begin + logical_rows;
     const bool nullable = batch.valid != nullptr;
     if (nullable_.has_value()) {
@@ -557,20 +554,16 @@ KnowhereGrowingVectorIndex<T>::Append(int64_t row_begin,
         PublishAccepted();
     }
 
-    AssertInfo(batch_physical <=
-                   std::numeric_limits<int64_t>::max() -
-                       accepted_physical_count_,
+    AssertInfo(batch_physical <= std::numeric_limits<int64_t>::max() -
+                                     accepted_physical_count_,
                "growing vector physical row count overflows int64");
-    const int64_t next_physical =
-        accepted_physical_count_ + batch_physical;
+    const int64_t next_physical = accepted_physical_count_ + batch_physical;
 
     // Mapping publication precedes any engine mutation. Reserve failure leaves
     // both states unchanged; after this returns, an Add failure poisons the
     // owner so the unpublished mapping suffix can never be exposed.
-    validity_.Append(batch.valid,
-                     logical_rows,
-                     accepted_row_end_,
-                     accepted_physical_count_);
+    validity_.Append(
+        batch.valid, logical_rows, accepted_row_end_, accepted_physical_count_);
     if (!nullable_.has_value()) {
         nullable_ = nullable;
     }
@@ -590,8 +583,7 @@ KnowhereGrowingVectorIndex<T>::Append(int64_t row_begin,
             // A nullable batch always reaches knowhere so the IdMap's public
             // row domain advances with the segment, even for an all-null tail.
             if (batch_physical > 0 || nullable) {
-                const auto add_dim =
-                    kSparseVector<T> ? batch.dim : dim_;
+                const auto add_dim = kSparseVector<T> ? batch.dim : dim_;
                 std::vector<uint8_t> validity_bitmap;
                 if (nullable) {
                     validity_bitmap =

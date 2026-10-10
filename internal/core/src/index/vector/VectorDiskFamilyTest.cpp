@@ -121,9 +121,10 @@ BuildDisk(const std::string& raw_path,
           bool mmap = false) {
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
-        .field_type = offsets_path.empty() ? PhysicalType<T>()
-                                           : DataType::VECTOR_ARRAY,
-        .element_type = offsets_path.empty() ? DataType::NONE : PhysicalType<T>(),
+        .field_type =
+            offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY,
+        .element_type =
+            offsets_path.empty() ? DataType::NONE : PhysicalType<T>(),
         .index_engine_version =
             knowhere::Version::GetCurrentVersion().VersionNumber(),
         .params = {{METRIC_TYPE, metric},
@@ -153,14 +154,20 @@ BuildDisk(const std::string& raw_path,
     config.storage_type = "local";
     config.root_path = staging_dir + "/objects/";
     std::filesystem::create_directories(config.root_path);
-    const auto field_type = offsets_path.empty() ? PhysicalType<T>()
-                                                  : DataType::VECTOR_ARRAY;
-    storage::FileManagerContext context(
-        {1, 2, 3, 100},
-        {3, 100, 1000, 1, "vector_disk_family", "field", field_type, dim,
-         false},
-        storage::CreateChunkManager(config),
-        storage::InitArrowFileSystem(config));
+    const auto field_type =
+        offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY;
+    storage::FileManagerContext context({1, 2, 3, 100},
+                                        {3,
+                                         100,
+                                         1000,
+                                         1,
+                                         "vector_disk_family",
+                                         "field",
+                                         field_type,
+                                         dim,
+                                         false},
+                                        storage::CreateChunkManager(config),
+                                        storage::InitArrowFileSystem(config));
     context.use_async_load = false;
     storage::V1DiskSink sink(context);
     artifact->Serialize(sink);
@@ -178,14 +185,14 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = mmap;
     options.mmap_dir_path = staging_dir;
-    opened.base = LoaderRegistry::Instance()
-                      .Lookup(adapted.family)
-                      .Load({IndexFiles{
-                                 context,
-                                 std::move(paths),
-                                 LegacyIndexStorageConfig{
-                                     storage::V1SourceLayout::DiskFiles}},
-                             options});
+    opened.base =
+        LoaderRegistry::Instance()
+            .Lookup(adapted.family)
+            .Load({IndexFiles{context,
+                              std::move(paths),
+                              LegacyIndexStorageConfig{
+                                  storage::V1SourceLayout::DiskFiles}},
+                   options});
 }
 
 template <typename T>
@@ -203,8 +210,7 @@ RunOrdinaryDiskSearch(bool mmap) {
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(opened.base->Count(), kRows);
     EXPECT_EQ(reader->Dim(), kDim);
-    EXPECT_EQ(reader->KnowhereIndexType(),
-              knowhere::IndexEnum::INDEX_DISKANN);
+    EXPECT_EQ(reader->KnowhereIndexType(), knowhere::IndexEnum::INDEX_DISKANN);
     VectorSearchParams params{
         .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
         .metric_type_ = "L2",
@@ -238,8 +244,8 @@ RunOrdinaryDiskSearch(bool mmap) {
                           0);
             }
         } else {
-            EXPECT_ANY_THROW(static_cast<void>(reader->GetVector(
-                GenIdsDataset(ids.size(), ids.data()))));
+            EXPECT_ANY_THROW(static_cast<void>(
+                reader->GetVector(GenIdsDataset(ids.size(), ids.data()))));
         }
     }
 }

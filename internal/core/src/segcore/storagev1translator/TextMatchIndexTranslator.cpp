@@ -165,9 +165,9 @@ TextMatchIndexTranslator::estimated_byte_size_of_cell(
     // localStorage, then copied into the staging directory, and the cache is
     // removed when the load finishes. Peak disk is twice the index size.
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
-    auto resident_bytes = bitmap_bytes +
-                          static_cast<int64_t>(
-                              index::kScalarIndexFixedResidentBytes);
+    auto resident_bytes =
+        bitmap_bytes +
+        static_cast<int64_t>(index::kScalarIndexFixedResidentBytes);
     if (load_info_.enable_mmap) {
         return {{resident_bytes, load_info_.index_size},
                 {load_info_.index_size, load_info_.index_size}};

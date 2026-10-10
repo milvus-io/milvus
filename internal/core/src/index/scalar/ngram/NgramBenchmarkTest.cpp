@@ -64,7 +64,8 @@ Measure(Query&& query) {
         count += query();
     }
     const auto duration = std::chrono::duration<double, std::micro>(
-        std::chrono::steady_clock::now() - begin).count();
+                              std::chrono::steady_clock::now() - begin)
+                              .count();
     return {duration / iterations, count / iterations};
 }
 
@@ -100,14 +101,21 @@ struct NgramBenchmarkData {
         auto raw_info = raw_files.Prepare(field_id, {field});
         segment->LoadFieldData(raw_info);
         auto opened = expr_index::BuildIndex(
-            field_id, DataType::VARCHAR, index::NGRAM_INDEX_TYPE, {field},
+            field_id,
+            DataType::VARCHAR,
+            index::NGRAM_INDEX_TYPE,
+            {field},
             {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
         ngram = dynamic_cast<const index::INgramReader*>(opened.reader.get());
-        AssertInfo(ngram != nullptr, "benchmark requires a production NGRAM reader");
-        expr_index::InstallIndex(*segment, field_id, DataType::VARCHAR,
-                                 std::move(opened));
-        inverted = expr_index::BuildIndex(
-            field_id, DataType::VARCHAR, index::INVERTED_INDEX_TYPE, {field}).reader;
+        AssertInfo(ngram != nullptr,
+                   "benchmark requires a production NGRAM reader");
+        expr_index::InstallIndex(
+            *segment, field_id, DataType::VARCHAR, std::move(opened));
+        inverted = expr_index::BuildIndex(field_id,
+                                          DataType::VARCHAR,
+                                          index::INVERTED_INDEX_TYPE,
+                                          {field})
+                       .reader;
     }
 
     TargetBitmap
@@ -116,11 +124,12 @@ struct NgramBenchmarkData {
         literal.set_string_val(pattern.term);
         auto expression = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(field_id, DataType::VARCHAR),
-            pattern.expression_op, literal);
-        auto plan = std::make_shared<plan::FilterBitsNode>(
-            DEFAULT_PLANNODE_ID, expression);
-        return query::ExecuteQueryExpr(plan, segment.get(), rows.size(),
-                                        MAX_TIMESTAMP);
+            pattern.expression_op,
+            literal);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        return query::ExecuteQueryExpr(
+            plan, segment.get(), rows.size(), MAX_TIMESTAMP);
     }
 
     TargetBitmap
@@ -144,10 +153,10 @@ struct NgramBenchmarkData {
 
 void
 PrintMeasurement(const char* name, const Measurement& measurement) {
-    std::cout << "  " << std::left << std::setw(28) << name
-              << std::right << std::setw(12) << std::fixed
-              << std::setprecision(0) << measurement.microseconds << " us"
-              << std::setw(12) << measurement.matches << " matches\n";
+    std::cout << "  " << std::left << std::setw(28) << name << std::right
+              << std::setw(12) << std::fixed << std::setprecision(0)
+              << measurement.microseconds << " us" << std::setw(12)
+              << measurement.matches << " matches\n";
 }
 
 }  // namespace
@@ -155,22 +164,40 @@ PrintMeasurement(const char* name, const Measurement& measurement) {
 // Benchmark suites belong to all_tests, outside the index contract target.
 TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
     NgramBenchmarkData data;
-    const auto* inverted = dynamic_cast<const index::IPatternMatchReader*>(
-        data.inverted.get());
+    const auto* inverted =
+        dynamic_cast<const index::IPatternMatchReader*>(data.inverted.get());
     ASSERT_NE(inverted, nullptr);
     const std::vector<Pattern> patterns = {
-        {"LIKE %ab%cd%ef%", "%ab%cd%ef%", "%ab%cd%ef%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"LIKE %ab%cd%", "%ab%cd%", "%ab%cd%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"LIKE abc%xyz%", "abc%xyz%", "abc%xyz%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"PREFIX abc", "abc", "abc%",
-         proto::plan::PrefixMatch, index::PatternOp::PrefixMatch},
-        {"INNER hello", "hello", "%hello%",
-         proto::plan::InnerMatch, index::PatternOp::InnerMatch},
-        {"SUFFIX xyz", "xyz", "%xyz",
-         proto::plan::PostfixMatch, index::PatternOp::PostfixMatch},
+        {"LIKE %ab%cd%ef%",
+         "%ab%cd%ef%",
+         "%ab%cd%ef%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"LIKE %ab%cd%",
+         "%ab%cd%",
+         "%ab%cd%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"LIKE abc%xyz%",
+         "abc%xyz%",
+         "abc%xyz%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"PREFIX abc",
+         "abc",
+         "abc%",
+         proto::plan::PrefixMatch,
+         index::PatternOp::PrefixMatch},
+        {"INNER hello",
+         "hello",
+         "%hello%",
+         proto::plan::InnerMatch,
+         index::PatternOp::InnerMatch},
+        {"SUFFIX xyz",
+         "xyz",
+         "%xyz",
+         proto::plan::PostfixMatch,
+         index::PatternOp::PostfixMatch},
     };
     for (const auto& pattern : patterns) {
         SCOPED_TRACE(pattern.name);
@@ -190,11 +217,11 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
         const auto regex_result = Measure([&] { return scan(regex); });
         const auto like_result = Measure([&] { return scan(like); });
         const auto inverted_result = Measure([&] {
-            return inverted->PatternMatch(pattern.term, pattern.reader_op).count();
+            return inverted->PatternMatch(pattern.term, pattern.reader_op)
+                .count();
         });
-        const auto ngram_result = Measure([&] {
-            return data.Execute(pattern).count();
-        });
+        const auto ngram_result =
+            Measure([&] { return data.Execute(pattern).count(); });
         EXPECT_EQ(regex_result.matches, expected.count());
         EXPECT_EQ(like_result.matches, expected.count());
         EXPECT_EQ(inverted_result.matches, expected.count());
@@ -206,8 +233,8 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
         if (data.ngram->CanHandle(pattern.term, pattern.reader_op)) {
             TargetBitmap candidates(data.rows.size(), true);
             data.ngram->Candidates(pattern.term, pattern.reader_op, candidates);
-            std::cout << "  phase 1 candidates: " << candidates.count()
-                      << "/" << data.rows.size() << "\n";
+            std::cout << "  phase 1 candidates: " << candidates.count() << "/"
+                      << data.rows.size() << "\n";
         }
     }
 }
@@ -215,32 +242,71 @@ TEST(NgramBenchmark, NgramVsTantivyVsBruteForce) {
 TEST(NgramBenchmark, NgramFilteringEffectiveness) {
     NgramBenchmarkData data;
     const std::vector<Pattern> patterns = {
-        {"three rare trigrams", "%xyz%def%ghi%", "%xyz%def%ghi%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"long literal", "%abcdef%", "%abcdef%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"rare prefix", "qzx", "qzx%",
-         proto::plan::PrefixMatch, index::PatternOp::PrefixMatch},
-        {"short LIKE segments", "%a%b%c%", "%a%b%c%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"mixed segment lengths", "%a%bc%", "%a%bc%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"only wildcards", "_%_%_%", "_%_%_%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"short suffix", "a", "%a",
-         proto::plan::PostfixMatch, index::PatternOp::PostfixMatch},
-        {"single bigram LIKE", "%ab%", "%ab%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"single bigram inner", "ab", "%ab%",
-         proto::plan::InnerMatch, index::PatternOp::InnerMatch},
-        {"common inner", "th", "%th%",
-         proto::plan::InnerMatch, index::PatternOp::InnerMatch},
-        {"two bigrams", "%ab%cd%", "%ab%cd%",
-         proto::plan::Match, index::PatternOp::Match},
-        {"rare four gram", "qzxw", "%qzxw%",
-         proto::plan::InnerMatch, index::PatternOp::InnerMatch},
-        {"two rare four grams", "%mnop%qrst%", "%mnop%qrst%",
-         proto::plan::Match, index::PatternOp::Match},
+        {"three rare trigrams",
+         "%xyz%def%ghi%",
+         "%xyz%def%ghi%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"long literal",
+         "%abcdef%",
+         "%abcdef%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"rare prefix",
+         "qzx",
+         "qzx%",
+         proto::plan::PrefixMatch,
+         index::PatternOp::PrefixMatch},
+        {"short LIKE segments",
+         "%a%b%c%",
+         "%a%b%c%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"mixed segment lengths",
+         "%a%bc%",
+         "%a%bc%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"only wildcards",
+         "_%_%_%",
+         "_%_%_%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"short suffix",
+         "a",
+         "%a",
+         proto::plan::PostfixMatch,
+         index::PatternOp::PostfixMatch},
+        {"single bigram LIKE",
+         "%ab%",
+         "%ab%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"single bigram inner",
+         "ab",
+         "%ab%",
+         proto::plan::InnerMatch,
+         index::PatternOp::InnerMatch},
+        {"common inner",
+         "th",
+         "%th%",
+         proto::plan::InnerMatch,
+         index::PatternOp::InnerMatch},
+        {"two bigrams",
+         "%ab%cd%",
+         "%ab%cd%",
+         proto::plan::Match,
+         index::PatternOp::Match},
+        {"rare four gram",
+         "qzxw",
+         "%qzxw%",
+         proto::plan::InnerMatch,
+         index::PatternOp::InnerMatch},
+        {"two rare four grams",
+         "%mnop%qrst%",
+         "%mnop%qrst%",
+         proto::plan::Match,
+         index::PatternOp::Match},
     };
     for (const auto& pattern : patterns) {
         SCOPED_TRACE(pattern.name);
@@ -251,11 +317,13 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
             TargetBitmap candidates(data.rows.size(), true);
             data.ngram->Candidates(pattern.term, pattern.reader_op, candidates);
             for (size_t row = 0; row < data.rows.size(); ++row) {
-                ASSERT_FALSE(expected[row] && !candidates[row]) << "row=" << row;
+                ASSERT_FALSE(expected[row] && !candidates[row])
+                    << "row=" << row;
             }
-            std::cout << "  phase 1 candidates: " << candidates.count()
-                      << "/" << data.rows.size() << "\n";
-            const auto result = Measure([&] { return data.Execute(pattern).count(); });
+            std::cout << "  phase 1 candidates: " << candidates.count() << "/"
+                      << data.rows.size() << "\n";
+            const auto result =
+                Measure([&] { return data.Execute(pattern).count(); });
             EXPECT_EQ(result.matches, expected.count());
             PrintMeasurement("NGRAM expression with recheck", result);
         } else {
@@ -263,10 +331,11 @@ TEST(NgramBenchmark, NgramFilteringEffectiveness) {
         }
         LikePatternMatcher matcher(pattern.like);
         PrintMeasurement("LikePatternMatcher scan", Measure([&] {
-            size_t count = 0;
-            for (const auto& row : data.rows) count += matcher(row);
-            return count;
-        }));
+                             size_t count = 0;
+                             for (const auto& row : data.rows)
+                                 count += matcher(row);
+                             return count;
+                         }));
     }
 }
 

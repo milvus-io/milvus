@@ -141,8 +141,7 @@ class VectorDiskBuildMaterializer final {
     ValidateSparse(FieldDataBase& batch, size_t physical_rows) const;
 
     size_t
-    ValidateEmbeddingList(FieldDataBase& batch,
-                          size_t physical_parents) const;
+    ValidateEmbeddingList(FieldDataBase& batch, size_t physical_parents) const;
 
     void
     WriteSparse(FieldDataBase& batch, size_t physical_rows);

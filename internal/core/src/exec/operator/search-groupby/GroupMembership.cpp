@@ -135,17 +135,16 @@ BuildIndexMembership(milvus::OpContext* op_ctx,
                                "strict group membership");
     std::unordered_set<GroupKey<T>> target_groups(groups.begin(), groups.end());
     TargetBitmap membership(row_count, false);
-    reader->Gather(
-        offsets.data(),
-        count,
-        [&](int64_t i, const ReaderType* value, bool valid) {
-            auto group = valid && value != nullptr
-                             ? GroupKey<T>(T(*value))
-                             : GroupKey<T>(std::nullopt);
-            if (target_groups.find(group) != target_groups.end()) {
-                membership[offsets[static_cast<size_t>(i)]] = true;
-            }
-        });
+    reader->Gather(offsets.data(),
+                   count,
+                   [&](int64_t i, const ReaderType* value, bool valid) {
+                       auto group = valid && value != nullptr
+                                        ? GroupKey<T>(T(*value))
+                                        : GroupKey<T>(std::nullopt);
+                       if (target_groups.find(group) != target_groups.end()) {
+                           membership[offsets[static_cast<size_t>(i)]] = true;
+                       }
+                   });
     return membership;
 }
 
@@ -213,11 +212,8 @@ ScanRawField(milvus::OpContext* op_ctx,
     int64_t chunk_id = 0;
     int64_t chunk_pos = 0;
     segcore::SegmentChunkReader reader(op_ctx, &segment, row_count);
-    auto accessor =
-        reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
-                                            field_id,
-                                            chunk_id,
-                                            chunk_pos);
+    auto accessor = reader.GetMultipleChunkDataAccessor(
+        segment.GetFieldDataType(field_id), field_id, chunk_id, chunk_pos);
     for (size_t offset = 0; offset < row_count; ++offset) {
         if ((offset & 1023) == 0) {
             segcore::CheckCancellation(op_ctx,

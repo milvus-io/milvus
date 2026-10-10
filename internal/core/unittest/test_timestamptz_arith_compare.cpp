@@ -215,7 +215,8 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
         LoadIndexInfo load_index_info{};
         load_index_info.field_id = tstz_fid_.get();
         load_index_info.field_type = DataType::TIMESTAMPTZ;
-        load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        load_index_info.index_params =
+            GenIndexParams(scalar_index.get(), "sort");
         SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
         load_index_info.cache_index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));

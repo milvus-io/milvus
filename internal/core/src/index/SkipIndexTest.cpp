@@ -51,20 +51,31 @@ class SkipMetricsGroupTranslator final
         meta_.num_rows_until_chunk_ = {0, 1};
         meta_.InstallSkipMetrics(std::move(metrics), 1, key_);
     }
-    size_t num_cells() const override { return 1; }
-    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t uid) const override {
+    size_t
+    num_cells() const override {
+        return 1;
+    }
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t uid) const override {
         return uid;
     }
     std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
         return {{0, 0}, {0, 0}};
     }
-    int64_t cells_storage_bytes(
+    int64_t
+    cells_storage_bytes(
         const std::vector<cachinglayer::cid_t>&) const override {
         return 0;
     }
-    const std::string& key() const override { return key_; }
-    cachinglayer::Meta* meta() override { return &meta_; }
+    const std::string&
+    key() const override {
+        return key_;
+    }
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
     std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>>
     get_cells(OpContext*, const std::vector<cachinglayer::cid_t>&) override {
         ThrowInfo(UnexpectedError, "skip metrics must not load group payloads");
@@ -87,28 +98,44 @@ class SkipMetricsChunkTranslator final
                 true) {
         meta_.num_rows_until_chunk_ = {0, rows};
         segcore::storagev1translator::virtual_chunk_config(
-            rows, 1, meta_.num_rows_until_chunk_, meta_.virt_chunk_order_,
+            rows,
+            1,
+            meta_.num_rows_until_chunk_,
+            meta_.virt_chunk_order_,
             meta_.vcid_to_cid_arr_);
     }
-    size_t num_cells() const override { return 1; }
-    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t uid) const override {
+    size_t
+    num_cells() const override {
+        return 1;
+    }
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t uid) const override {
         return uid;
     }
     std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
         return {{0, 0}, {0, 0}};
     }
-    int64_t cells_storage_bytes(
+    int64_t
+    cells_storage_bytes(
         const std::vector<cachinglayer::cid_t>&) const override {
         return 0;
     }
-    const std::string& key() const override { return key_; }
-    cachinglayer::Meta* meta() override { return &meta_; }
+    const std::string&
+    key() const override {
+        return key_;
+    }
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
     std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Chunk>>>
-    get_cells(OpContext*, const std::vector<cachinglayer::cid_t>& cids) override {
+    get_cells(OpContext*,
+              const std::vector<cachinglayer::cid_t>& cids) override {
         AssertInfo(cids.size() == 1 && cids.front() == 0 && chunk_ != nullptr,
                    "skip column fixture can transfer its chunk once");
-        std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Chunk>>> cells;
+        std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Chunk>>>
+            cells;
         cells.emplace_back(0, std::move(chunk_));
         return cells;
     }
@@ -127,8 +154,8 @@ MakeColumnWithMetrics(FieldId field_id,
     segcore::storagev2translator::SkipMetricsByField metrics_by_field;
     metrics_by_field[field_id.get()].push_back(std::move(metrics));
 
-    auto translator =
-        std::make_unique<SkipMetricsGroupTranslator>(std::move(metrics_by_field));
+    auto translator = std::make_unique<SkipMetricsGroupTranslator>(
+        std::move(metrics_by_field));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
     FieldMeta field_meta(
@@ -595,8 +622,7 @@ class SingleCellMetricsProvider : public milvus::FieldChunkMetricsProvider {
 };
 }  // namespace
 
-TEST_F(SkipIndexTest,
-       ColumnMetricsViewsKeepGenerationsIsolatedAndFailOpen) {
+TEST_F(SkipIndexTest, ColumnMetricsViewsKeepGenerationsIsolatedAndFailOpen) {
     const FieldId field_id(101);
     auto make_view = [&](int64_t lower, int64_t upper) {
         auto skip_index = std::make_shared<SkipIndex>();

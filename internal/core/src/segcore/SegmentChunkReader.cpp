@@ -284,8 +284,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
 
 template <typename T>
 ChunkDataAccessor
-SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
-                                         int chunk_id) const {
+SegmentChunkReader::GetChunkDataAccessor(FieldId field_id, int chunk_id) const {
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
@@ -306,8 +305,8 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
 
 template <>
 ChunkDataAccessor
-SegmentChunkReader::GetChunkDataAccessor<std::string>(
-    FieldId field_id, int chunk_id) const {
+SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
+                                                      int chunk_id) const {
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",

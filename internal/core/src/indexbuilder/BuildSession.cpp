@@ -826,8 +826,7 @@ BuildSession::RunToArtifact() {
                                "{} source produced a null field-data batch",
                                label);
                     const auto rows = batch->Length();
-                    if (rows >
-                        static_cast<size_t>(row_limit - decoded_rows)) {
+                    if (rows > static_cast<size_t>(row_limit - decoded_rows)) {
                         ThrowInfo(DataFormatBroken,
                                   "{} source decoded more than {} rows",
                                   label,
@@ -872,11 +871,8 @@ BuildSession::RunToArtifact() {
                 materializer = make_materializer();
                 add_missing_rows(*materializer,
                                  req_.expected_rows - decoded_rows);
-                const auto replayed_rows =
-                    visit_primary(storage::kStreamingInflightBytes,
-                                  label,
-                                  decoded_rows,
-                                  add);
+                const auto replayed_rows = visit_primary(
+                    storage::kStreamingInflightBytes, label, decoded_rows, add);
                 if (replayed_rows != decoded_rows) {
                     ThrowInfo(DataFormatBroken,
                               "{} source decoded {} rows on its second read "

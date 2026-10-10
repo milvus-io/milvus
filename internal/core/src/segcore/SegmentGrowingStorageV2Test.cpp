@@ -454,10 +454,11 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     // even when the shared all-types schema gains another type.
     std::vector<std::vector<int>> column_groups(2);
     for (int i = 0; i < arrow_schema->num_fields(); ++i) {
-        const auto field_id = std::stoll(
-            arrow_schema->field(i)->metadata()
-                ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
-                .ValueOrDie());
+        const auto field_id =
+            std::stoll(arrow_schema->field(i)
+                           ->metadata()
+                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                           .ValueOrDie());
         column_groups[field_id == vec.get() ? 1 : 0].push_back(i);
     }
     ASSERT_EQ(column_groups[1].size(), 1);

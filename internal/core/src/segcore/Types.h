@@ -52,7 +52,8 @@ struct LoadIndexInfo {
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
-    std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>> cache_index;
+    std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
+        cache_index;
     // Captured from the translator before its unique reader factory is moved
     // into the cache slot. Segment installation consumes these values without
     // pinning a cold payload.

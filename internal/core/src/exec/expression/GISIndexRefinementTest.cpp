@@ -58,26 +58,47 @@ class ShortSpatialCandidates final : public index::IIndexReaderBase,
         : reader_(std::move(reader)) {
     }
 
-    index::ReaderCaps Caps() const override { return reader_->Caps(); }
-    index::Domain CoordDomain() const override { return reader_->CoordDomain(); }
-    int64_t Count() const override { return reader_->Count(); }
-    DataType ValueType() const override { return reader_->ValueType(); }
-    int64_t MemoryUsage() const override { return reader_->MemoryUsage(); }
-    cachinglayer::ResourceUsage CellByteSize() const override {
+    index::ReaderCaps
+    Caps() const override {
+        return reader_->Caps();
+    }
+    index::Domain
+    CoordDomain() const override {
+        return reader_->CoordDomain();
+    }
+    int64_t
+    Count() const override {
+        return reader_->Count();
+    }
+    DataType
+    ValueType() const override {
+        return reader_->ValueType();
+    }
+    int64_t
+    MemoryUsage() const override {
+        return reader_->MemoryUsage();
+    }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
         return reader_->CellByteSize();
     }
-    TargetBitmap Candidates(index::SpatialOp op, const Geometry& query) const override {
+    TargetBitmap
+    Candidates(index::SpatialOp op, const Geometry& query) const override {
         auto candidates =
-            dynamic_cast<const index::ISpatialReader&>(*reader_).Candidates(op, query);
-        AssertInfo(candidates.size() > 2, "short-candidate fixture needs three rows");
+            dynamic_cast<const index::ISpatialReader&>(*reader_).Candidates(
+                op, query);
+        AssertInfo(candidates.size() > 2,
+                   "short-candidate fixture needs three rows");
         candidates.reset(1);
         candidates.resize(candidates.size() - 1);
         return candidates;
     }
-    TargetBitmap IsNull() const override {
+    TargetBitmap
+    IsNull() const override {
         return dynamic_cast<const index::INullReader&>(*reader_).IsNull();
     }
-    TargetBitmap IsNotNull() const override {
+    TargetBitmap
+    IsNotNull() const override {
         return dynamic_cast<const index::INullReader&>(*reader_).IsNotNull();
     }
 
@@ -111,7 +132,9 @@ class GISIndexRefinementTest : public ::testing::Test {
     };
 
     void
-    LoadColumn(SegmentSealed& segment, FieldId field_id, const FieldDataPtr& data) {
+    LoadColumn(SegmentSealed& segment,
+               FieldId field_id,
+               const FieldDataPtr& data) {
         segment.LoadFieldData(raw_files_.Prepare(field_id, {data}));
     }
 
@@ -120,8 +143,8 @@ class GISIndexRefinementTest : public ::testing::Test {
                        FieldId field_id,
                        const std::vector<std::string>& wkbs,
                        const std::vector<uint8_t>& validity = {}) {
-        auto data = storage::CreateFieldData(DataType::GEOMETRY, DataType::NONE,
-                                             !validity.empty());
+        auto data = storage::CreateFieldData(
+            DataType::GEOMETRY, DataType::NONE, !validity.empty());
         if (validity.empty()) {
             data->FillFieldData(wkbs.data(), wkbs.size());
         } else {
@@ -136,16 +159,18 @@ class GISIndexRefinementTest : public ::testing::Test {
                         bool load_geometry = true) {
         auto schema = std::make_shared<Schema>();
         const auto pk = schema->AddDebugField("id", DataType::INT64);
-        const auto geo = schema->AddDebugField("geo", DataType::GEOMETRY,
-                                               !validity.empty());
+        const auto geo =
+            schema->AddDebugField("geo", DataType::GEOMETRY, !validity.empty());
         schema->set_primary_field_id(pk);
         auto sealed = CreateSealedSegment(schema);
         std::vector<int64_t> ids(wkbs.size());
         std::iota(ids.begin(), ids.end(), 0);
         const std::vector<int64_t> timestamps(wkbs.size(), 0);
         for (const auto field_id : {RowFieldID, pk, TimestampFieldID}) {
-            auto data = storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
-            const auto& values = field_id == TimestampFieldID ? timestamps : ids;
+            auto data = storage::CreateFieldData(
+                DataType::INT64, DataType::NONE, false);
+            const auto& values =
+                field_id == TimestampFieldID ? timestamps : ids;
             data->FillFieldData(values.data(), values.size());
             LoadColumn(*sealed, field_id, data);
         }
@@ -160,15 +185,17 @@ class GISIndexRefinementTest : public ::testing::Test {
                          const std::vector<std::string>& wkbs,
                          const std::vector<uint8_t>& validity = {},
                          bool short_candidates = false) {
-        auto data = storage::CreateFieldData(DataType::GEOMETRY, DataType::NONE,
-                                             !validity.empty());
+        auto data = storage::CreateFieldData(
+            DataType::GEOMETRY, DataType::NONE, !validity.empty());
         if (validity.empty()) {
             data->FillFieldData(wkbs.data(), wkbs.size());
         } else {
             data->FillFieldData(wkbs.data(), validity.data(), wkbs.size(), 0);
         }
-        auto opened = test::expr_index::BuildIndex(
-            segment.geo_id, DataType::GEOMETRY, index::RTREE_INDEX_TYPE, {data});
+        auto opened = test::expr_index::BuildIndex(segment.geo_id,
+                                                   DataType::GEOMETRY,
+                                                   index::RTREE_INDEX_TYPE,
+                                                   {data});
         if (short_candidates) {
             opened.reader = std::make_unique<ShortSpatialCandidates>(
                 std::move(opened.reader));
@@ -246,7 +273,6 @@ TEST_F(GISIndexRefinementTest, ExactRelationsRefineRTreeCandidates) {
     test_op("POINT(0 0)",
             proto::plan::GISFunctionFilterExpr_GISOp_Equals,
             [](int i) { return (i % 4 == 0); });
-
 }
 
 // Restore the previous split-fusion setting even if
@@ -255,7 +281,8 @@ TEST_F(GISIndexRefinementTest, ExactRelationsRefineRTreeCandidates) {
 struct GisSplitFusionFlagGuard {
     bool previous;
     explicit GisSplitFusionFlagGuard(bool enable)
-        : previous(SegcoreConfig::default_config().get_enable_gis_split_fusion()) {
+        : previous(
+              SegcoreConfig::default_config().get_enable_gis_split_fusion()) {
         milvus::segcore::SegcoreConfig::default_config()
             .set_enable_gis_split_fusion(enable);
     }
@@ -376,7 +403,6 @@ TEST_F(GISIndexRefinementTest, SplitFusionMatchesBaselineAcrossIndexedBatches) {
             ASSERT_EQ(bool(baseline[i]), bool(fused[i])) << "row " << i;
         }
     }
-
 }
 
 TEST_F(GISIndexRefinementTest, IndexedRefinementSkipsCorruptWkbCandidate) {
@@ -404,7 +430,6 @@ TEST_F(GISIndexRefinementTest, IndexedRefinementSkipsCorruptWkbCandidate) {
     for (int i = 0; i < N; ++i) {
         EXPECT_EQ(bool(bits[i]), i != kBad) << "row " << i;
     }
-
 }
 
 TEST_F(GISIndexRefinementTest,
@@ -464,7 +489,8 @@ TEST_F(GISIndexRefinementTest,
 // batch size far below N so the group loop runs several full groups plus a
 // partial tail, and check the answer is identical to the single-shot read:
 // every valid row found, the NULL tail row not.
-TEST_F(GISIndexRefinementTest, ShortCandidatesChunkedRefinementMatchesFullRead) {
+TEST_F(GISIndexRefinementTest,
+       ShortCandidatesChunkedRefinementMatchesFullRead) {
     GeometryCacheFlagGuard cache_off(false);
     using namespace milvus;
     using namespace milvus::query;

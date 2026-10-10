@@ -514,7 +514,7 @@ NgramIndexLoader::LoadLegacy(storage::FileSource& source,
     auto state = (co_await LoadState(
         use_async, source, opts, ParseRuntimeParams(opts.params)));
     auto reader = MakeReader(state);
-    co_return(co_await FinishJsonProjectedOpenAsync(
+    co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
 

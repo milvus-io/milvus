@@ -71,37 +71,50 @@ DataGen(SchemaPtr schema, int64_t rows, uint64_t = 0, int64_t offset = 0) {
     result.raw_ = result.owner.get();
     result.raw_->set_num_rows(rows);
     for (const auto id : schema->get_field_ids()) {
-        if (id.get() < START_USER_FIELDID) continue;
+        if (id.get() < START_USER_FIELDID)
+            continue;
         const auto& meta = (*schema)[id];
         auto* field = result.raw_->add_fields_data();
         field->set_field_id(id.get());
-        field->set_type(static_cast<proto::schema::DataType>(meta.get_data_type()));
+        field->set_type(
+            static_cast<proto::schema::DataType>(meta.get_data_type()));
         if (meta.get_data_type() == DataType::INT64) {
-            for (const auto value : result.row_ids_) field->mutable_scalars()->mutable_long_data()->add_data(value);
+            for (const auto value : result.row_ids_)
+                field->mutable_scalars()->mutable_long_data()->add_data(value);
         } else if (meta.get_data_type() == DataType::TIMESTAMPTZ) {
-            for (const auto value : result.row_ids_) field->mutable_scalars()->mutable_timestamptz_data()->add_data(value);
+            for (const auto value : result.row_ids_)
+                field->mutable_scalars()->mutable_timestamptz_data()->add_data(
+                    value);
         } else if (IsStringDataType(meta.get_data_type())) {
-            for (int64_t row = 0; row < rows; ++row) field->mutable_scalars()->mutable_string_data()->add_data("");
+            for (int64_t row = 0; row < rows; ++row)
+                field->mutable_scalars()->mutable_string_data()->add_data("");
         } else {
-            AssertInfo(meta.get_data_type() == DataType::VECTOR_FLOAT, "unsupported text fixture field {}", meta.get_data_type());
+            AssertInfo(meta.get_data_type() == DataType::VECTOR_FLOAT,
+                       "unsupported text fixture field {}",
+                       meta.get_data_type());
             field->mutable_vectors()->set_dim(meta.get_dim());
-            for (int64_t value = 0; value < rows * meta.get_dim(); ++value) field->mutable_vectors()->mutable_float_vector()->add_data(0.0F);
+            for (int64_t value = 0; value < rows * meta.get_dim(); ++value)
+                field->mutable_vectors()->mutable_float_vector()->add_data(
+                    0.0F);
         }
         if (meta.is_nullable()) {
-            for (int64_t row = 0; row < rows; ++row) field->mutable_scalars()->add_valid_data(true);
+            for (int64_t row = 0; row < rows; ++row)
+                field->mutable_scalars()->add_valid_data(true);
         }
     }
-    result.binlogs = storage::LocalDirectory::CreateOwned(
-        TestRemotePath, "text-consumer-binlogs-XXXXXX", "text consumer binlogs");
+    result.binlogs =
+        storage::LocalDirectory::CreateOwned(TestRemotePath,
+                                             "text-consumer-binlogs-XXXXXX",
+                                             "text consumer binlogs");
     return result;
 }
 
 inline void
 AddBinlog(LoadFieldDataInfo& info,
-           const std::string& root,
-           int64_t field_id,
-           const std::vector<FieldDataPtr>& batches,
-           const storage::ChunkManagerPtr& manager) {
+          const std::string& root,
+          int64_t field_id,
+          const std::vector<FieldDataPtr>& batches,
+          const storage::ChunkManagerPtr& manager) {
     std::vector<std::string> paths;
     std::vector<int64_t> rows;
     std::vector<int64_t> bytes;
@@ -110,7 +123,8 @@ AddBinlog(LoadFieldDataInfo& info,
     rows.reserve(batches.size());
     bytes.reserve(batches.size());
     for (size_t batch = 0; batch < batches.size(); ++batch) {
-        const auto path = root + "/" + std::to_string(field_id) + "/" + std::to_string(batch);
+        const auto path =
+            root + "/" + std::to_string(field_id) + "/" + std::to_string(batch);
         auto payload = std::make_shared<storage::PayloadReader>(batches[batch]);
         storage::InsertData insert(payload);
         insert.SetFieldDataMeta(storage::FieldDataMeta{1, 2, 3, field_id});
@@ -121,16 +135,21 @@ AddBinlog(LoadFieldDataInfo& info,
         bytes.push_back(serialized.size());
         total += rows.back();
     }
-    info.field_infos.emplace(field_id, FieldBinlogInfo{field_id, total, rows, bytes, false, "", paths});
+    info.field_infos.emplace(
+        field_id,
+        FieldBinlogInfo{field_id, total, rows, bytes, false, "", paths});
 }
 
 inline LoadFieldDataInfo
-PrepareInsertBinlog(int64_t, int64_t, int64_t,
-                     const TextTestData& data,
-                     const storage::ChunkManagerPtr& manager) {
+PrepareInsertBinlog(int64_t,
+                    int64_t,
+                    int64_t,
+                    const TextTestData& data,
+                    const storage::ChunkManagerPtr& manager) {
     LoadFieldDataInfo info;
     auto add_int64 = [&](int64_t id, const auto& values) {
-        auto field = storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+        auto field =
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
         field->FillFieldData(values.data(), values.size());
         AddBinlog(info, data.binlogs->Path(), id, {field}, manager);
     };
@@ -139,18 +158,23 @@ PrepareInsertBinlog(int64_t, int64_t, int64_t,
     for (const auto& field : data.raw_->fields_data()) {
         const auto& meta = (*data.schema_)[FieldId(field.field_id())];
         const auto rows = data.row_ids_.size();
-        auto native = storage::CreateFieldData(meta.get_data_type(), DataType::NONE,
-                                                meta.is_nullable(), meta.is_vector() ? meta.get_dim() : 1);
+        auto native =
+            storage::CreateFieldData(meta.get_data_type(),
+                                     DataType::NONE,
+                                     meta.is_nullable(),
+                                     meta.is_vector() ? meta.get_dim() : 1);
         auto fill = [&](const void* values) {
             if (!meta.is_nullable()) {
                 native->FillFieldData(values, rows);
                 return;
             }
             const auto& valid = GetFieldDataRowValidData(field);
-            AssertInfo(valid.size() == rows, "text fixture validity row count mismatch");
+            AssertInfo(valid.size() == rows,
+                       "text fixture validity row count mismatch");
             std::vector<uint8_t> packed((rows + 7) / 8, 0);
             for (size_t row = 0; row < rows; ++row) {
-                if (valid[row]) packed[row / 8] |= uint8_t{1} << (row % 8);
+                if (valid[row])
+                    packed[row / 8] |= uint8_t{1} << (row % 8);
             }
             native->FillFieldData(values, packed.data(), rows, 0);
         };
@@ -163,17 +187,21 @@ PrepareInsertBinlog(int64_t, int64_t, int64_t,
             std::vector<std::string> values(strings.begin(), strings.end());
             fill(values.data());
         } else {
-            AssertInfo(meta.get_data_type() == DataType::VECTOR_FLOAT, "unsupported text binlog fixture field");
+            AssertInfo(meta.get_data_type() == DataType::VECTOR_FLOAT,
+                       "unsupported text binlog fixture field");
             fill(field.vectors().float_vector().data().data());
         }
-        AddBinlog(info, data.binlogs->Path(), field.field_id(), {native}, manager);
+        AddBinlog(
+            info, data.binlogs->Path(), field.field_id(), {native}, manager);
     }
     return info;
 }
 
 inline std::unique_ptr<SegmentSealed>
-CreateSealedWithFieldDataLoaded(const SchemaPtr& schema, const TextTestData& data) {
-    auto manager = storage::CreateChunkManager(get_default_local_storage_config());
+CreateSealedWithFieldDataLoaded(const SchemaPtr& schema,
+                                const TextTestData& data) {
+    auto manager =
+        storage::CreateChunkManager(get_default_local_storage_config());
     auto info = PrepareInsertBinlog(1, 2, 3, data, manager);
     auto segment = CreateSealedSegment(schema, empty_index_meta);
     segment->LoadFieldData(info);
@@ -184,7 +212,8 @@ inline IndexPin
 PinSealedText(const SegmentInternalInterface& segment, FieldId field) {
     const auto capability = segment.IndexCapability(field);
     for (const auto& entry : capability.entries()) {
-        if (entry.caps.text_match) return segment.PinIndex(nullptr, entry.key);
+        if (entry.caps.text_match)
+            return segment.PinIndex(nullptr, entry.key);
     }
     return {};
 }
@@ -192,18 +221,20 @@ PinSealedText(const SegmentInternalInterface& segment, FieldId field) {
 inline const index::ITextMatchReader&
 TextReader(const index::IIndexReaderBase& base) {
     const auto* reader = dynamic_cast<const index::ITextMatchReader*>(&base);
-    AssertInfo(reader != nullptr, "text fixture selected a reader without text capability");
+    AssertInfo(reader != nullptr,
+               "text fixture selected a reader without text capability");
     return *reader;
 }
 
 inline void
 ExpectOnlyTextMatchHit(const index::ITextMatchReader& reader,
-                        const std::string& term,
-                        int64_t expected,
-                        int64_t rows) {
+                       const std::string& term,
+                       int64_t expected,
+                       int64_t rows) {
     const auto hits = reader.MatchQuery(term, 1);
     ASSERT_EQ(hits.size(), rows);
-    for (int64_t row = 0; row < rows; ++row) EXPECT_EQ(hits[row], row == expected) << term << "/" << row;
+    for (int64_t row = 0; row < rows; ++row)
+        EXPECT_EQ(hits[row], row == expected) << term << "/" << row;
 }
 inline SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
