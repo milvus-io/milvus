@@ -35,6 +35,9 @@ class AsyncIndexEntryReader;
 
 namespace milvus::index {
 
+// Admission reserve for resident scalar reader metadata, charged once per index.
+inline constexpr uint64_t kScalarIndexFixedResidentBytes = 2 * 1024;
+
 bool
 CanUseIndexRawDataForField(DataType field_type, bool has_raw_data);
 

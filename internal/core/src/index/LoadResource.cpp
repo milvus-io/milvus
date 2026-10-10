@@ -29,6 +29,7 @@
 #include "common/Utils.h"
 #include "index/Families.h"
 #include "index/Meta.h"
+#include "index/ParamUtils.h"
 #include "index/ResourceUsageUtils.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 #include "index/scalar/spatial/RTreeSerialization.h"
@@ -455,6 +456,12 @@ ScalarIndexLoadResourceWithOverhead(
     }
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
+    request.final_memory_cost =
+        SaturatingAdd(request.final_memory_cost,
+                      kScalarIndexFixedResidentBytes);
+    request.max_memory_cost =
+        SaturatingAdd(request.max_memory_cost,
+                      kScalarIndexFixedResidentBytes);
     return request;
 }
 
@@ -519,12 +526,20 @@ ScalarIndexLoadResource(DataType field_type,
     auto stream_memory_overhead = ScalarIndexStreamMemoryOverhead(
         index_size_in_bytes, scalar_version, encrypted_stream, file_stream);
 
-    return ScalarIndexLoadResourceWithOverhead(field_type,
-                                               index_size_in_bytes,
-                                               index_params,
-                                               mmap_enable,
-                                               num_rows,
-                                               stream_memory_overhead);
+    auto request = ScalarIndexLoadResourceWithOverhead(field_type,
+                                                       index_size_in_bytes,
+                                                       index_params,
+                                                       mmap_enable,
+                                                       num_rows,
+                                                       stream_memory_overhead);
+    if (scalar_version < 3 && index_type == milvus::index::ASCENDING_SORT) {
+        // V1/V2 numeric sorted heap loads stage index_data on local disk
+        // before decoding it. Numeric and string values are not distinguished
+        // here, so string sorts reserve the same disk.
+        request.max_disk_cost =
+            std::max(request.max_disk_cost, index_size_in_bytes);
+    }
+    return request;
 }
 
 namespace {
@@ -618,8 +633,9 @@ LegacyScalarLoadResource(DataType field_type,
                     SaturatingMul(uint64_t{std::max<int64_t>(0, rows)},
                                   sizeof(void*)));
             }
-            request.final_memory_cost =
-                std::max(request.final_memory_cost, resident);
+            request.final_memory_cost = std::max(
+                request.final_memory_cost,
+                SaturatingAdd(resident, kScalarIndexFixedResidentBytes));
         }
         if (!mmap_enable &&
             (type == MARISA_TRIE || type == MARISA_TRIE_UPPER)) {
@@ -932,11 +948,15 @@ PackedScalarIndexLoadResource(
             request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
     }
     if (type == RTREE_INDEX_TYPE) {
+        // This branch replaces the generic resident estimate; retain its
+        // per-index reader reservation.
         request.final_memory_cost =
             SaturatingAdd(RTreeHeapBytes(num_rows),
                           directory.HasEntry("index_null_offset")
                               ? directory.At("index_null_offset").plaintext_size
                               : uint64_t{0});
+        request.final_memory_cost = SaturatingAdd(
+            request.final_memory_cost, kScalarIndexFixedResidentBytes);
     }
     if (field_type == DataType::JSON) {
         const auto non_exist_bytes =
