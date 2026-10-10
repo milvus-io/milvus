@@ -2740,7 +2740,7 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 
 			recycled := make([]int64, 0, 1)
 			mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).
-				To(func(_ *garbageCollector, _ context.Context, segmentID int64, _ *SegmentInfo) {
+				To(func(_ *garbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64, _ *SegmentInfo) {
 					recycled = append(recycled, segmentID)
 				}).Build()
 			defer mockRecycle.UnPatch()
