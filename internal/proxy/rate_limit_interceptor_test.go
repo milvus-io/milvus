@@ -18,9 +18,12 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -32,9 +35,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -57,34 +64,6 @@ func (l *limiterMock) Check(dbID int64, collectionIDToPartIDs map[int64][]int64,
 
 func (l *limiterMock) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
 	return l.Check(dbID, collectionIDToPartIDs, rt, n)
-}
-
-type snapshotLimiterCheck struct {
-	dbID            int64
-	collectionCount int
-	rateType        internalpb.RateType
-	n               int
-}
-
-type rejectingSnapshotLimiter struct {
-	checks []snapshotLimiterCheck
-}
-
-func (l *rejectingSnapshotLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
-	l.checks = append(l.checks, snapshotLimiterCheck{
-		dbID:            dbID,
-		collectionCount: len(collectionIDToPartIDs),
-		rateType:        rateType,
-		n:               n,
-	})
-	if n <= 0 {
-		return nil
-	}
-	return merr.ErrServiceRateLimit
-}
-
-func (l *rejectingSnapshotLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rateType internalpb.RateType, n int) error {
-	return l.Check(dbID, collectionIDToPartIDs, rateType, n)
 }
 
 func TestRateLimitInterceptor(t *testing.T) {
@@ -210,19 +189,6 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
 		assert.Equal(t, database, int64(100))
 		assert.Empty(t, col2part)
-
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ExportSnapshotRequest{
-			DbName:         "db1",
-			CollectionName: "foo",
-			Name:           "snapshot",
-			TargetS3Path:   "s3://bucket/export-root",
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, 1, size)
-		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.Equal(t, database, int64(100))
-		assert.Equal(t, 1, len(col2part))
-		assert.Equal(t, 0, len(col2part[1]))
 
 		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
@@ -402,7 +368,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
 		testGetFailedResponse(&milvuspb.RestoreExternalSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "restoreExternalSnapshot")
-		testGetFailedResponse(&milvuspb.ExportSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "exportSnapshot")
+		assert.NotNil(t, GetFailedResponse(&milvuspb.ExportSnapshotRequest{}, merr.ErrServiceRateLimit))
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 		testGetFailedResponse(&milvuspb.AddFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "addFileResource")
@@ -413,118 +379,6 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Nil(t, rsp)
 		rsp = GetFailedResponse(nil, merr.OldCodeToMerr(commonpb.ErrorCode_UnexpectedError))
 		assert.Nil(t, rsp)
-	})
-
-	t.Run("snapshot mutations are rate limited", func(t *testing.T) {
-		mockCache := NewMockCache(t)
-		databaseNames := make([]string, 0)
-		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).
-			Run(func(_ context.Context, database string) {
-				databaseNames = append(databaseNames, database)
-			}).
-			Return(&databaseInfo{
-				DBID:             100,
-				CreatedTimestamp: 1,
-			}, nil)
-		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-
-		testCases := []struct {
-			name            string
-			ctx             context.Context
-			request         proto.Message
-			expectedDBID    int64
-			expectedCollNum int
-		}{
-			{
-				name: "create snapshot",
-				request: &milvuspb.CreateSnapshotRequest{
-					DbName:         "db1",
-					CollectionName: "source",
-				},
-				expectedDBID:    100,
-				expectedCollNum: 1,
-			},
-			{
-				name: "drop snapshot",
-				request: &milvuspb.DropSnapshotRequest{
-					DbName:         "db1",
-					CollectionName: "source",
-				},
-				expectedDBID:    100,
-				expectedCollNum: 1,
-			},
-			{
-				name: "restore snapshot",
-				request: &milvuspb.RestoreSnapshotRequest{
-					DbName:               "source_db",
-					CollectionName:       "source",
-					TargetDbName:         "target_db",
-					TargetCollectionName: "target",
-				},
-				expectedDBID: 100,
-			},
-			{
-				name: "restore snapshot to active database",
-				ctx: metadata.NewIncomingContext(context.Background(), metadata.Pairs(
-					util.HeaderDBName, "active_db",
-				)),
-				request: &milvuspb.RestoreSnapshotRequest{
-					DbName:               "source_db",
-					CollectionName:       "source",
-					TargetCollectionName: "target",
-				},
-				expectedDBID: 100,
-			},
-			{
-				name: "pin snapshot",
-				request: &milvuspb.PinSnapshotDataRequest{
-					DbName:         "db1",
-					CollectionName: "source",
-				},
-				expectedDBID:    100,
-				expectedCollNum: 1,
-			},
-			{
-				name:         "unpin snapshot",
-				request:      &milvuspb.UnpinSnapshotDataRequest{PinId: 1},
-				expectedDBID: util.InvalidDBID,
-			},
-		}
-
-		limiter := &rejectingSnapshotLimiter{}
-		handlerCalls := 0
-		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-			handlerCalls++
-			return merr.Success(), nil
-		}
-		interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, limiter)
-		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockSnapshotMethod"}
-
-		for _, testCase := range testCases {
-			t.Run(testCase.name, func(t *testing.T) {
-				testCtx := testCase.ctx
-				if testCtx == nil {
-					testCtx = context.Background()
-				}
-				response, err := interceptor(testCtx, testCase.request, serverInfo, handler)
-				require.NoError(t, err)
-				status, ok := requestutil.GetStatusFromResponse(response)
-				require.True(t, ok)
-				assert.Equal(t, commonpb.ErrorCode_RateLimit, status.GetErrorCode())
-			})
-		}
-
-		assert.Zero(t, handlerCalls)
-		require.Len(t, limiter.checks, len(testCases))
-		for i, testCase := range testCases {
-			assert.Equal(t, snapshotLimiterCheck{
-				dbID:            testCase.expectedDBID,
-				collectionCount: testCase.expectedCollNum,
-				rateType:        internalpb.RateType_DDLCollection,
-				n:               1,
-			}, limiter.checks[i])
-		}
-		assert.Equal(t, []string{"db1", "db1", "target_db", "active_db", "db1"}, databaseNames)
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
@@ -573,7 +427,10 @@ func TestRateLimitInterceptor(t *testing.T) {
 		// test 0 rate, force deny
 		limiter.rate = 0
 		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
-		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
+		// A force-deny check needs tokens; an empty protobuf request is exempt.
+		request := &milvuspb.InsertRequest{DbName: "db1", CollectionName: "foo"}
+		require.Positive(t, proto.Size(request))
+		rsp, err = interceptorFun(context.Background(), request, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_ForceDeny, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
@@ -595,6 +452,133 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
+}
+
+func TestRateLimitInterceptor_ZeroTokenRequestsBypassLimiter(t *testing.T) {
+	quotaConfig := &Params.QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, Params.Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = Params.Save(quotaConfig.Key, originalValue) })
+
+	limiter := NewSimpleLimiter(0, 0)
+	limiter.rateLimiter.GetRootLimiters().GetLimiters().Insert(
+		internalpb.RateType_DDLCollection, ratelimitutil.NewLimiter(0, 0))
+	require.ErrorIs(t, limiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLCollection, 1), merr.ErrServiceQuotaExceeded)
+	check := mockey.Mock((*SimpleLimiter).Check).Return(merr.ErrServiceQuotaExceeded).Build()
+	defer check.UnPatch()
+
+	// These requests must not resolve collection or database metadata for quotas.
+	metaCache := &MetaCache{}
+	getDatabase := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), merr.ErrServiceNotReady).Build()
+	defer getCollection.UnPatch()
+	warn := mockey.Mock(mlog.RatedWarn).Return().Build()
+	defer warn.UnPatch()
+	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return metaCache }, limiter)
+	testCases := []struct {
+		name    string
+		request proto.Message
+	}{
+		{"create", &milvuspb.CreateSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"drop", &milvuspb.DropSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"pin", &milvuspb.PinSnapshotDataRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"unpin", &milvuspb.UnpinSnapshotDataRequest{PinId: 1}},
+		{"export", &milvuspb.ExportSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot", TargetS3Path: "s3://bucket/export-root"}},
+		{"list file resources", &milvuspb.ListFileResourcesRequest{}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			dbID, collections, _, tokens, err := GetRequestInfo(ctx, metaCache, tc.request)
+			require.NoError(t, err)
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Empty(t, collections)
+			assert.Zero(t, tokens)
+			nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+			before := make(map[string]float64)
+			for _, status := range []string{metrics.TotalLabel, metrics.SuccessLabel, metrics.FailLabel} {
+				before[status] = testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status))
+			}
+
+			want := merr.Success()
+			handlerCalled := false
+			resp, err := interceptor(ctx, tc.request, &grpc.UnaryServerInfo{},
+				func(_ context.Context, request interface{}) (interface{}, error) {
+					handlerCalled = true
+					assert.Same(t, tc.request, request)
+					return want, nil
+				})
+			require.NoError(t, err)
+			assert.True(t, handlerCalled)
+			assert.Same(t, want, resp)
+			assert.Zero(t, check.Times(), "zero-token requests must not call the limiter")
+			assert.Zero(t, getDatabase.Times(), "zero-token requests must not resolve database metadata")
+			assert.Zero(t, getCollection.Times(), "zero-token requests must not resolve collection metadata")
+			assert.Zero(t, warn.Times(), "supported exempt requests must not emit an unsupported-request warning")
+			for status, value := range before {
+				assert.Equal(t, value, testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status)), status)
+			}
+		})
+	}
+}
+
+func TestRateLimitInterceptor_SnapshotRestoreRemainsRateLimited(t *testing.T) {
+	quotaConfig := &Params.QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, Params.Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = Params.Save(quotaConfig.Key, originalValue) })
+
+	metaCache := &MetaCache{}
+	var databaseName string
+	getDatabase := mockey.Mock((*MetaCache).GetDatabaseInfo).To(
+		func(_ *MetaCache, _ context.Context, database string) (*databaseInfo, error) {
+			databaseName = database
+			return &databaseInfo{DBID: 100}, nil
+		}).Build()
+	defer getDatabase.UnPatch()
+
+	limiter := NewSimpleLimiter(0, 0)
+	limiter.rateLimiter.GetRootLimiters().GetLimiters().Insert(
+		internalpb.RateType_DDLCollection, ratelimitutil.NewLimiter(ratelimitutil.Inf, 0))
+	limiter.rateLimiter.GetOrCreateDatabaseLimiters(100, newDatabaseLimiter).GetLimiters().Insert(
+		internalpb.RateType_DDLCollection, ratelimitutil.NewLimiter(0, 0))
+	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return metaCache }, limiter)
+
+	testCases := []struct {
+		name             string
+		request          proto.Message
+		expectedDatabase string
+	}{
+		{"native", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", TargetDbName: "target_db", TargetCollectionName: "target"}, "target_db"},
+		{"native_active_database", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", TargetCollectionName: "target"}, "active_db"},
+		{"external", &milvuspb.RestoreExternalSnapshotRequest{DbName: "target_db", TargetCollectionName: "target"}, "target_db"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(util.HeaderDBName, "active_db"))
+			dbID, collections, rateType, tokens, err := GetRequestInfo(ctx, metaCache, tc.request)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedDatabase, databaseName)
+			assert.Equal(t, int64(100), dbID)
+			assert.Empty(t, collections)
+			assert.Equal(t, internalpb.RateType_DDLCollection, rateType)
+			assert.Equal(t, 1, tokens)
+			require.ErrorIs(t, limiter.Check(dbID, collections, rateType, tokens), merr.ErrServiceQuotaExceeded)
+
+			handlerCalled := false
+			resp, err := interceptor(ctx, tc.request, &grpc.UnaryServerInfo{},
+				func(_ context.Context, _ interface{}) (interface{}, error) {
+					handlerCalled = true
+					return merr.Success(), nil
+				})
+			require.NoError(t, err)
+			assert.False(t, handlerCalled)
+			status, ok := requestutil.GetStatusFromResponse(resp)
+			require.True(t, ok)
+			assert.ErrorIs(t, merr.Error(status), merr.ErrServiceQuotaExceeded)
+		})
+	}
 }
 
 func TestGetInfo(t *testing.T) {

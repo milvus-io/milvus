@@ -26,8 +26,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -37,7 +39,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -54,6 +60,129 @@ const (
 )
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
+
+func TestCheckLimiter_ZeroTokenRequestsBypassLimiter(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	// Exempt requests must work even when the limiter cannot be obtained.
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getLimiter.UnPatch()
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(0), merr.ErrServiceNotReady).Build()
+	defer getCollection.UnPatch()
+
+	testCases := []struct {
+		name    string
+		request proto.Message
+	}{
+		{"create", &milvuspb.CreateSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"drop", &milvuspb.DropSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"pin", &milvuspb.PinSnapshotDataRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"unpin", &milvuspb.UnpinSnapshotDataRequest{PinId: 1}},
+		{"export", &milvuspb.ExportSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot", TargetS3Path: "s3://bucket/export-root"}},
+		{"list file resources", &milvuspb.ListFileResourcesRequest{}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+			before := make(map[string]float64)
+			for _, status := range []string{metrics.TotalLabel, metrics.SuccessLabel, metrics.FailLabel} {
+				before[status] = testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status))
+			}
+
+			resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+			require.NoError(t, err)
+			assert.Nil(t, resp)
+			assert.Zero(t, getLimiter.Times(), "zero-token requests must not obtain a limiter")
+			assert.Zero(t, getDatabase.Times(), "zero-token requests must not resolve database metadata")
+			assert.Zero(t, getCollection.Times(), "zero-token requests must not resolve collection metadata")
+			for status, value := range before {
+				assert.Equal(t, value, testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status)), status)
+			}
+		})
+	}
+}
+
+func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	limiter := &proxy.SimpleLimiter{}
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(limiter, nil).Build()
+	defer getLimiter.UnPatch()
+	var databaseName string
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).To(
+		func(_ *proxy.MetaCache, _ context.Context, name string) (*metacache.DatabaseInfo, error) {
+			databaseName = name
+			return &metacache.DatabaseInfo{DBID: 100}, nil
+		}).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(10), nil).Build()
+	defer getCollection.UnPatch()
+	getPartition := mockey.Mock((*proxy.MetaCache).GetPartitionInfo).Return(&metacache.PartitionInfo{PartitionID: 20}, nil).Build()
+	defer getPartition.UnPatch()
+
+	insert := &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "partition"}
+	testCases := []struct {
+		name     string
+		request  proto.Message
+		rateType internalpb.RateType
+		tokens   int
+	}{
+		{"restore", &milvuspb.RestoreSnapshotRequest{TargetDbName: "target"}, internalpb.RateType_DDLCollection, 1},
+		{"external restore", &milvuspb.RestoreExternalSnapshotRequest{DbName: "target"}, internalpb.RateType_DDLCollection, 1},
+		{"create collection", &milvuspb.CreateCollectionRequest{DbName: "target", CollectionName: "collection"}, internalpb.RateType_DDLCollection, 1},
+		{"insert", insert, internalpb.RateType_DMLInsert, proto.Size(insert)},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, rejected := range []bool{false, true} {
+				t.Run(strconv.FormatBool(rejected), func(t *testing.T) {
+					check := mockey.Mock((*proxy.SimpleLimiter).Check).To(
+						func(_ *proxy.SimpleLimiter, dbID int64, _ map[int64][]int64, rt internalpb.RateType, n int) error {
+							assert.Equal(t, int64(100), dbID)
+							assert.Equal(t, tc.rateType, rt)
+							assert.Equal(t, tc.tokens, n)
+							if rejected {
+								return merr.ErrServiceQuotaExceeded
+							}
+							return nil
+						}).Build()
+					defer check.UnPatch()
+					nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+					total := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.TotalLabel)
+					success := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.SuccessLabel)
+					fail := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.FailLabel)
+					totalBefore, successBefore, failBefore := testutil.ToFloat64(total), testutil.ToFloat64(success), testutil.ToFloat64(fail)
+
+					resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+					assert.EqualValues(t, 1, check.Times())
+					assert.Equal(t, "target", databaseName)
+					assert.Equal(t, totalBefore+1, testutil.ToFloat64(total))
+					if rejected {
+						require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+						assert.NotNil(t, resp)
+						assert.Equal(t, successBefore, testutil.ToFloat64(success))
+						assert.Equal(t, failBefore+1, testutil.ToFloat64(fail))
+					} else {
+						require.NoError(t, err)
+						assert.Nil(t, resp)
+						assert.Equal(t, successBefore+1, testutil.ToFloat64(success))
+						assert.Equal(t, failBefore, testutil.ToFloat64(fail))
+					}
+				})
+			}
+		})
+	}
+}
 
 func generatePrimaryField(datatype schemapb.DataType, autoID bool) *schemapb.FieldSchema {
 	return &schemapb.FieldSchema{
