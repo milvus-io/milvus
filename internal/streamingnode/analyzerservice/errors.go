@@ -1,9 +1,6 @@
 package analyzerservice
 
 import (
-	"context"
-
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
@@ -12,26 +9,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// StreamingError projects execution failures into the SN's native error domain.
-// RPC responses never carry an application Status.
-func StreamingError(err error) error {
-	if err == nil || errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
-		return err
-	}
-	var se *status.StreamingError
-	if errors.As(err, &se) {
-		return err
-	}
-	code := streamingpb.StreamingCode_STREAMING_CODE_INNER
-	if errors.Is(err, merr.ErrCollectionSchemaVersionNotReady) {
-		code = streamingpb.StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH
-	} else if merr.GetErrorType(err) == merr.InputError {
-		code = streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT
-	}
-	return &status.StreamingError{Code: code, Cause: err.Error()}
-}
-
-// PublicError is used only at the public Proxy response boundary.
+// PublicError translates only streaming/transport failures at the Proxy boundary.
+// Analyzer statuses bypass this adapter and are forwarded unchanged.
 func PublicError(err error) error {
 	if err == nil || status.IsCanceled(err) {
 		return err
@@ -39,9 +18,6 @@ func PublicError(err error) error {
 	se := status.AsStreamingError(err)
 	if se.IsInvalidArgument() {
 		return merr.WrapErrParameterInvalidErr(err, "run analyzer")
-	}
-	if se.IsSchemaVersionMismatch() {
-		return merr.Wrap(merr.ErrCollectionSchemaVersionNotReady, se.Cause)
 	}
 	if grpcstatus.Code(err) == codes.Unimplemented {
 		return merr.Wrap(merr.ErrServiceUnimplemented, err.Error())

@@ -44,14 +44,14 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId())
+		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId()))}, nil
 	}
 	results := make([]*milvuspb.AnalyzerResult, len(tokens))
 	for i, token := range tokens {
 		results[i] = &milvuspb.AnalyzerResult{Tokens: token}
 	}
-	return &streamingpb.StreamingNodeRunAnalyzerResponse{Results: results}, nil
+	return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: results}, nil
 }

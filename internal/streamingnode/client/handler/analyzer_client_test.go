@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,7 +47,7 @@ func (*analyzerTrigger) ReportAssignmentError(context.Context, types.PChannelInf
 }
 
 func TestAnalyzerAssignmentRetry(t *testing.T) {
-	for _, scenario := range []string{"migration", "invalid", "schema mismatch", "unavailable"} {
+	for _, scenario := range []string{"migration", "invalid", "schema mismatch", "analyzer unavailable", "unavailable"} {
 		mockey.PatchConvey(scenario, t, func() {
 			term := int64(1)
 			mockey.Mock((*analyzerWatcher).Get).To(func(*analyzerWatcher, context.Context, string) *types.PChannelInfoAssigned {
@@ -69,7 +70,9 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 				case "invalid":
 					return nil, status.NewInvalidArgument("bad names")
 				case "schema mismatch":
-					return nil, status.NewSchemaVersionMismatch("changed")
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrCollectionSchemaVersionNotReady)}, nil
+				case "analyzer unavailable":
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrServiceUnavailable)}, nil
 				case "unavailable":
 					return nil, status.NewInner("not ready")
 				}
@@ -78,13 +81,19 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
 			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{Vchannel: "p_1v0"}}}
 			client.analyzerClient = newAnalyzerClient(client)
-			_, err := client.AnalyzerClient().RunAnalyzer(context.Background(), req)
+			resp, err := client.AnalyzerClient().RunAnalyzer(context.Background(), req)
 			require.Nil(t, req.GetFieldAnalyzer().GetPchannel(), "retry must not mutate caller request")
-			if scenario == "migration" {
+			switch scenario {
+			case "migration":
 				require.NoError(t, err)
 				require.Equal(t, 2, calls)
 				require.Equal(t, 1, reports.Times())
-			} else {
+			case "schema mismatch", "analyzer unavailable":
+				require.NoError(t, err)
+				require.Error(t, merr.Error(resp.GetStatus()))
+				require.Equal(t, 1, calls)
+				require.Zero(t, reports.Times())
+			default:
 				require.Error(t, err)
 				require.Zero(t, reports.Times())
 				if scenario == "unavailable" {
