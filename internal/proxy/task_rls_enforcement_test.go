@@ -317,7 +317,10 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 
 	t.Run("insert", func(t *testing.T) {
 		const collectionID = int64(993003)
-		_, nameSchemaLoads := newCache(t, collectionID)
+		cache, nameSchemaLoads := newCache(t, collectionID)
+		// 2.6 checks legacy replication mode before pinning the collection ID.
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "default", aliasName, int64(0)).
+			Return(&collectionInfo{collID: collectionID}, nil).Once()
 		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
 			PolicyName: "insert_policy",
 			PolicyType: rlsutil.PolicyTypePermissive,
