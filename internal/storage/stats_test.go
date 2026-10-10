@@ -346,3 +346,59 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 		assert.Equal(t, int64(5), restored.NumRow())
 	})
 }
+
+func TestBM25Stats_Deserialize(t *testing.T) {
+	payload := func(numRow, numToken int64, tail ...any) []byte {
+		buf := new(bytes.Buffer)
+		binary.Write(buf, common.Endian, int32(0)) // version
+		binary.Write(buf, common.Endian, numRow)
+		binary.Write(buf, common.Endian, numToken)
+		for _, v := range tail {
+			binary.Write(buf, common.Endian, v)
+		}
+		return buf.Bytes()
+	}
+
+	original := NewBM25Stats()
+	for i := uint32(0); i < 50; i++ {
+		original.Append(map[uint32]float32{i: 1})
+	}
+	wellFormed, err := original.Serialize()
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name    string
+		data    []byte
+		wantErr bool
+		numRow  int64
+	}{
+		{"roundtrip", wellFormed, false, original.NumRow()},
+		{"empty_tokens", payload(5, 0), false, 5},
+		{"truncated_header", make([]byte, 10), true, 0},
+		// The header counts a token whose entry is cut short. Dropping that
+		// entry would leave numRow/numToken describing a token missing from
+		// rowsWithToken, and BuildIDF scores a missing token at the formula
+		// maximum rather than degrading it.
+		{"truncated_value", payload(1, 1, uint32(42), int16(1)), true, 0},
+		{"truncated_key", payload(1, 1, uint16(42)), true, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stats := NewBM25Stats()
+			err := stats.Deserialize(tc.data)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.numRow, stats.NumRow())
+			}
+
+			// Both parsers read the same wire format, so they must agree.
+			readerErr := NewBM25Stats().DeserializeFromReader(bytes.NewReader(tc.data))
+			assert.Equal(t, readerErr != nil, err != nil,
+				"Deserialize and DeserializeFromReader disagree on %d bytes: bytes=%v reader=%v",
+				len(tc.data), err, readerErr)
+		})
+	}
+}
