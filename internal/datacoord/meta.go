@@ -2013,15 +2013,24 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 	}
 }
 
+// maxSegmentTimestampTo returns the highest accepted insert timestamp bound for
+// a segment: the max of the insert-binlog TimestampTo values and
+// Statistics.TimestampTo. V2/CDC segments carry the bound in their binlogs;
+// manifest-backed V3 segments have no FieldBinlog arrays and persist it in
+// Statistics instead, so the durable bound is whichever is larger.
+func maxSegmentTimestampTo(segment *SegmentInfo) uint64 {
+	if segment == nil {
+		return 0
+	}
+	maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+	if stats := segment.EnsureStats(); stats != nil && stats.GetTimestampTo() > maxTsTo {
+		maxTsTo = stats.GetTimestampTo()
+	}
+	return maxTsTo
+}
+
 // maxBinlogTimestampTo returns the highest TimestampTo across a segment's insert
-// binlogs, or 0 when the arrays are absent.
-//
-// Absent is not the same as "no rows": a V3 (manifest-backed) segment never
-// persists these arrays -- buildAlterSegmentsKvs skips the per-FieldBinlog KVs
-// for it (kv_catalog.go:357) and the SegmentInfo is written without them -- so a
-// V3 segment reloaded after a DataCoord restart reports 0 here regardless of the
-// row timestamps it actually holds. Callers therefore get a bound that is safe
-// to compare against but that does not fire for reloaded V3 segments.
+// binlogs, or 0 when the arrays are absent. It is retained for legacy V2 callers.
 func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 	var maxTsTo uint64
 	for _, fb := range fieldBinlogs {
@@ -2038,8 +2047,11 @@ func maxBinlogTimestampTo(fieldBinlogs []*datapb.FieldBinlog) uint64 {
 // Non-zero marks it as committed at that transaction time, overriding
 // start_position.Timestamp for all temporal decisions.
 //
-// Invariant: a non-zero commit_timestamp MUST be >= max(binlog.TimestampTo)
-// across all binlogs on the segment. Row timestamps cannot exceed the commit
+// Invariant: a non-zero commit_timestamp MUST be >= the accepted segment
+// timestamp bound (the binlog TimestampTo for V2/CDC segments, or
+// Statistics.TimestampTo for manifest-backed V3 segments, whose binlog arrays
+// are absent).
+// Row timestamps cannot exceed the commit
 // time logically (the data did not "exist" until commit). Violating inputs
 // (e.g., CDC where source-cluster TSO > target-cluster TSO) are rejected at
 // this entry point rather than letting C++ segcore silently lower row
@@ -2054,17 +2066,17 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			return false
 		}
 		if ts != 0 {
-			maxTsTo := maxBinlogTimestampTo(segment.GetBinlogs())
+			maxTsTo := maxSegmentTimestampTo(segment)
 			if ts < maxTsTo {
-				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+				mlog.Error(modPack.meta.ctx, "meta update: update commit timestamp rejected - commit_ts < segment timestamp bound",
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
-					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
+					mlog.Uint64("segmentTimestampTo", maxTsTo))
 				// Preserve the commit fence and let the broadcast callback retry.
 				// It must not publish segment visibility or complete the job
 				// with a timestamp preceding the imported rows.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
-					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
+					"commit timestamp %d is less than the segment timestamp bound %d for import segment %d",
 					ts, maxTsTo, segmentID))
 			}
 		}
@@ -2681,13 +2693,8 @@ func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, f
 	stats := storage.BuildStatsFromFieldBinlogs(binlogs, nil, nil, nil)
 	minTs, maxTs := stats.GetTimestampFrom(), stats.GetTimestampTo()
 	if minTs > 0 && maxTs > 0 {
-		return &msgpb.MsgPosition{
-				ChannelName: channel,
-				Timestamp:   minTs,
-			}, &msgpb.MsgPosition{
-				ChannelName: channel,
-				Timestamp:   maxTs,
-			}
+		return &msgpb.MsgPosition{ChannelName: channel, Timestamp: minTs},
+			&msgpb.MsgPosition{ChannelName: channel, Timestamp: maxTs}
 	}
 	return fallbackStart, fallbackDml
 }

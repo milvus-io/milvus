@@ -398,6 +398,8 @@ enum ImportJobState {
   Uncommitted = 8;
   Committing  = 9;
   AssigningIDRange = 10;
+  Planning = 11;
+  Resharding = 12;
 }
 
 message ImportFile {
@@ -418,6 +420,19 @@ message ImportFile {
   common.IDRange id_range = 4;
 }
 
+// ImportVersion is the single execution-version number shared by the internal
+// import request (DataCoord's selection input), the WAL message
+// (msg.ImportMsg.version) and the persisted ImportJob. One number per
+// execution path, so no boundary has to translate between a "request version"
+// and a "job version".
+enum ImportVersion {
+  // In a request: DataCoord selects V2 or V3 from dataCoord.import.enableImportV3.
+  // In a WAL message or a stored job: written before this field existed, runs as V2.
+  ImportVersionUnspecified = 0;
+  ImportVersionV2 = 2; // PreImportTask + ImportTaskV2
+  ImportVersionV3 = 3; // count-only preimport + ReshardTask + ImportTaskV3
+}
+
 message ImportRequestInternal {
   int64 dbID = 1 [deprecated=true];
   int64 collectionID = 2;
@@ -431,6 +446,9 @@ message ImportRequestInternal {
   int64 jobID = 10;
   string rls_principal = 11;
   bool skip_rls = 12;
+  // Internal import execution version. Direct requests may leave
+  // ImportVersionUnspecified for DataCoord to select V2 or V3.
+  ImportVersion version = 13;
 }
 
 message ImportRequest {

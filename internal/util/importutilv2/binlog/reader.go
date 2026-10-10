@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -45,6 +45,7 @@ type reader struct {
 	schema         *schemapb.CollectionSchema
 	storageVersion int64
 	importEz       string
+	pluginContext  *indexcgopb.StoragePluginContext
 
 	fileSize      *atomic.Int64
 	bufferSize    int
@@ -54,6 +55,35 @@ type reader struct {
 
 	filters []Filter
 	dr      storage.DeserializeReader[*storage.Value]
+}
+
+func newReader(ctx context.Context,
+	cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	storageVersion int64,
+	bufferSize int,
+) *reader {
+	systemFieldsAbsent := true
+	for _, field := range schema.Fields {
+		if field.GetFieldID() < 100 {
+			systemFieldsAbsent = false
+			break
+		}
+	}
+	if systemFieldsAbsent {
+		schema = typeutil.AppendSystemFields(schema)
+	}
+	return &reader{
+		ctx:            ctx,
+		cm:             cm,
+		schema:         schema,
+		storageVersion: storageVersion,
+		fileSize:       atomic.NewInt64(0),
+		bufferSize:     bufferSize,
+		storageConfig:  storageConfig,
+		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
+	}
 }
 
 func NewReader(ctx context.Context,
@@ -66,28 +96,11 @@ func NewReader(ctx context.Context,
 	tsEnd uint64,
 	bufferSize int,
 	importEz string,
+	pluginContext *indexcgopb.StoragePluginContext,
 ) (*reader, error) {
-	systemFieldsAbsent := true
-	for _, field := range schema.Fields {
-		if field.GetFieldID() < 100 {
-			systemFieldsAbsent = false
-			break
-		}
-	}
-	if systemFieldsAbsent {
-		schema = typeutil.AppendSystemFields(schema)
-	}
-	r := &reader{
-		ctx:            ctx,
-		cm:             cm,
-		schema:         schema,
-		storageVersion: storageVersion,
-		fileSize:       atomic.NewInt64(0),
-		bufferSize:     bufferSize,
-		storageConfig:  storageConfig,
-		importEz:       importEz,
-		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
-	}
+	r := newReader(ctx, cm, schema, storageConfig, storageVersion, bufferSize)
+	r.importEz = importEz
+	r.pluginContext = pluginContext
 	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
@@ -96,21 +109,19 @@ func NewReader(ctx context.Context,
 }
 
 func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
+	insertLogs, deltaLogs, err := expandObjects(r.ctx, r.cm, paths, r.retryAttempts)
+	if err != nil {
+		return err
+	}
+	return r.initExplicit(insertLogs, deltaLogs, tsStart, tsEnd)
+}
+
+func (r *reader) initExplicit(insertLogs map[int64][]string, deltaLogs []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
-	if len(paths) == 0 {
+	if len(insertLogs) == 0 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
-	}
-	// the "paths" has one or two paths, the first is the binlog path of a segment
-	// the other is optional, is the delta path of a segment
-	if len(paths) > 2 {
-		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", paths)
-	}
-	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
-	if err != nil {
-		return err
 	}
 
 	validInsertLogs, cloneschema, err := verify(r.schema, r.storageVersion, insertLogs)
@@ -133,7 +144,9 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		storage.WithStorageConfig(r.storageConfig),
 	}
 
-	if len(r.importEz) > 0 {
+	if r.pluginContext != nil {
+		rwOptions = append(rwOptions, storage.WithPluginContext(r.pluginContext))
+	} else if len(r.importEz) > 0 {
 		ezID, err := hookutil.GetEzIDByImportEzk(r.importEz)
 		if err != nil {
 			return err
@@ -154,21 +167,6 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
 	})
 
-	if len(paths) < 2 {
-		return nil
-	}
-	var deltaLogs []string
-	err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, paths[1], true, r.retryAttempts,
-		func() {
-			deltaLogs = nil
-		},
-		func(chunkInfo *storage.ChunkObjectInfo) bool {
-			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
-			return true
-		})
-	if err != nil {
-		return err
-	}
 	if len(deltaLogs) == 0 {
 		return nil
 	}

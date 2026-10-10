@@ -40,6 +40,18 @@ func NewTimeRecorder(header string) *TimeRecorder {
 	}
 }
 
+// NewTimeRecorderWithStart creates a TimeRecorder whose span starts at the
+// given time instead of now, so a recorder rebuilt during recovery resumes the
+// elapsed time instead of restarting at zero.
+func NewTimeRecorderWithStart(header string, start time.Time) *TimeRecorder {
+	return &TimeRecorder{
+		header:   header,
+		logLabel: "tr/" + header,
+		start:    start,
+		last:     start,
+	}
+}
+
 // NewTimeRecorderWithCtx creates a new TimeRecorder with context's traceID,
 func NewTimeRecorderWithTrace(ctx context.Context, header string) *TimeRecorder {
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()

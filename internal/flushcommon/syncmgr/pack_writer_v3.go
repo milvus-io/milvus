@@ -294,8 +294,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		mlog.Info(ctx, "using TEXT-aware writer for import",
 			mlog.Int("textFieldCount", len(textColumnConfigs)),
 			mlog.String("basePath", basePath))
+		// TODO: pass pluginContextPtr instead of nil once the TEXT read chain
+		// supports CMEK decryption; encrypting TEXT now would make it unreadable.
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, nil, writerFormat, schemaBasedFormats)
 	} else {
 		w, err = storage.NewPackedRecordBatchWriter(basePath, bw.schema,
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)

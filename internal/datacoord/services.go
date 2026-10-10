@@ -2019,6 +2019,7 @@ func (s *Server) GetGcStatus(ctx context.Context) (*datapb.GetGcStatusResponse, 
 
 // ImportV2 handles import requests from proxy by broadcasting import messages.
 // This is the entry point for all user-initiated imports.
+// ImportV3 is still use ImportV2 as the entry point, but with a different version number in the request.
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -2055,6 +2056,24 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
+	// The message version is authoritative: old Proxy/StreamingCoord forwarded or
+	// CDC-replicated requests carry the version chosen by the originating
+	// coordinator, and it must be honored even if the local gate differs. The
+	// gate only selects the execution version for NEW unversioned requests: L0
+	// is always V2, ordinary/backup follow the one-way rollout gate. Unknown
+	// explicit versions are rejected here so no garbage version is broadcast.
+	version := in.GetVersion()
+	if version == internalpb.ImportVersion_ImportVersionUnspecified {
+		version = internalpb.ImportVersion_ImportVersionV2
+		if Params.DataCoordCfg.EnableImportV3.GetAsBool() && !importutilv2.IsL0Import(in.GetOptions()) {
+			version = internalpb.ImportVersion_ImportVersionV3
+		}
+	} else if version != internalpb.ImportVersion_ImportVersionV2 && version != internalpb.ImportVersion_ImportVersionV3 {
+		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg(
+			"unsupported import task version %d", version))
+		return resp, nil
+	}
+
 	// Use the incoming JobID if provided (backward compat: old proxy allocates jobID
 	// before sending broadcast RPC, which is forwarded here with the original jobID).
 	// Otherwise allocate a new one.
@@ -2084,6 +2103,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		interceptor.IdempotencyKeyFromContext(ctx),
 		in.GetRlsPrincipal(),
 		in.GetSkipRls(),
+		version,
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast import message", mlog.Err(err))
@@ -2116,12 +2136,22 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 // createImportJobFromAck creates an import job from ack callback.
 // This is called internally when broadcast ack is received.
-// Note: pre-broadcast feature gates cover only locally originated imports.
-// Replicated or old-Proxy messages land here directly, so the gates must be
-// re-checked. A disabled gate must create a Failed job instead of returning a
-// retryable error: ack callbacks retry forever while holding the collection
-// resource guard. The terminal job also keeps the failure visible through
-// GetImportProgress.
+// An unsupported task version with a valid job ID is persisted as a minimal,
+// terminal V1 failure envelope instead of returning an error: acknowledging it
+// prevents an old coordinator from retrying the broadcaster callback forever,
+// but no legacy task executes. An unsupported message without a job ID is
+// corrupt and remains unacknowledged for operator investigation.
+// Note: the pre-broadcast L0-import gate in ImportV2 covers only locally
+// originated imports. Replicated import messages (CDC) from a cluster with
+// enableL0Import=true land here directly without passing that gate, so it must
+// be re-checked. The gate here must NOT return an error: ack callbacks are
+// retried forever (callMessageAckCallbackUntilDone), and skipping job creation
+// would wedge the replicated CommitImport path (HandleCommitVchannel retries
+// on job-not-found). Instead the job is created directly in Failed state — a
+// terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
+// and the failure stays visible via GetImportProgress. The envelope marks its
+// channels ready so the V2 checker's channel gate lets the Failed branch run
+// instead of logging "waiting for channels" every tick.
 func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
@@ -2131,6 +2161,53 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
+	}
+	var jobVersion internalpb.ImportVersion
+	switch in.GetVersion() {
+	case internalpb.ImportVersion_ImportVersionV3:
+		jobVersion = internalpb.ImportVersion_ImportVersionV3
+	case internalpb.ImportVersion_ImportVersionUnspecified, internalpb.ImportVersion_ImportVersionV2:
+		jobVersion = internalpb.ImportVersion_ImportVersionV2
+	default:
+		if in.GetJobID() == 0 {
+			resp.Status = merr.Status(merr.WrapErrDataIntegrityMsg(
+				"unsupported import task version %d has no job ID", in.GetVersion()))
+			return resp, nil
+		}
+
+		// The envelope keeps only fields needed for querying, GC, and a possible
+		// CDC rollback. It does not allocate file IDs or read collection metadata.
+		// ReadyVchannels is set so the V2 checker's channel gate lets the Failed
+		// branch run instead of logging "waiting for channels" every 2s tick; the
+		// channels have by definition all just signaled. UpdateJobState(Failed)
+		// below sets the real cleanup ts (now + retention).
+		job := &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:          in.GetJobID(),
+				CollectionID:   in.GetCollectionID(),
+				CollectionName: in.GetCollectionName(),
+				Vchannels:      in.GetChannelNames(),
+				ReadyVchannels: in.GetChannelNames(),
+				TimeoutTs:      math.MaxUint64,
+				State:          internalpb.ImportJobState_Pending,
+				CreateTime:     time.Now().Format(time.RFC3339),
+				AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+				Version:        internalpb.ImportVersion_ImportVersionV2,
+			},
+			tr: timerecord.NewTimeRecorder("import job"),
+		}
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(merr.WrapErrServiceInternalMsg("unsupported import task version %d", in.GetVersion()).Error())(job)
+		if err := s.importMeta.AddJob(ctx, job); err != nil {
+			resp.Status = merr.Status(merr.Wrap(err, "add import job failed"))
+			return resp, nil
+		}
+
+		resp.JobID = fmt.Sprint(job.GetJobID())
+		mlog.Warn(ctx, "unsupported import task version, created a minimal Failed job",
+			mlog.Int64("jobID", job.GetJobID()), mlog.Int64("collectionID", in.GetCollectionID()),
+			mlog.Int32("taskVersion", int32(in.GetVersion())))
+		return resp, nil
 	}
 
 	mlog.Info(context.TODO(), "creating import job from ack callback",
@@ -2207,12 +2284,13 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			State:               internalpb.ImportJobState_Pending,
 			Files:               files,
 			Options:             in.GetOptions(),
-			CreateTime:          createTime.Format("2006-01-02T15:04:05Z07:00"),
+			CreateTime:          createTime.Format(time.RFC3339),
 			ReadyVchannels:      in.GetChannelNames(),
 			DataTs:              in.GetDataTimestamp(),
 			AutoCommit:          importutilv2.IsAutoCommit(in.GetOptions()),
 			CommitByCoordinator: commitByCoordinator,
 			RlsCheckPredicate:   rlsPredicate,
+			Version:             jobVersion,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -3434,6 +3512,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
 // Called by the broadcast callback without holding importMeta's mutex.
+//
+// V2 preserves its legacy original/sorted candidate set. V3 only admits the
+// current Completed task outputs that have been materialized as non-empty
+// Flushed segments; zero-row or unaccepted segments never cross the
+// CommitImport fence.
 func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
 	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	var segIDs []int64
@@ -3452,6 +3535,33 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 				continue
 			}
 			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			segIDs = append(segIDs, segID)
+		}
+	}
+	tasks = s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
+	for _, task := range tasks {
+		it, ok := task.(*importTaskV3)
+		if !ok {
+			continue
+		}
+		if it.GetState() != datapb.ImportTaskStateV2_Completed {
+			continue
+		}
+		var candidates []int64
+		if segmentID := it.task.Load().GetSegmentId(); segmentID != 0 {
+			candidates = append(candidates, segmentID)
+		}
+		for _, segID := range candidates {
+			seg := s.meta.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			if seg.GetState() != commonpb.SegmentState_Flushed || seg.GetNumOfRows() == 0 || !seg.GetIsImporting() {
 				continue
 			}
 			segIDs = append(segIDs, segID)
