@@ -2,11 +2,11 @@ from typing import Any, Protocol, cast
 
 import pytest
 import requests
-from pymilvus import DataType, Function, FunctionType
-from common import common_func as cf
 from base.client_v2_base import TestMilvusClientV2Base
+from common import common_func as cf
 from common.common_type import CaseLabel
 from common.text_generator import generate_text_by_analyzer
+from pymilvus import DataType, Function, FunctionType
 
 
 class AnalyzerResult(Protocol):
@@ -429,7 +429,6 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         # With empty stop words, no filtering should occur
         assert "is" in token_list  # Common stop word should still be present
 
-
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("with_bm25", [False, True])
     @pytest.mark.parametrize("protocol", ["python", "rest"])
@@ -440,26 +439,40 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
-        schema.add_field("text", DataType.VARCHAR, max_length=1000,
-                         enable_analyzer=True, analyzer_params={"type": "standard"})
+        schema.add_field(
+            "text", DataType.VARCHAR, max_length=1000, enable_analyzer=True, analyzer_params={"type": "standard"}
+        )
         if with_bm25:
             schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
-            schema.add_function(Function(name="bm25", function_type=FunctionType.BM25,
-                                         input_field_names=["text"], output_field_names=["sparse"]))
+            schema.add_function(
+                Function(
+                    name="bm25",
+                    function_type=FunctionType.BM25,
+                    input_field_names=["text"],
+                    output_field_names=["sparse"],
+                )
+            )
         self.create_collection(client, name, schema=schema, shards_num=2)
 
         def analyze():
             if protocol == "python":
-                result = client.run_analyzer("Hello world", collection_name=name,
-                                             field_name="text", with_detail=True, with_hash=True)
+                result = client.run_analyzer(
+                    "Hello world", collection_name=name, field_name="text", with_detail=True, with_hash=True
+                )
                 tokens = result.tokens
             else:
-                endpoint = (f"http://{request.config.getoption('host')}:"
-                            f"{request.config.getoption('http_port')}")
-                response = requests.post(endpoint + "/v2/vectordb/common/run_analyzer",
-                                         json={"text": ["Hello world"], "collectionName": name,
-                                               "fieldName": "text", "withDetail": True, "withHash": True},
-                                         timeout=30)
+                endpoint = f"http://{request.config.getoption('host')}:{request.config.getoption('http_port')}"
+                response = requests.post(
+                    endpoint + "/v2/vectordb/common/run_analyzer",
+                    json={
+                        "text": ["Hello world"],
+                        "collectionName": name,
+                        "fieldName": "text",
+                        "withDetail": True,
+                        "withHash": True,
+                    },
+                    timeout=30,
+                )
                 response.raise_for_status()
                 body = response.json()
                 assert body["code"] == 0, body
