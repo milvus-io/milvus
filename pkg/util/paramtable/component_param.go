@@ -6296,7 +6296,7 @@ user-task-polling:
 		Key:          "queryNode.queryView.transformLogDrainConcurrency",
 		Version:      "3.0.0",
 		DefaultValue: "4",
-		Doc:          "Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.",
+		Doc:          "Maximum number of concurrent QueryView TransformLog backlog drain tasks per PChannel on each QueryNode.",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) < 1 {

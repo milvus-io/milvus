@@ -420,40 +420,30 @@ A later View can create a fresh instance without reusing the failed one. Old
 View releases and callbacks retain the old instance identity and cannot affect
 that replacement. There is no physical reset interface or second ref table.
 
-### TODO: preparation fairness across PChannels
+### Catch-up scheduling per PChannel
 
-Treat catch-up scheduling fairness as a follow-up optimization, not a required
-correctness fix in this PR. Waiting among VChannels on the same PChannel is
-acceptable: they share that PChannel's availability boundary. The optimization
-target is isolation between PChannels with different availability.
+`TransformLogBuffer` groups replay tasks by PChannel. All VChannels and logical
+stream generations for one PChannel share the same concurrency limit
+(`queryNode.queryView.transformLogDrainConcurrency`, defaulting to 4 per
+PChannel). Physical RPC reconnects do not replace this scheduling unit.
+Workers are started on demand; once a queue is empty and its last worker exits,
+the buffer removes that queue. Idle PChannels retain no replay worker pool.
 
-Currently, `TransformLogBuffer` has one shared `drainTasks` queue and worker
-pool, not partitioned by PChannel. The configured worker count
-(`queryNode.queryView.transformLogDrainConcurrency`, defaulting to 4) bounds
-replay tasks including waits for progress when buffered entries are exhausted
-before the first SyncUp. Replay workers notify `QueryViewSegmentManager`
-directly on completion.
-Consequently, PChannel A can establish subscriptions, start enough Segment
-catch-up tasks, then stall before its first SyncUp or lose its connection while
-resumption is pending. A's tasks can occupy the shared workers and delay
-Preparing views on a healthy PChannel B. A
-PChannel that is unreachable before subscription establishment does not occupy
-this pool: initial subscription acquisition runs asynchronously before Segment
-loading. Terminal subscription errors end catch-up rather than waiting for
-recovery indefinitely.
+A PChannel waiting for its first SyncUp cannot consume another PChannel's
+replay slots. Waiting among VChannels on the same PChannel remains acceptable.
+The aggregate replay concurrency is proportional to the number of active
+PChannels; this setting is no longer a node-wide cap.
 
-This scheduling contention delays preparation and Ready transitions; it does
-not directly stop queries or live Transform delivery for already-serving views.
-An underlying data-stream outage can separately delay those views' MVCC waits.
-Do not conflate that availability effect with catch-up scheduling contention.
+Submission appends to an unbounded pending queue without waiting for replay
+capacity, so it cannot block NodeScheduler's physical-load completion workers.
+Queued tasks retain their loaded segments under the existing resource admission
+and task-reference lifecycle. Completion still runs outside buffer/Apply locks,
+and catch-up/live handoff and history retention remain unchanged.
 
-TODO: evaluate scheduling that limits active catch-up work without letting
-waiting PChannels monopolize execution capacity. Preserve per-Segment Apply
-ordering, cancellation, history retention and the atomic catch-up/live handoff.
-Validation must hold A before its first SyncUp with more tasks than the worker
-capacity, demonstrate B can still become Ready, then verify A can resume or be
-released without missed Deletes, stale callbacks or leaked references. No
-additional fairness guarantee within a PChannel is required by this TODO.
+Pending follow-up under discussion: a queued task canceled or terminally failed
+still needs a replay worker to complete. Per-PChannel isolation removes the
+cross-PChannel dependency, but a stalled VChannel within the same PChannel can
+still delay another queued task's terminal notification or resource release.
 
 ### ApplyTransform failure and Poison
 
