@@ -567,6 +567,11 @@ func (s *mixCoordImpl) HasCollection(ctx context.Context, req *milvuspb.HasColle
 	return s.rootcoordServer.HasCollection(ctx, req)
 }
 
+// IsCollectionAvailable is an in-process, positive-only GC fast path.
+func (s *mixCoordImpl) IsCollectionAvailable(collectionID int64) bool {
+	return s.rootcoordServer.IsCollectionAvailable(collectionID)
+}
+
 func (s *mixCoordImpl) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootcoordServer.DescribeCollection(ctx, req)
 }

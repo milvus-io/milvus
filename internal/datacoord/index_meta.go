@@ -77,6 +77,7 @@ type indexMeta struct {
 	// collID -> indexID -> index
 	fieldIndexLock sync.RWMutex
 	indexes        map[UniqueID]map[UniqueID]*model.Index
+	taskCounts     indexTaskCounts
 
 	// buildID2Meta records building index meta information of the segment
 	segmentBuildInfo *segmentBuildInfo
@@ -225,6 +226,8 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 					indexes.Insert(segIdx.IndexID, segIdx)
 					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 				}
+				old, _ := m.segmentBuildInfo.Get(segIdx.BuildID)
+				m.taskCounts.replaceTask(old, segIdx)
 				m.segmentBuildInfo.AddForRecovery(segIdx)
 			}
 		}
@@ -258,6 +261,7 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 }
 
 func (m *indexMeta) updateCollectionIndex(index *model.Index) {
+	m.taskCounts.replaceIndex(m.indexes[index.CollectionID][index.IndexID], index)
 	if _, ok := m.indexes[index.CollectionID]; !ok {
 		m.indexes[index.CollectionID] = make(map[UniqueID]*model.Index)
 	}
@@ -265,6 +269,8 @@ func (m *indexMeta) updateCollectionIndex(index *model.Index) {
 }
 
 func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
+	old, _ := m.segmentBuildInfo.Get(segIdx.BuildID)
+	m.taskCounts.replaceTask(old, segIdx)
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -359,40 +365,16 @@ func (m *indexMeta) recordFinishedTask(old, updated *model.SegmentIndex, oldSize
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 }
 
+func (m *indexMeta) indexTaskCountsSnapshot() indexTaskStateCounts {
+	return m.taskCounts.snapshot()
+}
+
 func (m *indexMeta) updateIndexTasksMetrics() {
-	taskMetrics := make(map[indexpb.JobState]int)
-	taskMetrics[indexpb.JobState_JobStateNone] = 0
-	taskMetrics[indexpb.JobState_JobStateInit] = 0
-	taskMetrics[indexpb.JobState_JobStateInProgress] = 0
-	taskMetrics[indexpb.JobState_JobStateFinished] = 0
-	taskMetrics[indexpb.JobState_JobStateFailed] = 0
-	taskMetrics[indexpb.JobState_JobStateRetry] = 0
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.IsDeleted || !m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-			continue
-		}
-
-		switch segIdx.IndexState {
-		case commonpb.IndexState_IndexStateNone:
-			taskMetrics[indexpb.JobState_JobStateNone]++
-		case commonpb.IndexState_Unissued:
-			taskMetrics[indexpb.JobState_JobStateInit]++
-		case commonpb.IndexState_InProgress:
-			taskMetrics[indexpb.JobState_JobStateInProgress]++
-		case commonpb.IndexState_Finished:
-			taskMetrics[indexpb.JobState_JobStateFinished]++
-		case commonpb.IndexState_Failed:
-			taskMetrics[indexpb.JobState_JobStateFailed]++
-		case commonpb.IndexState_Retry:
-			taskMetrics[indexpb.JobState_JobStateRetry]++
-		}
-	}
-
+	counts := m.indexTaskCountsSnapshot()
 	jobType := indexpb.JobType_JobTypeIndexJob.String()
-	for k, v := range taskMetrics {
-		metrics.IndexStatsTaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
+	for state, count := range counts {
+		metrics.IndexStatsTaskNum.WithLabelValues(jobType, indexTaskMetricStates[state].String()).Set(float64(count))
 	}
-	mlog.Info(m.ctx, "update index metric", mlog.Int("collectionNum", len(taskMetrics)))
 }
 
 func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) bool {
@@ -878,7 +860,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 	deletedSet := make(map[UniqueID]struct{}, len(indexes))
 	for _, index := range indexes {
-		m.indexes[index.CollectionID][index.IndexID] = index
+		m.updateCollectionIndex(index)
 		deletedSet[index.IndexID] = struct{}{}
 	}
 
@@ -1261,8 +1243,8 @@ func (m *indexMeta) subtractStoredIndexSizeOnRemoval(segIdx *model.SegmentIndex)
 }
 
 // removeSegmentIndexRecordInMemory is the record half: it mutates only the
-// in-memory segment-index maps and acquires no locks, so it is safe to run
-// inside a segMu critical section.
+// in-memory segment-index maps and the memory-only task counters. It never
+// acquires fieldIndexLock, so it is safe to run inside a segMu critical section.
 func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
@@ -1274,6 +1256,7 @@ func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 		}
 	}
 
+	m.taskCounts.replaceTask(segIdx, nil)
 	m.segmentBuildInfo.Remove(segIdx.BuildID)
 }
 
@@ -1288,7 +1271,7 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 // write. action is nil when the mutation resolves to no catalog write at all;
 // record is the locked task projection used to validate manifest contents.
 //
-// install performs the in-memory record change only — it acquires no locks, so
+// install performs in-memory changes only — it never acquires fieldIndexLock, so
 // the manifest commit may run it inside its segMu critical section. It returns
 // the observability update it deferred (never nil): the stored-index-size gauge
 // must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
@@ -1407,6 +1390,7 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 		return err
 	}
 
+	m.taskCounts.replaceIndex(m.indexes[collID][indexID], nil)
 	delete(m.indexes[collID], indexID)
 	if len(m.indexes[collID]) == 0 {
 		delete(m.indexes, collID)

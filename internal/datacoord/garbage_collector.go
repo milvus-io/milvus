@@ -1380,6 +1380,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 	}
 
 	collectionID2GcStatus := make(map[int64]bool)
+	availability, _ := gc.option.broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 
 	mlog.Info(ctx, "start to GC channel cp", mlog.Int("vchannelCPCnt", len(channelCPs)))
@@ -1398,15 +1399,21 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			continue
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+		// A positive resident lookup avoids schema conversion, task scheduling,
+		// per-collection timeouts and retaining live IDs for the entire sweep.
+		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+			skippedCnt++
+			continue
+		}
+
 		_, ok := collectionID2GcStatus[collectionID]
 		if !ok {
-			if ctx.Err() != nil {
-				// process canceled, stop.
-				return
-			}
 			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
 			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+			cancel()
 			if err == nil && !has {
 				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
 			} else {

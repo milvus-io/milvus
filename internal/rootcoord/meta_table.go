@@ -982,6 +982,15 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	return filterUnavailablePartition(coll), nil
 }
 
+// IsCollectionAvailable is a positive-only check of current resident metadata.
+// A miss does not prove absence: callers must use the normal lookup before GC.
+func (mt *MetaTable) IsCollectionAvailable(collectionID int64) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	collection := mt.collID2Meta[collectionID]
+	return collection != nil && collection.Available()
+}
+
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
