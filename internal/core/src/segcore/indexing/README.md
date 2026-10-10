@@ -1,73 +1,76 @@
-# Segment 索引架构
+# Segment index architecture
 
-Segcore 对外提供统一的“能力选择 + pin + 借用 reader”模型，但 sealed 与
-growing 使用不同的所有权和发布机制：
+Segcore exposes a single "capability selection + pin + borrowed reader" model, but sealed and
+growing indexes use different ownership and publication mechanisms:
 
-- sealed 索引保存在 `IndexInventory`，随 `PublishedSegmentState` 原子发布；
-- growing 索引由 `GrowingIndexSet` 长期持有，并发布可 pin 的 reader snapshot。
+- sealed indexes are stored in `IndexInventory` and published atomically with `PublishedSegmentState`;
+- growing indexes are held long-term by `GrowingIndexSet`, which publishes pinnable reader snapshots.
 
-## 核心组件
+## Core components
 
 `IndexCapabilityEntry`
-: 描述一个索引的 `IndexKey`、family、value type 和 `ReaderCaps`。它只包含元数据，
-  不需要打开 reader。
+: Describes an index's `IndexKey`, family, value type, and `ReaderCaps`. It contains only metadata
+  and does not require opening a reader.
 
 `FieldIndexCapability`
-: 一个字段的不可变 entry 列表。消费者必须从中选择一条完整 entry，不能合并不同
-  entry 的 capability。
+: The immutable entry list of a field. A consumer must select one complete entry from it and must
+  not combine capabilities from different entries.
 
 `IndexInventory`
-: sealed segment 的索引目录。每条 entry 由 capability 元数据和一个
-  `CacheSlot<IIndexReaderBase>` 组成。
+: The index inventory of a sealed segment. Each entry consists of capability metadata and a
+  `CacheSlot<IIndexReaderBase>`.
 
 `IndexPin`
-: sealed 查询的 move-only 生命周期句柄。它持有 cache accessor，只向消费者暴露
-  借用的 `IIndexReaderBase*`。
+: The move-only lifetime handle for sealed queries. It holds the cache accessor and exposes only the
+  borrowed `IIndexReaderBase*` to consumers.
 
 `GrowingIndexSet`
-: 每个字段唯一持有一个 `IGrowingIndex` publisher。写入通过独立的
-  `IAppendable<Batch>` capability 进入 owner。
+: Solely holds one `IGrowingIndex` publisher per field. Writes reach the owner through a separate
+  `IAppendable<Batch>` capability.
 
 `GrowingIndexSnapshotPin`
-: 固定一个已发布的 snapshot record。record 唯一持有 reader，并同时记录连续覆盖边界
-  `CoveredRowEnd`；pin 共享 record 的生命周期，但不共享 reader 所有权。
+: Pins one published snapshot record. The record solely owns the reader and also records the
+  contiguous coverage bound `CoveredRowEnd`; the pin shares the record's lifetime but not ownership
+  of the reader.
 
-## Sealed：加载与发布
+## Sealed: loading and publication
 
-加载阶段先根据 schema 和 load metadata 确定 family、value type 与 capability，再创建
-cache slot。`IndexInventory::Register` 把元数据和 slot 安装到新 runtime generation；
-完整的 `PublishedSegmentState` 发布后，查询才会看到新 entry。
+During loading, the family, value type, and capability are first determined from the schema and
+load metadata, and then the cache slot is created. `IndexInventory::Register` installs the metadata
+and the slot into a new runtime generation; queries see the new entry only after the complete
+`PublishedSegmentState` is published.
 
 ```mermaid
 flowchart LR
-    load["Load metadata"] --> resolve["解析 family / value type / caps"]
-    resolve --> slot["创建 CacheSlot<br/>reader cell 尚可为 cold"]
+    load["Load metadata"] --> resolve["Resolve family / value type / caps"]
+    resolve --> slot["Create CacheSlot<br/>reader cell may still be cold"]
     resolve --> meta["IndexCapabilityEntry"]
     slot --> register["IndexInventory::Register"]
     meta --> register
     register --> staged["staged RuntimeResourceState"]
-    staged --> publish["原子发布 PublishedSegmentState"]
-    publish --> visible["查询可见的新 generation"]
-    publish --> retire["发布后退役被替换的 slot"]
+    staged --> publish["Atomically publish PublishedSegmentState"]
+    publish --> visible["New generation visible to queries"]
+    publish --> retire["Retire replaced slots after publication"]
 ```
 
-capability 查询只读取元数据。同步/异步 warmup 或首次 `PinIndex` 会通过
-`CacheSlot::PinCells` 打开 cell；打开后，inventory 校验 reader 的 `Caps()` 与 entry
-中保存的 capability 一致。
+Capability queries read only metadata. Synchronous/asynchronous warmup or the first `PinIndex` opens
+the cell through `CacheSlot::PinCells`; once it is open, the inventory checks that the reader's
+`Caps()` match the capability stored in the entry.
 
-slot 使用 `shared_ptr`，使发布状态、替换期间的旧状态和 cache accessor 可以共同保证
-slot 存活；slot 的 cell 仍唯一拥有 reader。替换或删除 entry 不会使已经取得的 pin
-失效。
+Slots are held by `shared_ptr`, so the published state, the old state during replacement, and the
+cache accessor can jointly keep a slot alive; the slot's cell still solely owns the reader.
+Replacing or removing an entry does not invalidate pins that have already been obtained.
 
-## 查询：选择、pin 与执行
+## Query: selection, pin, and execution
 
-表达式和向量搜索先读取字段 capability，再按查询需求选择一条 entry。sealed 与
-growing 从这里进入各自的 pin 路径，最终都只向执行器提供借用的 query interface。
+Expressions and vector search first read the field capability, then select one entry according to
+the query's requirements. From here, sealed and growing indexes take their own pin paths, and both
+end up providing the executor with only a borrowed query interface.
 
 ```mermaid
 flowchart TB
-    query["表达式 / 向量搜索"] --> caps["Segment::IndexCapability(field)"]
-    caps --> select["选择一条满足需求的 entry"]
+    query["Expression / vector search"] --> caps["Segment::IndexCapability(field)"]
+    caps --> select["Select one entry that meets the requirements"]
 
     select -->|sealed| spin["Segment::PinIndex(key)"]
     spin --> cells["CacheSlot::PinCells"]
@@ -77,44 +80,53 @@ flowchart TB
     gpin --> commit["CommitIfNeeded + PinSnapshot"]
     commit --> snapshot["GrowingIndexSnapshotPin<br/>reader + CoveredRowEnd"]
 
-    indexpin --> cast["取得所需 query interface"]
+    indexpin --> cast["Obtain the required query interface"]
     snapshot --> cast
-    cast --> execute["在 pin 生命周期内执行"]
+    cast --> execute["Execute within the pin lifetime"]
     execute --> result["bitmap / top-k / iterator"]
 
-    select -->|无可用 entry| fallback["column scan / brute force"]
-    cast -->|interface 不支持| fallback
+    select -->|no usable entry| fallback["column scan / brute force"]
+    cast -->|interface not supported| fallback
 ```
 
-entry 或所需 interface 不存在时，消费者可走自己的 raw fallback。进入 pin 之后发生的
-cache 加载错误或 capability 一致性错误直接传播，不会被当作“索引不存在”。延迟
-iterator 必须把 sealed accessor lifetime 或 growing snapshot pin 保留到结果消费结束。
+When the entry or the required interface does not exist, the consumer may take its own raw fallback.
+Cache load errors or capability consistency errors raised after entering the pin propagate directly
+and are not treated as "index does not exist". A deferred iterator must keep the sealed accessor
+lifetime or the growing snapshot pin until its results have been fully consumed.
 
-## Growing snapshot 的边界
+## Growing snapshot bounds
 
-`GrowingIndexSet` 唯一持有可写的 `IGrowingIndex`。owner 可以继续接收 append 并发布
-更高 coverage 的 snapshot；旧 pin 则继续保留它取得的 record，包括 reader 依赖、
-Count、validity/offset mapping 和覆盖边界。
+`GrowingIndexSet` solely holds the writable `IGrowingIndex`. The owner can keep accepting appends and
+publish snapshots with higher coverage; an older pin keeps the record it obtained, including the
+reader dependencies, Count, validity/offset mapping, and the coverage bound.
 
-`CoveredRowEnd` 表示 Segment 行号区间 `[0, end)` 的连续覆盖：
+`CoveredRowEnd` denotes contiguous coverage of the Segment row range `[0, end)`:
 
-- 它不是查询可见行数；查询仍需独立应用 timestamp/visibility 规则；
-- 它不是 reader 内部 element 数量，null 和 nested 数据不能用 element count 推导覆盖；
-- growing 向量查询使用 `min(query-visible row end, CoveredRowEnd)` 得到物理 prefix，
-  并在 ANN candidate/top-k 生成前应用；
-- snapshot 为空或 capability 不满足时，消费者使用对应的 raw fallback。
+- it is not the query-visible row count; queries still apply timestamp/visibility rules
+  independently;
+- it is not the reader's internal element count; for null and nested data, coverage cannot be
+  derived from the element count;
+- growing vector queries use `min(query-visible row end, CoveredRowEnd)` to obtain the physical
+  prefix and apply it before ANN candidates/top-k are generated;
+- when the snapshot is empty or the capability is not satisfied, the consumer uses the
+  corresponding raw fallback.
 
-Tantivy/R-Tree snapshot 可以绑定不可变 engine view。Knowhere snapshot 可以绑定同一个
-live Add/Search engine，因此 pin 固定的是 reader record、依赖和可查询 prefix，不保证
-旧 pin 的 ANN 命中集合保持不变。
+A Tantivy/R-Tree snapshot can bind an immutable engine view. A Knowhere snapshot can bind the same
+live Add/Search engine, so a pin fixes the reader record, its dependencies, and the queryable
+prefix; it does not guarantee that an older pin's ANN hit set stays unchanged.
 
-## 关键不变式
+## Key invariants
 
-1. `IndexKey` 同时包含 `FieldId` 与 identity；不同字段或不同 identity kind 不会混淆。
-2. capability 选择以单条 entry 为单位，不能跨 entry 拼接能力。
-3. reader 始终由 sealed cache cell 或 growing snapshot record 唯一持有；消费者只借用。
-4. 借用的 reader、query interface 及其 view 不能比对应 pin 活得更久。
-5. sealed 索引随完整 runtime generation 发布；被替换的 slot 在新状态发布后再退役。
-6. sealed reader 打开后，其 `Caps()` 必须与 metadata-derived capability 完全一致。
-7. array offsets 属于 column runtime state，不由 reader 保存，避免列替换后引用旧映射。
-8. growing coverage 与查询 visibility 独立；growing 索引路径不能返回 coverage 之外的行。
+1. `IndexKey` contains both `FieldId` and an identity; different fields or different identity kinds
+   are never confused.
+2. Capability selection works on a single entry; capabilities cannot be combined across entries.
+3. A reader is always solely owned by a sealed cache cell or a growing snapshot record; consumers
+   only borrow it.
+4. A borrowed reader, query interface, and their views must not outlive the corresponding pin.
+5. Sealed indexes are published with a complete runtime generation; a replaced slot is retired only
+   after the new state is published.
+6. After a sealed reader is opened, its `Caps()` must exactly match the metadata-derived capability.
+7. Array offsets belong to the column runtime state and are not stored by the reader, so that the
+   reader does not reference a stale mapping after the column is replaced.
+8. Growing coverage is independent of query visibility; the growing index path must not return rows
+   outside the coverage.
