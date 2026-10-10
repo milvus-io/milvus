@@ -338,7 +338,9 @@ For each physically loaded segment:
 Registration pins replay history without starting a task. The manager stores
 the registration before submitting catch-up, so even an inline completion
 finds the owned registration. The actual replay worker invokes completion once
-after replay ends, outside buffer and Apply locks. Cancellation or failure cannot
+after replay ends, outside buffer and Apply locks. Queued tasks that have not
+started can be removed and completed asynchronously on cancellation or terminal
+buffer failure, without acquiring a replay slot. Cancellation or failure cannot
 complete while native Apply is still running. There is no separate pool or
 per-Segment goroutine waiting for replay completion.
 
@@ -440,10 +442,21 @@ Queued tasks retain their loaded segments under the existing resource admission
 and task-reference lifecycle. Completion still runs outside buffer/Apply locks,
 and catch-up/live handoff and history retention remain unchanged.
 
-Pending follow-up under discussion: a queued task canceled or terminally failed
-still needs a replay worker to complete. Per-PChannel isolation removes the
-cross-PChannel dependency, but a stalled VChannel within the same PChannel can
-still delay another queued task's terminal notification or resource release.
+Queue removal transfers sole completion ownership under the queue lock. A
+worker that dequeues a task owns its completion until replay exits, including
+any native Apply already in progress. Otherwise task cancellation or registration
+cancellation removes the queued task and completes it asynchronously without a
+replay slot. Terminal buffer failure cancels pending registrations with the
+original error, using the same completion path. A failure before submission is
+also observed through the registration's cancellation cause.
+
+Cancellation callbacks exist only while a task is queued and are detached on
+dequeue; there is no per-Segment waiting goroutine or separate waiting pool.
+Completion and Unregister run outside queue/buffer locks. Release/Unregister
+never join completion callbacks, which may re-enter the manager or shard. This
+returns the manager's task reference even when another VChannel on the same
+PChannel keeps waiting for SyncUp. Normal same-PChannel scheduling fairness is
+unchanged.
 
 ### ApplyTransform failure and Poison
 

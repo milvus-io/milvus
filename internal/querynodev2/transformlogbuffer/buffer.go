@@ -99,6 +99,11 @@ type catchupTask struct {
 	ctx        context.Context
 	reg        *registration
 	onComplete func(error)
+
+	// Buffer.mu protects queue membership. Removing the element transfers
+	// sole completion ownership to either a worker or a cancellation callback.
+	element          *list.Element
+	stopCancellation func()
 }
 
 // drainQueue is shared by all VChannels and logical stream generations of a
@@ -108,7 +113,7 @@ type drainQueue struct {
 	workers int
 }
 
-func (b *Buffer) scheduleDrain(task catchupTask) {
+func (b *Buffer) scheduleDrain(task *catchupTask) {
 	pchannel := task.reg.buffer.pchannel
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -118,11 +123,46 @@ func (b *Buffer) scheduleDrain(task catchupTask) {
 		b.drainQueues[pchannel] = queue
 	}
 	// Submission must not occupy a physical-loading worker waiting for replay.
-	queue.tasks.PushBack(task)
+	task.element = queue.tasks.PushBack(task)
+	stopTask := context.AfterFunc(task.ctx, func() { b.cancelDrain(queue, task, task.ctx.Err()) })
+	stopRegistration := context.AfterFunc(task.reg.ctx, func() {
+		b.cancelDrain(queue, task, context.Cause(task.reg.ctx))
+	})
+	task.stopCancellation = func() { stopTask(); stopRegistration() }
 	if queue.workers < b.drainConcurrency {
 		queue.workers++
 		go b.drainWorker(pchannel, queue)
 	}
+}
+
+// takeDrainLocked is the only transition out of the pending queue. After it
+// succeeds, cancellation cannot complete the task ahead of an in-flight Apply.
+func (b *Buffer) takeDrainLocked(queue *drainQueue, task *catchupTask) bool {
+	if task.element == nil {
+		return false
+	}
+	queue.tasks.Remove(task.element)
+	task.element = nil
+	task.stopCancellation()
+	return true
+}
+
+func (b *Buffer) cancelDrain(queue *drainQueue, task *catchupTask, err error) {
+	b.mu.Lock()
+	owned := b.takeDrainLocked(queue, task)
+	b.mu.Unlock()
+	if owned {
+		// AfterFunc runs asynchronously: Unregister/Release must never join
+		// a completion callback which can re-enter the manager or shard.
+		task.complete(err)
+	}
+}
+
+func (task *catchupTask) complete(err error) {
+	if err != nil {
+		task.reg.Unregister()
+	}
+	task.onComplete(err)
 }
 
 func (b *Buffer) drainWorker(pchannel string, queue *drainQueue) {
@@ -137,13 +177,10 @@ func (b *Buffer) drainWorker(pchannel string, queue *drainQueue) {
 			b.mu.Unlock()
 			return
 		}
-		task := queue.tasks.Remove(front).(catchupTask)
+		task := front.Value.(*catchupTask)
+		b.takeDrainLocked(queue, task)
 		b.mu.Unlock()
-		err := task.reg.buffer.drainRegistration(task.ctx, task.reg)
-		if err != nil {
-			task.reg.Unregister()
-		}
-		task.onComplete(err)
+		task.complete(task.reg.buffer.drainRegistration(task.ctx, task.reg))
 	}
 }
 
@@ -463,7 +500,7 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 			case <-notify:
 				continue
 			case <-reg.ctx.Done():
-				return reg.ctx.Err()
+				return context.Cause(reg.ctx)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -496,7 +533,7 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 	if b.err != nil {
 		return nil, false, nil, b.err
 	}
-	if err := reg.ctx.Err(); err != nil {
+	if err := context.Cause(reg.ctx); err != nil {
 		return nil, false, nil, err
 	}
 	if b.pending[reg.segment.ID()] != reg {
@@ -727,6 +764,12 @@ func (b *vchannelBuffer) fail(err error) {
 		return
 	}
 	b.err = err
+	// Pending registrations include both queued and running catch-up tasks.
+	// Queued tasks can now complete independently of replay capacity; running
+	// tasks keep their worker until Apply has returned.
+	for _, reg := range b.pending {
+		reg.cancel(err)
+	}
 	b.notifyVisibilityLocked()
 	b.mu.Unlock()
 }
@@ -742,14 +785,14 @@ type registration struct {
 	startFrom uint64
 	drainedTo atomic.Uint64
 	ctx       context.Context
-	cancel    context.CancelFunc
+	cancel    context.CancelCauseFunc
 	applyMu   sync.Mutex
 	poisoned  bool
 	once      sync.Once
 }
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // registration owns cancellation through Unregister
+	ctx, cancel := context.WithCancelCause(context.Background()) //nolint:gosec // registration owns cancellation through Unregister
 	reg := &registration{
 		buffer:    buffer,
 		segment:   segment,
@@ -767,16 +810,17 @@ func (r *registration) Catchup(ctx context.Context, onComplete func(error)) {
 		onComplete(err)
 		return
 	}
-	if err := r.ctx.Err(); err != nil {
+	if err := context.Cause(r.ctx); err != nil {
+		r.Unregister()
 		onComplete(err)
 		return
 	}
-	r.buffer.owner.scheduleDrain(catchupTask{ctx: ctx, reg: r, onComplete: onComplete})
+	r.buffer.owner.scheduleDrain(&catchupTask{ctx: ctx, reg: r, onComplete: onComplete})
 }
 
 func (r *registration) Unregister() {
 	r.once.Do(func() {
-		r.cancel()
+		r.cancel(nil)
 		r.buffer.unregister(r)
 		// Cancellation cannot interrupt an already running native Delete.
 		// Wait without the buffer lock before allowing the owner to free it.
@@ -788,7 +832,7 @@ func (r *registration) Unregister() {
 func (r *registration) applyEntry(entry *streamingpb.TransformLogEntry) error {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
-	if err := r.ctx.Err(); err != nil {
+	if err := context.Cause(r.ctx); err != nil {
 		return err
 	}
 	if r.poisoned {
