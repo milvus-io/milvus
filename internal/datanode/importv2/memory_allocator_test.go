@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TestMemoryAllocatorBasicOperations tests basic memory allocation and release operations
@@ -225,4 +227,56 @@ func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
 	// Assert that all memory is released
 	finalMemory := ma.(*memoryAllocator).usedMemory
 	assert.Equal(t, int64(0), finalMemory, "All memory should be released")
+}
+
+// TestMemoryAllocatorOversizedRequest tests that a request larger than the whole limit
+// runs alone instead of waiting forever.
+func TestMemoryAllocatorOversizedRequest(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	memoryLimit := int64(float64(ma.(*memoryAllocator).systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+	oversized := memoryLimit * 2
+	small := memoryLimit / 10
+
+	allocateAsync := func(taskID int64, size int64) chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			ma.BlockingAllocate(taskID, size)
+			close(done)
+		}()
+		return done
+	}
+
+	// The oversized request gets its memory when no other task holds memory.
+	select {
+	case <-allocateAsync(1, oversized):
+	case <-time.After(5 * time.Second):
+		t.Fatal("oversized request blocked on an idle allocator")
+	}
+	assert.Equal(t, oversized, ma.(*memoryAllocator).usedMemory)
+
+	// Other requests wait until the oversized request releases its memory.
+	smallDone := allocateAsync(2, small)
+	select {
+	case <-smallDone:
+		t.Fatal("small request did not wait for the oversized request")
+	case <-time.After(100 * time.Millisecond):
+	}
+	ma.Release(1, oversized)
+	<-smallDone
+	assert.Equal(t, small, ma.(*memoryAllocator).usedMemory)
+
+	// The oversized request waits until the other tasks release their memory.
+	oversizedDone := allocateAsync(3, oversized)
+	select {
+	case <-oversizedDone:
+		t.Fatal("oversized request did not wait for the small request")
+	case <-time.After(100 * time.Millisecond):
+	}
+	ma.Release(2, small)
+	<-oversizedDone
+	assert.Equal(t, oversized, ma.(*memoryAllocator).usedMemory)
+
+	ma.Release(3, oversized)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 }
