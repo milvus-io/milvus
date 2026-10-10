@@ -25,6 +25,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -38,12 +39,6 @@ type ReduceStream interface {
 	Recv() (*internalpb.SearchResults, error)
 	Close() error
 	Interrupt() (*internalpb.SearchResults, error)
-}
-
-type childRecvCompletion struct {
-	childIndex int
-	chunk      *internalpb.SearchResults
-	err        error
 }
 
 type orderedUnit struct {
@@ -301,11 +296,8 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*int
 
 // OrderedReduceStream merges Plain ANN Search child Chunks by score.
 type OrderedReduceStream struct {
-	childStreams         []ReduceStream
-	childBuffers         []orderedChildBuffer
-	childRecvTasks       []bool
-	childDrained         []bool
-	childRecvCompletions chan childRecvCompletion
+	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
+	childBuffers []orderedChildBuffer
 
 	nq              int64
 	topK            int64
@@ -318,10 +310,9 @@ type OrderedReduceStream struct {
 	metadata        *internalpb.SearchResults
 	metadataEmitted bool
 
-	closed         bool
-	finished       bool
-	childrenClosed bool
-	closeErr       error
+	closed   bool
+	finished bool
+	closeErr error
 }
 
 // NewReduceStream creates the Plain ANN Search iterator OrderedReduceStream implementation.
@@ -348,16 +339,13 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 	}
 
 	return &OrderedReduceStream{
-		childStreams:         append([]ReduceStream(nil), childStreams...),
-		childBuffers:         make([]orderedChildBuffer, len(childStreams)),
-		childRecvTasks:       make([]bool, len(childStreams)),
-		childDrained:         make([]bool, len(childStreams)),
-		childRecvCompletions: make(chan childRecvCompletion, max(1, len(childStreams))),
-		nq:                   request.GetNq(),
-		topK:                 request.GetTopk(),
-		chunkBytes:           chunkBytes,
-		metricType:           request.GetMetricType(),
-		emittedPerQuery:      make([]int64, request.GetNq()),
+		childStreams:    reduce.NewChildStreams[*internalpb.SearchResults](childStreams),
+		childBuffers:    make([]orderedChildBuffer, len(childStreams)),
+		nq:              request.GetNq(),
+		topK:            request.GetTopk(),
+		chunkBytes:      chunkBytes,
+		metricType:      request.GetMetricType(),
+		emittedPerQuery: make([]int64, request.GetNq()),
 	}, nil
 }
 
@@ -425,70 +413,44 @@ func (s *OrderedReduceStream) isChunkReady(outputBuffer *orderedOutputBuffer) bo
 }
 
 func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
-	for {
-		allReady := true
-		for i, childStream := range s.childStreams {
-			if s.childDrained[i] || s.childBuffers[i].hasUnit() {
-				continue
+	err := s.childStreams.ReceiveUntilReady(
+		func(childIndex int) bool {
+			return s.childBuffers[childIndex].hasUnit()
+		},
+		func(childIndex int, chunk *internalpb.SearchResults) error {
+			if chunk == nil {
+				return merr.WrapErrServiceInternalMsg("child stream %d returned a nil Chunk", childIndex)
 			}
-
-			allReady = false
-			if s.childRecvTasks[i] {
-				continue
+			if !merr.Ok(chunk.GetStatus()) {
+				return merr.Wrapf(merr.Error(chunk.GetStatus()), "child stream %d returned a failed Chunk", childIndex)
 			}
-
-			s.childRecvTasks[i] = true
-			completionChannel := s.childRecvCompletions
-			go func(childIndex int) {
-				chunk, err := childStream.Recv()
-				completionChannel <- childRecvCompletion{
-					childIndex: childIndex,
-					chunk:      chunk,
-					err:        err,
-				}
-			}(i)
-		}
-
-		if allReady {
-			readyBuffers := make([]*orderedChildBuffer, 0, len(s.childBuffers))
-			for i := range s.childBuffers {
-				if s.childBuffers[i].hasUnit() {
-					readyBuffers = append(readyBuffers, &s.childBuffers[i])
-				}
+			if s.metricType == "" {
+				s.metricType = chunk.GetMetricType()
 			}
-			return readyBuffers, nil
-		}
-
-		received := <-s.childRecvCompletions
-		s.childRecvTasks[received.childIndex] = false
-
-		if errors.Is(received.err, io.EOF) {
-			s.childDrained[received.childIndex] = true
-			continue
-		}
-		if received.err != nil {
-			return nil, fmt.Errorf("child stream %d Recv failed: %w", received.childIndex, received.err)
-		}
-		if received.chunk == nil {
-			return nil, fmt.Errorf("child stream %d returned a nil Chunk", received.childIndex)
-		}
-		if !merr.Ok(received.chunk.GetStatus()) {
-			return nil, fmt.Errorf("child stream %d returned a failed Chunk: %w", received.childIndex, merr.Error(received.chunk.GetStatus()))
-		}
-		if s.metricType == "" {
-			s.metricType = received.chunk.GetMetricType()
-		}
-		if received.chunk.GetMetricType() != "" && s.metricType != received.chunk.GetMetricType() {
-			return nil, fmt.Errorf("child stream %d metric %q does not match %q", received.childIndex, received.chunk.GetMetricType(), s.metricType)
-		}
-		s.isTopKReduce = s.isTopKReduce || received.chunk.GetIsTopkReduce()
-		s.isRecallEval = s.isRecallEval || received.chunk.GetIsRecallEvaluation()
-		data, err := s.childBuffers[received.childIndex].accept(received.chunk, s.nq, s.topK)
-		if err != nil {
-			return nil, fmt.Errorf("child stream %d returned an invalid Chunk: %w", received.childIndex, err)
-		}
-		s.acceptMetadata(received.chunk, data)
+			if chunk.GetMetricType() != "" && s.metricType != chunk.GetMetricType() {
+				return merr.WrapErrServiceInternalMsg("child stream %d metric %q does not match %q", childIndex, chunk.GetMetricType(), s.metricType)
+			}
+			s.isTopKReduce = s.isTopKReduce || chunk.GetIsTopkReduce()
+			s.isRecallEval = s.isRecallEval || chunk.GetIsRecallEvaluation()
+			data, err := s.childBuffers[childIndex].accept(chunk, s.nq, s.topK)
+			if err != nil {
+				return merr.Wrapf(err, "child stream %d returned an invalid Chunk", childIndex)
+			}
+			s.acceptMetadata(chunk, data)
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
 	}
+
+	readyBuffers := make([]*orderedChildBuffer, 0, len(s.childBuffers))
+	for i := range s.childBuffers {
+		if s.childBuffers[i].hasUnit() {
+			readyBuffers = append(readyBuffers, &s.childBuffers[i])
+		}
+	}
+	return readyBuffers, nil
 }
 
 func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, data *schemapb.SearchResultData) {
@@ -572,7 +534,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 				s.discardQuery(buffer, s.currentQuery)
 			}
 			for i := range s.childBuffers {
-				if !s.childDrained[i] && !s.childBuffers[i].hasUnit() {
+				if !s.childStreams.IsDrained(i) && !s.childBuffers[i].hasUnit() {
 					return nil, false, nil
 				}
 			}
@@ -787,22 +749,12 @@ func (s *OrderedReduceStream) Close() error {
 }
 
 func (s *OrderedReduceStream) closeChildren() error {
-	if s.childrenClosed {
-		return s.closeErr
-	}
-	s.childrenClosed = true
-
-	closeErrors := make([]error, 0, len(s.childStreams))
-	for i := range s.childStreams {
-		if err := s.childStreams[i].Close(); err != nil {
-			closeErrors = append(closeErrors, fmt.Errorf("close child stream %d: %w", i, err))
-		}
+	for i := range s.childBuffers {
 		s.childBuffers[i].units = nil
 		s.childBuffers[i].cursor = 0
-		s.childRecvTasks[i] = false
 	}
 	s.metadata = nil
-	s.closeErr = errors.Join(closeErrors...)
+	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }
 

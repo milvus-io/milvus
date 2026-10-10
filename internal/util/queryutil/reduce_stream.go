@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -35,12 +36,6 @@ type ReduceStream interface {
 	Recv() (*internalpb.RetrieveResults, error)
 	Close() error
 	Interrupt() (*internalpb.RetrieveResults, error)
-}
-
-type childRecvCompletion struct {
-	childIndex int
-	chunk      *internalpb.RetrieveResults
-	err        error
 }
 
 type retrieveUnit struct {
@@ -107,11 +102,8 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 
 // OrderedReduceStream performs the Plain Query PK-ordered merge.
 type OrderedReduceStream struct {
-	childStreams         []ReduceStream
-	childBuffers         []orderedChildBuffer
-	childRecvTasks       []bool
-	childDrained         []bool
-	childRecvCompletions chan childRecvCompletion
+	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
+	childBuffers []orderedChildBuffer
 
 	limit      int64
 	chunkBytes int
@@ -123,7 +115,6 @@ type OrderedReduceStream struct {
 	metadataEmitted bool
 	closed          bool
 	finished        bool
-	childrenClosed  bool
 	closeErr        error
 }
 
@@ -149,13 +140,10 @@ func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceS
 	}
 
 	return &OrderedReduceStream{
-		childStreams:         childStreams,
-		childBuffers:         make([]orderedChildBuffer, len(childStreams)),
-		childRecvTasks:       make([]bool, len(childStreams)),
-		childDrained:         make([]bool, len(childStreams)),
-		childRecvCompletions: make(chan childRecvCompletion, max(1, len(childStreams))),
-		limit:                request.GetLimit(),
-		chunkBytes:           chunkBytes,
+		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
+		childBuffers: make([]orderedChildBuffer, len(childStreams)),
+		limit:        request.GetLimit(),
+		chunkBytes:   chunkBytes,
 	}, nil
 }
 
@@ -236,53 +224,35 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 }
 
 func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
-	for {
-		allReady := true
-		for i, childStream := range s.childStreams {
-			if s.childDrained[i] || s.childBuffers[i].hasUnit() {
-				continue
+	err := s.childStreams.ReceiveUntilReady(
+		func(childIndex int) bool {
+			return s.childBuffers[childIndex].hasUnit()
+		},
+		func(childIndex int, chunk *internalpb.RetrieveResults) error {
+			if chunk == nil {
+				return merr.WrapErrServiceInternalMsg("Query child stream %d returned a nil Chunk", childIndex)
 			}
-			allReady = false
-			if s.childRecvTasks[i] {
-				continue
+			if !merr.Ok(chunk.GetStatus()) {
+				return merr.Wrapf(merr.Error(chunk.GetStatus()), "Query child stream %d returned a failed Chunk", childIndex)
 			}
-			s.childRecvTasks[i] = true
-			go func(childIndex int, stream ReduceStream) {
-				chunk, err := stream.Recv()
-				s.childRecvCompletions <- childRecvCompletion{childIndex: childIndex, chunk: chunk, err: err}
-			}(i, childStream)
-		}
+			s.acceptMetadata(chunk)
+			if err := s.childBuffers[childIndex].accept(chunk); err != nil {
+				return merr.Wrapf(err, "Query child stream %d returned an invalid Chunk", childIndex)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 
-		if allReady {
-			ready := make([]*orderedChildBuffer, 0, len(s.childBuffers))
-			for i := range s.childBuffers {
-				if s.childBuffers[i].hasUnit() {
-					ready = append(ready, &s.childBuffers[i])
-				}
-			}
-			return ready, nil
-		}
-
-		received := <-s.childRecvCompletions
-		s.childRecvTasks[received.childIndex] = false
-		if errors.Is(received.err, io.EOF) {
-			s.childDrained[received.childIndex] = true
-			continue
-		}
-		if received.err != nil {
-			return nil, merr.Wrapf(received.err, "Query child stream %d Recv failed", received.childIndex)
-		}
-		if received.chunk == nil {
-			return nil, merr.WrapErrServiceInternalMsg("Query child stream %d returned a nil Chunk", received.childIndex)
-		}
-		if !merr.Ok(received.chunk.GetStatus()) {
-			return nil, merr.Wrapf(merr.Error(received.chunk.GetStatus()), "Query child stream %d returned a failed Chunk", received.childIndex)
-		}
-		s.acceptMetadata(received.chunk)
-		if err := s.childBuffers[received.childIndex].accept(received.chunk); err != nil {
-			return nil, merr.Wrapf(err, "Query child stream %d returned an invalid Chunk", received.childIndex)
+	ready := make([]*orderedChildBuffer, 0, len(s.childBuffers))
+	for i := range s.childBuffers {
+		if s.childBuffers[i].hasUnit() {
+			ready = append(ready, &s.childBuffers[i])
 		}
 	}
+	return ready, nil
 }
 
 func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.RetrieveResults) {
@@ -436,20 +406,11 @@ func (s *OrderedReduceStream) Close() error {
 }
 
 func (s *OrderedReduceStream) closeChildren() error {
-	if s.childrenClosed {
-		return s.closeErr
-	}
-	s.childrenClosed = true
-	closeErrors := make([]error, 0, len(s.childStreams))
-	for i, childStream := range s.childStreams {
-		if err := childStream.Close(); err != nil {
-			closeErrors = append(closeErrors, merr.Wrapf(err, "close Query child stream %d", i))
-		}
+	for i := range s.childBuffers {
 		s.childBuffers[i] = orderedChildBuffer{}
-		s.childRecvTasks[i] = false
 	}
 	s.metadata = nil
-	s.closeErr = errors.Join(closeErrors...)
+	s.closeErr = s.childStreams.Close()
 	return s.closeErr
 }
 
