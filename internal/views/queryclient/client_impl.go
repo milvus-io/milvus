@@ -23,10 +23,8 @@ type ViewQueryClientConfig struct {
 	// LoadInfoClient confirms current load state when an initialized directory is empty.
 	LoadInfoClient         LoadInfoClient
 	MaxRetries             int  // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
-	EnableSearchStreaming  bool // Route supported Search requests through Streaming Reduce.
-	SearchStreamChunkBytes int  // Search Chunk reducible-payload byte threshold. 0 uses 256 KiB.
-	EnableQueryStreaming   bool // Route supported Query requests through Streaming Reduce.
-	QueryStreamChunkBytes  int  // Query Chunk reducible-payload byte threshold. 0 uses 256 KiB.
+	EnableReduceStream     bool // Route supported requests through Streaming Reduce.
+	ReduceStreamChunkBytes int  // Chunk reducible-payload byte threshold. 0 uses 256 KiB.
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
