@@ -201,7 +201,7 @@ func ParseTimeRange(options Options) (uint64, uint64, error) {
 
 func IsBackup(options Options) bool {
 	isBackup, err := funcutil.GetAttrByKeyFromRepeatedKV(BackupFlag, options)
-	if err != nil || strings.ToLower(isBackup) != "true" {
+	if err != nil || !isImportOptionTrue(isBackup) {
 		return false
 	}
 	return true
@@ -209,7 +209,7 @@ func IsBackup(options Options) bool {
 
 func IsL0Import(options Options) bool {
 	isL0Import, err := funcutil.GetAttrByKeyFromRepeatedKV(L0Import, options)
-	if err != nil || strings.ToLower(isL0Import) != "true" {
+	if err != nil || !isImportOptionTrue(isL0Import) {
 		return false
 	}
 	return true
@@ -244,7 +244,7 @@ func SkipDiskQuotaCheck(options Options) bool {
 		return false
 	}
 	skip, err := funcutil.GetAttrByKeyFromRepeatedKV(SkipDQC, options)
-	if err != nil || strings.ToLower(skip) != "true" {
+	if err != nil || !isImportOptionTrue(skip) {
 		return false
 	}
 	return true
@@ -282,8 +282,16 @@ func GetEZK(options Options) (string, error) {
 // IsAutoCommit parses the auto_commit option. Defaults to true if absent.
 func IsAutoCommit(options Options) bool {
 	val, err := funcutil.GetAttrByKeyFromRepeatedKV(AutoCommitKey, options)
-	if err != nil || strings.ToLower(val) != "false" {
+	if err != nil || !isImportOptionFalse(val) {
 		return true
 	}
 	return false
+}
+
+func isImportOptionTrue(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
+func isImportOptionFalse(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "false")
 }
