@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -307,6 +309,85 @@ func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {
 	s.Equal("collection_1000", schema.GetName())
 }
 
+func (s *CollectionManagerSuite) TestLoadSchemaSnapshot() {
+	schema := mock_segcore.GenTestCollectionSchema("snapshot", schemapb.DataType_Int64, false)
+	collection := NewCollectionWithoutSegcoreForTest(10, schema)
+	collection.setSchema(schema, 7, 100, 101)
+	fieldID := schema.GetFields()[0].GetFieldID()
+	collection.loadFields = typeutil.NewSet(fieldID)
+
+	loadedSchema, version, fields := collection.LoadSchemaSnapshot()
+	s.Same(schema, loadedSchema)
+	s.Equal(uint64(101), version, "reopen must use the native schema version, not the logical version")
+	s.Equal([]int64{fieldID}, fields)
+	fields[0] = 999
+	_, _, fields = collection.LoadSchemaSnapshot()
+	s.Equal([]int64{fieldID}, fields, "the returned slice must not alias collection state")
+
+	allFields := lo.Map(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+	collection.loadFieldsDefault = true
+	_, _, fields = collection.LoadSchemaSnapshot()
+	s.ElementsMatch(allFields, fields, "default-all must resolve against the current schema")
+
+	collection.loadFieldsDefault = false
+	collection.loadFields = nil
+	_, _, fields = collection.LoadSchemaSnapshot()
+	s.ElementsMatch(allFields, fields, "legacy collections without a stored hint must resolve all fields")
+}
+
+func (s *CollectionManagerSuite) TestLoadSchemaSnapshotKeepsSchemaAndFieldsInSameEpoch() {
+	schema := &schemapb.CollectionSchema{Name: "snapshot_0"}
+	collection := NewCollectionWithoutSegcoreForTest(10, schema)
+	collection.setSchema(schema, 0, 0, 100)
+	collection.loadFields = typeutil.NewSet(int64(100))
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errCh := make(chan string, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			schema, version, fields := collection.LoadSchemaSnapshot()
+			if schema.GetName() != fmt.Sprintf("snapshot_%d", version-100) || len(fields) != 1 || fields[0] != int64(version) {
+				select {
+				case errCh <- fmt.Sprintf("mixed load snapshot: schema=%s, version=%d, fields=%v", schema.GetName(), version, fields):
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	for i := 1; i <= 1000; i++ {
+		collection.lockSchemaTransitionForUpdate()
+		collection.setSchema(&schemapb.CollectionSchema{Name: fmt.Sprintf("snapshot_%d", i)}, uint64(i), uint64(i), uint64(100+i))
+		// Exercise the interval between schema publication and the later field
+		// hint update in applyLoadUpdate; readers must wait for both to finish.
+		runtime.Gosched()
+		collection.mu.Lock()
+		collection.loadFields = typeutil.NewSet(int64(100 + i))
+		collection.mu.Unlock()
+		collection.unlockSchemaTransitionForUpdate()
+	}
+	close(stop)
+	wg.Wait()
+	select {
+	case msg := <-errCh:
+		s.Fail(msg)
+	default:
+	}
+	schema, version, fields := collection.LoadSchemaSnapshot()
+	s.Equal("snapshot_1000", schema.GetName())
+	s.Equal(uint64(1100), version)
+	s.Equal([]int64{1100}, fields)
+}
+
 func (s *CollectionManagerSuite) TestNewMilvusTableCollectionKeepsUserSchema() {
 	schema := milvusTableCollectionSchema(false)
 	collection, err := NewCollection(10, schema, nil, &querypb.LoadMetaInfo{
@@ -406,6 +487,404 @@ func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMetaWaitsForCollectionNa
 	coll.mu.Unlock()
 	s.Require().NoError(<-done)
 	s.cm.Unref(1, 1)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefPublishesLoadUpdateBeforeNativeReaders() {
+	cm := NewCollectionManager()
+	schema := mock_segcore.GenTestCollectionSchema("atomic_load_update", schemapb.DataType_Int64, false)
+	initialFields := []int64{schema.GetFields()[0].GetFieldID()}
+	initialIndexMeta := mock_segcore.GenTestIndexMeta(10, schema)
+	s.Require().NoError(cm.PutOrRef(10, schema, initialIndexMeta, &querypb.LoadMetaInfo{
+		LoadFields: initialFields,
+	}))
+	defer cm.Unref(10, 1)
+	coll := cm.Get(10)
+
+	newSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	newSchema.Version++
+	newSchema.Fields = append(newSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  580,
+		Name:     "new_warmup_field",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	})
+	newFields := append(append([]int64(nil), initialFields...), 580)
+	newIndexMeta := proto.Clone(initialIndexMeta).(*segcorepb.CollectionIndexMeta)
+	newIndexMeta.MaxIndexRowCount++
+	retrieveReq := s.newSimpleRetrieveRequest(coll)
+
+	// Stop after the native schema has changed and its Go snapshot has been
+	// published, but before the new index metadata and warmup hint are applied.
+	// The old implementation released mu at this exact point, allowing native
+	// readers to capture the new schema together with the previous hint.
+	schemaPublished := make(chan struct{})
+	continueUpdate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseUpdate := func() { releaseOnce.Do(func() { close(continueUpdate) }) }
+	var setSchemaOrigin func(*Collection, *schemapb.CollectionSchema, uint64, uint64, uint64)
+	schemaPatch := mockey.Mock((*Collection).setSchema).To(func(c *Collection, schema *schemapb.CollectionSchema, logicalVersion, barrierTs, nativeVersion uint64) {
+		setSchemaOrigin(c, schema, logicalVersion, barrierTs, nativeVersion)
+		close(schemaPublished)
+		<-continueUpdate
+	}).Origin(&setSchemaOrigin).Build()
+	defer schemaPatch.UnPatch()
+
+	hintPublished := make(chan struct{})
+	nativeLoadFields := append([]int64(nil), initialFields...)
+	var loadFieldsOrigin func(*segcore.CCollection, []int64) error
+	hintPatch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).To(func(c *segcore.CCollection, fields []int64) error {
+		if err := loadFieldsOrigin(c, fields); err != nil {
+			return err
+		}
+		nativeLoadFields = append([]int64(nil), fields...)
+		close(hintPublished)
+		return nil
+	}).Origin(&loadFieldsOrigin).Build()
+	defer hintPatch.UnPatch()
+
+	type nativeReadSnapshot struct {
+		reader           string
+		schemaVersion    uint64
+		nativeVersion    uint64
+		indexMeta        *segcorepb.CollectionIndexMeta
+		loadFields       []int64
+		nativeLoadFields []int64
+		hintPublished    bool
+	}
+	observed := make(chan nativeReadSnapshot, 3)
+	capture := func(reader string) {
+		_, version := coll.SchemaAndVersion()
+		_, nativeVersion := coll.SchemaAndSegcoreVersion()
+		var hintReady bool
+		select {
+		case <-hintPublished:
+			hintReady = true
+		default:
+		}
+		observed <- nativeReadSnapshot{
+			reader:           reader,
+			schemaVersion:    version,
+			nativeVersion:    nativeVersion,
+			indexMeta:        coll.ccollection.IndexMeta(),
+			loadFields:       coll.loadFields.Collect(),
+			nativeLoadFields: append([]int64(nil), nativeLoadFields...),
+			hintPublished:    hintReady,
+		}
+	}
+	segmentPatch := mockey.Mock(segcore.CreateCSegment).To(func(*segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
+		capture("CreateCSegment")
+		return nil, nil
+	}).Build()
+	defer segmentPatch.UnPatch()
+	searchPatch := mockey.Mock(segcore.NewSearchRequest).To(func(*segcore.CCollection, *querypb.SearchRequest, []byte) (*segcore.SearchRequest, error) {
+		capture("NewSearchRequest")
+		return nil, nil
+	}).Build()
+	defer searchPatch.UnPatch()
+	retrievePatch := mockey.Mock(segcore.NewRetrievePlan).To(func(*segcore.CCollection, []byte, typeutil.Timestamp, int64, commonpb.ConsistencyLevel, typeutil.Timestamp, typeutil.Timestamp) (*segcore.RetrievePlan, error) {
+		capture("NewRetrievePlan")
+		return nil, nil
+	}).Build()
+	defer retrievePatch.UnPatch()
+
+	updateDone := make(chan error, 1)
+	updateFinished := make(chan struct{})
+	go func() {
+		defer close(updateFinished)
+		err := cm.PutOrRef(10, newSchema, newIndexMeta, &querypb.LoadMetaInfo{
+			LoadFields:      newFields,
+			SchemaBarrierTs: 100,
+		})
+		if err == nil {
+			cm.Unref(10, 1)
+		}
+		updateDone <- err
+	}()
+	var readers sync.WaitGroup
+	defer func() {
+		releaseUpdate()
+		select {
+		case <-updateFinished:
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("load update did not finish")
+		}
+		readersFinished := make(chan struct{})
+		go func() {
+			readers.Wait()
+			close(readersFinished)
+		}()
+		select {
+		case <-readersFinished:
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("native readers did not finish")
+		}
+	}()
+
+	select {
+	case <-schemaPublished:
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("load update did not reach the schema publication point")
+	}
+	// TryRLock makes the exclusion assertion deterministic: it fails the old
+	// split publication even if the scheduler has not run a reader goroutine.
+	readLockAcquired := coll.mu.TryRLock()
+	if readLockAcquired {
+		coll.mu.RUnlock()
+	}
+	s.Require().False(readLockAcquired, "native readers must be excluded until schema, index metadata, and hints are all published")
+
+	readerStarted := make(chan struct{}, 3)
+	readerDone := make(chan error, 3)
+	for _, read := range []func() error{
+		func() error {
+			_, err := coll.CreateCSegment(&segcore.CreateCSegmentRequest{SegmentID: 1, SegmentType: SegmentTypeSealed})
+			return err
+		},
+		func() error {
+			_, err := coll.NewSearchRequest(&querypb.SearchRequest{}, nil)
+			return err
+		},
+		func() error {
+			_, err := coll.NewRetrievePlan(retrieveReq)
+			return err
+		},
+	} {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			readerStarted <- struct{}{}
+			readerDone <- read()
+		}()
+	}
+	for range 3 {
+		<-readerStarted
+	}
+	select {
+	case snapshot := <-observed:
+		s.T().Fatalf("%s entered native code before warmup hints were published", snapshot.reader)
+	default:
+	}
+
+	releaseUpdate()
+	select {
+	case err := <-updateDone:
+		s.Require().NoError(err)
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("load update did not complete after publication resumed")
+	}
+	for range 3 {
+		select {
+		case err := <-readerDone:
+			s.Require().NoError(err)
+		case <-time.After(5 * time.Second):
+			s.T().Fatal("native reader did not resume after load update")
+		}
+		snapshot := <-observed
+		s.Equal(uint64(newSchema.GetVersion()), snapshot.schemaVersion, snapshot.reader)
+		s.Equal(uint64(1), snapshot.nativeVersion, snapshot.reader)
+		s.Same(newIndexMeta, snapshot.indexMeta, snapshot.reader)
+		s.ElementsMatch(newFields, snapshot.loadFields, snapshot.reader)
+		s.ElementsMatch(newFields, snapshot.nativeLoadFields, snapshot.reader)
+		s.True(snapshot.hintPublished, "%s must observe the updated native hint", snapshot.reader)
+	}
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdatesLoadFields() {
+	cm := NewCollectionManager()
+	schema := mock_segcore.GenTestCollectionSchema("load_fields", schemapb.DataType_Int64, false)
+	allFields := lo.Map(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
+	s.Require().GreaterOrEqual(len(allFields), 2)
+	initialFields := allFields[:1]
+
+	var nativeFields []int64
+	var nativeCalls int
+	var origin func(*segcore.CCollection, []int64) error
+	patch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).To(func(c *segcore.CCollection, fields []int64) error {
+		nativeFields = append([]int64(nil), fields...)
+		nativeCalls++
+		return origin(c, fields)
+	}).Origin(&origin).Build()
+	defer patch.UnPatch()
+
+	s.Require().NoError(cm.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      initialFields,
+		SchemaBarrierTs: 100,
+	}))
+	defer cm.Unref(10, 1)
+	coll := cm.Get(10)
+	s.ElementsMatch(initialFields, coll.loadFields.Collect())
+	s.ElementsMatch(initialFields, nativeFields)
+
+	// The schema and its barrier do not change when the warmup hint changes.
+	for _, fields := range [][]int64{allFields, allFields[1:], initialFields} {
+		s.Require().NoError(cm.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+			LoadFields:      fields,
+			SchemaBarrierTs: 100,
+		}))
+		cm.Unref(10, 1)
+		s.ElementsMatch(fields, coll.loadFields.Collect())
+		s.ElementsMatch(fields, nativeFields)
+	}
+	s.Equal(4, nativeCalls)
+	s.Require().NoError(cm.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      initialFields,
+		SchemaBarrierTs: 100,
+	}))
+	cm.Unref(10, 1)
+	s.Equal(4, nativeCalls, "repeated identical hints must not copy the native schema")
+
+	newSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	newSchema.Version++
+	newSchema.Fields = append(newSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  580,
+		Name:     "new_warmup_field",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	})
+	newFields := append(append([]int64(nil), initialFields...), 580)
+	s.Require().NoError(cm.PutOrRef(10, newSchema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      newFields,
+		SchemaBarrierTs: 101,
+	}))
+	cm.Unref(10, 1)
+	s.ElementsMatch(newFields, coll.loadFields.Collect())
+	s.ElementsMatch(newFields, nativeFields)
+	s.Equal(uint64(newSchema.GetVersion()), coll.SchemaVersion())
+
+	// Schema-only and legacy loads must leave an existing subset intact.
+	s.Require().NoError(cm.PutOrRef(10, newSchema, nil, nil))
+	cm.Unref(10, 1)
+	s.Require().NoError(cm.PutOrRef(10, newSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 102}))
+	cm.Unref(10, 1)
+	s.Equal(5, nativeCalls)
+	s.ElementsMatch(newFields, coll.loadFields.Collect())
+
+	// A present empty list restores native default-all rather than a frozen
+	// list of current IDs, so subsequently added fields use that default too.
+	s.Require().NoError(cm.PutOrRef(10, newSchema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      []int64{},
+		SchemaBarrierTs: 102,
+	}))
+	cm.Unref(10, 1)
+	s.Equal(6, nativeCalls)
+	s.Empty(nativeFields)
+	s.ElementsMatch(append(append([]int64(nil), allFields...), 580), coll.loadFields.Collect())
+	s.Require().NoError(cm.PutOrRef(10, newSchema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      []int64{},
+		SchemaBarrierTs: 102,
+	}))
+	cm.Unref(10, 1)
+	s.Equal(6, nativeCalls, "repeated default-all hints must not copy the native schema")
+
+	newestSchema := proto.Clone(newSchema).(*schemapb.CollectionSchema)
+	newestSchema.Version++
+	newestSchema.Fields = append(newestSchema.Fields, &schemapb.FieldSchema{
+		FieldID:  581,
+		Name:     "future_warmup_field",
+		DataType: schemapb.DataType_Bool,
+		Nullable: true,
+	})
+	s.Require().NoError(cm.PutOrRef(10, newestSchema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 103}))
+	cm.Unref(10, 1)
+	s.Equal(6, nativeCalls, "schema-only refreshes inherit the native default-all hint")
+	s.True(coll.loadFieldsDefault)
+	s.ElementsMatch(append(append([]int64(nil), allFields...), 580, 581), coll.loadFields.Collect())
+
+	// First loads with either nil or empty hints retain the legacy default.
+	for _, fields := range [][]int64{nil, {}} {
+		freshManager := NewCollectionManager()
+		var createdFields []int64
+		var createOrigin func(*segcore.CreateCCollectionRequest) (*segcore.CCollection, error)
+		createPatch := mockey.Mock(segcore.CreateCCollection).To(func(req *segcore.CreateCCollectionRequest) (*segcore.CCollection, error) {
+			createdFields = req.LoadFieldList
+			return createOrigin(req)
+		}).Origin(&createOrigin).Build()
+		err := freshManager.PutOrRef(11, schema, nil, &querypb.LoadMetaInfo{LoadFields: fields})
+		createPatch.UnPatch()
+		s.Require().NoError(err)
+		fresh := freshManager.Get(11)
+		s.Empty(createdFields, "native creation must retain default-all, not freeze current field IDs")
+		s.True(fresh.loadFieldsDefault)
+		s.ElementsMatch(allFields, fresh.loadFields.Collect())
+		s.Require().NoError(freshManager.UpdateSchema(11, newSchema, 101))
+		_, _, snapshotFields := fresh.LoadSchemaSnapshot()
+		s.True(fresh.loadFieldsDefault)
+		s.ElementsMatch(append(append([]int64(nil), allFields...), 580), snapshotFields)
+		freshManager.Unref(11, 1)
+	}
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefLoadFieldsRejectsStaleSnapshots() {
+	cm := NewCollectionManager()
+	schema := mock_segcore.GenTestCollectionSchema("load_fields", schemapb.DataType_Int64, false)
+	schema.Version = 3
+	initialFields := []int64{schema.GetFields()[0].GetFieldID()}
+	s.Require().NoError(cm.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      initialFields,
+		SchemaBarrierTs: 100,
+	}))
+	defer cm.Unref(10, 1)
+	coll := cm.Get(10)
+
+	var nativeCalls int
+	var origin func(*segcore.CCollection, []int64) error
+	patch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).To(func(c *segcore.CCollection, fields []int64) error {
+		nativeCalls++
+		return origin(c, fields)
+	}).Origin(&origin).Build()
+	defer patch.UnPatch()
+	expandedFields := []int64{schema.GetFields()[0].GetFieldID(), schema.GetFields()[1].GetFieldID()}
+	s.Require().NoError(cm.PutOrRef(10, schema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      expandedFields,
+		SchemaBarrierTs: 200,
+	}))
+	cm.Unref(10, 1)
+
+	olderSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	olderSchema.Version--
+	for _, stale := range []struct {
+		schema  *schemapb.CollectionSchema
+		barrier uint64
+	}{
+		{schema, 100},
+		{olderSchema, 300},
+	} {
+		s.Require().NoError(cm.PutOrRef(10, stale.schema, nil, &querypb.LoadMetaInfo{
+			LoadFields:      initialFields,
+			SchemaBarrierTs: stale.barrier,
+		}))
+		cm.Unref(10, 1)
+		s.ElementsMatch(expandedFields, coll.loadFields.Collect())
+	}
+	s.Equal(1, nativeCalls, "stale messages must not modify native warmup hints")
+
+	// Preserve the existing two-domain ordering rule: a newer structural
+	// schema is accepted even when its barrier is below the current barrier.
+	newerSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	newerSchema.Version++
+	s.Require().NoError(cm.PutOrRef(10, newerSchema, nil, &querypb.LoadMetaInfo{
+		LoadFields:      initialFields,
+		SchemaBarrierTs: 150,
+	}))
+	cm.Unref(10, 1)
+	s.Equal(2, nativeCalls)
+	s.ElementsMatch(initialFields, coll.loadFields.Collect())
+	_, version, barrier := coll.SchemaSnapshot()
+	s.Equal(uint64(4), version)
+	s.Equal(uint64(200), barrier)
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefLoadFieldsFailureDoesNotPublishRef() {
+	coll := s.cm.Get(1)
+	initialFields := coll.loadFields.Collect()
+	errNative := errors.New("update load fields failed")
+	patch := mockey.Mock((*segcore.CCollection).UpdateLoadFields).Return(errNative).Build()
+	defer patch.UnPatch()
+
+	err := s.cm.PutOrRef(1, coll.Schema(), nil, &querypb.LoadMetaInfo{LoadFields: initialFields[:1]})
+	s.ErrorIs(err, errNative)
+	s.Equal(uint32(1), coll.refCount.Load(), "failed updates must release the temporary lease without publishing a caller ref")
+	s.ElementsMatch(initialFields, coll.loadFields.Collect())
 }
 
 func holdInsertSchemaTransition(t *testing.T, collection *Collection) func() {
@@ -644,6 +1123,39 @@ func (s *CollectionManagerSuite) TestSchemaUpdateLeaseKeepsCollectionAliveWhileW
 	s.Nil(s.cm.Get(coll.ID()), "releasing the lease should complete the pending collection release")
 }
 
+func (s *CollectionManagerSuite) TestPutOrRefLoadFieldsLeaseKeepsCollectionAliveWhileWaiting() {
+	coll := s.cm.Get(1)
+	fields := []int64{coll.Schema().GetFields()[0].GetFieldID()}
+	releaseReader := holdInsertSchemaTransition(s.T(), coll)
+	defer releaseReader()
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- s.cm.PutOrRef(coll.ID(), coll.Schema(), nil, &querypb.LoadMetaInfo{LoadFields: fields})
+	}()
+	waitForSchemaTransitionWriter(s.T(), coll)
+
+	unrefDone := make(chan bool, 1)
+	go func() {
+		unrefDone <- s.cm.Unref(coll.ID(), 1)
+	}()
+	select {
+	case released := <-unrefDone:
+		s.False(released, "the load-update lease must retain the collection")
+	case <-time.After(5 * time.Second):
+		s.T().Fatal("Unref blocked while load fields waited for an insert transition reader")
+	}
+	s.Same(coll, s.cm.Get(coll.ID()))
+	s.Equal(uint32(1), coll.refCount.Load(), "only the temporary lease may be visible while the update waits")
+
+	releaseReader()
+	s.Require().NoError(<-updateDone)
+	s.Same(coll, s.cm.Get(coll.ID()), "successful PutOrRef must publish the caller ref before dropping its lease")
+	s.ElementsMatch(fields, coll.loadFields.Collect())
+	s.Equal(uint32(1), coll.refCount.Load())
+	s.True(s.cm.Unref(coll.ID(), 1))
+	s.Nil(s.cm.Get(coll.ID()))
+}
+
 func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethods() {
 	coll := s.cm.Get(1)
 	s.Require().NotNil(coll)
@@ -692,6 +1204,7 @@ func (s *CollectionManagerSuite) TestCollectionNativeWrapperMethodsReleased() {
 	s.Error(err)
 	s.Error(coll.updateIndexMeta(indexMeta))
 	s.Error(coll.updateSchema(coll.Schema(), 1))
+	s.Error(coll.updateLoadFields(nil))
 }
 
 func (s *CollectionManagerSuite) TestPutOrRefKeepsFreshCollectionInSchemaVersionDomain() {

@@ -834,15 +834,17 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
+	collection := &Collection{loadFields: typeutil.NewSet[int64](100)}
 	collection.setSchema(schema, 1, 100, 101)
 
+	var capturedFields []int64
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
+			capturedFields = append([]int64(nil), request.LoadFields...)
 			return request.Schema == schema && request.SchemaVersion == 101
 		})).
-		Return(nil)
+		Return(nil).Twice()
 
 	loadInfo := &querypb.SegmentLoadInfo{
 		CollectionID:  10,
@@ -865,6 +867,13 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 	}
 
 	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+	assert.ElementsMatch(t, []int64{100}, capturedFields)
+
+	// A same-schema load config change must reach the next reopen, even though
+	// the segment was created with the earlier hint.
+	collection.loadFields = typeutil.NewSet[int64](100, 101)
+	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+	assert.ElementsMatch(t, []int64{100, 101}, capturedFields)
 }
 
 func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {

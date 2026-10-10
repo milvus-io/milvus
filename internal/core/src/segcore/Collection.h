@@ -53,14 +53,21 @@ class Collection {
     void
     set_schema(SchemaPtr& new_schema) {
         std::unique_lock lock(schema_mutex_);
-        auto old_schema = schema_;
         if (new_schema->get_schema_version() > schema_->get_schema_version()) {
+            new_schema->UpdateLoadFields(schema_->load_fields());
             schema_ = new_schema;
         }
+    }
 
-        if (old_schema) {
-            schema_->UpdateLoadFields(old_schema->load_fields());
-        }
+    void
+    update_load_fields(const std::vector<int64_t>& field_ids) {
+        std::unique_lock lock(schema_mutex_);
+        // Segments retain schema snapshots without holding schema_mutex_.
+        // Publish a copy so changing the warmup hint does not mutate those
+        // snapshots while search or reopen reads them.
+        auto new_schema = std::make_shared<Schema>(*schema_);
+        new_schema->UpdateLoadFields(field_ids);
+        schema_ = std::move(new_schema);
     }
 
     IndexMetaPtr

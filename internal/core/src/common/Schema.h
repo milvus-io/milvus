@@ -557,9 +557,10 @@ class Schema {
     }
 
     std::vector<int64_t>
-    load_fields() {
+    load_fields() const {
         auto fields = std::vector<int64_t>();
-        for (auto field_id : field_ids_) {
+        fields.reserve(load_fields_.size());
+        for (auto field_id : load_fields_) {
             fields.emplace_back(field_id.get());
         }
         return fields;

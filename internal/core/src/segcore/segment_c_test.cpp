@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -93,6 +94,138 @@ TEST(CApiTest, SegmentTest) {
     DeleteCollection(collection);
     DeleteSegment(segment);
     free((char*)status.error_msg);
+}
+
+namespace {
+
+class CApiReopenLoadFieldsTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        schema_ = std::make_shared<Schema>();
+        pk_ = schema_->AddDebugField("pk", DataType::INT64);
+        payload_ = schema_->AddDebugField("payload", DataType::INT64);
+        schema_->set_primary_field_id(pk_);
+        schema_->set_schema_version(100);
+        schema_->UpdateLoadFields({pk_.get()});
+
+        auto dataset = DataGen(schema_, 4);
+        segment_ = CreateSealedWithFieldDataLoaded(schema_, dataset);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_.get());
+        ASSERT_NE(sealed, nullptr);
+        auto load_info = sealed->TestGetLoadInfoSnapshot()->GetProto();
+        load_info.set_num_of_rows(4);
+        load_blob_ = load_info.SerializeAsString();
+        schema_blob_ = schema_->ToProto().SerializeAsString();
+    }
+
+    CStatus
+    Wait(CFuture* future) {
+        auto guard = std::unique_ptr<CFuture, decltype(&future_destroy)>(
+            future, &future_destroy);
+        auto* impl =
+            static_cast<milvus::futures::IFuture*>(static_cast<void*>(future));
+        std::promise<void> ready;
+        auto wait = ready.get_future();
+        impl->registerReadyCallback(
+            [](CLockedGoMutex* value) {
+                reinterpret_cast<std::promise<void>*>(value)->set_value();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&ready));
+        wait.get();
+        auto [result, status] = impl->leakyGet();
+        EXPECT_EQ(result, nullptr);
+        return status;
+    }
+
+    CFuture*
+    Reopen(const int64_t* fields,
+           int64_t count,
+           uint64_t schema_version = 100) {
+        return AsyncReopenSegmentWithLoadFields(
+            {},
+            segment_.get(),
+            reinterpret_cast<const uint8_t*>(load_blob_.data()),
+            load_blob_.size(),
+            schema_blob_.data(),
+            schema_blob_.size(),
+            schema_version,
+            fields,
+            count);
+    }
+
+    SchemaPtr schema_;
+    std::unique_ptr<SegmentSealed> segment_;
+    FieldId pk_{100};
+    FieldId payload_{101};
+    std::string load_blob_;
+    std::string schema_blob_;
+};
+
+}  // namespace
+
+TEST_F(CApiReopenLoadFieldsTest, LegacyReopenPreservesPartialHint) {
+    auto status = Wait(
+        AsyncReopenSegment({},
+                           segment_.get(),
+                           reinterpret_cast<const uint8_t*>(load_blob_.data()),
+                           load_blob_.size(),
+                           schema_blob_.data(),
+                           schema_blob_.size(),
+                           100));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto current = segment_->get_schema_snapshot();
+    EXPECT_TRUE(current->ShouldLoadField(pk_));
+    EXPECT_FALSE(current->ShouldLoadField(payload_));
+    EXPECT_NE(current, schema_);
+    EXPECT_FALSE(schema_->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest,
+       ReopenUsesCurrentHintAndCopiesBeforeAsyncLoad) {
+    std::vector<int64_t> fields{pk_.get(), payload_.get()};
+    auto future = Reopen(fields.data(), fields.size());
+    // The asynchronous operation must own the hint before the caller returns.
+    fields.clear();
+    fields.shrink_to_fit();
+    auto status = Wait(future);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto current = segment_->get_schema_snapshot();
+    EXPECT_TRUE(current->ShouldLoadField(payload_));
+    EXPECT_FALSE(schema_->ShouldLoadField(payload_));
+
+    const int64_t partial_fields[] = {pk_.get()};
+    status = Wait(Reopen(partial_fields, 1));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_FALSE(segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+    EXPECT_TRUE(current->ShouldLoadField(payload_));
+
+    status = Wait(Reopen(nullptr, 0));
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_TRUE(segment_->get_schema_snapshot()->load_fields().empty());
+    EXPECT_TRUE(segment_->get_schema_snapshot()->ShouldLoadField(payload_));
+}
+
+TEST_F(CApiReopenLoadFieldsTest, InvalidHintOrStaleSchemaKeepsPublishedHint) {
+    auto original = segment_->get_schema_snapshot();
+    for (const auto count : {-1, 1}) {
+        auto status = Wait(Reopen(nullptr, count));
+        EXPECT_NE(status.error_code, Success);
+        if (status.error_code != Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        EXPECT_EQ(segment_->get_schema_snapshot(), original);
+    }
+
+    const int64_t fields[] = {pk_.get(), payload_.get()};
+    auto status = Wait(Reopen(fields, 2, 99));
+    // CollectionSchemaVersionNotReady is the stable segcore error code 2046.
+    EXPECT_EQ(status.error_code, 2046);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_EQ(segment_->get_schema_snapshot(), original);
+    EXPECT_FALSE(original->ShouldLoadField(payload_));
 }
 
 TEST(CApiTest, InsertTest) {
