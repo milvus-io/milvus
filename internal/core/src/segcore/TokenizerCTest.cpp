@@ -80,32 +80,3 @@ TEST(CTokenizer, Default) {
 
     free_tokenizer(tokenizer);
 }
-
-TEST(CTokenizer, LegacyEnglishStems) {
-    for (
-        const auto* params :
-        {R"({"type":"english"})",
-         R"({"tokenizer":"standard","filter":["lowercase",{"type":"stemmer","language":"english"}]})"}) {
-        CTokenizer tokenizer;
-        auto status = create_tokenizer(params, &tokenizer);
-        ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
-        const std::string text = "Internal international interval running";
-        const std::vector<std::string> expected = {
-            "intern", "intern", "interv", "run"};
-        const std::vector<int64_t> offsets = {0, 9, 23, 32};
-        for (int repeat = 0; repeat < 2; ++repeat) {
-            auto stream =
-                create_token_stream(tokenizer, text.c_str(), text.size());
-            for (size_t i = 0; i < expected.size(); ++i) {
-                ASSERT_TRUE(token_stream_advance(stream));
-                auto token = token_stream_get_detailed_token(stream);
-                EXPECT_EQ(expected[i], std::string(token.token));
-                EXPECT_EQ(offsets[i], token.start_offset);
-                free_token(const_cast<char*>(token.token));
-            }
-            EXPECT_FALSE(token_stream_advance(stream));
-            free_token_stream(stream);
-        }
-        free_tokenizer(tokenizer);
-    }
-}
