@@ -20,7 +20,7 @@ func TestCatchupCompletionWaitsForApply(t *testing.T) {
 			name = "task canceled"
 		}
 		t.Run(name, func(t *testing.T) {
-			owner := New(nil, 1)
+			owner := newBuffer(nil, 1)
 			buf := newVChannelBuffer(owner, "p1", "v1", 50)
 			reg := newRegistration(buf, &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})
 			defer reg.Unregister()
@@ -74,7 +74,7 @@ func TestCatchupCompletionWaitsForApply(t *testing.T) {
 
 func TestCatchupCanceledBeforeSubmission(t *testing.T) {
 	// Cancellation known before submission must complete inline.
-	owner := New(nil, 1)
+	owner := newBuffer(nil, 1)
 	buf := newVChannelBuffer(owner, "p1", "v1", 50)
 	reg := newRegistration(buf, &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})
 	buf.pending[10] = reg
@@ -91,7 +91,7 @@ func TestCatchupCanceledBeforeSubmission(t *testing.T) {
 }
 
 func TestCatchupUnregisterBeforeSyncUp(t *testing.T) {
-	owner := New(nil, 1)
+	owner := newBuffer(nil, 1)
 	buf := newVChannelBuffer(owner, "p1", "v1", 50)
 	reg := newRegistration(buf, &fakeSegment{id: 10, vchannel: "v1", startAfter: 50})
 	buf.pending[10] = reg
@@ -125,7 +125,7 @@ func waitDrainIdle(t *testing.T, buffer *Buffer) {
 }
 
 func TestCatchupSchedulingPerPChannel(t *testing.T) {
-	buffer := New(nil, 1)
+	buffer := newBuffer(nil, 1)
 	a := newVChannelBuffer(buffer, "pa", "pa_1v0", 0)
 	a2 := newVChannelBuffer(buffer, "pa", "pa_2v0", 0)
 	b := newVChannelBuffer(buffer, "pb", "pb_1v0", 0)

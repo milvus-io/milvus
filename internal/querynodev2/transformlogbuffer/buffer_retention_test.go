@@ -14,7 +14,7 @@ import (
 func TestBufferRetentionFollowsMinimumStartAfter(t *testing.T) {
 	for _, outcome := range []string{"caught up", "canceled", "failed"} {
 		t.Run(outcome, func(t *testing.T) {
-			owner := New(nil, 1)
+			owner := newBuffer(nil, 1)
 			buf := newVChannelBuffer(owner, "p1", "v1", 50)
 			owner.channels["v1"] = buf
 			for _, start := range []uint64{50, 50, 80, 110} {

@@ -235,7 +235,7 @@ func TestQueryNodeBufferConsumesCatchupAndLiveDeletes(t *testing.T) {
 		applied <- e.GetTimeTick()
 		return nil
 	}).Build())
-	buffer := transformlogbuffer.New(&streamManager{}, 1)
+	buffer := transformlogbuffer.New(t.Context(), &streamManager{})
 	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: "p_1v0"}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
 	guard, err := buffer.Acquire(ctx, view)
 	require.NoError(t, err)
@@ -524,7 +524,7 @@ func TestBufferSharedStreamSurvivesViewCancellation(t *testing.T) {
 				acquired = resumable.NewResumableStream(ctx, p, factory)
 				return acquired, nil
 			}).Build())
-			buffer := transformlogbuffer.New(&streamManager{}, 1)
+			buffer := transformlogbuffer.New(t.Context(), &streamManager{})
 			view := func(channel string) *qviews.QueryViewAtQueryNode {
 				return qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: channel}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
 			}

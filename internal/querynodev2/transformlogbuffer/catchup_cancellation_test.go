@@ -53,7 +53,7 @@ func occupyCatchupWorker(t *testing.T, owner *Buffer) {
 func TestQueuedCatchupTerminatesWithoutReplaySlot(t *testing.T) {
 	for _, reason := range []string{"context", "unregister", "buffer failure", "failure before submission"} {
 		t.Run(reason, func(t *testing.T) {
-			owner := New(nil, 1)
+			owner := newBuffer(nil, 1)
 			occupyCatchupWorker(t, owner)
 			buf := newVChannelBuffer(owner, "p", "p_2v0", 0)
 			reg := newRegistration(buf, &fakeSegment{id: 2, vchannel: buf.vchannel})
@@ -99,7 +99,7 @@ func TestQueuedCatchupTerminatesWithoutReplaySlot(t *testing.T) {
 }
 
 func TestCatchupDequeueRacesTermination(t *testing.T) {
-	owner := New(nil, 1)
+	owner := newBuffer(nil, 1)
 	for i := 0; i < 100; i++ {
 		buf := newVChannelBuffer(owner, "p", "p_1v0", 0)
 		reg := newRegistration(buf, &fakeSegment{id: 1, vchannel: buf.vchannel})
@@ -138,7 +138,7 @@ func TestQueuedCatchupReleasesPhysicalSegment(t *testing.T) {
 			name = "buffer failed"
 		}
 		t.Run(name, func(t *testing.T) {
-			buffer := New(newFakeStreamManager(), 1)
+			buffer := newBuffer(newFakeStreamManager(), 1)
 			occupyCatchupWorker(t, buffer)
 			segment := &fakeSegment{id: 2, partitionID: 10, vchannel: "p_2v0"}
 			load := mockey.Mock((*poisonPhysicalLoader).Load).Return(segment, nil).Build()

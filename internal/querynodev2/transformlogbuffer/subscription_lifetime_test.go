@@ -90,7 +90,7 @@ func TestPendingSubscriptionSurvivesCallerCancellation(t *testing.T) {
 				return c.Context.Done()
 			}).Build()
 			t.Cleanup(func() { waitPatch.UnPatch() })
-			buffer := New(newFakeStreamManager(), 1)
+			buffer := newBuffer(newFakeStreamManager(), 1)
 			first := acquireSubscriptionAsync(firstCtx, buffer, "p_1v0")
 			var attemptCtx context.Context
 			select {
@@ -160,7 +160,7 @@ func TestLastPendingReferenceCancelsSubscription(t *testing.T) {
 			}).Build()
 			t.Cleanup(func() { closePatch.UnPatch() })
 			streams := newFakeStreamManager()
-			buffer := New(streams, 1)
+			buffer := newBuffer(streams, 1)
 			other, err := buffer.Acquire(ctx, newTestQueryView("p_2v0", 50))
 			require.NoError(t, err)
 			t.Cleanup(other.Release)

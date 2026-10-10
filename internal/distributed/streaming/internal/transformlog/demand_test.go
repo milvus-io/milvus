@@ -136,7 +136,7 @@ func TestBufferReplacesOnlyTerminatedLogicalStream(t *testing.T) {
 				parents = append(parents, parent)
 				return stream, nil
 			}).Build())
-			buffer := transformlogbuffer.New(&streamManager{}, 1)
+			buffer := transformlogbuffer.New(t.Context(), &streamManager{})
 			view := func(vc string) *qviews.QueryViewAtQueryNode {
 				return qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{Vchannel: vc}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
 			}
