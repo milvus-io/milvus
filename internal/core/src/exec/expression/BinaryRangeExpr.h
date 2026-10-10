@@ -42,8 +42,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "simdjson/error.h"
@@ -247,19 +246,19 @@ struct BinaryRangeIndexFunc {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = index_value_t<T>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
                                IndexInnerType>
         HighPrecisionType;
     TargetBitmap
-    operator()(Index* index,
+    operator()(const index::IScalarPredicateReader<ReaderType>* reader,
                IndexInnerType val1,
                IndexInnerType val2,
                bool lower_inclusive,
                bool upper_inclusive) {
-        return index->Range(val1, lower_inclusive, val2, upper_inclusive);
+        return reader->Range(val1, lower_inclusive, val2, upper_inclusive);
     }
 };
 

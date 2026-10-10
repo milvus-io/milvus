@@ -39,8 +39,8 @@
 #include "folly/FBVector.h"
 #include "glog/logging.h"
 #include "monitor/Monitor.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "opentelemetry/trace/span.h"
 #include "pb/plan.pb.h"
@@ -929,10 +929,7 @@ PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex() {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = index_value_t<T>;
     auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
     if (!next_batch_size.has_value()) {
@@ -945,7 +942,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     }
 
     if (!arg_inited_) {
-        std::vector<IndexInnerType> vals;
+        std::vector<ReaderType> vals;
         for (auto& val : expr_->vals_) {
             if constexpr (std::is_same_v<T, double>) {
                 if (val.has_int64_val()) {
@@ -958,28 +955,31 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
             // Generic overflow handling for all types
             bool overflowed = false;
             auto converted_val =
-                GetValueFromProtoWithOverflow<T>(val, overflowed);
+                GetValueFromProtoWithOverflow<ReaderType>(val, overflowed);
             if (!overflowed) {
                 vals.emplace_back(converted_val);
             }
         }
-        arg_set_ = std::make_shared<FlatVectorElement<IndexInnerType>>(vals);
+        arg_set_ = std::make_shared<FlatVectorElement<ReaderType>>(vals);
         arg_inited_ = true;
     }
-    auto execute_sub_batch = [](Index* index_ptr,
-                                const std::vector<IndexInnerType>& vals) {
-        TermIndexFunc<T> func;
-        return func(index_ptr, vals.size(), vals.data());
+    auto execute_sub_batch = [](
+                                 const index::IScalarPredicateReader<ReaderType>*
+                                     reader,
+                                 const std::vector<ReaderType>& vals) {
+        TermIndexFunc<ReaderType> func;
+        return func(reader, vals.size(), vals.data());
     };
     auto args =
-        std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+        std::dynamic_pointer_cast<FlatVectorElement<ReaderType>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
+    auto res =
+        ProcessIndexChunks<ReaderType>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -991,7 +991,6 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
 template <>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
-    using Index = index::ScalarIndex<bool>;
     auto next_batch_size =
         GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
     if (!next_batch_size.has_value()) {
@@ -1011,10 +1010,12 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         arg_set_ = std::make_shared<FlatVectorElement<uint8_t>>(vals);
         arg_inited_ = true;
     }
-    auto execute_sub_batch = [](Index* index_ptr,
+    auto execute_sub_batch = [](const index::IScalarPredicateReader<bool>* reader,
                                 const std::vector<uint8_t>& vals) {
         TermIndexFunc<bool> func;
-        return func(index_ptr, vals.size(), (bool*)vals.data());
+        return func(reader,
+                    vals.size(),
+                    reinterpret_cast<const bool*>(vals.data()));
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
     if (field_type_ == DataType::JSON && args->values_.empty()) {
@@ -1289,11 +1290,6 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
-        return;
-    }
-
     if (data_type == DataType::JSON && !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val) {
@@ -1301,22 +1297,15 @@ PhyTermFilterExpr::DetermineExecPath() {
             expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
             });
-        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
+        if (has_unsafe_literal) {
             exec_path_ = ExprExecPath::RawData;
+            return;
         }
-        return;
     }
 
-    // IN / NOT IN is a disjunction of equalities. Ask the pinned string index
-    // whether it wants the equality op (represented as Equal): FMINDEX declines
-    // it (a term set of exact values is better served by the scan / an equality
-    // index), while INVERTED and the others accept it (base default). FMINDEX is
-    // VARCHAR-only, so only the string path needs the check.
-    if ((data_type == DataType::VARCHAR || data_type == DataType::TEXT) &&
-        !SegmentExpr::CanUseIndexForOp<std::string>(
-            proto::plan::OpType::Equal)) {
-        exec_path_ = ExprExecPath::RawData;
-    }
+    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
+    SelectAndPinIndex(req);
 }
 
 void

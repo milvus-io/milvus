@@ -28,18 +28,15 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
-#include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "segcore/SegmentInterface.h"
 #include "query/Utils.h"
 #include "common/RegexQuery.h"
 #include "common/Volnitsky.h"
-#include "index/NgramInvertedIndex.h"
 #include "exec/expression/Utils.h"
+#include "index/scalar/ngram/NgramRegex.h"
 #include "common/bson_view.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
-#include "index/NgramInvertedIndex.h"
 
 namespace milvus {
 namespace exec {
@@ -631,118 +628,31 @@ struct UnaryElementFuncForArray {
 
 template <typename T>
 struct UnaryIndexFuncForMatch {
-    using IndexInnerType =
-        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-    using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index,
-               const IndexInnerType& val,
+    operator()(const index::IPatternMatchReader* reader,
+               std::string_view val,
                proto::plan::OpType op) {
-        AssertInfo(op == proto::plan::OpType::Match ||
-                       op == proto::plan::OpType::PostfixMatch ||
-                       op == proto::plan::OpType::InnerMatch ||
-                       op == proto::plan::OpType::PrefixMatch,
-                   "op must be one of the following: Match, PrefixMatch, "
-                   "PostfixMatch, InnerMatch");
-
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            if (index->SupportPatternMatch()) {
-                return index->PatternMatch(val, op);
-            }
-
-            if (!index->HasRawData()) {
-                ThrowInfo(Unsupported,
-                          "index don't support pattern match and don't have "
-                          "raw data");
-            }
-            // retrieve raw data to do brute force query, may be very slow.
-            auto cnt = index->Count();
-            TargetBitmap res(cnt);
-            if (op == proto::plan::OpType::InnerMatch ||
-                op == proto::plan::OpType::PostfixMatch ||
-                op == proto::plan::OpType::PrefixMatch) {
-                for (int64_t i = 0; i < cnt; i++) {
-                    auto raw = index->Reverse_Lookup(i);
-                    if (!raw.has_value()) {
-                        res[i] = false;
-                        continue;
-                    }
-                    res[i] = milvus::query::Match(raw.value(), val, op);
-                }
-                return res;
-            } else {
-                LikePatternMatcher matcher(val);
-                for (int64_t i = 0; i < cnt; i++) {
-                    auto raw = index->Reverse_Lookup(i);
-                    if (!raw.has_value()) {
-                        res[i] = false;
-                        continue;
-                    }
-                    res[i] = matcher(raw.value());
-                }
-                return res;
-            }
-        }
-        ThrowInfo(ErrorCode::Unsupported,
-                  "UnaryIndexFuncForMatch is only supported on string types");
+        AssertInfo(reader != nullptr, "selected index has no pattern reader");
+        return reader->PatternMatch(val, ToIndexPatternOp(op));
     }
 };
 
 template <typename T, proto::plan::OpType op>
 struct UnaryIndexFunc {
-    using IndexInnerType =
-        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-    using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, const IndexInnerType& val) {
+    operator()(const index::IScalarPredicateReader<T>* index, T val) {
         if constexpr (op == proto::plan::OpType::Equal) {
             return index->In(1, &val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
             return index->NotIn(1, &val);
         } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            return index->Range(val, OpType::GreaterThan);
+            return index->Range(val, index::CompareOp::GreaterThan);
         } else if constexpr (op == proto::plan::OpType::LessThan) {
-            return index->Range(val, OpType::LessThan);
+            return index->Range(val, index::CompareOp::LessThan);
         } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            return index->Range(val, OpType::GreaterEqual);
+            return index->Range(val, index::CompareOp::GreaterEqual);
         } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            return index->Range(val, OpType::LessEqual);
-        } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
-                             op == proto::plan::OpType::Match ||
-                             op == proto::plan::OpType::PostfixMatch ||
-                             op == proto::plan::OpType::InnerMatch) {
-            UnaryIndexFuncForMatch<T> func;
-            return func(index, val, op);
-        } else if constexpr (op == proto::plan::OpType::RegexMatch) {
-            if constexpr (std::is_same_v<T, std::string> ||
-                          std::is_same_v<T, std::string_view>) {
-                // Prefer PatternMatch which iterates unique values
-                // (O(unique) vs O(total_rows) for Reverse_Lookup)
-                if (index->SupportPatternMatch()) {
-                    return index->PatternMatch(val, op);
-                }
-                // Fallback to Reverse_Lookup for indexes without
-                // PatternMatch support
-                if (!index->HasRawData()) {
-                    ThrowInfo(Unsupported,
-                              "index doesn't have raw data for RegexMatch");
-                }
-                auto cnt = index->Count();
-                TargetBitmap res(cnt);
-                PartialRegexMatcher matcher(val);
-                for (int64_t i = 0; i < cnt; i++) {
-                    auto raw = index->Reverse_Lookup(i);
-                    if (!raw.has_value()) {
-                        res[i] = false;
-                        continue;
-                    }
-                    res[i] = matcher(raw.value());
-                }
-                return res;
-            }
-            ThrowInfo(ErrorCode::Unsupported,
-                      "RegexMatch is only supported on string types");
+            return index->Range(val, index::CompareOp::LessEqual);
         } else {
             ThrowInfo(
                 UnexpectedError,
@@ -997,29 +907,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       plan_options),
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+        // Pre-warm the LIKE matcher for general Match: the FMINDEX Match
+        // route (ExecFMMatch) rechecks every phase-1 candidate with it, and
+        // building it on the query thread inside the first batch would put a
+        // regex compile on the critical path of every such query.
         if (expr_->op_type_ == proto::plan::OpType::Match) {
             EnsureLikeMatcherCache();
-        }
-        auto val_type = FromValCase(expr_->val_.val_case());
-        if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
-            (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
-             expr_->op_type_ == proto::plan::OpType::Match ||
-             expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
-             expr_->op_type_ == proto::plan::OpType::PostfixMatch ||
-             expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
-            // try to pin ngram index for json
-            auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema_snapshot();
-            const auto& field_meta = (*schema)[field_id];
-
-            if (field_meta.is_json()) {
-                auto pointer =
-                    milvus::Json::pointer(expr_->column_.nested_path_);
-                pinned_ngram_index_ =
-                    segment->GetNgramIndexForJson(op_ctx_, field_id, pointer);
-            } else {
-                pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
-            }
         }
         // DetermineExecPath();
     }
@@ -1153,12 +1046,31 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
-    bool
-    CanUseFMMatch();
-
+    // True when the selected inventory entry is an FM index. Metadata only:
+    // the family name is recorded at load time, so this never casts to a
+    // concrete index implementation.
     bool
     PinnedIndexIsFMIndex() const;
 
+    // True when the selected pattern reader answers this expression's
+    // operation with a CANDIDATE SUPERSET instead of the exact result
+    // (index::IPatternMatchReader::PatternMatchIsExact). Such an answer must
+    // never be emitted as-is: the caller either rechecks the candidates
+    // against the raw column or falls back to the scan.
+    bool
+    PatternMatchIsCandidatesOnly() const;
+
+    // Whether general LIKE (Match) may take the FM-index candidate route.
+    // Requires the ScalarIndex exec path without offset input, a sealed
+    // segment, an FM index, and raw VARCHAR field data for the phase-2
+    // recheck.
+    bool
+    CanUseFMMatch();
+
+    // FMINDEX general-LIKE route: phase 1 takes candidates from the rarest
+    // literal fragment via IPatternMatchReader::PatternMatch(Match), phase 2
+    // rechecks those rows against the LIKE matcher on the sealed VARCHAR
+    // column. FMINDEX Match candidates are NEVER served unrechecked.
     std::optional<VectorPtr>
     ExecFMMatch(EvalCtx& context);
 
@@ -1176,7 +1088,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr> expr_;
     bool arg_inited_{false};
     SingleElement value_arg_;
-    PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
     bool enable_sub_expr_cache_write_{true};
 
