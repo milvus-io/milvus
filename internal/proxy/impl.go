@@ -7025,20 +7025,12 @@ func (node *Proxy) resolveRLSRequestTarget(ctx context.Context, req rlsManagemen
 	return dbName, collectionName, nil
 }
 
-func rlsPolicyActionsFromProto(actions []milvuspb.RowPolicyAction) []rlsutil.PolicyAction {
-	converted := make([]rlsutil.PolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = rlsutil.PolicyAction(action)
-	}
-	return converted
-}
-
 func normalizeCreateRowPolicyType(req *milvuspb.CreateRowPolicyRequest) rlsutil.PolicyType {
 	if req.PolicyType == nil {
 		policyType := milvuspb.RowPolicyType_RowPolicyTypePermissive
 		req.PolicyType = &policyType
 	}
-	return rlsutil.PolicyType(req.GetPolicyType())
+	return req.GetPolicyType()
 }
 
 func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
@@ -7060,7 +7052,7 @@ func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowP
 	if err := rlsutil.ValidatePolicyActionCount(len(req.GetActions())); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := rlsutil.ValidatePolicy(req.GetPolicyName(), normalizeCreateRowPolicyType(req), rlsPolicyActionsFromProto(req.GetActions()), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+	if err := rlsutil.ValidatePolicy(req.GetPolicyName(), normalizeCreateRowPolicyType(req), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {
@@ -7100,7 +7092,7 @@ func (node *Proxy) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowP
 	if err := rlsutil.ValidatePolicyActionCount(len(req.GetActions())); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := rlsutil.ValidatePolicyForUpdate(req.GetPolicyName(), rlsutil.PolicyType(req.GetPolicyType()), rlsPolicyActionsFromProto(req.GetActions()), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
+	if err := rlsutil.ValidatePolicyForUpdate(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {

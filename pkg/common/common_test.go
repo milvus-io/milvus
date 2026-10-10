@@ -688,35 +688,6 @@ func TestNamespaceShardingEnabled(t *testing.T) {
 }
 
 func TestRLSEnabled(t *testing.T) {
-	t.Run("rls.enabled is immutable after creation", func(t *testing.T) {
-		for _, value := range []string{"true", "false", "True", "0"} {
-			err := ValidateRLSEnabledNotAltered(
-				[]*commonpb.KeyValuePair{{Key: RLSEnabledKey, Value: value}},
-				nil,
-			)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		}
-		assert.ErrorIs(t, ValidateRLSEnabledNotAltered(nil, []string{RLSEnabledKey}), merr.ErrParameterInvalid)
-	})
-
-	t.Run("rls.enabled immutable validation rejects wrong case", func(t *testing.T) {
-		for _, key := range []string{"RLS.ENABLED", "Rls.Enabled"} {
-			err := ValidateRLSEnabledNotAltered(
-				[]*commonpb.KeyValuePair{{Key: key, Value: "true"}},
-				nil,
-			)
-			assert.ErrorContains(t, err, "did you mean")
-			assert.ErrorContains(t, ValidateRLSEnabledNotAltered(nil, []string{key}), "did you mean")
-		}
-	})
-
-	t.Run("rls.enabled immutable validation accepts unrelated changes", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSEnabledNotAltered(
-			[]*commonpb.KeyValuePair{{Key: RLSForceKey, Value: "true"}},
-			[]string{"other.key"},
-		))
-	})
-
 	t.Run("returns value when set", func(t *testing.T) {
 		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"})
 		assert.NoError(t, err)

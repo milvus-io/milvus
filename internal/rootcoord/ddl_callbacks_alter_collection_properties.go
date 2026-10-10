@@ -58,9 +58,6 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	if err := common.ValidateRLSProperties(req.GetProperties()...); err != nil {
 		return err
 	}
-	if err := common.ValidateRLSEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
-		return err
-	}
 	for _, key := range req.GetDeleteKeys() {
 		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
 			if strings.EqualFold(key, expected) && key != expected {
@@ -492,11 +489,11 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			return merr.Wrap(err, "failed to update load config")
 		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			if errors.Is(err, merr.ErrResourceGroupNotFound) {
-				mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
-				return nil
+			if !errors.Is(err, merr.ErrResourceGroupNotFound) {
+				return merr.Wrap(err, "failed to update load config")
 			}
-			return merr.Wrap(err, "failed to update load config")
+			// Properties are already persisted; still invalidate Proxy caches.
+			mlog.Warn(ctx, "failed to update load config due to missing resource group, stop retrying", mlog.Err(err))
 		}
 	}
 	if err := c.cascadeDropFieldIndexesInline(ctx, result); err != nil {

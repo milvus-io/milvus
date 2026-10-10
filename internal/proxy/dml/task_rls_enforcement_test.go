@@ -18,6 +18,7 @@ package dml
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -118,16 +119,12 @@ func rlsPolicyInfos(collectionID int64, policies []*rlsutil.RowPolicy) []*rootco
 		if policy == nil {
 			continue
 		}
-		actions := make([]milvuspb.RowPolicyAction, len(policy.Actions))
-		for i, action := range policy.Actions {
-			actions[i] = milvuspb.RowPolicyAction(action)
-		}
 		converted = append(converted, &rootcoordpb.RLSPolicyInfo{
 			CollectionId: collectionID,
 			PolicyId:     int64(len(converted) + 1),
 			PolicyName:   policy.PolicyName,
-			PolicyType:   milvuspb.RowPolicyType(policy.PolicyType),
-			Actions:      actions,
+			PolicyType:   policy.PolicyType,
+			Actions:      slices.Clone(policy.Actions),
 			UsingExpr:    policy.UsingExpr,
 			CheckExpr:    policy.CheckExpr,
 			Description:  policy.Description,

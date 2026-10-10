@@ -130,6 +130,28 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, "key2")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	// A description-only edit preserves the existing field properties.
+	req := &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.FieldDescriptionKey, Value: "updated description"},
+		},
+	}
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, "updated description", getAlterCollectionField(coll.ToCollectionSchemaPB(), fieldName).GetDescription())
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
+
+	req.Properties[0].Value = "value2"
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
 }
 
 func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {

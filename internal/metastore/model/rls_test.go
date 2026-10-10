@@ -21,27 +21,30 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 )
 
-func TestRLSPolicyActionValuesMatchPublicProto(t *testing.T) {
-	tests := []struct {
-		internal rlsutil.PolicyAction
-		proto    milvuspb.RowPolicyAction
-	}{
-		{rlsutil.PolicyActionQuery, milvuspb.RowPolicyAction_Query},
-		{rlsutil.PolicyActionSearch, milvuspb.RowPolicyAction_Search},
-		{rlsutil.PolicyActionInsert, milvuspb.RowPolicyAction_Insert},
-		{rlsutil.PolicyActionDelete, milvuspb.RowPolicyAction_Delete},
-		{rlsutil.PolicyActionUpsert, milvuspb.RowPolicyAction_Upsert},
-		{rlsutil.PolicyActionQueryIterator, milvuspb.RowPolicyAction_QueryIterator},
-		{rlsutil.PolicyActionSearchIterator, milvuspb.RowPolicyAction_SearchIterator},
-		{rlsutil.PolicyActionHybridSearch, milvuspb.RowPolicyAction_HybridSearch},
+func TestRLSPolicyModelCopiesActions(t *testing.T) {
+	policy := &RLSPolicy{
+		DBID: 10, CollectionID: 20, PolicyID: 100, PolicyName: "tenant",
+		PolicyType: rlsutil.PolicyTypeRestrictive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery, rlsutil.PolicyActionUpsert},
+		UsingExpr:  "tenant == $current_principal", CheckExpr: "tenant == $current_principal",
 	}
+	encoded := MarshalRLSPolicyModel(policy)
+	decoded := UnmarshalRLSPolicyModel(encoded)
+	require.Equal(t, policy, decoded)
+	encoded.Actions[0] = rlsutil.PolicyActionDelete
+	require.Equal(t, rlsutil.PolicyActionQuery, policy.Actions[0])
+	require.Equal(t, rlsutil.PolicyActionQuery, decoded.Actions[0])
+	decoded.Actions[1] = rlsutil.PolicyActionInsert
+	require.Equal(t, rlsutil.PolicyActionUpsert, policy.Actions[1])
 
-	for _, test := range tests {
-		require.Equal(t, int32(test.proto), int32(test.internal))
+	require.Nil(t, MarshalRLSPolicyModel(nil))
+	require.Nil(t, UnmarshalRLSPolicyModel(nil))
+	for _, actions := range [][]rlsutil.PolicyAction{nil, {}} {
+		policy.Actions = actions
+		require.Equal(t, actions, UnmarshalRLSPolicyModel(MarshalRLSPolicyModel(policy)).Actions)
 	}
 }
 

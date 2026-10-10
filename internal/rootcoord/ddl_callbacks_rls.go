@@ -18,9 +18,9 @@ package rootcoord
 
 import (
 	"context"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -203,8 +203,8 @@ func marshalRLSPolicyMessage(policy *model.RLSPolicy) *messagespb.RLSPolicyMetad
 	return &messagespb.RLSPolicyMetadata{
 		PolicyId:    policy.PolicyID,
 		PolicyName:  policy.PolicyName,
-		PolicyType:  milvuspb.RowPolicyType(policy.PolicyType),
-		Actions:     policyActionsToMilvusProto(policy.Actions),
+		PolicyType:  policy.PolicyType,
+		Actions:     slices.Clone(policy.Actions),
 		UsingExpr:   policy.UsingExpr,
 		CheckExpr:   policy.CheckExpr,
 		Description: policy.Description,
@@ -228,28 +228,12 @@ func unmarshalRLSPolicyMessage(header *message.AlterRLSMetadataMessageHeader, po
 		CollectionID: header.GetCollectionId(),
 		PolicyID:     policy.GetPolicyId(),
 		PolicyName:   policy.GetPolicyName(),
-		PolicyType:   rlsutil.PolicyType(policy.GetPolicyType()),
-		Actions:      policyActionsFromMilvusProto(policy.GetActions()),
+		PolicyType:   policy.GetPolicyType(),
+		Actions:      slices.Clone(policy.GetActions()),
 		UsingExpr:    policy.GetUsingExpr(),
 		CheckExpr:    policy.GetCheckExpr(),
 		Description:  policy.GetDescription(),
 	}
-}
-
-func policyActionsToMilvusProto(actions []rlsutil.PolicyAction) []milvuspb.RowPolicyAction {
-	converted := make([]milvuspb.RowPolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = milvuspb.RowPolicyAction(action)
-	}
-	return converted
-}
-
-func policyActionsFromMilvusProto(actions []milvuspb.RowPolicyAction) []rlsutil.PolicyAction {
-	converted := make([]rlsutil.PolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = rlsutil.PolicyAction(action)
-	}
-	return converted
 }
 
 func unmarshalRLSPrincipalMessage(header *message.AlterRLSMetadataMessageHeader, principal *messagespb.RLSPrincipalMetadata) (*model.RLSPrincipal, error) {
