@@ -1587,8 +1587,16 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
     // (logger / http client factory) set up by Aws::InitAPI; without it the
     // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
     // share init_count_ with any production code paths in the same binary.
-    TestableMinioChunkManager init_guard;
-    init_guard.InitSDKAPIDefault("info");
+    // Balance this test's initialization after config is destroyed. Leaving
+    // CRT worker threads alive lets them log during shared-library teardown.
+    struct SdkGuard : TestableMinioChunkManager {
+        SdkGuard() {
+            InitSDKAPIDefault("info");
+        }
+        ~SdkGuard() override {
+            ShutdownSDKAPI();
+        }
+    } init_guard;
 
     Aws::Client::ClientConfiguration config;
     // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.

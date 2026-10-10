@@ -182,11 +182,13 @@ find_package(GTest REQUIRED)
 find_package(benchmark REQUIRED)
 find_package(googleapis REQUIRED)
 find_package(libavrocpp REQUIRED)
-find_package(AWSSDK REQUIRED)
+find_package(AWSSDK REQUIRED CONFIG)
+find_package(aws-crt-cpp REQUIRED CONFIG)
 find_package(Azure REQUIRED)
 
 include( CTest )
 include( BuildUtils )
+include( AwsRuntime )
 include( DefineOptions )
 
 # ---- Split DWARF (Linux only) ----
