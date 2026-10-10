@@ -18,7 +18,7 @@ ARG MILVUS_RUNTIME_USER=milvus:milvus
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
     dnf install -y wget libgomp libaio libatomic tzdata && \
-    dnf upgrade -y openssl openssl-libs && \
+    dnf upgrade -y openssl openssl-libs curl tar zlib glibc && \
     rm -rf /var/cache/dnf/*
 
 # Add Tini

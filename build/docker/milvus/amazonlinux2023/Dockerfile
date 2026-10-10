@@ -16,7 +16,7 @@ ARG MILVUS_ASAN_LIB
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 RUN yum install -y wget libgomp libaio libatomic tzdata && \
-    yum upgrade -y openssl openssl-libs && \
+    yum upgrade -y openssl openssl-libs curl tar zlib glibc && \
     rm -rf /var/cache/yum/*
 
 # Add Tini
