@@ -318,6 +318,22 @@ message RoaringFilterExpr {
   bytes bitmap_blob = 2;
 }
 
+// TupleTermExpr: correlated multi-column exact membership, e.g.
+// `[a, b] in [[v1, w1], [v2, w2]]`. Matches a row iff the tuple formed by
+// reading `columns` in order equals one of `tuples` exactly, position for
+// position. Exact (no false positives/negatives), so unlike
+// bloom_filter_expr it is eligible for delete expressions.
+// See design doc 20260901-tuple-term-membership-expression.md.
+message TupleTermExpr {
+  // Every column MUST be a top-level scalar field (no JSON path, no nested
+  // array path, no dynamic field) and columns MUST be pairwise distinct.
+  repeated ColumnInfo columns = 1;
+  // Each Array here is one candidate tuple; Array.array MUST have exactly
+  // len(columns) elements, and element i's type is validated/cast against
+  // columns[i] at parse time.
+  repeated Array tuples = 2;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -342,6 +358,7 @@ message Expr {
     MatchExpr match_expr = 21;
     BloomFilterExpr bloom_filter_expr = 22;
     RoaringFilterExpr roaring_filter_expr = 23;
+    TupleTermExpr tuple_term_expr = 24;
   };
   bool is_template = 20;
 }

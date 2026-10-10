@@ -155,6 +155,9 @@ class ProtoParser {
     ParseRoaringFilterExprs(const proto::plan::RoaringFilterExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseTupleTermFilterExprs(const proto::plan::TupleTermExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void
