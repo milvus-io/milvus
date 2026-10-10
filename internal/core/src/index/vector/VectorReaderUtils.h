@@ -70,11 +70,18 @@ RetrieveEmbeddingLists(const KnowhereEngine& engine,
         if (engine.IsEmptyEmbListIndex()) {
             const auto& offsets = engine.EmptyEmbListOffsets();
             const auto emb_list_count = offsets.size() - 1;
+            const auto& id_map = engine.native_index.GetIdMap();
             for (size_t i = 0; i < request.rows_size; ++i) {
-                if (request.ids[i] < 0 ||
-                    static_cast<uint64_t>(request.ids[i]) >= emb_list_count) {
+                // Empty-list offsets are in compact valid-parent order, while
+                // callers supply public logical row ids. The native retrieval
+                // path applies this map itself; this metadata-only path must
+                // perform the same translation before checking its bounds.
+                const auto compact_id = id_map.MapOutToIn(request.ids[i]);
+                if (compact_id < 0 ||
+                    static_cast<uint64_t>(compact_id) >= emb_list_count) {
                     ThrowInfo(ConfigInvalid,
-                              "embedding-list id {} is out of range [0, {})",
+                              "embedding-list id {} is invalid for {} valid "
+                              "parents",
                               request.ids[i],
                               emb_list_count);
                 }
