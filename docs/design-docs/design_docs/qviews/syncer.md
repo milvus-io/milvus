@@ -106,6 +106,11 @@ pendingSyncQueryViews
   disconnected consume memory proportional to pending keys rather than update
   count. Reconnection still re-pushes the authoritative `entries` snapshot.
 
+For QN Preparing targets, a Ready response completes that node's preparation
+sync and removes its pending entry. Poison remains local to QueryNode and does
+not require continued monitoring or a re-push when Coordinator recovers an Up
+view. Ordinary outstanding syncs retain their existing reconnect behavior.
+
 ## 4. resumableSyncer
 
 Per-node component that maintains a gRPC bidirectional stream.

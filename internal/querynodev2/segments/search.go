@@ -163,6 +163,13 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 	return searchResults, segments, err
 }
 
+func SearchSealedSegments(ctx context.Context, req *SearchRequest, selected []Segment) ([]*SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return searchSegments(ctx, nil, selected, SegmentTypeSealed, req)
+}
+
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {

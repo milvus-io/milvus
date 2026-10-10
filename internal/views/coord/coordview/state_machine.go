@@ -100,8 +100,7 @@ func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQuer
 		// Already persisted; re-push to all nodes.
 		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
 	case qviews.QueryViewStateUp:
-		// Active view; no re-push needed. Up is persisted precisely to
-		// avoid unnecessary Coord↔node communication on recovery.
+		// Active view; no re-push is needed on Coord recovery.
 	case qviews.QueryViewStateDown:
 		// Re-push Down to SN.
 		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)

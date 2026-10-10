@@ -28,7 +28,9 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 	streamingCoordClient := client.NewClient(c)
 	// Create a new streamingnode handler client.
 	handlerClient := handler.NewHandlerClient(streamingCoordClient.Assignment())
+	transformCtx, transformCancel := context.WithCancel(context.Background())
 	w := &walAccesserImpl{
+		transformCtx: transformCtx, transformCancel: transformCancel,
 		lifetime:             typeutil.NewLifetime(),
 		clusterID:            paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		streamingCoordClient: streamingCoordClient,
@@ -49,8 +51,10 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 // walAccesserImpl is the implementation of WALAccesser.
 type walAccesserImpl struct {
 	mlog.Binder
-	lifetime  *typeutil.Lifetime
-	clusterID string
+	transformCtx    context.Context
+	transformCancel context.CancelFunc
+	lifetime        *typeutil.Lifetime
+	clusterID       string
 
 	// All services
 	streamingCoordClient client.Client
@@ -159,6 +163,9 @@ func (w *walAccesserImpl) Broadcast() Broadcast {
 func (w *walAccesserImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.lifetime.Wait()
+	if w.transformCancel != nil {
+		w.transformCancel()
+	}
 
 	w.producerMutex.Lock()
 	for _, p := range w.producers {

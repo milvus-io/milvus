@@ -47,7 +47,7 @@ func TestComputeScorerScoresOnChunkedOffsetsNonLocalSegment(t *testing.T) {
 	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, nil, nil)
 	require.Error(t, err)
 	require.Nil(t, scores)
-	require.Contains(t, err.Error(), "does not support boost score")
+	require.Contains(t, err.Error(), "does not expose native query capability")
 }
 
 func TestComputeScorerScoresOnChunkedOffsetsNilCSegment(t *testing.T) {

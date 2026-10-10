@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -356,30 +355,20 @@ func fetchFieldsAsRecord(
 	retrievePlan *segcore.RetrievePlan,
 	merged *MergedResultWithOffsets,
 ) (arrow.Record, error) {
-	type pinned struct {
-		ls *LocalSegment
-		cs segcore.CSegment
-	}
-	segs := make([]pinned, len(validSegments))
-	for i, seg := range validSegments {
-		ls := seg.(*LocalSegment)
-		if !ls.ptrLock.PinIf(state.IsNotReleased) {
-			for j := 0; j < i; j++ {
-				segs[j].ls.ptrLock.Unpin()
-			}
-			return nil, merr.WrapErrSegmentNotLoaded(ls.ID(), "segment released")
-		}
-		segs[i] = pinned{ls, ls.csegment}
-	}
+	releases := make([]func(), 0, len(validSegments))
 	defer func() {
-		for _, s := range segs {
-			s.ls.ptrLock.Unpin()
+		for _, release := range releases {
+			release()
 		}
 	}()
-
-	cSegments := make([]segcore.CSegment, len(segs))
-	for i, s := range segs {
-		cSegments[i] = s.cs
+	cSegments := make([]segcore.CSegment, len(validSegments))
+	for i, segment := range validSegments {
+		native, release, err := borrowNativeSegment(segment)
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, release)
+		cSegments[i] = native
 	}
 
 	segIndices := make([]int32, len(merged.Selections))

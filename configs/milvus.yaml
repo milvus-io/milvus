@@ -1659,6 +1659,11 @@ streamingNode:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
     clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte
 
+# Any configuration related to query views.
+queryView:
+  transformLog:
+    catchupConcurrencyRatio: 0.25 # Maximum concurrent TransformLog catch-up tasks per PChannel in each process, expressed as a ratio of CPU cores. Concurrency is max(1, floor(CPU cores * ratio)); not a process-wide cap. Must be positive and supports dynamic updates.
+
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.

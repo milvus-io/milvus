@@ -7,6 +7,7 @@
 package viewpb
 
 import (
+	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -20,19 +21,33 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// QueryViewState represents the distributed lifecycle of a QueryView.
 type QueryViewState int32
 
 const (
-	QueryViewState_QueryViewStateUnknown       QueryViewState = 0
-	QueryViewState_QueryViewStatePreparing     QueryViewState = 1
-	QueryViewState_QueryViewStateReady         QueryViewState = 2
-	QueryViewState_QueryViewStateUp            QueryViewState = 3
-	QueryViewState_QueryViewStateDown          QueryViewState = 4
+	QueryViewState_QueryViewStateUnknown QueryViewState = 0
+	// Initial state. View is created with data distribution determined.
+	// Pushed to target streaming/query nodes for resource preparation.
+	QueryViewState_QueryViewStatePreparing QueryViewState = 1
+	// All nodes have completed resource preparation.
+	// Coord needs to push Up to streaming node.
+	QueryViewState_QueryViewStateReady QueryViewState = 2
+	// View is active on streaming node and serving queries.
+	// Only applies to streaming node; query node stays in Ready.
+	QueryViewState_QueryViewStateUp QueryViewState = 3
+	// View is deactivated on streaming node (no longer generates new query plans).
+	// Precedes the dropping phase for resource cleanup.
+	QueryViewState_QueryViewStateDown QueryViewState = 4
+	// Resource preparation failed on one or more nodes (e.g., OOM).
+	// View cannot be recovered; will proceed to Dropping → Dropped for cleanup.
 	QueryViewState_QueryViewStateUnrecoverable QueryViewState = 5
-	QueryViewState_QueryViewStateDropping      QueryViewState = 6
-	QueryViewState_QueryViewStateDropped       QueryViewState = 7
-	// StreamingNode-only state while WAL recovery is catching up.
+	// View is being dropped. Sealed segments can be released from query nodes.
+	// Coord pushes Dropped to nodes to trigger resource cleanup.
+	QueryViewState_QueryViewStateDropping QueryViewState = 6
+	// View is fully dropped and can be removed from persistent storage.
+	QueryViewState_QueryViewStateDropped QueryViewState = 7
+	// StreamingNode-only: WAL is recovering after SN crash.
+	// Not used by Coord or QueryNode. Maps to Up for Coord-visible state.
+	// See design doc Section 2.4.
 	QueryViewState_QueryViewStateUpRecovering QueryViewState = 8
 )
 
@@ -89,6 +104,64 @@ func (QueryViewState) EnumDescriptor() ([]byte, []int) {
 	return file_view_proto_rawDescGZIP(), []int{0}
 }
 
+// ViewCode is the error code for view-related operations.
+// Transported via gRPC status details (not embedded in response messages),
+// following the same pattern as StreamingCode / StreamingError.
+type ViewCode int32
+
+const (
+	ViewCode_VIEW_CODE_OK               ViewCode = 0
+	ViewCode_VIEW_CODE_VIEW_INVALIDATED ViewCode = 1 // View version is no longer valid (Down/Dropped).
+	ViewCode_VIEW_CODE_VIEW_NOT_FOUND   ViewCode = 2 // View version not found on this node.
+	ViewCode_VIEW_CODE_ON_SHUTDOWN      ViewCode = 3 // Node is shutting down.
+	ViewCode_VIEW_CODE_UNKNOWN          ViewCode = 999
+)
+
+// Enum value maps for ViewCode.
+var (
+	ViewCode_name = map[int32]string{
+		0:   "VIEW_CODE_OK",
+		1:   "VIEW_CODE_VIEW_INVALIDATED",
+		2:   "VIEW_CODE_VIEW_NOT_FOUND",
+		3:   "VIEW_CODE_ON_SHUTDOWN",
+		999: "VIEW_CODE_UNKNOWN",
+	}
+	ViewCode_value = map[string]int32{
+		"VIEW_CODE_OK":               0,
+		"VIEW_CODE_VIEW_INVALIDATED": 1,
+		"VIEW_CODE_VIEW_NOT_FOUND":   2,
+		"VIEW_CODE_ON_SHUTDOWN":      3,
+		"VIEW_CODE_UNKNOWN":          999,
+	}
+)
+
+func (x ViewCode) Enum() *ViewCode {
+	p := new(ViewCode)
+	*p = x
+	return p
+}
+
+func (x ViewCode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ViewCode) Descriptor() protoreflect.EnumDescriptor {
+	return file_view_proto_enumTypes[1].Descriptor()
+}
+
+func (ViewCode) Type() protoreflect.EnumType {
+	return &file_view_proto_enumTypes[1]
+}
+
+func (x ViewCode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ViewCode.Descriptor instead.
+func (ViewCode) EnumDescriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{1}
+}
+
 // DataVersion is the composite version embedded in a QueryView version.
 // Values are ordered lexicographically by
 // (streaming_version, compact_version).
@@ -97,8 +170,8 @@ type DataVersion struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	StreamingVersion int64 `protobuf:"varint,1,opt,name=streaming_version,json=streamingVersion,proto3" json:"streaming_version,omitempty"`
-	CompactVersion   int64 `protobuf:"varint,2,opt,name=compact_version,json=compactVersion,proto3" json:"compact_version,omitempty"`
+	StreamingVersion int64 `protobuf:"varint,1,opt,name=streaming_version,json=streamingVersion,proto3" json:"streaming_version,omitempty"` // Incremented when a growing segment is flushed to sealed.
+	CompactVersion   int64 `protobuf:"varint,2,opt,name=compact_version,json=compactVersion,proto3" json:"compact_version,omitempty"`       // Incremented when segments are compacted.
 }
 
 func (x *DataVersion) Reset() {
@@ -349,15 +422,16 @@ func (x *DataViewOfPartition) GetSegmentManifestVersions() []int64 {
 	return nil
 }
 
-// QueryViewOfShard is the state-machine snapshot for one shard and replica.
+// QueryViewOfShard represents a complete query view for a shard on a specific replica.
+// Contains the view metadata, streaming node assignment, and query node segment assignments.
 type QueryViewOfShard struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
 	Meta          *QueryViewMeta            `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"`
-	QueryNode     []*QueryViewOfQueryNode   `protobuf:"bytes,2,rep,name=query_node,json=queryNode,proto3" json:"query_node,omitempty"`
-	StreamingNode *QueryViewOfStreamingNode `protobuf:"bytes,3,opt,name=streaming_node,json=streamingNode,proto3" json:"streaming_node,omitempty"`
+	QueryNode     []*QueryViewOfQueryNode   `protobuf:"bytes,2,rep,name=query_node,json=queryNode,proto3" json:"query_node,omitempty"`             // Sealed segment assignments per query node.
+	StreamingNode *QueryViewOfStreamingNode `protobuf:"bytes,3,opt,name=streaming_node,json=streamingNode,proto3" json:"streaming_node,omitempty"` // Streaming node assignment for growing data.
 }
 
 func (x *QueryViewOfShard) Reset() {
@@ -413,19 +487,23 @@ func (x *QueryViewOfShard) GetStreamingNode() *QueryViewOfStreamingNode {
 	return nil
 }
 
-// QueryViewMeta identifies a QueryView and carries its current lifecycle state.
+// QueryViewMeta contains the metadata of a query view.
 type QueryViewMeta struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	CollectionId                int64             `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
-	ReplicaId                   int64             `protobuf:"varint,2,opt,name=replica_id,json=replicaId,proto3" json:"replica_id,omitempty"`
-	Vchannel                    string            `protobuf:"bytes,3,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
-	Version                     *QueryViewVersion `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
-	State                       QueryViewState    `protobuf:"varint,5,opt,name=state,proto3,enum=milvus.proto.view.QueryViewState" json:"state,omitempty"`
-	LoadInfoVersion             uint64            `protobuf:"varint,6,opt,name=load_info_version,json=loadInfoVersion,proto3" json:"load_info_version,omitempty"`
-	TransformStartAfterTimetick uint64            `protobuf:"varint,7,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
+	CollectionId int64             `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	ReplicaId    int64             `protobuf:"varint,2,opt,name=replica_id,json=replicaId,proto3" json:"replica_id,omitempty"` // The replica this view belongs to.
+	Vchannel     string            `protobuf:"bytes,3,opt,name=vchannel,proto3" json:"vchannel,omitempty"`                     // The shard (vchannel) this view covers.
+	Version      *QueryViewVersion `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
+	State        QueryViewState    `protobuf:"varint,5,opt,name=state,proto3,enum=milvus.proto.view.QueryViewState" json:"state,omitempty"`
+	// Version of the global load-config snapshot used to resolve this view's
+	// partitions, load fields, and collection index metadata.
+	LoadInfoVersion uint64 `protobuf:"varint,6,opt,name=load_info_version,json=loadInfoVersion,proto3" json:"load_info_version,omitempty"`
+	// Inherited from DataViewOfShard at the time this query view was created.
+	// TransformLog entries with timetick > this value need to be consumed for this shard.
+	TransformStartAfterTimetick uint64 `protobuf:"varint,7,opt,name=transform_start_after_timetick,json=transformStartAfterTimetick,proto3" json:"transform_start_after_timetick,omitempty"`
 }
 
 func (x *QueryViewMeta) Reset() {
@@ -509,8 +587,8 @@ func (x *QueryViewMeta) GetTransformStartAfterTimetick() uint64 {
 	return 0
 }
 
-// QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
-// The node is identified implicitly by the shard's vchannel binding.
+// QueryViewOfStreamingNode represents the streaming node's portion of a query view.
+// Currently empty; streaming node is implicitly determined by the shard's vchannel binding.
 type QueryViewOfStreamingNode struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -549,13 +627,14 @@ func (*QueryViewOfStreamingNode) Descriptor() ([]byte, []int) {
 	return file_view_proto_rawDescGZIP(), []int{6}
 }
 
-// QueryViewOfQueryNode contains the segment assignments for one QueryNode.
+// QueryViewOfQueryNode represents a query node's segment assignments within a query view.
 type QueryViewOfQueryNode struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	NodeId     int64                   `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId int64 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// Partitions and their segments assigned to this query node.
 	Partitions []*QueryViewOfPartition `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
 }
 
@@ -605,15 +684,16 @@ func (x *QueryViewOfQueryNode) GetPartitions() []*QueryViewOfPartition {
 	return nil
 }
 
-// QueryViewVersion is ordered lexicographically by
-// (data_version, query_version).
+// QueryViewVersion is the composite version of a query view.
+// Scoped to ShardOnReplica level. Ordered by lexicographic order of (data_version, query_version).
+// When data_version changes, query_version resets to 1.
 type QueryViewVersion struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	DataVersion  *DataVersion `protobuf:"bytes,1,opt,name=data_version,json=dataVersion,proto3" json:"data_version,omitempty"`
-	QueryVersion int64        `protobuf:"varint,2,opt,name=query_version,json=queryVersion,proto3" json:"query_version,omitempty"`
+	DataVersion  *DataVersion `protobuf:"bytes,1,opt,name=data_version,json=dataVersion,proto3" json:"data_version,omitempty"`     // The data view version this query view is based on.
+	QueryVersion int64        `protobuf:"varint,2,opt,name=query_version,json=queryVersion,proto3" json:"query_version,omitempty"` // Increments when data is redistributed across nodes (balance, recovery).
 }
 
 func (x *QueryViewVersion) Reset() {
@@ -662,14 +742,19 @@ func (x *QueryViewVersion) GetQueryVersion() int64 {
 	return 0
 }
 
-// QueryViewOfPartition tracks assigned and ready segments for one partition.
+// QueryViewOfPartition represents a partition's segment list within a query view.
 type QueryViewOfPartition struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	PartitionId     int64   `protobuf:"varint,1,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
-	SegmentIds      []int64 `protobuf:"varint,2,rep,packed,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"`
+	PartitionId int64 `protobuf:"varint,1,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	// All segment IDs in this partition.
+	SegmentIds []int64 `protobuf:"varint,2,rep,packed,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"`
+	// Subset of segment IDs that are in Ready state.
+	// Segments not in this list are implicitly NotReady.
+	// Coord → Node (Request): this field is empty (all segments start as NotReady).
+	// Node → Coord (Response): this field contains the ready subset.
 	ReadySegmentIds []int64 `protobuf:"varint,3,rep,packed,name=ready_segment_ids,json=readySegmentIds,proto3" json:"ready_segment_ids,omitempty"`
 }
 
@@ -726,7 +811,8 @@ func (x *QueryViewOfPartition) GetReadySegmentIds() []int64 {
 	return nil
 }
 
-// SyncRequest carries an atomic state-machine input or closes the stream.
+// SyncRequest is the bidirectional streaming request for SyncQueryView RPC.
+// Uses oneof to support query view sync and graceful stream close.
 type SyncRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -808,7 +894,7 @@ func (*SyncRequest_Views) isSyncRequest_Request() {}
 
 func (*SyncRequest_Close) isSyncRequest_Request() {}
 
-// SyncQueryViewsRequest atomically applies QueryView states on one work node.
+// SyncQueryViewsRequest carries query view states to be atomically applied on the target node.
 type SyncQueryViewsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -856,6 +942,7 @@ func (x *SyncQueryViewsRequest) GetQueryViews() []*QueryViewOfShard {
 	return nil
 }
 
+// SyncCloseRequest signals graceful close of the bidirectional stream.
 type SyncCloseRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -894,7 +981,7 @@ func (*SyncCloseRequest) Descriptor() ([]byte, []int) {
 	return file_view_proto_rawDescGZIP(), []int{12}
 }
 
-// SyncResponse carries follower state reports or acknowledges stream close.
+// SyncResponse is the bidirectional streaming response for SyncQueryView RPC.
 type SyncResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -976,7 +1063,8 @@ func (*SyncResponse_Views) isSyncResponse_Response() {}
 
 func (*SyncResponse_Close) isSyncResponse_Response() {}
 
-// SyncQueryViewsResponse reports the follower's latest local states.
+// SyncQueryViewsResponse carries the node's current query view states.
+// The response always reflects the node's latest local state, not just the delta from the request.
 type SyncQueryViewsResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1024,6 +1112,7 @@ func (x *SyncQueryViewsResponse) GetQueryViews() []*QueryViewOfShard {
 	return nil
 }
 
+// SyncCloseResponse acknowledges graceful close of the bidirectional stream.
 type SyncCloseResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1062,7 +1151,64 @@ func (*SyncCloseResponse) Descriptor() ([]byte, []int) {
 	return file_view_proto_rawDescGZIP(), []int{15}
 }
 
-// ShardID identifies one shard within a replica.
+// ViewError is the error type for view-related operations.
+// Attached to gRPC status details for error propagation.
+type ViewError struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Code  ViewCode `protobuf:"varint,1,opt,name=code,proto3,enum=milvus.proto.view.ViewCode" json:"code,omitempty"`
+	Cause string   `protobuf:"bytes,2,opt,name=cause,proto3" json:"cause,omitempty"`
+}
+
+func (x *ViewError) Reset() {
+	*x = ViewError{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[16]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ViewError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewError) ProtoMessage() {}
+
+func (x *ViewError) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[16]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewError.ProtoReflect.Descriptor instead.
+func (*ViewError) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ViewError) GetCode() ViewCode {
+	if x != nil {
+		return x.Code
+	}
+	return ViewCode_VIEW_CODE_OK
+}
+
+func (x *ViewError) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+// ShardID uniquely identifies a shard within a replica.
 type ShardID struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1075,7 +1221,7 @@ type ShardID struct {
 func (x *ShardID) Reset() {
 	*x = ShardID{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_view_proto_msgTypes[16]
+		mi := &file_view_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1088,7 +1234,7 @@ func (x *ShardID) String() string {
 func (*ShardID) ProtoMessage() {}
 
 func (x *ShardID) ProtoReflect() protoreflect.Message {
-	mi := &file_view_proto_msgTypes[16]
+	mi := &file_view_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1101,7 +1247,7 @@ func (x *ShardID) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardID.ProtoReflect.Descriptor instead.
 func (*ShardID) Descriptor() ([]byte, []int) {
-	return file_view_proto_rawDescGZIP(), []int{16}
+	return file_view_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ShardID) GetReplicaId() int64 {
@@ -1118,11 +1264,432 @@ func (x *ShardID) GetVchannel() string {
 	return ""
 }
 
+// QueryPlanMVCC carries the WAL read frontiers used by QueryView execution.
+type QueryPlanMVCC struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Latest timetick of the growing stream. StreamingNode waits for growing
+	// runtime visibility up to this timetick before executing growing segments.
+	GrowingTimetick uint64 `protobuf:"varint,1,opt,name=growing_timetick,json=growingTimetick,proto3" json:"growing_timetick,omitempty"`
+	// Latest timetick of the transforming stream. StreamingNode and QueryNode
+	// wait for transform visibility up to this timetick before execution.
+	TransformingTimetick uint64 `protobuf:"varint,2,opt,name=transforming_timetick,json=transformingTimetick,proto3" json:"transforming_timetick,omitempty"`
+}
+
+func (x *QueryPlanMVCC) Reset() {
+	*x = QueryPlanMVCC{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[18]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryPlanMVCC) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryPlanMVCC) ProtoMessage() {}
+
+func (x *QueryPlanMVCC) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[18]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryPlanMVCC.ProtoReflect.Descriptor instead.
+func (*QueryPlanMVCC) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *QueryPlanMVCC) GetGrowingTimetick() uint64 {
+	if x != nil {
+		return x.GrowingTimetick
+	}
+	return 0
+}
+
+func (x *QueryPlanMVCC) GetTransformingTimetick() uint64 {
+	if x != nil {
+		return x.TransformingTimetick
+	}
+	return 0
+}
+
+type SearchOnViewRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view request types once legacy internal protos are removed.
+	LegacyReq *internalpb.SearchRequest `protobuf:"bytes,1,opt,name=legacy_req,json=legacyReq,proto3" json:"legacy_req,omitempty"`
+	ShardId   *ShardID                  `protobuf:"bytes,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Version   *QueryViewVersion         `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Mvcc      *QueryPlanMVCC            `protobuf:"bytes,4,opt,name=mvcc,proto3" json:"mvcc,omitempty"`
+}
+
+func (x *SearchOnViewRequest) Reset() {
+	*x = SearchOnViewRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[19]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SearchOnViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchOnViewRequest) ProtoMessage() {}
+
+func (x *SearchOnViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[19]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchOnViewRequest.ProtoReflect.Descriptor instead.
+func (*SearchOnViewRequest) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SearchOnViewRequest) GetLegacyReq() *internalpb.SearchRequest {
+	if x != nil {
+		return x.LegacyReq
+	}
+	return nil
+}
+
+func (x *SearchOnViewRequest) GetShardId() *ShardID {
+	if x != nil {
+		return x.ShardId
+	}
+	return nil
+}
+
+func (x *SearchOnViewRequest) GetVersion() *QueryViewVersion {
+	if x != nil {
+		return x.Version
+	}
+	return nil
+}
+
+func (x *SearchOnViewRequest) GetMvcc() *QueryPlanMVCC {
+	if x != nil {
+		return x.Mvcc
+	}
+	return nil
+}
+
+type SearchOnViewResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view result types once legacy internal protos are removed.
+	LegacyResults *internalpb.SearchResults `protobuf:"bytes,1,opt,name=legacy_results,json=legacyResults,proto3" json:"legacy_results,omitempty"`
+}
+
+func (x *SearchOnViewResponse) Reset() {
+	*x = SearchOnViewResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[20]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SearchOnViewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchOnViewResponse) ProtoMessage() {}
+
+func (x *SearchOnViewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[20]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchOnViewResponse.ProtoReflect.Descriptor instead.
+func (*SearchOnViewResponse) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SearchOnViewResponse) GetLegacyResults() *internalpb.SearchResults {
+	if x != nil {
+		return x.LegacyResults
+	}
+	return nil
+}
+
+type QueryOnViewRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view request types once legacy internal protos are removed.
+	LegacyReq *internalpb.RetrieveRequest `protobuf:"bytes,1,opt,name=legacy_req,json=legacyReq,proto3" json:"legacy_req,omitempty"`
+	ShardId   *ShardID                    `protobuf:"bytes,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Version   *QueryViewVersion           `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Mvcc      *QueryPlanMVCC              `protobuf:"bytes,4,opt,name=mvcc,proto3" json:"mvcc,omitempty"`
+}
+
+func (x *QueryOnViewRequest) Reset() {
+	*x = QueryOnViewRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[21]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryOnViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryOnViewRequest) ProtoMessage() {}
+
+func (x *QueryOnViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[21]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryOnViewRequest.ProtoReflect.Descriptor instead.
+func (*QueryOnViewRequest) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *QueryOnViewRequest) GetLegacyReq() *internalpb.RetrieveRequest {
+	if x != nil {
+		return x.LegacyReq
+	}
+	return nil
+}
+
+func (x *QueryOnViewRequest) GetShardId() *ShardID {
+	if x != nil {
+		return x.ShardId
+	}
+	return nil
+}
+
+func (x *QueryOnViewRequest) GetVersion() *QueryViewVersion {
+	if x != nil {
+		return x.Version
+	}
+	return nil
+}
+
+func (x *QueryOnViewRequest) GetMvcc() *QueryPlanMVCC {
+	if x != nil {
+		return x.Mvcc
+	}
+	return nil
+}
+
+type QueryOnViewResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view result types once legacy internal protos are removed.
+	LegacyResults *internalpb.RetrieveResults `protobuf:"bytes,1,opt,name=legacy_results,json=legacyResults,proto3" json:"legacy_results,omitempty"`
+}
+
+func (x *QueryOnViewResponse) Reset() {
+	*x = QueryOnViewResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[22]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *QueryOnViewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryOnViewResponse) ProtoMessage() {}
+
+func (x *QueryOnViewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[22]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryOnViewResponse.ProtoReflect.Descriptor instead.
+func (*QueryOnViewResponse) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *QueryOnViewResponse) GetLegacyResults() *internalpb.RetrieveResults {
+	if x != nil {
+		return x.LegacyResults
+	}
+	return nil
+}
+
+type RequeryOnViewRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view request types once legacy internal protos are removed.
+	LegacyReq *internalpb.RetrieveRequest `protobuf:"bytes,1,opt,name=legacy_req,json=legacyReq,proto3" json:"legacy_req,omitempty"`
+	ShardId   *ShardID                    `protobuf:"bytes,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Version   *QueryViewVersion           `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Mvcc      *QueryPlanMVCC              `protobuf:"bytes,4,opt,name=mvcc,proto3" json:"mvcc,omitempty"`
+}
+
+func (x *RequeryOnViewRequest) Reset() {
+	*x = RequeryOnViewRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[23]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RequeryOnViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequeryOnViewRequest) ProtoMessage() {}
+
+func (x *RequeryOnViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[23]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequeryOnViewRequest.ProtoReflect.Descriptor instead.
+func (*RequeryOnViewRequest) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *RequeryOnViewRequest) GetLegacyReq() *internalpb.RetrieveRequest {
+	if x != nil {
+		return x.LegacyReq
+	}
+	return nil
+}
+
+func (x *RequeryOnViewRequest) GetShardId() *ShardID {
+	if x != nil {
+		return x.ShardId
+	}
+	return nil
+}
+
+func (x *RequeryOnViewRequest) GetVersion() *QueryViewVersion {
+	if x != nil {
+		return x.Version
+	}
+	return nil
+}
+
+func (x *RequeryOnViewRequest) GetMvcc() *QueryPlanMVCC {
+	if x != nil {
+		return x.Mvcc
+	}
+	return nil
+}
+
+type RequeryOnViewResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// TODO: replace with native view result types once legacy internal protos are removed.
+	LegacyResults *internalpb.RetrieveResults `protobuf:"bytes,1,opt,name=legacy_results,json=legacyResults,proto3" json:"legacy_results,omitempty"`
+}
+
+func (x *RequeryOnViewResponse) Reset() {
+	*x = RequeryOnViewResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_view_proto_msgTypes[24]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RequeryOnViewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequeryOnViewResponse) ProtoMessage() {}
+
+func (x *RequeryOnViewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_view_proto_msgTypes[24]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequeryOnViewResponse.ProtoReflect.Descriptor instead.
+func (*RequeryOnViewResponse) Descriptor() ([]byte, []int) {
+	return file_view_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RequeryOnViewResponse) GetLegacyResults() *internalpb.RetrieveResults {
+	if x != nil {
+		return x.LegacyResults
+	}
+	return nil
+}
+
 var File_view_proto protoreflect.FileDescriptor
 
 var file_view_proto_rawDesc = []byte{
 	0x0a, 0x0a, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x11, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x22,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x1a,
+	0x0e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22,
 	0x63, 0x0a, 0x0b, 0x44, 0x61, 0x74, 0x61, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x2b,
 	0x0a, 0x11, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x69, 0x6e, 0x67, 0x5f, 0x76, 0x65, 0x72, 0x73,
 	0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x10, 0x73, 0x74, 0x72, 0x65, 0x61,
@@ -1258,39 +1825,149 @@ var file_view_proto_rawDesc = []byte{
 	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56,
 	0x69, 0x65, 0x77, 0x4f, 0x66, 0x53, 0x68, 0x61, 0x72, 0x64, 0x52, 0x0a, 0x71, 0x75, 0x65, 0x72,
 	0x79, 0x56, 0x69, 0x65, 0x77, 0x73, 0x22, 0x13, 0x0a, 0x11, 0x53, 0x79, 0x6e, 0x63, 0x43, 0x6c,
-	0x6f, 0x73, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x44, 0x0a, 0x07, 0x53,
-	0x68, 0x61, 0x72, 0x64, 0x49, 0x44, 0x12, 0x1d, 0x0a, 0x0a, 0x72, 0x65, 0x70, 0x6c, 0x69, 0x63,
-	0x61, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x72, 0x65, 0x70, 0x6c,
-	0x69, 0x63, 0x61, 0x49, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
-	0x6c, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68, 0x61, 0x6e, 0x6e, 0x65,
-	0x6c, 0x2a, 0x87, 0x02, 0x0a, 0x0e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53,
-	0x74, 0x61, 0x74, 0x65, 0x12, 0x19, 0x0a, 0x15, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65,
-	0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12,
-	0x1b, 0x0a, 0x17, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74,
-	0x65, 0x50, 0x72, 0x65, 0x70, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x10, 0x01, 0x12, 0x17, 0x0a, 0x13,
-	0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x65,
-	0x61, 0x64, 0x79, 0x10, 0x02, 0x12, 0x14, 0x0a, 0x10, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69,
-	0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x70, 0x10, 0x03, 0x12, 0x16, 0x0a, 0x12, 0x51,
-	0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x44, 0x6f, 0x77,
-	0x6e, 0x10, 0x04, 0x12, 0x1f, 0x0a, 0x1b, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77,
-	0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x6e, 0x72, 0x65, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x61, 0x62,
-	0x6c, 0x65, 0x10, 0x05, 0x12, 0x1a, 0x0a, 0x16, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65,
-	0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x44, 0x72, 0x6f, 0x70, 0x70, 0x69, 0x6e, 0x67, 0x10, 0x06,
-	0x12, 0x19, 0x0a, 0x15, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61,
-	0x74, 0x65, 0x44, 0x72, 0x6f, 0x70, 0x70, 0x65, 0x64, 0x10, 0x07, 0x12, 0x1e, 0x0a, 0x1a, 0x51,
-	0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x70, 0x52,
-	0x65, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x69, 0x6e, 0x67, 0x10, 0x08, 0x32, 0x69, 0x0a, 0x0f, 0x56,
-	0x69, 0x65, 0x77, 0x53, 0x79, 0x6e, 0x63, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x56,
-	0x0a, 0x0d, 0x53, 0x79, 0x6e, 0x63, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x12,
-	0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76,
-	0x69, 0x65, 0x77, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x1f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76,
-	0x69, 0x65, 0x77, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x42, 0x31, 0x5a, 0x2f, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
-	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x33, 0x2f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2f, 0x76, 0x69, 0x65, 0x77, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x33,
+	0x6f, 0x73, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x52, 0x0a, 0x09, 0x56,
+	0x69, 0x65, 0x77, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x12, 0x2f, 0x0a, 0x04, 0x63, 0x6f, 0x64, 0x65,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x56, 0x69, 0x65, 0x77, 0x43,
+	0x6f, 0x64, 0x65, 0x52, 0x04, 0x63, 0x6f, 0x64, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x63, 0x61, 0x75,
+	0x73, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x63, 0x61, 0x75, 0x73, 0x65, 0x22,
+	0x44, 0x0a, 0x07, 0x53, 0x68, 0x61, 0x72, 0x64, 0x49, 0x44, 0x12, 0x1d, 0x0a, 0x0a, 0x72, 0x65,
+	0x70, 0x6c, 0x69, 0x63, 0x61, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09,
+	0x72, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x49, 0x64, 0x12, 0x1a, 0x0a, 0x08, 0x76, 0x63, 0x68,
+	0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x76, 0x63, 0x68,
+	0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x22, 0x6f, 0x0a, 0x0d, 0x51, 0x75, 0x65, 0x72, 0x79, 0x50, 0x6c,
+	0x61, 0x6e, 0x4d, 0x56, 0x43, 0x43, 0x12, 0x29, 0x0a, 0x10, 0x67, 0x72, 0x6f, 0x77, 0x69, 0x6e,
+	0x67, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04,
+	0x52, 0x0f, 0x67, 0x72, 0x6f, 0x77, 0x69, 0x6e, 0x67, 0x54, 0x69, 0x6d, 0x65, 0x74, 0x69, 0x63,
+	0x6b, 0x12, 0x33, 0x0a, 0x15, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x69, 0x6e,
+	0x67, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x18, 0x02, 0x20, 0x01, 0x28, 0x04,
+	0x52, 0x14, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x66, 0x6f, 0x72, 0x6d, 0x69, 0x6e, 0x67, 0x54, 0x69,
+	0x6d, 0x65, 0x74, 0x69, 0x63, 0x6b, 0x22, 0x86, 0x02, 0x0a, 0x13, 0x53, 0x65, 0x61, 0x72, 0x63,
+	0x68, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x43,
+	0x0a, 0x0a, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63,
+	0x68, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x52, 0x09, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79,
+	0x52, 0x65, 0x71, 0x12, 0x35, 0x0a, 0x08, 0x73, 0x68, 0x61, 0x72, 0x64, 0x5f, 0x69, 0x64, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x68, 0x61, 0x72, 0x64, 0x49,
+	0x44, 0x52, 0x07, 0x73, 0x68, 0x61, 0x72, 0x64, 0x49, 0x64, 0x12, 0x3d, 0x0a, 0x07, 0x76, 0x65,
+	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e,
+	0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e,
+	0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x34, 0x0a, 0x04, 0x6d, 0x76, 0x63,
+	0x63, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75, 0x65, 0x72,
+	0x79, 0x50, 0x6c, 0x61, 0x6e, 0x4d, 0x56, 0x43, 0x43, 0x52, 0x04, 0x6d, 0x76, 0x63, 0x63, 0x22,
+	0x63, 0x0a, 0x14, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x4b, 0x0a, 0x0e, 0x6c, 0x65, 0x67, 0x61, 0x63,
+	0x79, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
+	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65,
+	0x73, 0x75, 0x6c, 0x74, 0x73, 0x52, 0x0d, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x52, 0x65, 0x73,
+	0x75, 0x6c, 0x74, 0x73, 0x22, 0x87, 0x02, 0x0a, 0x12, 0x51, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e,
+	0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x45, 0x0a, 0x0a, 0x6c,
+	0x65, 0x67, 0x61, 0x63, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
+	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x52, 0x09, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x52,
+	0x65, 0x71, 0x12, 0x35, 0x0a, 0x08, 0x73, 0x68, 0x61, 0x72, 0x64, 0x5f, 0x69, 0x64, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x68, 0x61, 0x72, 0x64, 0x49, 0x44,
+	0x52, 0x07, 0x73, 0x68, 0x61, 0x72, 0x64, 0x49, 0x64, 0x12, 0x3d, 0x0a, 0x07, 0x76, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51,
+	0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52,
+	0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x34, 0x0a, 0x04, 0x6d, 0x76, 0x63, 0x63,
+	0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79,
+	0x50, 0x6c, 0x61, 0x6e, 0x4d, 0x56, 0x43, 0x43, 0x52, 0x04, 0x6d, 0x76, 0x63, 0x63, 0x22, 0x64,
+	0x0a, 0x13, 0x51, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x4d, 0x0a, 0x0e, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x5f,
+	0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x26, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74,
+	0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65,
+	0x73, 0x75, 0x6c, 0x74, 0x73, 0x52, 0x0d, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x52, 0x65, 0x73,
+	0x75, 0x6c, 0x74, 0x73, 0x22, 0x89, 0x02, 0x0a, 0x14, 0x52, 0x65, 0x71, 0x75, 0x65, 0x72, 0x79,
+	0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x45, 0x0a,
+	0x0a, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x5f, 0x72, 0x65, 0x71, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65,
+	0x76, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x52, 0x09, 0x6c, 0x65, 0x67, 0x61, 0x63,
+	0x79, 0x52, 0x65, 0x71, 0x12, 0x35, 0x0a, 0x08, 0x73, 0x68, 0x61, 0x72, 0x64, 0x5f, 0x69, 0x64,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x68, 0x61, 0x72, 0x64,
+	0x49, 0x44, 0x52, 0x07, 0x73, 0x68, 0x61, 0x72, 0x64, 0x49, 0x64, 0x12, 0x3d, 0x0a, 0x07, 0x76,
+	0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77,
+	0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f,
+	0x6e, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x34, 0x0a, 0x04, 0x6d, 0x76,
+	0x63, 0x63, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75, 0x65,
+	0x72, 0x79, 0x50, 0x6c, 0x61, 0x6e, 0x4d, 0x56, 0x43, 0x43, 0x52, 0x04, 0x6d, 0x76, 0x63, 0x63,
+	0x22, 0x66, 0x0a, 0x15, 0x52, 0x65, 0x71, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e, 0x56, 0x69, 0x65,
+	0x77, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x4d, 0x0a, 0x0e, 0x6c, 0x65, 0x67,
+	0x61, 0x63, 0x79, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65,
+	0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x52, 0x0d, 0x6c, 0x65, 0x67, 0x61, 0x63,
+	0x79, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x2a, 0x87, 0x02, 0x0a, 0x0e, 0x51, 0x75, 0x65,
+	0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x19, 0x0a, 0x15, 0x51,
+	0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x6e, 0x6b,
+	0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x1b, 0x0a, 0x17, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56,
+	0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x50, 0x72, 0x65, 0x70, 0x61, 0x72, 0x69, 0x6e,
+	0x67, 0x10, 0x01, 0x12, 0x17, 0x0a, 0x13, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77,
+	0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x65, 0x61, 0x64, 0x79, 0x10, 0x02, 0x12, 0x14, 0x0a, 0x10,
+	0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x70,
+	0x10, 0x03, 0x12, 0x16, 0x0a, 0x12, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53,
+	0x74, 0x61, 0x74, 0x65, 0x44, 0x6f, 0x77, 0x6e, 0x10, 0x04, 0x12, 0x1f, 0x0a, 0x1b, 0x51, 0x75,
+	0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x55, 0x6e, 0x72, 0x65,
+	0x63, 0x6f, 0x76, 0x65, 0x72, 0x61, 0x62, 0x6c, 0x65, 0x10, 0x05, 0x12, 0x1a, 0x0a, 0x16, 0x51,
+	0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x44, 0x72, 0x6f,
+	0x70, 0x70, 0x69, 0x6e, 0x67, 0x10, 0x06, 0x12, 0x19, 0x0a, 0x15, 0x51, 0x75, 0x65, 0x72, 0x79,
+	0x56, 0x69, 0x65, 0x77, 0x53, 0x74, 0x61, 0x74, 0x65, 0x44, 0x72, 0x6f, 0x70, 0x70, 0x65, 0x64,
+	0x10, 0x07, 0x12, 0x1e, 0x0a, 0x1a, 0x51, 0x75, 0x65, 0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x53,
+	0x74, 0x61, 0x74, 0x65, 0x55, 0x70, 0x52, 0x65, 0x63, 0x6f, 0x76, 0x65, 0x72, 0x69, 0x6e, 0x67,
+	0x10, 0x08, 0x2a, 0x8d, 0x01, 0x0a, 0x08, 0x56, 0x69, 0x65, 0x77, 0x43, 0x6f, 0x64, 0x65, 0x12,
+	0x10, 0x0a, 0x0c, 0x56, 0x49, 0x45, 0x57, 0x5f, 0x43, 0x4f, 0x44, 0x45, 0x5f, 0x4f, 0x4b, 0x10,
+	0x00, 0x12, 0x1e, 0x0a, 0x1a, 0x56, 0x49, 0x45, 0x57, 0x5f, 0x43, 0x4f, 0x44, 0x45, 0x5f, 0x56,
+	0x49, 0x45, 0x57, 0x5f, 0x49, 0x4e, 0x56, 0x41, 0x4c, 0x49, 0x44, 0x41, 0x54, 0x45, 0x44, 0x10,
+	0x01, 0x12, 0x1c, 0x0a, 0x18, 0x56, 0x49, 0x45, 0x57, 0x5f, 0x43, 0x4f, 0x44, 0x45, 0x5f, 0x56,
+	0x49, 0x45, 0x57, 0x5f, 0x4e, 0x4f, 0x54, 0x5f, 0x46, 0x4f, 0x55, 0x4e, 0x44, 0x10, 0x02, 0x12,
+	0x19, 0x0a, 0x15, 0x56, 0x49, 0x45, 0x57, 0x5f, 0x43, 0x4f, 0x44, 0x45, 0x5f, 0x4f, 0x4e, 0x5f,
+	0x53, 0x48, 0x55, 0x54, 0x44, 0x4f, 0x57, 0x4e, 0x10, 0x03, 0x12, 0x16, 0x0a, 0x11, 0x56, 0x49,
+	0x45, 0x57, 0x5f, 0x43, 0x4f, 0x44, 0x45, 0x5f, 0x55, 0x4e, 0x4b, 0x4e, 0x4f, 0x57, 0x4e, 0x10,
+	0xe7, 0x07, 0x32, 0x69, 0x0a, 0x0f, 0x56, 0x69, 0x65, 0x77, 0x53, 0x79, 0x6e, 0x63, 0x53, 0x65,
+	0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x56, 0x0a, 0x0d, 0x53, 0x79, 0x6e, 0x63, 0x51, 0x75, 0x65,
+	0x72, 0x79, 0x56, 0x69, 0x65, 0x77, 0x12, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x28, 0x01, 0x30, 0x01, 0x32, 0xbb, 0x02,
+	0x0a, 0x10, 0x56, 0x69, 0x65, 0x77, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53, 0x65, 0x72, 0x76, 0x69,
+	0x63, 0x65, 0x12, 0x61, 0x0a, 0x0c, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x4f, 0x6e, 0x56, 0x69,
+	0x65, 0x77, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x4f, 0x6e, 0x56,
+	0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x53,
+	0x65, 0x61, 0x72, 0x63, 0x68, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5e, 0x0a, 0x0b, 0x51, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e,
+	0x56, 0x69, 0x65, 0x77, 0x12, 0x25, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e,
+	0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e,
+	0x51, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x64, 0x0a, 0x0d, 0x52, 0x65, 0x71, 0x75, 0x65, 0x72, 0x79,
+	0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x12, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76, 0x69, 0x65, 0x77, 0x2e, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x72, 0x79, 0x4f, 0x6e, 0x56, 0x69, 0x65, 0x77, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x76,
+	0x69, 0x65, 0x77, 0x2e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x72, 0x79, 0x4f, 0x6e, 0x56, 0x69, 0x65,
+	0x77, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x31, 0x5a, 0x2f, 0x67,
+	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76,
+	0x33, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x76, 0x69, 0x65, 0x77, 0x70, 0x62, 0x62, 0x06,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1305,52 +1982,87 @@ func file_view_proto_rawDescGZIP() []byte {
 	return file_view_proto_rawDescData
 }
 
-var file_view_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_view_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_view_proto_goTypes = []interface{}{
-	(QueryViewState)(0),              // 0: milvus.proto.view.QueryViewState
-	(*DataVersion)(nil),              // 1: milvus.proto.view.DataVersion
-	(*DataViewOfCollection)(nil),     // 2: milvus.proto.view.DataViewOfCollection
-	(*DataViewOfShard)(nil),          // 3: milvus.proto.view.DataViewOfShard
-	(*DataViewOfPartition)(nil),      // 4: milvus.proto.view.DataViewOfPartition
-	(*QueryViewOfShard)(nil),         // 5: milvus.proto.view.QueryViewOfShard
-	(*QueryViewMeta)(nil),            // 6: milvus.proto.view.QueryViewMeta
-	(*QueryViewOfStreamingNode)(nil), // 7: milvus.proto.view.QueryViewOfStreamingNode
-	(*QueryViewOfQueryNode)(nil),     // 8: milvus.proto.view.QueryViewOfQueryNode
-	(*QueryViewVersion)(nil),         // 9: milvus.proto.view.QueryViewVersion
-	(*QueryViewOfPartition)(nil),     // 10: milvus.proto.view.QueryViewOfPartition
-	(*SyncRequest)(nil),              // 11: milvus.proto.view.SyncRequest
-	(*SyncQueryViewsRequest)(nil),    // 12: milvus.proto.view.SyncQueryViewsRequest
-	(*SyncCloseRequest)(nil),         // 13: milvus.proto.view.SyncCloseRequest
-	(*SyncResponse)(nil),             // 14: milvus.proto.view.SyncResponse
-	(*SyncQueryViewsResponse)(nil),   // 15: milvus.proto.view.SyncQueryViewsResponse
-	(*SyncCloseResponse)(nil),        // 16: milvus.proto.view.SyncCloseResponse
-	(*ShardID)(nil),                  // 17: milvus.proto.view.ShardID
+	(QueryViewState)(0),                // 0: milvus.proto.view.QueryViewState
+	(ViewCode)(0),                      // 1: milvus.proto.view.ViewCode
+	(*DataVersion)(nil),                // 2: milvus.proto.view.DataVersion
+	(*DataViewOfCollection)(nil),       // 3: milvus.proto.view.DataViewOfCollection
+	(*DataViewOfShard)(nil),            // 4: milvus.proto.view.DataViewOfShard
+	(*DataViewOfPartition)(nil),        // 5: milvus.proto.view.DataViewOfPartition
+	(*QueryViewOfShard)(nil),           // 6: milvus.proto.view.QueryViewOfShard
+	(*QueryViewMeta)(nil),              // 7: milvus.proto.view.QueryViewMeta
+	(*QueryViewOfStreamingNode)(nil),   // 8: milvus.proto.view.QueryViewOfStreamingNode
+	(*QueryViewOfQueryNode)(nil),       // 9: milvus.proto.view.QueryViewOfQueryNode
+	(*QueryViewVersion)(nil),           // 10: milvus.proto.view.QueryViewVersion
+	(*QueryViewOfPartition)(nil),       // 11: milvus.proto.view.QueryViewOfPartition
+	(*SyncRequest)(nil),                // 12: milvus.proto.view.SyncRequest
+	(*SyncQueryViewsRequest)(nil),      // 13: milvus.proto.view.SyncQueryViewsRequest
+	(*SyncCloseRequest)(nil),           // 14: milvus.proto.view.SyncCloseRequest
+	(*SyncResponse)(nil),               // 15: milvus.proto.view.SyncResponse
+	(*SyncQueryViewsResponse)(nil),     // 16: milvus.proto.view.SyncQueryViewsResponse
+	(*SyncCloseResponse)(nil),          // 17: milvus.proto.view.SyncCloseResponse
+	(*ViewError)(nil),                  // 18: milvus.proto.view.ViewError
+	(*ShardID)(nil),                    // 19: milvus.proto.view.ShardID
+	(*QueryPlanMVCC)(nil),              // 20: milvus.proto.view.QueryPlanMVCC
+	(*SearchOnViewRequest)(nil),        // 21: milvus.proto.view.SearchOnViewRequest
+	(*SearchOnViewResponse)(nil),       // 22: milvus.proto.view.SearchOnViewResponse
+	(*QueryOnViewRequest)(nil),         // 23: milvus.proto.view.QueryOnViewRequest
+	(*QueryOnViewResponse)(nil),        // 24: milvus.proto.view.QueryOnViewResponse
+	(*RequeryOnViewRequest)(nil),       // 25: milvus.proto.view.RequeryOnViewRequest
+	(*RequeryOnViewResponse)(nil),      // 26: milvus.proto.view.RequeryOnViewResponse
+	(*internalpb.SearchRequest)(nil),   // 27: milvus.proto.internal.SearchRequest
+	(*internalpb.SearchResults)(nil),   // 28: milvus.proto.internal.SearchResults
+	(*internalpb.RetrieveRequest)(nil), // 29: milvus.proto.internal.RetrieveRequest
+	(*internalpb.RetrieveResults)(nil), // 30: milvus.proto.internal.RetrieveResults
 }
 var file_view_proto_depIdxs = []int32{
-	3,  // 0: milvus.proto.view.DataViewOfCollection.shards:type_name -> milvus.proto.view.DataViewOfShard
-	1,  // 1: milvus.proto.view.DataViewOfCollection.data_version:type_name -> milvus.proto.view.DataVersion
-	4,  // 2: milvus.proto.view.DataViewOfShard.partitions:type_name -> milvus.proto.view.DataViewOfPartition
-	6,  // 3: milvus.proto.view.QueryViewOfShard.meta:type_name -> milvus.proto.view.QueryViewMeta
-	8,  // 4: milvus.proto.view.QueryViewOfShard.query_node:type_name -> milvus.proto.view.QueryViewOfQueryNode
-	7,  // 5: milvus.proto.view.QueryViewOfShard.streaming_node:type_name -> milvus.proto.view.QueryViewOfStreamingNode
-	9,  // 6: milvus.proto.view.QueryViewMeta.version:type_name -> milvus.proto.view.QueryViewVersion
+	4,  // 0: milvus.proto.view.DataViewOfCollection.shards:type_name -> milvus.proto.view.DataViewOfShard
+	2,  // 1: milvus.proto.view.DataViewOfCollection.data_version:type_name -> milvus.proto.view.DataVersion
+	5,  // 2: milvus.proto.view.DataViewOfShard.partitions:type_name -> milvus.proto.view.DataViewOfPartition
+	7,  // 3: milvus.proto.view.QueryViewOfShard.meta:type_name -> milvus.proto.view.QueryViewMeta
+	9,  // 4: milvus.proto.view.QueryViewOfShard.query_node:type_name -> milvus.proto.view.QueryViewOfQueryNode
+	8,  // 5: milvus.proto.view.QueryViewOfShard.streaming_node:type_name -> milvus.proto.view.QueryViewOfStreamingNode
+	10, // 6: milvus.proto.view.QueryViewMeta.version:type_name -> milvus.proto.view.QueryViewVersion
 	0,  // 7: milvus.proto.view.QueryViewMeta.state:type_name -> milvus.proto.view.QueryViewState
-	10, // 8: milvus.proto.view.QueryViewOfQueryNode.partitions:type_name -> milvus.proto.view.QueryViewOfPartition
-	1,  // 9: milvus.proto.view.QueryViewVersion.data_version:type_name -> milvus.proto.view.DataVersion
-	12, // 10: milvus.proto.view.SyncRequest.views:type_name -> milvus.proto.view.SyncQueryViewsRequest
-	13, // 11: milvus.proto.view.SyncRequest.close:type_name -> milvus.proto.view.SyncCloseRequest
-	5,  // 12: milvus.proto.view.SyncQueryViewsRequest.query_views:type_name -> milvus.proto.view.QueryViewOfShard
-	15, // 13: milvus.proto.view.SyncResponse.views:type_name -> milvus.proto.view.SyncQueryViewsResponse
-	16, // 14: milvus.proto.view.SyncResponse.close:type_name -> milvus.proto.view.SyncCloseResponse
-	5,  // 15: milvus.proto.view.SyncQueryViewsResponse.query_views:type_name -> milvus.proto.view.QueryViewOfShard
-	11, // 16: milvus.proto.view.ViewSyncService.SyncQueryView:input_type -> milvus.proto.view.SyncRequest
-	14, // 17: milvus.proto.view.ViewSyncService.SyncQueryView:output_type -> milvus.proto.view.SyncResponse
-	17, // [17:18] is the sub-list for method output_type
-	16, // [16:17] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	11, // 8: milvus.proto.view.QueryViewOfQueryNode.partitions:type_name -> milvus.proto.view.QueryViewOfPartition
+	2,  // 9: milvus.proto.view.QueryViewVersion.data_version:type_name -> milvus.proto.view.DataVersion
+	13, // 10: milvus.proto.view.SyncRequest.views:type_name -> milvus.proto.view.SyncQueryViewsRequest
+	14, // 11: milvus.proto.view.SyncRequest.close:type_name -> milvus.proto.view.SyncCloseRequest
+	6,  // 12: milvus.proto.view.SyncQueryViewsRequest.query_views:type_name -> milvus.proto.view.QueryViewOfShard
+	16, // 13: milvus.proto.view.SyncResponse.views:type_name -> milvus.proto.view.SyncQueryViewsResponse
+	17, // 14: milvus.proto.view.SyncResponse.close:type_name -> milvus.proto.view.SyncCloseResponse
+	6,  // 15: milvus.proto.view.SyncQueryViewsResponse.query_views:type_name -> milvus.proto.view.QueryViewOfShard
+	1,  // 16: milvus.proto.view.ViewError.code:type_name -> milvus.proto.view.ViewCode
+	27, // 17: milvus.proto.view.SearchOnViewRequest.legacy_req:type_name -> milvus.proto.internal.SearchRequest
+	19, // 18: milvus.proto.view.SearchOnViewRequest.shard_id:type_name -> milvus.proto.view.ShardID
+	10, // 19: milvus.proto.view.SearchOnViewRequest.version:type_name -> milvus.proto.view.QueryViewVersion
+	20, // 20: milvus.proto.view.SearchOnViewRequest.mvcc:type_name -> milvus.proto.view.QueryPlanMVCC
+	28, // 21: milvus.proto.view.SearchOnViewResponse.legacy_results:type_name -> milvus.proto.internal.SearchResults
+	29, // 22: milvus.proto.view.QueryOnViewRequest.legacy_req:type_name -> milvus.proto.internal.RetrieveRequest
+	19, // 23: milvus.proto.view.QueryOnViewRequest.shard_id:type_name -> milvus.proto.view.ShardID
+	10, // 24: milvus.proto.view.QueryOnViewRequest.version:type_name -> milvus.proto.view.QueryViewVersion
+	20, // 25: milvus.proto.view.QueryOnViewRequest.mvcc:type_name -> milvus.proto.view.QueryPlanMVCC
+	30, // 26: milvus.proto.view.QueryOnViewResponse.legacy_results:type_name -> milvus.proto.internal.RetrieveResults
+	29, // 27: milvus.proto.view.RequeryOnViewRequest.legacy_req:type_name -> milvus.proto.internal.RetrieveRequest
+	19, // 28: milvus.proto.view.RequeryOnViewRequest.shard_id:type_name -> milvus.proto.view.ShardID
+	10, // 29: milvus.proto.view.RequeryOnViewRequest.version:type_name -> milvus.proto.view.QueryViewVersion
+	20, // 30: milvus.proto.view.RequeryOnViewRequest.mvcc:type_name -> milvus.proto.view.QueryPlanMVCC
+	30, // 31: milvus.proto.view.RequeryOnViewResponse.legacy_results:type_name -> milvus.proto.internal.RetrieveResults
+	12, // 32: milvus.proto.view.ViewSyncService.SyncQueryView:input_type -> milvus.proto.view.SyncRequest
+	21, // 33: milvus.proto.view.ViewQueryService.SearchOnView:input_type -> milvus.proto.view.SearchOnViewRequest
+	23, // 34: milvus.proto.view.ViewQueryService.QueryOnView:input_type -> milvus.proto.view.QueryOnViewRequest
+	25, // 35: milvus.proto.view.ViewQueryService.RequeryOnView:input_type -> milvus.proto.view.RequeryOnViewRequest
+	15, // 36: milvus.proto.view.ViewSyncService.SyncQueryView:output_type -> milvus.proto.view.SyncResponse
+	22, // 37: milvus.proto.view.ViewQueryService.SearchOnView:output_type -> milvus.proto.view.SearchOnViewResponse
+	24, // 38: milvus.proto.view.ViewQueryService.QueryOnView:output_type -> milvus.proto.view.QueryOnViewResponse
+	26, // 39: milvus.proto.view.ViewQueryService.RequeryOnView:output_type -> milvus.proto.view.RequeryOnViewResponse
+	36, // [36:40] is the sub-list for method output_type
+	32, // [32:36] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_view_proto_init() }
@@ -1552,7 +2264,103 @@ func file_view_proto_init() {
 			}
 		}
 		file_view_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ViewError); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ShardID); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*QueryPlanMVCC); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SearchOnViewRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SearchOnViewResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*QueryOnViewRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*QueryOnViewResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RequeryOnViewRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_view_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RequeryOnViewResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1577,10 +2385,10 @@ func file_view_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_view_proto_rawDesc,
-			NumEnums:      1,
-			NumMessages:   17,
+			NumEnums:      2,
+			NumMessages:   25,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_view_proto_goTypes,
 		DependencyIndexes: file_view_proto_depIdxs,

@@ -3,10 +3,13 @@ package milvus.proto.view;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/viewpb";
 
-// ViewSyncService transports QueryView state transitions between the
-// coordinator and StreamingNode/QueryNode followers. State-machine execution
-// remains outside this transport contract.
+import "internal.proto";
+
+// ViewSyncService is the unified service to sync query views between coord and nodes.
 service ViewSyncService {
+    // SyncQueryView syncs query view state between coord and streaming/query nodes using bidirectional streaming.
+    // Coord pushes query view state transitions to nodes; nodes respond with their current local state.
+    // The response always carries the node's latest state, enabling coord to rebuild awareness after recovery.
     rpc SyncQueryView(stream SyncRequest) returns (stream SyncResponse) {
     }
 }
@@ -15,8 +18,8 @@ service ViewSyncService {
 // Values are ordered lexicographically by
 // (streaming_version, compact_version).
 message DataVersion {
-    int64 streaming_version = 1;
-    int64 compact_version = 2;
+    int64 streaming_version = 1;  // Incremented when a growing segment is flushed to sealed.
+    int64 compact_version = 2;    // Incremented when segments are compacted.
 }
 
 // DataViewOfCollection is the complete loadable sealed-segment membership
@@ -51,63 +54,101 @@ message DataViewOfPartition {
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.
+
 enum QueryViewState {
     QueryViewStateUnknown = 0;
+    // Initial state. View is created with data distribution determined.
+    // Pushed to target streaming/query nodes for resource preparation.
     QueryViewStatePreparing = 1;
+    // All nodes have completed resource preparation.
+    // Coord needs to push Up to streaming node.
     QueryViewStateReady = 2;
+    // View is active on streaming node and serving queries.
+    // Only applies to streaming node; query node stays in Ready.
     QueryViewStateUp = 3;
+    // View is deactivated on streaming node (no longer generates new query plans).
+    // Precedes the dropping phase for resource cleanup.
     QueryViewStateDown = 4;
+    // Resource preparation failed on one or more nodes (e.g., OOM).
+    // View cannot be recovered; will proceed to Dropping → Dropped for cleanup.
     QueryViewStateUnrecoverable = 5;
+    // View is being dropped. Sealed segments can be released from query nodes.
+    // Coord pushes Dropped to nodes to trigger resource cleanup.
     QueryViewStateDropping = 6;
+    // View is fully dropped and can be removed from persistent storage.
     QueryViewStateDropped = 7;
-    // StreamingNode-only state while WAL recovery is catching up.
+    // StreamingNode-only: WAL is recovering after SN crash.
+    // Not used by Coord or QueryNode. Maps to Up for Coord-visible state.
+    // See design doc Section 2.4.
     QueryViewStateUpRecovering = 8;
 }
 
-// QueryViewOfShard is the state-machine snapshot for one shard and replica.
+
+//
+// ======================== Query View Messages ========================
+//
+
+// QueryViewOfShard represents a complete query view for a shard on a specific replica.
+// Contains the view metadata, streaming node assignment, and query node segment assignments.
 message QueryViewOfShard {
     QueryViewMeta meta = 1;
-    repeated QueryViewOfQueryNode query_node = 2;
-    QueryViewOfStreamingNode streaming_node = 3;
+    repeated QueryViewOfQueryNode query_node = 2;   // Sealed segment assignments per query node.
+    QueryViewOfStreamingNode streaming_node = 3;     // Streaming node assignment for growing data.
 }
 
-// QueryViewMeta identifies a QueryView and carries its current lifecycle state.
+// QueryViewMeta contains the metadata of a query view.
 message QueryViewMeta {
     int64 collection_id = 1;
-    int64 replica_id = 2;
-    string vchannel = 3;
+    int64 replica_id = 2;       // The replica this view belongs to.
+    string vchannel = 3;        // The shard (vchannel) this view covers.
     QueryViewVersion version = 4;
     QueryViewState state = 5;
+    // Version of the global load-config snapshot used to resolve this view's
+    // partitions, load fields, and collection index metadata.
     uint64 load_info_version = 6;
+    // Inherited from DataViewOfShard at the time this query view was created.
+    // TransformLog entries with timetick > this value need to be consumed for this shard.
     uint64 transform_start_after_timetick = 7;
 }
 
-// QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
-// The node is identified implicitly by the shard's vchannel binding.
+// QueryViewOfStreamingNode represents the streaming node's portion of a query view.
+// Currently empty; streaming node is implicitly determined by the shard's vchannel binding.
 message QueryViewOfStreamingNode {
 }
 
-// QueryViewOfQueryNode contains the segment assignments for one QueryNode.
+// QueryViewOfQueryNode represents a query node's segment assignments within a query view.
 message QueryViewOfQueryNode {
     int64 node_id = 1;
+    // Partitions and their segments assigned to this query node.
     repeated QueryViewOfPartition partitions = 2;
 }
 
-// QueryViewVersion is ordered lexicographically by
-// (data_version, query_version).
+// QueryViewVersion is the composite version of a query view.
+// Scoped to ShardOnReplica level. Ordered by lexicographic order of (data_version, query_version).
+// When data_version changes, query_version resets to 1.
 message QueryViewVersion {
-    DataVersion data_version = 1;
-    int64 query_version = 2;
+    DataVersion data_version = 1;  // The data view version this query view is based on.
+    int64 query_version = 2;       // Increments when data is redistributed across nodes (balance, recovery).
 }
 
-// QueryViewOfPartition tracks assigned and ready segments for one partition.
+// QueryViewOfPartition represents a partition's segment list within a query view.
 message QueryViewOfPartition {
     int64 partition_id = 1;
+    // All segment IDs in this partition.
     repeated int64 segment_ids = 2;
+    // Subset of segment IDs that are in Ready state.
+    // Segments not in this list are implicitly NotReady.
+    // Coord → Node (Request): this field is empty (all segments start as NotReady).
+    // Node → Coord (Response): this field contains the ready subset.
     repeated int64 ready_segment_ids = 3;
 }
 
-// SyncRequest carries an atomic state-machine input or closes the stream.
+//
+// ======================== SyncQueryView RPC Messages ========================
+//
+
+// SyncRequest is the bidirectional streaming request for SyncQueryView RPC.
+// Uses oneof to support query view sync and graceful stream close.
 message SyncRequest {
     oneof request {
         SyncQueryViewsRequest views = 1;
@@ -115,15 +156,16 @@ message SyncRequest {
     }
 }
 
-// SyncQueryViewsRequest atomically applies QueryView states on one work node.
+// SyncQueryViewsRequest carries query view states to be atomically applied on the target node.
 message SyncQueryViewsRequest {
     repeated QueryViewOfShard query_views = 1;
 }
 
+// SyncCloseRequest signals graceful close of the bidirectional stream.
 message SyncCloseRequest {
 }
 
-// SyncResponse carries follower state reports or acknowledges stream close.
+// SyncResponse is the bidirectional streaming response for SyncQueryView RPC.
 message SyncResponse {
     oneof response {
         SyncQueryViewsResponse views = 1;
@@ -131,16 +173,110 @@ message SyncResponse {
     }
 }
 
-// SyncQueryViewsResponse reports the follower's latest local states.
+// SyncQueryViewsResponse carries the node's current query view states.
+// The response always reflects the node's latest local state, not just the delta from the request.
 message SyncQueryViewsResponse {
     repeated QueryViewOfShard query_views = 1;
 }
 
+// SyncCloseResponse acknowledges graceful close of the bidirectional stream.
 message SyncCloseResponse {
 }
 
-// ShardID identifies one shard within a replica.
+//
+// ======================== View Error ========================
+//
+
+// ViewCode is the error code for view-related operations.
+// Transported via gRPC status details (not embedded in response messages),
+// following the same pattern as StreamingCode / StreamingError.
+enum ViewCode {
+    VIEW_CODE_OK               = 0;
+    VIEW_CODE_VIEW_INVALIDATED = 1;  // View version is no longer valid (Down/Dropped).
+    VIEW_CODE_VIEW_NOT_FOUND   = 2;  // View version not found on this node.
+    VIEW_CODE_ON_SHUTDOWN      = 3;  // Node is shutting down.
+    VIEW_CODE_UNKNOWN          = 999;
+}
+
+// ViewError is the error type for view-related operations.
+// Attached to gRPC status details for error propagation.
+message ViewError {
+    ViewCode code = 1;
+    string cause  = 2;
+}
+
+//
+// ======================== Shared Types ========================
+//
+
+// ShardID uniquely identifies a shard within a replica.
 message ShardID {
     int64 replica_id = 1;
     string vchannel = 2;
+}
+
+// QueryPlanMVCC carries the WAL read frontiers used by QueryView execution.
+message QueryPlanMVCC {
+    // Latest timetick of the growing stream. StreamingNode waits for growing
+    // runtime visibility up to this timetick before executing growing segments.
+    uint64 growing_timetick = 1;
+    // Latest timetick of the transforming stream. StreamingNode and QueryNode
+    // wait for transform visibility up to this timetick before execution.
+    uint64 transforming_timetick = 2;
+}
+
+//
+// ======================== View Query Service (Phase 2) ========================
+//
+
+// ViewQueryService executes queries on a specific view version.
+// Implemented by both StreamingNode and QueryNode.
+// Each node determines which segments to query based on the view version.
+service ViewQueryService {
+    // SearchOnView executes a vector search on segments belonging to the given view version.
+    rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
+    // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
+    rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
+    // RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
+    // Uses the same view version as the preceding search/query to ensure consistency.
+    rpc RequeryOnView(RequeryOnViewRequest) returns (RequeryOnViewResponse) {}
+}
+
+message SearchOnViewRequest {
+    // TODO: replace with native view request types once legacy internal protos are removed.
+    internal.SearchRequest legacy_req = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    QueryPlanMVCC mvcc = 4;
+}
+
+message SearchOnViewResponse {
+    // TODO: replace with native view result types once legacy internal protos are removed.
+    internal.SearchResults legacy_results = 1;
+}
+
+message QueryOnViewRequest {
+    // TODO: replace with native view request types once legacy internal protos are removed.
+    internal.RetrieveRequest legacy_req = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    QueryPlanMVCC mvcc = 4;
+}
+
+message QueryOnViewResponse {
+    // TODO: replace with native view result types once legacy internal protos are removed.
+    internal.RetrieveResults legacy_results = 1;
+}
+
+message RequeryOnViewRequest {
+    // TODO: replace with native view request types once legacy internal protos are removed.
+    internal.RetrieveRequest legacy_req = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    QueryPlanMVCC mvcc = 4;
+}
+
+message RequeryOnViewResponse {
+    // TODO: replace with native view result types once legacy internal protos are removed.
+    internal.RetrieveResults legacy_results = 1;
 }

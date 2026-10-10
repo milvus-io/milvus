@@ -463,6 +463,14 @@ later local progress does not retroactively mutate an already-pending report.
 - Coord pushes Dropped → QN transitions to Dropped.
 - Other signals → QN ignores.
 
+ApplyTransform failure records a QN-local, per-instance Poison boundary. A Ready
+QN keeps its local state; queries at or beyond the failed TimeTick fail while
+older MVCCs remain usable. Poison itself produces no Coordinator report and
+carries no wire fields. A failure during preparation, or preparing a new view
+that references an already poisoned instance, follows the ordinary Unrecoverable
+preparation path. Coordinator does not monitor Ready QNs or restore monitoring
+on recovery for the purpose of observing Poison.
+
 ### 3.3 Unrecoverable
 
 **Entry Conditions:**

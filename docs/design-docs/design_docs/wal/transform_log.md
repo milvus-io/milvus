@@ -5,10 +5,10 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Future integration, outside the current recovery-storage PR.
-This is the agreed subscription contract. L0 materialization is implemented
-separately in [L0 Materializer](l0_materializer.md); the former
-`vchannel/transformlog` package has been removed.
+**Status:** Remote transport and resumable clients are implemented in the
+view-resource preparation workspace. The local Summary subscription implementation
+belongs to `40451-sn_query_extract`; it is not duplicated here. The two workspaces
+integrate through the interfaces in `internal/streamingnode/server/wal/transform_log.go`.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
@@ -47,8 +47,17 @@ AcquireStream(PChannel)
 
 One stream may carry several VChannel subscriptions. A subscription reads
 strictly after its start cursor. An unset end means continuous delivery; a set
-end means bounded replay through that position. Stream closure releases all
-subscriptions; closing one subscription does not close a shared stream.
+end means bounded replay through that position.
+
+`AcquireStream` returns an owner-held logical stream, independent of its physical
+RPC connections. Closing the logical stream releases all subscriptions.
+Closing one subscription releases only that subscription. Physical connections
+are on-demand: the first subscription starts a connection, and removing the last
+subscription cancels the connection or pending connection attempt. The logical
+stream remains idle and can accept new subscriptions; no physical connection is
+created or retried while it has no subscriptions. An idle/transport close does
+not close the logical stream's `Done`. Explicit owner close, parent shutdown, or
+a terminal stream error ends the logical stream.
 
 QueryNode uses continuous subscriptions to catch loaded sealed Segments up and
 then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
@@ -105,6 +114,25 @@ the client reacquires the PChannel stream and resubscribes exclusively after the
 last position its handler successfully accepted. Entry, SyncUp and an explicitly accepted FastForward advance
 that cursor; failed handler calls do not.
 
+Reconnect backoff accumulates only across consecutive connection or subscription
+restoration failures. Successful restoration resets it before live delivery, so
+a later independent disconnect starts at the initial retry interval again.
+
+For remote streams, the server owns the boundary between provider lifetime and
+subscription lifetime. An unavailable PChannel owner ends the physical RPC;
+normal CloseSubscription closes only the selected reader after disabling its
+forwarding handler. The client reconnects at PChannel scope and restores only
+logical subscriptions that remain live. Reader cancellation must not mask a
+terminal error already reported by the local PChannel stream. Typed terminal
+physical errors stop client resumption; logical semantic errors remain attached
+to their subscriptions. Subscription handlers do not request physical reconnects
+or infer migration from UNKNOWN error text.
+Consumer rejection releases the corresponding remote reader even if the local
+subscription has already finished. Its close request is sent outside the receive
+callback without waiting for a close acknowledgement there. If rejection races
+with Subscribe returning, the recorded logical failure takes precedence over
+connection retry; it must not reconnect unrelated subscriptions.
+
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
 A caller recovering its own state must select a cursor consistent with that
 state. If the recovered server has not yet reconstructed a previously delivered
@@ -141,3 +169,44 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 5. Historical/live handoff and storage transitions lose no records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.
+
+## 8. Workspace Integration Boundary
+
+The shared `TransformLogStreamManager`, `TransformLogStream`, subscription options,
+handler and sentinel errors match `40451-sn_query_extract` at `be4b5bdaa0`.
+The local workspace exposes its manager from a WAL through `wal.TransformLogProvider`:
+
+```go
+type TransformLogProvider interface {
+    TransformLog() TransformLogAccesser
+}
+```
+
+The remote workspace implements `StreamingNodeHandlerService.SubscribeTransform`,
+assignment-aware remote stream creation, typed subscription-error transport and
+resumption from the last handler-accepted Entry/SyncUp. It exposes
+`streaming.TransformLogStreamManager()` for the QueryNode resource-preparation
+consumer. Even co-located clients use this remote transport; there is no second
+local reader in this workspace.
+
+The local workspace owns the provider implementation, Summary reads, bounded
+replay, coverage proofs, VChannel validation, WAL shutdown, recovery and retention.
+Each acquired stream has its own lifetime: closing it must not close the SN's
+shared bootstrap stream or block WAL observation. Subscription IDs must identify
+independent subscriptions within that stream. Caller cancellation must unblock
+pending reads and close their handlers. A WAL without the provider fails stream
+creation explicitly, before the remote client considers the assignment usable.
+
+The remote service adds a readiness header after acquiring the local stream.
+Subscription errors preserve invalid-option, truncated-history and unavailable-
+VChannel reasons. Disconnects resume subscriptions; these terminal semantic errors
+are surfaced to the consumer. An empty bounded interval is permitted by the shared
+interface; the provider still owns proof that its end is readable.
+
+Remote/QN retention remains a local-provider prerequisite. The agreed first policy
+is conservative retention of active VChannel history across disconnections and
+recovery, until QueryView/DataView requirements are wired. SN retained-segment
+`SetQueryRetention` alone does not prove that remote/QN history is safe to release.
+This remote-only change does not modify Summary GC or install retention pins.
+Tests mock the local interfaces and run the production gRPC service, client,
+resumption and QN buffer; they do not claim local-provider or retention validation.

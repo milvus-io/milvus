@@ -133,7 +133,8 @@ type QueryNode struct {
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
 
-	chunkManager storage.ChunkManager
+	chunkManager       storage.ChunkManager
+	loadResourceBudget *segments.LoadResourceBudget
 
 	/*
 		// Pool for search/query
@@ -411,7 +412,8 @@ func (node *QueryNode) Init() error {
 		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
 		node.manager = segments.NewManager()
-		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
+		node.loadResourceBudget = segments.NewLoadResourceBudget(node.ctx)
+		node.loader = segments.NewLoaderWithResourceBudget(node.manager, node.chunkManager, node.loadResourceBudget)
 		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager

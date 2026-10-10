@@ -385,6 +385,11 @@ service StreamingNodeHandlerService {
     // log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
     // moving away to other log node, the RPC will return error CHANNEL_FENCED.
     rpc Consume(stream ConsumeRequest) returns (stream ConsumeResponse) {};
+
+    // SubscribeTransform is a bi-directional streaming RPC to subscribe
+    // vchannel-level transform effects. Multiple vchannel subscriptions can be
+    // multiplexed on one stream by subscription_id.
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
 }
 
 // GetReplicateCheckpointRequest is the request of GetReplicateCheckpoint service.
@@ -589,6 +594,103 @@ message TransformLogEntry {
     oneof entry {
         TransformDeleteEntry delete = 2;
     }
+}
+
+// CreateTransformStreamRequest is passed in SubscribeTransform stream metadata.
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+// TransformRequest is the request of the SubscribeTransform RPC.
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+// CreateTransformSubscriptionRequest creates a remote vchannel-level transform
+// scanner on a SubscribeTransform stream.
+message CreateTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+
+    // Inclusive. When non-zero, server stops after consuming entries with
+    // time_tick <= end_time_tick.
+    uint64 end_time_tick = 4;
+}
+
+// CloseTransformSubscriptionRequest closes one vchannel subscription on a
+// SubscribeTransform stream.
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+// CloseTransformStreamRequest gracefully closes the SubscribeTransform stream.
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+    }
+}
+
+// CreateTransformSubscriptionResponse acknowledges creation of one vchannel
+// transform scanner.
+message CreateTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+    uint64 end_time_tick = 5;
+}
+
+// CloseTransformSubscriptionResponse acknowledges closing one vchannel
+// subscription on a SubscribeTransform stream.
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+// TransformSubscriptionSyncUp is a transform frontier event. After receiving
+// SyncUp(time_tick), all TransformLog entries with time_tick <= SyncUp.time_tick
+// have been delivered to this subscription.
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 time_tick = 3;
+}
+
+// TransformSubscriptionError carries a StreamingError for one subscription on a
+// multiplexed SubscribeTransform stream.
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+    TransformSubscriptionErrorReason reason = 4;
+}
+
+// CloseTransformStreamResponse acknowledges graceful stream close.
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
 }
 
 //
@@ -997,4 +1099,11 @@ message ReplicatePChannelMeta {
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
+}
+
+enum TransformSubscriptionErrorReason {
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_UNKNOWN = 0;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_INVALID_OPTION = 1;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_TRUNCATED = 2;
+    TRANSFORM_SUBSCRIPTION_ERROR_REASON_UNAVAILABLE = 3;
 }

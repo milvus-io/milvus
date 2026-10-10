@@ -1072,7 +1072,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		return nil
 	}
 
-	pks, tss := deltaData.DeletePks(), deltaData.DeleteTimestamps()
+	tss := deltaData.DeleteTimestamps()
 	rowNum := deltaData.DeleteRowCount()
 
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
@@ -1093,47 +1093,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	// NOT sorted across L0 segments (BufferForwarder appends in iteration
 	// order), so comparing against tss[last] is both unnecessary and incorrect.
 
-	ids, err := storage.ParsePrimaryKeysBatch2IDs(pks)
-	if err != nil {
-		return err
-	}
-
-	idsBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return err
-	}
-
-	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:        unsafe.Pointer(&tss[0]),
-		primary_keys:      (*C.uint8_t)(unsafe.Pointer(&idsBlob[0])),
-		primary_keys_size: C.uint64_t(len(idsBlob)),
-		row_count:         C.int64_t(rowNum),
-	}
-	/*
-		CStatus
-		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
-	*/
-	var status C.CStatus
-	// Delta-log replay during segment load runs on the load pool, not the
-	// online-write mutate pool, so a large post-compaction replay cannot starve
-	// online insert/delete (and thus tSafe advancement).
-	GetLoadPool().Submit(func() (any, error) {
-		start := time.Now()
-		defer func() {
-			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				paramtable.GetStringNodeID(),
-				"LoadDeletedRecord",
-				"Sync",
-			).Observe(float64(time.Since(start).Milliseconds()))
-		}()
-		status = C.LoadDeletedRecord(s.ptr, loadInfo)
-		return nil, nil
-	}).Await()
-
-	if err := HandleCStatus(ctx, &status, "LoadDeletedRecord failed",
-		mlog.FieldCollectionID(s.Collection()),
-		mlog.FieldPartitionID(s.Partition()),
-		mlog.FieldSegmentID(s.ID())); err != nil {
+	if err := LoadSegmentDeletedRecords(ctx, s.csegment, deltaData); err != nil {
 		return err
 	}
 

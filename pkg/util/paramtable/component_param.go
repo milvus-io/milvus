@@ -122,6 +122,7 @@ type ComponentParam struct {
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	QueryViewCfg   queryViewConfig
 	FunctionCfg    functionConfig
 	CredentialCfg  credentialConfig
 
@@ -177,6 +178,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -9060,6 +9062,21 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+}
+
+type queryViewConfig struct {
+	TransformLogCatchupConcurrencyRatio ParamItem `refreshable:"true"`
+}
+
+func (p *queryViewConfig) init(base *BaseTable) {
+	p.TransformLogCatchupConcurrencyRatio = ParamItem{
+		Key:          "queryView.transformLog.catchupConcurrencyRatio",
+		Version:      "3.1.0",
+		DefaultValue: "0.25",
+		Doc:          "Maximum concurrent TransformLog catch-up tasks per PChannel in each process, expressed as a ratio of CPU cores. Concurrency is max(1, floor(CPU cores * ratio)); not a process-wide cap. Must be positive and supports dynamic updates.",
+		Export:       true,
+	}
+	p.TransformLogCatchupConcurrencyRatio.Init(base.mgr)
 }
 
 type streamingConfig struct {
