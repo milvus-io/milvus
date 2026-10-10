@@ -476,9 +476,12 @@ Per-term definition and edge cases:
 - **segmentIndexed**: `indexMeta.GetIndexedSegments(collection, {id},
   targetFieldIds)` contains the segment, with `targetFieldIds` = all vector
   fields + (when `DVForceAllIndexReady`) all scalar-indexed fields. **Edge
-  case**: a pure-scalar collection (no vector field) leaves `targetFieldIds`
-  empty → must explicitly degrade to "all scalar indexes `Finished`", otherwise
-  the term is always false.
+  case**: a collection with no vector field (and `DVForceAllIndexReady` off)
+  leaves `targetFieldIds` empty; the term is then **true** for every segment,
+  so that scalar indexes do not gate publication, matching how a vector
+  collection treats its scalar indexes today. See
+  `20261007-collection-without-vector-field.md` (touchpoint C1) for the
+  `FilterInIndexedSegments` change that implements this.
 - **smallExempt**: `(IsSorted || IsSortedByNamespace) && NumOfRows <
   Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex`. Same as today.
 - **sort term**: exempt when `enableSortCompaction()` (both
