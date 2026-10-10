@@ -581,6 +581,23 @@ type taskScheduler struct {
 
 	segmentTaskDelta *SegmentTaskDelta
 	channelTaskDelta *ChannelTaskDelta
+
+	// fileResourceGate holds grow actions back on a node whose analyzer file
+	// resources are behind. The coordinator installs it whenever the
+	// file-resource observer exists - which is every mixcoord deployment - so
+	// "native" here is not the gate being nil but the gate answering nil,
+	// which it does whenever no file resource is registered or query-node
+	// sync is off. It is handed to every executor this scheduler creates.
+	fileResourceGate NodeFileResourceGate
+}
+
+// SetFileResourceGate installs the gate the executors defer grow actions on.
+//
+// It is called once, before the scheduler starts and before any executor is
+// added, so that every executor sees the same gate. A nil gate leaves the
+// executors on the native path.
+func (scheduler *taskScheduler) SetFileResourceGate(gate NodeFileResourceGate) {
+	scheduler.fileResourceGate = gate
 }
 
 func NewScheduler(ctx context.Context,
@@ -644,6 +661,7 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 		scheduler.targetMgr,
 		scheduler.cluster,
 		scheduler.nodeMgr)
+	executor.fileResourceGate = scheduler.fileResourceGate
 
 	if _, exist := scheduler.executors.GetOrInsert(nodeID, executor); exist {
 		return

@@ -21,14 +21,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	dcsession "github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/mocks"
 	qcsession "github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -802,4 +806,89 @@ func (s *FileResourceObserverSuite) TestRetryNotify() {
 
 func TestFileResourceObserverSuite(t *testing.T) {
 	suite.Run(t, new(FileResourceObserverSuite))
+}
+
+// The per-dispatch gate must not take rootcoord's ddLock: after one Sync pass
+// the answer comes from the cached snapshot, and a deployment with no file
+// resources answers nil without ever reaching the meta table again.
+func TestCheckNodesSyncedJudgesFromTheSnapshotNotTheLock(t *testing.T) {
+	listCalls := 0
+	mockList := mockey.Mock((*rootcoord.MetaTable).ListFileResource).To(
+		func(*rootcoord.MetaTable, context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+			listCalls++
+			return nil, 0
+		}).Build()
+	defer mockList.UnPatch()
+
+	m := &FileResourceObserver{
+		ctx:          context.Background(),
+		meta:         &rootcoord.MetaTable{},
+		distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+		qnMode:       fileresource.SyncMode,
+	}
+
+	require.NoError(t, m.CheckNodesSynced([]int64{1}), "no resources registered: the gate answers nil")
+	first := listCalls
+	require.NoError(t, m.CheckNodesSynced([]int64{1}))
+	require.NoError(t, m.CheckNodesSynced([]int64{1}))
+	assert.Equal(t, first, listCalls,
+		"after the first read the gate must judge from the snapshot, not re-take the DDL lock per dispatch")
+}
+
+// A node recorded at the target version passes the gate - which is the state
+// the Unimplemented branch of Sync() leaves an old query node in. (The branch
+// itself lives in Sync and is not driven here; this pins the gate's side.)
+func TestCheckNodesSyncedPassesANodeRecordedAtTargetVersion(t *testing.T) {
+	// The snapshot path is exercised through CheckNodesSynced after a manual
+	// distribution insert, which is what the Unimplemented branch performs.
+	m := &FileResourceObserver{
+		ctx:          context.Background(),
+		distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+		qnMode:       fileresource.SyncMode,
+		meta:         &rootcoord.MetaTable{},
+	}
+	m.gateSnapshot.Store(&gateState{version: 3, gated: true})
+
+	err := m.CheckNodesSynced([]int64{7})
+	require.Error(t, err, "an unrecorded node is behind")
+
+	m.distribution.Insert(7, &NodeInfo{NodeID: 7, NodeType: QueryNode, Version: 3})
+	assert.NoError(t, m.CheckNodesSynced([]int64{7}),
+		"a node recorded at the target version - including via the Unimplemented floor - passes")
+}
+
+// Sync() returns early on a version-0 meta table - nothing has ever been
+// registered, so there is nothing to push to any node. It must still publish
+// the snapshot on the way out: "version 0" is a definite answer for the gate,
+// and leaving the snapshot nil sends every CheckNodesSynced call back to the
+// meta table, which is rootcoord's ddLock - exactly what the cache exists to
+// avoid.
+func TestSyncPublishesTheSnapshotBeforeTheVersionZeroEarlyReturn(t *testing.T) {
+	listCalls := 0
+	mockList := mockey.Mock((*rootcoord.MetaTable).ListFileResource).To(
+		func(*rootcoord.MetaTable, context.Context) ([]*internalpb.FileResourceInfo, uint64) {
+			listCalls++
+			return nil, 0
+		}).Build()
+	defer mockList.UnPatch()
+
+	m := &FileResourceObserver{
+		ctx:          context.Background(),
+		meta:         &rootcoord.MetaTable{},
+		distribution: typeutil.NewConcurrentMap[int64, *NodeInfo](),
+		qnMode:       fileresource.SyncMode,
+	}
+
+	require.NoError(t, m.Sync(), "a version-0 meta table has nothing to sync")
+
+	snap := m.gateSnapshot.Load()
+	require.NotNil(t, snap, "the early return must not skip publishing the snapshot")
+	assert.EqualValues(t, 0, snap.version)
+	assert.False(t, snap.gated, "nothing registered: the gate must be inert")
+
+	after := listCalls
+	require.NoError(t, m.CheckNodesSynced([]int64{1}))
+	require.NoError(t, m.CheckNodesSynced([]int64{2}))
+	assert.Equal(t, after, listCalls,
+		"the gate must judge from the snapshot Sync published, not re-take the DDL lock")
 }
