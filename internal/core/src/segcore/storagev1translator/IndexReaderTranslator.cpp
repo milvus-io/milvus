@@ -1,6 +1,7 @@
 #include "segcore/storagev1translator/IndexReaderTranslator.h"
 
 #include "common/EasyAssert.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -19,21 +20,16 @@ IndexReaderTranslator::Caps() const noexcept {
     return caps_;
 }
 
-storage::WarmupPolicy
-ToStorageWarmup(CacheWarmupPolicy policy) {
-    switch (policy) {
-        case CacheWarmupPolicy::CacheWarmupPolicy_Disable:
-            return storage::WarmupPolicy::Disable;
-        case CacheWarmupPolicy::CacheWarmupPolicy_Async:
-            return storage::WarmupPolicy::Async;
-        case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
-            return storage::WarmupPolicy::Sync;
-        default:
-            AssertInfo(false,
-                       "unknown cache warmup policy {}",
-                       static_cast<int>(policy));
+std::string
+LocalStagingRoot(const std::string& configured_root) {
+    if (!configured_root.empty()) {
+        return configured_root;
     }
-    return storage::WarmupPolicy::Sync;
+    auto local =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    AssertInfo(local != nullptr,
+               "local chunk manager is not initialized for index staging");
+    return local->GetRootPath();
 }
 
 }  // namespace milvus::segcore::storagev1translator

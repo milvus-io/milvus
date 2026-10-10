@@ -15,13 +15,12 @@
 
 #pragma once
 
+#include <string>
 #include <utility>
 
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
-#include "common/common_type_c.h"
 #include "index/contracts/Registry.h"
-#include "storage/artifact/LoadOptions.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -56,7 +55,9 @@ class IndexReaderTranslator
     index::ReaderCaps caps_;
 };
 
-storage::WarmupPolicy
-ToStorageWarmup(CacheWarmupPolicy policy);
+// Root under which index loaders stage local files, with or without mmap.
+// QueryNode supplies localStorage.path; an empty root resolves to it.
+std::string
+LocalStagingRoot(const std::string& configured_root = {});
 
 }  // namespace milvus::segcore::storagev1translator

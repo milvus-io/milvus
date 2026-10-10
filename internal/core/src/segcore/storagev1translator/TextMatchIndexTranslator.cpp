@@ -19,8 +19,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/ScopedTimer.h"
 #include "fmt/core.h"
@@ -159,16 +161,19 @@ TextMatchIndexTranslator::estimated_byte_size_of_cell(
                  request.max_disk_cost - request.final_disk_cost}};
     }
     // ignore the cid checking, because there is only one cell
+    // V1/V2 text loads are synchronous: each sliced file is first cached under
+    // localStorage, then copied into the staging directory, and the cache is
+    // removed when the load finishes. Peak disk is twice the index size.
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
+    auto resident_bytes = bitmap_bytes +
+                          static_cast<int64_t>(
+                              index::kScalarIndexFixedResidentBytes);
     if (load_info_.enable_mmap) {
-        return {{bitmap_bytes, load_info_.index_size},
-                {load_info_.index_size, 0}};
+        return {{resident_bytes, load_info_.index_size},
+                {load_info_.index_size, load_info_.index_size}};
     } else {
-        // The reason the maximum disk usage is not zero is that the text match index
-        // is first written to the disk, then loaded into memory. Only after that are
-        // the disk files deleted.
-        return {{load_info_.index_size + bitmap_bytes, 0},
-                {0, load_info_.index_size}};
+        return {{load_info_.index_size + resident_bytes, 0},
+                {0, 2 * load_info_.index_size}};
     }
 }
 
@@ -205,10 +210,13 @@ TextMatchIndexTranslator::get_cells(
     options.estimated_bytes = load_info_.index_size;
     options.params = config_;
     options.op_ctx = ctx;
-    options.warmup = ToStorageWarmup(
-        milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
-                                              /* is_vector */ false,
-                                              /* is_index */ true));
+    // Text files are staged under localStorage with or without mmap.
+    options.mmap_dir_path =
+        (std::filesystem::path(LocalStagingRoot()) / TEXT_LOG_ROOT_PATH /
+         std::to_string(file_manager_context_.indexMeta.build_id) /
+         std::to_string(load_info_.segment_id) /
+         std::to_string(load_info_.field_id) / "index")
+            .string();
     const auto loader_entry =
         milvus::index::LoaderRegistry::Instance().Lookup(Family());
     AssertInfo(static_cast<bool>(loader_entry),
