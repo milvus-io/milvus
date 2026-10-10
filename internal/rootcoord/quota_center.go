@@ -410,6 +410,16 @@ func SplitCollectionKey(key string) (dbID int64, collectionName string) {
 	return dbID, collectionName
 }
 
+// loadedCollectionIDs returns the collections that are loaded on at least one
+// QueryNode or StreamingNode, according to the last collected node metrics.
+func (q *QuotaCenter) loadedCollectionIDs() typeutil.UniqueSet {
+	collections := typeutil.NewUniqueSet()
+	for _, metric := range q.queryNodeMetrics {
+		collections.Insert(metric.Effect.CollectionIDs...)
+	}
+	return collections
+}
+
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) collectMetrics() error {
 	q.lock.Lock()
@@ -431,13 +441,11 @@ func (q *QuotaCenter) collectMetrics() error {
 			return err
 		}
 
-		collections := typeutil.NewUniqueSet()
 		numEntitiesLoaded := make(map[int64]int64)
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
 				oldQueryNodes.Remove(queryNodeMetric.ID)
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
-				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
 			if queryNodeMetric.CollectionMetrics != nil {
 				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
@@ -446,7 +454,7 @@ func (q *QuotaCenter) collectMetrics() error {
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
 		var rangeErr error
-		collections.Range(func(collectionID int64) bool {
+		q.loadedCollectionIDs().Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
 				// skip limit check if the collection meta has been removed from rootcoord meta
