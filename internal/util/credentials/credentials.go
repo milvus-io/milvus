@@ -85,7 +85,7 @@ func (c *Credentials) GetGcpCredential(name string) ([]byte, error) {
 
 	decode, err := base64.StdEncoding.DecodeString(jsonByte)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("parse gcp credential:%s faild, err: %s", name, err)
+		return nil, merr.WrapErrParameterInvalidMsg("parse gcp credential:%s failed, err: %s", name, err)
 	}
 	return decode, nil
 }
