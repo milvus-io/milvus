@@ -150,6 +150,14 @@ PopulateBruteForceIndexParams(SearchInfo& search_info,
     const auto& index_params = field_index_meta.GetIndexParams();
     auto& params = search_info.brute_force_index_params_;
 
+    if (auto it = index_params.find(MRL_DIM_KEY); it != index_params.end()) {
+        params.mrl_dim_ = std::stoll(it->second);
+    }
+    if (auto it = index_params.find(WITH_MRL_REFINE_KEY);
+        it != index_params.end()) {
+        params.with_mrl_refine_ = it->second == "true";
+    }
+
     if (search_info.metric_type_ == knowhere::metric::BM25) {
         auto it = index_params.find(knowhere::meta::BM25_K1);
         if (it != index_params.end()) {
@@ -230,9 +238,56 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                                query_ds.round_decimal);
     auto topk = query_ds.topk;
     auto nq = query_ds.num_queries;
+    auto effective_query = query_ds;
+    auto effective_raw = raw_ds;
+    std::unique_ptr<uint8_t[]> prefix_query;
+    std::unique_ptr<uint8_t[]> prefix_raw;
+    const auto& mrl_params = search_info.brute_force_index_params_;
+    const bool mrl_enabled =
+        mrl_params.mrl_dim_ > 0 && mrl_params.mrl_dim_ < raw_ds.dim;
+    const bool use_prefix = mrl_enabled && !mrl_params.with_mrl_refine_;
+    if (use_prefix) {
+        AssertInfo(data_type == DataType::VECTOR_FLOAT ||
+                       data_type == DataType::VECTOR_FLOAT16 ||
+                       data_type == DataType::VECTOR_BFLOAT16,
+                   "MRL brute force supports only dense float vectors");
+        AssertInfo(query_ds.dim == raw_ds.dim,
+                   "MRL query and source dimensions must match");
+        const size_t element_size = data_type == DataType::VECTOR_FLOAT
+                                        ? sizeof(float)
+                                        : sizeof(float16);
+        const size_t source_row_size = raw_ds.dim * element_size;
+        const size_t prefix_row_size = mrl_params.mrl_dim_ * element_size;
+        prefix_query =
+            std::make_unique<uint8_t[]>(query_ds.num_queries * prefix_row_size);
+        prefix_raw =
+            std::make_unique<uint8_t[]>(raw_ds.num_raw_data * prefix_row_size);
+        for (int64_t row = 0; row < query_ds.num_queries; ++row) {
+            milvus::fastmem::FastMemcpy(
+                prefix_query.get() + row * prefix_row_size,
+                static_cast<const uint8_t*>(query_ds.query_data) +
+                    row * source_row_size,
+                prefix_row_size);
+        }
+        for (int64_t row = 0; row < raw_ds.num_raw_data; ++row) {
+            milvus::fastmem::FastMemcpy(
+                prefix_raw.get() + row * prefix_row_size,
+                static_cast<const uint8_t*>(raw_ds.raw_data) +
+                    row * source_row_size,
+                prefix_row_size);
+        }
+        effective_query.dim = mrl_params.mrl_dim_;
+        effective_query.query_data = prefix_query.get();
+        effective_raw.dim = mrl_params.mrl_dim_;
+        effective_raw.raw_data = prefix_raw.get();
+    }
     auto [query_dataset, base_dataset] =
-        PrepareBFDataSet(query_ds, raw_ds, data_type);
+        PrepareBFDataSet(effective_query, effective_raw, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
+
+    if (mrl_enabled && search_cfg.contains(RADIUS)) {
+        ThrowInfo(Unsupported, "MRL range search is not supported");
+    }
     // `range_search_k` is only used as one of the conditions for iterator early termination.
     // not gurantee to return exactly `range_search_k` results, which may be more or less.
     // set it to -1 will return all results in the range.
@@ -412,6 +467,13 @@ GetBruteForceSearchIterators(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     DataType data_type) {
+    const auto& mrl_params = search_info.brute_force_index_params_;
+    if (mrl_params.mrl_dim_ > 0 && mrl_params.mrl_dim_ < raw_ds.dim) {
+        return knowhere::
+            expected<std::vector<knowhere::IndexNode::IteratorPtr>>::Err(
+                knowhere::Status::not_implemented,
+                "MRL iterator search is not supported");
+    }
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);
