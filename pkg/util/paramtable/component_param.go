@@ -2821,10 +2821,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
-	EnableSearchStreaming  ParamItem `refreshable:"false"`
-	SearchStreamChunkBytes ParamItem `refreshable:"false"`
-	EnableQueryStreaming   ParamItem `refreshable:"false"`
-	QueryStreamChunkBytes  ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"false"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -3597,41 +3595,23 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
 
-	p.EnableSearchStreaming = ParamItem{
-		Key:          "proxy.queryView.enableSearchStreaming",
+	p.EnableReduceStream = ParamItem{
+		Key:          "proxy.queryView.enableReduceStream",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "route supported Search requests through Streaming Reduce",
+		Doc:          "route supported requests through Streaming Reduce",
 		Export:       true,
 	}
-	p.EnableSearchStreaming.Init(base.mgr)
+	p.EnableReduceStream.Init(base.mgr)
 
-	p.SearchStreamChunkBytes = ParamItem{
-		Key:          "proxy.queryView.searchStreamChunkBytes",
+	p.ReduceStreamChunkBytes = ParamItem{
+		Key:          "proxy.queryView.reduceStreamChunkBytes",
 		Version:      "3.0.0",
 		DefaultValue: "262144",
-		Doc:          "reducible-payload byte threshold for each Search stream Chunk",
+		Doc:          "reducible-payload byte threshold for each stream Chunk",
 		Export:       true,
 	}
-	p.SearchStreamChunkBytes.Init(base.mgr)
-
-	p.EnableQueryStreaming = ParamItem{
-		Key:          "proxy.queryView.enableQueryStreaming",
-		Version:      "3.0.0",
-		DefaultValue: "false",
-		Doc:          "route supported Query requests through Streaming Reduce",
-		Export:       true,
-	}
-	p.EnableQueryStreaming.Init(base.mgr)
-
-	p.QueryStreamChunkBytes = ParamItem{
-		Key:          "proxy.queryView.queryStreamChunkBytes",
-		Version:      "3.0.0",
-		DefaultValue: "262144",
-		Doc:          "reducible-payload byte threshold for each Query stream Chunk",
-		Export:       true,
-	}
-	p.QueryStreamChunkBytes.Init(base.mgr)
+	p.ReduceStreamChunkBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
