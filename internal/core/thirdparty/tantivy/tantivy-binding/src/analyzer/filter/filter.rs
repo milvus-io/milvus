@@ -4,7 +4,7 @@ use tantivy::tokenizer::*;
 use super::util::*;
 use super::{
     ArabicNormalizationFilter, CnAlphaNumOnlyFilter, CnCharOnlyFilter, DecimalDigitFilter,
-    PinyinFilter, RegexFilter, RemovePunctFilter, SynonymFilter,
+    PinyinFilter, RegexFilter, RemovePunctFilter, Stemmer, SynonymFilter,
 };
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
