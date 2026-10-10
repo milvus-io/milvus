@@ -1401,9 +1401,15 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 
 		queryView := delegator.GetChannelQueryView()
+		// Report the segments this delegator is no longer serving, so QueryCoord can decide
+		// segment release from this fact instead of inferring it from target versions.
+		// reportsServingSet stays false until the query view has been synced by coord, where
+		// the readable set is empty and the answer would be meaningless.
+		notServingSegments, reportsServingSet := delegator.NotServingSealedSegments()
 		leaderViewStatus := &querypb.LeaderViewStatus{
 			Serviceable:             queryView.Serviceable(),
 			CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
+			ReportsServingSet:       reportsServingSet,
 		}
 		return &querypb.LeaderView{
 			Collection:             delegator.Collection(),
@@ -1413,6 +1419,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			NumOfGrowingRows:       numOfGrowingRows,
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 			TargetVersion:          queryView.GetVersion(),
+			NotServingSegmentIDs:   notServingSegments,
 			Status:                 leaderViewStatus,
 		}
 	}
