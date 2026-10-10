@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -227,9 +228,14 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 			case entity.FieldTypeText:
 				data := make([]string, 0, rowsLen)
 				col = column.NewColumnText(field.Name, data)
+			case entity.FieldTypeTimestamptz:
+				col = column.NewColumnTimestamptz(field.Name, nil)
 			case entity.FieldTypeJSON:
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)
+			case entity.FieldTypeGeometry:
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnGeometryWKT(field.Name, data)
 			case entity.FieldTypeArray:
 				if field.ElementType == entity.FieldTypeStruct {
 					structColumn, err := column.NewColumnStructArrayFromSchema(field.Name, field.StructSchema)
@@ -327,6 +333,30 @@ func NewArrayColumn(f *entity.Field) column.Column {
 	}
 }
 
+var timeType = reflect.TypeOf(time.Time{})
+
+// CoerceValue converts value into a value assignable to targetType when
+// unmarshalling read-back data into typed struct fields.
+//
+// TIMESTAMPTZ columns are transported as RFC3339Nano ISO strings, so string
+// values are parsed into time.Time (or *time.Time) targets; string targets and
+// any other type pair keep the value unchanged.
+func CoerceValue(targetType reflect.Type, value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if targetType == timeType {
+		if s, ok := value.(string); ok {
+			t, err := time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse timestamptz string %q: %w", s, err)
+			}
+			return t, nil
+		}
+	}
+	return value, nil
+}
+
 func SetField(receiver any, fieldName string, value any) error {
 	candidates, err := rowutil.ParseFields(reflect.ValueOf(receiver))
 	if err != nil {
@@ -344,12 +374,20 @@ func SetField(receiver any, fieldName string, value any) error {
 			if value == nil {
 				candidate.Value.Set(reflect.Zero(candidate.Value.Type()))
 			} else {
+				converted, err := CoerceValue(candidate.Value.Type().Elem(), value)
+				if err != nil {
+					return err
+				}
 				ptr := reflect.New(candidate.Value.Type().Elem())
-				ptr.Elem().Set(reflect.ValueOf(value))
+				ptr.Elem().Set(reflect.ValueOf(converted))
 				candidate.Value.Set(ptr)
 			}
 		} else {
-			candidate.Value.Set(reflect.ValueOf(value))
+			converted, err := CoerceValue(candidate.Value.Type(), value)
+			if err != nil {
+				return err
+			}
+			candidate.Value.Set(reflect.ValueOf(converted))
 		}
 	}
 
