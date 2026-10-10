@@ -17,6 +17,7 @@
 #include <array>
 #include <algorithm>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -32,11 +33,13 @@
 #include "common/RegexQuery.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Volnitsky.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "index/FMIndex.h"
+#include "index/fmindex/FMIndex.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "common/type_c.h"
@@ -113,7 +116,7 @@ Match(index::FMIndex* idx, const std::string& p) {
 
 // PatternMatch(Match) returns rarest-fragment candidates. Exactness is the
 // intersection with LikePatternMatcher on the original strings, the same
-// recheck ExecFMMatch performs on sealed VARCHAR.
+// recheck ExecFMPatternCandidates performs on sealed VARCHAR.
 std::vector<int64_t>
 RecheckedMatch(index::FMIndex* idx,
                const std::vector<std::string>& data,
@@ -183,12 +186,11 @@ TEST(FMIndex, EmptyPatternMatchesAllRows) {
 // ShouldUseOp is the executor's routing gate (UnaryIndexFunc): true routes the
 // op to this index, false downgrades to the raw-data scan. Range ops MUST be
 // declined. Range() throws Unsupported, so routing them here would fail the
-// query (`field > "x"`, BETWEEN) instead of scanning. RegexMatch stays declined
-// (required-literal extraction is a later follow-up). Equal/NotEqual (== and
+// query (`field > "x"`, BETWEEN) instead of scanning. Equal/NotEqual (== and
 // IN/NOT IN) are intentionally declined too: a set of exact values is served
 // better by the raw-data scan or an equality-oriented index (INVERTED), not by
 // FMINDEX's prefix enumeration. General LIKE (Match) is on the allowlist.
-TEST(FMIndex, ShouldUseOpDeclinesRangeAndRegex) {
+TEST(FMIndex, ShouldUseOpDeclinesRangeAndEmptyRegex) {
     auto idx = MakeRawDataIndex({"apple", "banana"});
 
     // The allowlist is the three anchored pattern ops plus general LIKE.
@@ -213,6 +215,7 @@ TEST(FMIndex, ShouldUseOpDeclinesRangeAndRegex) {
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::LessThan));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::LessEqual));
     EXPECT_FALSE(idx->ShouldUseOp(proto::plan::OpType::RegexMatch));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::RegexMatch, "ZZZ.*"));
 
     EXPECT_THROW(idx->Range("m", OpType::GreaterThan), SegcoreError);
     EXPECT_EQ(RecheckedMatch(idx.get(), {"apple", "banana"}, "a%e"),
@@ -1242,7 +1245,7 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
 }
 
 // Large enough corpus that Match is accepted. Phase 2 must recheck VARCHAR
-// so a candidate superset (QOP%ZEBRA) is exact after ExecFMMatch.
+// so a candidate superset (QOP%ZEBRA) is exact after ExecFMPatternCandidates.
 TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
     int64_t collection_id = 11, partition_id = 12, segment_id = 13;
     int64_t index_build_id = 6101, index_version = 6101, index_id = 7101;
@@ -1431,8 +1434,9 @@ expr::TypedExprPtr
 MakeMatchTypedExpr(const SchemaPtr& schema,
                    FieldId field_id,
                    const std::string& pattern,
-                   bool nullable) {
-    auto* unary = test::GenUnaryRangeExpr(proto::plan::OpType::Match, pattern);
+                   bool nullable,
+                   proto::plan::OpType op = proto::plan::OpType::Match) {
+    auto* unary = test::GenUnaryRangeExpr(op, pattern);
     unary->set_allocated_column_info(
         test::GenColumnInfo(field_id.get(),
                             proto::schema::DataType::VarChar,
@@ -1471,7 +1475,8 @@ LoadSealedFMMatch(int64_t collection_id,
                   const std::vector<FieldDataPtr>& varchar_chunks,
                   bool nullable,
                   const uint8_t* valid_bitmap,
-                  const std::vector<int64_t>* ints) {
+                  const std::vector<int64_t>* ints,
+                  bool with_index = true) {
     SealedFMMatch out;
     out.schema = std::make_shared<Schema>();
     out.varchar_id =
@@ -1531,6 +1536,10 @@ LoadSealedFMMatch(int64_t collection_id,
                                                        {int_data},
                                                        cm);
         out.segment->LoadFieldData(int_info);
+    }
+
+    if (!with_index) {
+        return out;
     }
 
     auto build_data =
@@ -1626,7 +1635,18 @@ MakeLongTextZebraRows(size_t nb) {
 
 }  // namespace
 
-TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
+class FMIndexPatternExecutorTest
+    : public ::testing::TestWithParam<proto::plan::OpType> {};
+
+INSTANTIATE_TEST_SUITE_P(FMIndex,
+                         FMIndexPatternExecutorTest,
+                         ::testing::Values(proto::plan::OpType::Match,
+                                           proto::plan::OpType::RegexMatch));
+
+TEST_P(FMIndexPatternExecutorTest, BatchesAndBitmap) {
+    const auto op = GetParam();
+    const std::string pattern =
+        op == proto::plan::OpType::Match ? "QOP%ZEBRA" : "^QOP.*ZEBRA$";
     const size_t nb = 1000;
     auto rows = MakeLongTextZebraRows(nb);
     constexpr size_t kLateFalsePositive = 500;
@@ -1640,20 +1660,22 @@ TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
         LoadSealedFMMatch(21, 22, 23, 8101, rows, {}, false, nullptr, &ints);
 
     auto match_expr = MakeMatchTypedExpr(
-        loaded.schema, loaded.varchar_id, "QOP%ZEBRA", false);
+        loaded.schema, loaded.varchar_id, pattern, false, op);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
     auto declined =
-        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%%", false);
+        MakeMatchTypedExpr(loaded.schema,
+                           loaded.varchar_id,
+                           op == proto::plan::OpType::Match ? "%%" : ".*",
+                           false,
+                           op);
     EXPECT_FALSE(CompiledUseIndexCursor(
         declined, loaded.segment.get(), static_cast<int64_t>(nb)));
 
     proto::plan::GenericValue match_val;
-    match_val.set_string_val("QOP%ZEBRA");
+    match_val.set_string_val(pattern);
     auto match = std::make_shared<expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(loaded.varchar_id, DataType::VARCHAR),
-        proto::plan::OpType::Match,
-        match_val);
+        expr::ColumnInfo(loaded.varchar_id, DataType::VARCHAR), op, match_val);
     proto::plan::GenericValue int_val;
     int_val.set_int64_val(500);
     auto numeric = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -1683,7 +1705,8 @@ TEST(FMIndex, ExecutorPathMatchBatchesAndBitmap) {
     EXPECT_TRUE(got[kLateTrueMatch]);
 }
 
-TEST(FMIndex, ExecutorPathMatchMultiChunk) {
+TEST_P(FMIndexPatternExecutorTest, MultiChunk) {
+    const auto op = GetParam();
     const size_t nb = 300;
     std::string filler(500, 'y');
     std::vector<std::string> rows;
@@ -1706,8 +1729,12 @@ TEST(FMIndex, ExecutorPathMatchMultiChunk) {
     auto loaded = LoadSealedFMMatch(
         31, 32, 33, 8201, rows, chunks, false, nullptr, nullptr);
 
-    auto match_expr =
-        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", false);
+    auto match_expr = MakeMatchTypedExpr(
+        loaded.schema,
+        loaded.varchar_id,
+        op == proto::plan::OpType::Match ? "%ZEBRA%" : "ZEBRA$",
+        false,
+        op);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
     EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
@@ -1734,7 +1761,8 @@ TEST(FMIndex, ExecutorPathMatchMultiChunk) {
     EXPECT_LT(hits, nb);
 }
 
-TEST(FMIndex, ExecutorPathMatchNullableAndOffsets) {
+TEST_P(FMIndexPatternExecutorTest, NullableAndOffsets) {
+    const auto op = GetParam();
     std::string filler(500, 'y');
     std::vector<std::string> rows(200, filler);
     rows[0] = filler + "ZEBRA";
@@ -1750,8 +1778,12 @@ TEST(FMIndex, ExecutorPathMatchNullableAndOffsets) {
     auto loaded = LoadSealedFMMatch(
         41, 42, 43, 8301, rows, {}, true, valid_bitmap.data(), nullptr);
     const size_t nb = rows.size();
-    auto match_expr =
-        MakeMatchTypedExpr(loaded.schema, loaded.varchar_id, "%ZEBRA%", true);
+    auto match_expr = MakeMatchTypedExpr(
+        loaded.schema,
+        loaded.varchar_id,
+        op == proto::plan::OpType::Match ? "%ZEBRA%" : "ZEBRA$",
+        true,
+        op);
     EXPECT_TRUE(CompiledUseIndexCursor(
         match_expr, loaded.segment.get(), static_cast<int64_t>(nb)));
 
@@ -1900,6 +1932,782 @@ TEST(FMIndex, MatchGuardAcceptsRareFragmentOnShortRows) {
     EXPECT_TRUE(idx->ShouldUseOp(proto::plan::OpType::Match, "%RARE%"));
     EXPECT_EQ(RecheckedMatch(idx.get(), data, "%RARE%"),
               (std::vector<int64_t>{0}));
+}
+
+TEST(FMIndex, RegexCandidatesAndRecheckEqualCanonicalScan) {
+    const std::vector<std::string> rows{
+        "",
+        "foo",
+        "foobar",
+        "foo\nbar",
+        "barfoo",
+        "FOO",
+        "food",
+        "fool",
+        "Aa.",
+        "41",
+        "a|b",
+        "a\\b",
+        "ab.*",
+        "aab",
+        "b",
+        "ééb",
+        "你好世界",
+        std::string("a\0b", 3),
+        std::string("a\xff"
+                    "b",
+                    3),
+        "12a",
+    };
+    auto idx = MakeRawDataIndex(rows);
+    const std::vector<std::string> patterns{
+        "",
+        "^$",
+        ".*",
+        "foo.*bar",
+        "^foo.*bar$",
+        "foo|bar",
+        "foo|",
+        "foo(?:d|l)",
+        "(?:foo)?bar",
+        "(?i)foo",
+        "[a-z]+",
+        "a{0,2}b",
+        R"(\x41\141\.)",
+        R"(a\|b)",
+        R"(a\\b)",
+        R"(\Qab.*\E)",
+        R"(a\x00b)",
+        R"(\d+a)",
+        "é+b",
+        "你好.*世界",
+        "ABSENT.*",
+    };
+    for (const auto& pattern : patterns) {
+        PartialRegexMatcher matcher(pattern);
+        const auto candidates =
+            idx->PatternMatch(pattern, proto::plan::OpType::RegexMatch);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const bool expected = matcher(rows[i]);
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), expected)
+                << "pattern=" << pattern << " row=" << i;
+        }
+    }
+    // Candidate membership alone must never be treated as a final result.
+    const auto candidates =
+        idx->PatternMatch("foo.*bar", proto::plan::OpType::RegexMatch);
+    EXPECT_TRUE(
+        candidates[4]);  // "barfoo" has both literals in the wrong order.
+    EXPECT_FALSE(PartialRegexMatcher("foo.*bar")(rows[4]));
+    EXPECT_LT(candidates.count(), rows.size());
+}
+
+TEST(FMIndex, RegexExternalWordBoundaryCandidatesAndRawFallback) {
+    // "bar" is absent. Before the fix, its spurious required prefix makes the
+    // guard accept zero hits and FMIndex eliminates the actual matching rows.
+    const std::vector<std::string> rows{"afoo", "a-foo", "other", ""};
+    auto idx = MakeRawDataIndex(rows);
+    for (const std::string pattern :
+         {R"(\Bfoo|bar)", R"(\b-foo|bar)", R"((?:\Bfoo|bar))"}) {
+        EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        const auto candidates =
+            idx->PatternMatch(pattern, proto::plan::RegexMatch);
+        EXPECT_LT(candidates.count(), rows.size());
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]));
+        }
+    }
+
+    // Exercise the physical raw-data executor both with an FMIndex that must
+    // decline and on a segment without any scalar index.
+    for (bool with_index : {true, false}) {
+        auto loaded = LoadSealedFMMatch(
+            81, 82, 83, 8701, rows, {}, false, nullptr, nullptr, with_index);
+        for (const std::string pattern :
+             {R"(\Bfoo|bar)", R"(\b-foo|bar)", R"((?:\Bfoo|bar))"}) {
+            auto expression = MakeMatchTypedExpr(loaded.schema,
+                                                 loaded.varchar_id,
+                                                 pattern,
+                                                 false,
+                                                 proto::plan::RegexMatch);
+            EXPECT_FALSE(CompiledUseIndexCursor(
+                expression, loaded.segment.get(), rows.size()));
+            auto evaluated = milvus::test::EvalExprInBatches(
+                expression, loaded.segment.get(), rows.size());
+            TargetBitmapView result(evaluated.result->GetRawData(),
+                                    rows.size());
+            PartialRegexMatcher matcher(pattern);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(result[i], matcher(rows[i]))
+                    << "pattern=" << pattern << " row=" << i
+                    << " with_index=" << with_index;
+            }
+        }
+    }
+}
+
+TEST(FMIndex, RegexInteriorLiteralCandidatesAndFallback) {
+    std::vector<std::string> rows(200, std::string(500, 'x') + "COMMON");
+    rows[0] += "RARE123END";
+    rows[1] += "RAREwrong";
+    rows[2] = "A";
+    rows[3] = "afoo";
+    rows[4] = "bar";
+    rows[5] = "xRAR";
+    rows[6] = "x";
+    rows[7] += "RARE123END";  // Candidate payload in a null row.
+    std::vector<uint8_t> validity((rows.size() + 7) / 8, 0xff);
+    validity[0] &= ~(1u << 7);
+    for (bool with_index : {false, true}) {
+        auto loaded = LoadSealedFMMatch(91,
+                                        92,
+                                        93,
+                                        8801,
+                                        rows,
+                                        {},
+                                        true,
+                                        validity.data(),
+                                        nullptr,
+                                        with_index);
+        for (const auto& [pattern, uses_index] :
+             std::vector<std::pair<std::string, bool>>{
+                 {".*RARE", true},
+                 {"x.*RARE123END", true},
+                 {".*RARE[0-9]+END", true},
+                 {R"(.*RARE\d+END)", true},
+                 {"x.*RARE123END+", true},
+                 {"x.*RARE123END?", true},
+                 {"x.*(RARE123END){1,2}", true},
+                 {"x.*RARE(123)END", true},
+                 {".*x{500}COMMONRARE123END", true},
+                 {"(?s).*RARE123END", true},
+                 {"x.*(?P<n>RARE123END)", true},
+                 {R"(.*\QRARE123END\E)", true},
+                 {"x.*(RARE123END)", true},
+                 {".*(RARE123END)?COMMON", false},
+                 {".*((RARE123END)+)?COMMON", false},
+                 {".*RARE[[:digit:]]+END", true},
+                 {"x.*RARE?", true},
+                 {"x.*(RARE)?", false},
+                 {"x.*RARE|bar", true},
+                 {R"(.*\x41)", false},
+                 {R"(\Bfoo|bar)", true}}) {
+            auto expression = MakeMatchTypedExpr(loaded.schema,
+                                                 loaded.varchar_id,
+                                                 pattern,
+                                                 true,
+                                                 proto::plan::RegexMatch);
+            EXPECT_EQ(CompiledUseIndexCursor(
+                          expression, loaded.segment.get(), rows.size()),
+                      with_index && uses_index)
+                << pattern;
+            auto evaluated = milvus::test::EvalExprInBatches(
+                expression, loaded.segment.get(), rows.size());
+            TargetBitmapView result(evaluated.result->GetRawData(),
+                                    rows.size());
+            TargetBitmapView valid(evaluated.result->GetValidRawData(),
+                                   rows.size());
+            PartialRegexMatcher matcher(pattern);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(valid[i], i != 7);
+                if (valid[i]) {
+                    EXPECT_EQ(result[i], matcher(rows[i]))
+                        << "pattern=" << pattern << " row=" << i
+                        << " with_index=" << with_index;
+                }
+            }
+        }
+    }
+}
+
+TEST(FMIndex, RegexGuardAndFallback) {
+    std::vector<std::string> rows(1000, std::string(500, 'x'));
+    rows[500] += "RARE123";
+    auto idx = MakeRawDataIndex(rows);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, R"(RARE\d+)"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "ABSENT.*"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, ".*RARE"));
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "x.*RARE123"));
+    EXPECT_EQ(idx->PatternMatch("x.*RARE123", proto::plan::RegexMatch).count(),
+              1);
+    for (const std::string pattern : {"x+", ".*", "", "RARE|", "(?i)rare"}) {
+        EXPECT_FALSE(idx->ShouldUseOp(proto::plan::RegexMatch, pattern))
+            << pattern;
+    }
+    EXPECT_FALSE(
+        idx->ShouldUseOp(proto::plan::RegexMatch, std::string(4097, 'a')));
+}
+
+TEST(FMIndex, RegexCandidatesKeepRarePrefixWhenInteriorIsCommon) {
+    std::vector<std::string> rows(1000, std::string(500, 'x') + "COMMON");
+    rows[500] = "RARE" + rows[500];
+    auto idx = MakeRawDataIndex(rows);
+    EXPECT_TRUE(idx->ShouldUseOp(proto::plan::RegexMatch, "RARE.*COMMON"));
+    const auto candidates =
+        idx->PatternMatch("RARE.*COMMON", proto::plan::RegexMatch);
+    EXPECT_EQ(candidates.count(), 1);
+    EXPECT_TRUE(candidates[500]);
+}
+
+TEST(FMIndex, RegexPreparationDoesNotCacheIndexStatistics) {
+    std::vector<std::string> first_rows(1000, std::string(500, 'x') + "bar");
+    first_rows[7] = "foo" + first_rows[7];
+    std::vector<std::string> second_rows(1000, "foo" + std::string(500, 'x'));
+    second_rows[9] += "bar";
+    auto first = MakeRawDataIndex(first_rows);
+    auto second = MakeRawDataIndex(second_rows);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        EXPECT_TRUE(first->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        EXPECT_TRUE(second->ShouldUseOp(proto::plan::RegexMatch, "foo.*bar"));
+        // The same cached requirements choose different rarest fragments.
+        const auto first_candidates =
+            first->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        const auto second_candidates =
+            second->PatternMatch("foo.*bar", proto::plan::RegexMatch);
+        EXPECT_EQ(first_candidates.count(), 1);
+        EXPECT_TRUE(first_candidates[7]);
+        EXPECT_EQ(second_candidates.count(), 1);
+        EXPECT_TRUE(second_candidates[9]);
+    }
+}
+
+TEST(FMIndex, RegexBooleanConditionsUseCurrentCounts) {
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    rows[9] += "RARE bar timeout";
+    rows[19] += "baz";
+    auto index = MakeRawDataIndex(rows);
+    for (const auto& [pattern, expected] :
+         std::vector<std::pair<std::string, size_t>>{
+             {".*COMMON_LONG.*RARE", 1},
+             {"(ERROR|WARN).*timeout", 1},
+             {"foo.*bar|baz.*qux", 2},
+             {"foo.*ABSENT|baz.*qux", 1}}) {
+        EXPECT_TRUE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        auto candidates = index->PatternMatch(pattern, proto::plan::RegexMatch);
+        EXPECT_EQ(candidates.count(), expected) << pattern;
+        PartialRegexMatcher matcher(pattern);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            EXPECT_EQ(candidates[i] && matcher(rows[i]), matcher(rows[i]))
+                << pattern;
+        }
+    }
+    for (const std::string pattern :
+         {"a|timeout", "(?i:foo)|timeout", "(foo)?|timeout"}) {
+        EXPECT_FALSE(index->ShouldUseOp(proto::plan::RegexMatch, pattern));
+        EXPECT_EQ(index->PatternMatch(pattern, proto::plan::RegexMatch).count(),
+                  rows.size());
+    }
+}
+
+TEST(FMIndex, RegexBooleanConditionsAcrossChunksBatchesNullAndNot) {
+    constexpr size_t n = 384;
+    std::vector<std::string> rows(n, std::string(500, 'x'));
+    std::vector<uint8_t> validity(n / 8, 0xff);
+    for (size_t base : {0, 128, 256}) {
+        rows[base + 3] += "foo bar";
+        rows[base + 4] += "baz qux";
+        rows[base + 5] += "bar foo";  // candidate rejected by RE2
+        rows[base + 6] += "baz qux";  // null candidate payload
+        validity[(base + 6) / 8] &= ~(1u << ((base + 6) % 8));
+    }
+    std::vector<FieldDataPtr> chunks;
+    for (size_t base : {0, 128, 256}) {
+        auto chunk =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+        chunk->FillFieldData(
+            rows.data() + base, validity.data() + base / 8, 128, 0);
+        chunks.push_back(std::move(chunk));
+    }
+    auto loaded = LoadSealedFMMatch(
+        101, 102, 103, 8901, rows, chunks, true, validity.data(), nullptr);
+    milvus::test::ExprBatchSizeGuard batch_guard(64);
+    for (const std::string pattern : {"foo.*bar|baz.*qux",
+                                      "(foo|baz).*(bar|qux)",
+                                      "a|foo",
+                                      "(?i:foo)|baz"}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        PartialRegexMatcher matcher(pattern);
+        for (bool negate : {false, true}) {
+            expr::TypedExprPtr root = expression;
+            if (negate) {
+                root = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, expression);
+            }
+            auto query_context = std::make_shared<exec::QueryContext>(
+                DEAFULT_QUERY_ID, loaded.segment.get(), n, MAX_TIMESTAMP);
+            query_context->set_enable_expr_cache(false);
+            exec::ExecContext exec_context(query_context.get());
+            auto compiled =
+                exec::CompileExpressions({root}, &exec_context, {}, false);
+            exec::EvalCtx context(&exec_context);
+            for (size_t base = 0; base < n; base += 64) {
+                TargetBitmap input(64, true);
+                // A nonmatching row and a true match are both excluded.
+                input[0] = false;
+                input[4] = false;
+                auto saved = input.clone();
+                context.set_bitmap_input(std::move(input));
+                VectorPtr output;
+                compiled[0]->Eval(context, output);
+                auto result = std::dynamic_pointer_cast<ColumnVector>(output);
+                ASSERT_NE(result, nullptr);
+                ASSERT_EQ(result->size(), 64);
+                TargetBitmapView hits(result->GetRawData(), 64);
+                TargetBitmapView valid(result->GetValidRawData(), 64);
+                for (size_t i = 0; i < 64; ++i) {
+                    EXPECT_EQ(context.get_bitmap_input()[i], saved[i]);
+                    // Bitmap-excluded rows are not consumed by the parent.
+                    if (!saved[i])
+                        continue;
+                    const bool expected_valid =
+                        validity[(base + i) / 8] & (1u << ((base + i) % 8));
+                    EXPECT_EQ(valid[i], expected_valid);
+                    if (expected_valid)
+                        EXPECT_EQ(hits[i], negate != matcher(rows[base + i]))
+                            << pattern << " row=" << base + i;
+                }
+            }
+        }
+    }
+}
+
+TEST(FMIndex, ExecutorRegexFallbackNegationAndInvalidPattern) {
+    std::vector<std::string> rows(200, std::string(500, 'x'));
+    rows[0] = "";
+    rows[1] = "Aa.";
+    rows[2] = "foo\nbar";
+    rows[3] = "FOO";
+    rows[4] = "aab";
+    rows[5] = "ééb";
+    rows[6] = std::string("a\0b", 3);
+    rows[7] = "foo";  // null despite the candidate-looking payload
+    std::vector<uint8_t> validity((rows.size() + 7) / 8, 0xff);
+    validity[0] &= ~(1u << 7);
+    auto loaded = LoadSealedFMMatch(
+        51, 52, 53, 8401, rows, {}, true, validity.data(), nullptr);
+    for (const std::string pattern : {"",
+                                      ".*",
+                                      "foo|",
+                                      "foo|bar",
+                                      "(?i)foo",
+                                      "foo.*bar",
+                                      ".*foo",
+                                      "x.*foo",
+                                      R"(\x41\141\.)",
+                                      "é+b",
+                                      R"(a\x00b)",
+                                      "x+",
+                                      "ABSENT.*"}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        PartialRegexMatcher matcher(pattern);
+        for (bool negate : {false, true}) {
+            expr::TypedExprPtr root = expression;
+            if (negate) {
+                root = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, expression);
+            }
+            auto evaluated = milvus::test::EvalExprInBatches(
+                root, loaded.segment.get(), rows.size());
+            TargetBitmapView result(evaluated.result->GetRawData(),
+                                    rows.size());
+            TargetBitmapView valid(evaluated.result->GetValidRawData(),
+                                   rows.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(valid[i], i != 7) << pattern << " row=" << i;
+                if (valid[i]) {
+                    EXPECT_EQ(result[i], negate != matcher(rows[i]))
+                        << pattern << " row=" << i;
+                }
+            }
+        }
+    }
+    for (const std::string pattern : {"ABSENT[", "("}) {
+        auto expression = MakeMatchTypedExpr(loaded.schema,
+                                             loaded.varchar_id,
+                                             pattern,
+                                             true,
+                                             proto::plan::RegexMatch);
+        try {
+            (void)CompiledUseIndexCursor(
+                expression, loaded.segment.get(), rows.size());
+            FAIL() << "invalid regex must fail before candidate generation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+        }
+    }
+}
+
+// Small native experiment runs in ordinary C++ CI and records stage timings in
+// gtest XML. Larger production-expression measurements remain opt-in below.
+// These stage comparisons include sealed-column reads, but not expression
+// dispatch. The separate end-to-end benchmark measures that dispatch as well.
+TEST(FMIndex, RegexSealedColumnExperiment) {
+    milvus::test::ExprBatchSizeGuard batch_guard(2048);
+    using Clock = std::chrono::steady_clock;
+    auto micros = [](Clock::time_point start) {
+        return std::chrono::duration<double, std::micro>(Clock::now() - start)
+            .count();
+    };
+    std::vector<std::string> rows(
+        1000, std::string(500, 'x') + "COMMON_LONG foo qux ERROR");
+    for (size_t i = 0; i < rows.size(); i += 100) {
+        rows[i] += " bar RARE123END timeout";
+        rows[i + 1] += " baz WARNtimeout";
+        rows[i + 2] += " RAREwrong";
+    }
+    auto fixture = LoadSealedFMMatch(
+        111, 112, 113, 9001, rows, {}, false, nullptr, nullptr, false);
+    auto index = MakeRawDataIndex(rows);
+    std::vector<std::string_view> docs(rows.begin(), rows.end());
+    milvus::index::fmindex::FMIndex counts;
+    counts.Build(docs, 8);
+    const std::vector<std::pair<std::string, std::string>> workloads{
+        {"independent", "foo.*bar"},
+        {"short_rare", ".*COMMON_LONG.*RARE"},
+        {"mandatory_suffix", "(ERROR|WARN).*timeout"},
+        {"branches", "foo.*bar|baz.*qux"},
+        {"frequent", "COMMON_LONG.*foo"},
+        {"long", ".*x{500}COMMON_LONG.*RARE123END"},
+        {"short_branch", "a|timeout"},
+        {"folded_branch", "(?i:foo)|bar"},
+        {"fallback", ".*"},
+    };
+    const std::string modes[]{"raw", "legacy", "all", "selected"};
+    const std::string stages[]{
+        "prepare", "count", "lookup", "bitset", "raw_read", "recheck", "total"};
+    RecordProperty("expression_result_cache",
+                   "disabled: direct sealed reads; no expression cache");
+    RecordProperty("rows", rows.size());
+    RecordProperty("samples", 3);
+    for (const auto& [name, pattern] : workloads) {
+        PartialRegexMatcher oracle(pattern);
+        for (bool sparse : {false, true}) {
+            TargetBitmap input(rows.size(), !sparse);
+            if (sparse) {
+                for (size_t i = 0; i < rows.size(); i += 100) input.set(i);
+            }
+            for (bool cold : {false, true}) {
+                std::optional<std::pair<std::string, RegexLiteralCondition>>
+                    legacy_cache;
+                auto prepare = [&](int mode) {
+                    if (mode == 0)
+                        return RegexLiteralCondition{};
+                    if (mode != 1)
+                        return PartialRegexMatcher::PrepareIndexCondition(
+                            pattern);
+                    if (legacy_cache && legacy_cache->first == pattern)
+                        return legacy_cache->second;
+                    // Reproduce the old longest-literal + RE2-prefix contract.
+                    PartialRegexMatcher matcher(pattern);
+                    auto best = matcher.RequiredLiteral();
+                    std::vector<std::string> atoms{best.substr(0, 64),
+                                                   matcher.RequiredPrefix()};
+                    if (best.size() > 64)
+                        atoms.push_back(best.substr(best.size() - 64));
+                    RegexLiteralCondition condition;
+                    for (const auto& atom : atoms) {
+                        if (!atom.empty())
+                            condition = RegexLiteralCondition::Combine(
+                                RegexLiteralCondition::Op::And,
+                                std::move(condition),
+                                {RegexLiteralCondition::Op::Literal, atom, {}});
+                    }
+                    legacy_cache = std::make_pair(pattern, condition);
+                    return condition;
+                };
+                std::array<std::array<std::vector<double>, 7>, 4> samples;
+                for (int round = 0; round < 4; ++round) {
+                    for (int turn = 0; turn < 4; ++turn) {
+                        const int mode = (round + turn) % 4;
+                        if (cold) {
+                            legacy_cache.reset();
+                            PartialRegexMatcher::PrepareIndexCondition(
+                                "__evict__");
+                        } else {
+                            prepare(mode);
+                        }
+                        std::array<double, 7> elapsed{};
+                        const auto total_start = Clock::now();
+                        auto start = Clock::now();
+                        PartialRegexMatcher matcher(pattern);
+                        auto condition = prepare(mode);
+                        const auto raw_literal = mode == 0
+                                                     ? matcher.RequiredLiteral()
+                                                     : std::string{};
+                        std::unique_ptr<VolnitskySearcher> raw_searcher;
+                        if (!raw_literal.empty()) {
+                            raw_searcher = std::make_unique<VolnitskySearcher>(
+                                raw_literal);
+                        }
+                        elapsed[0] = micros(start);
+                        start = Clock::now();
+                        double cost = 0;
+                        auto count = [&](const std::string& atom) {
+                            return counts.Count(
+                                reinterpret_cast<const uint8_t*>(atom.data()),
+                                atom.size());
+                        };
+                        if (mode == 1 || mode == 3) {
+                            condition = condition.Select(count, cost);
+                        }
+                        elapsed[1] = micros(start);
+                        start = Clock::now();
+                        auto candidates = condition.Evaluate(
+                            [&](const std::string& atom) {
+                                auto lookup_start = Clock::now();
+                                TargetBitmap hits = index->PatternMatch(
+                                    atom, proto::plan::InnerMatch);
+                                elapsed[2] += micros(lookup_start);
+                                return hits;
+                            },
+                            [&] { return TargetBitmap(rows.size(), true); });
+                        candidates &= input;
+                        elapsed[3] = std::max(0.0, micros(start) - elapsed[2]);
+                        start = Clock::now();
+                        using PinnedStrings =
+                            decltype(fixture.segment->chunk_views_by_offsets<
+                                     std::string_view>(
+                                nullptr,
+                                fixture.varchar_id,
+                                0,
+                                std::declval<const FixedVector<int32_t>&>()));
+                        std::vector<PinnedStrings> pins;
+                        std::vector<size_t> selected_rows;
+                        FixedVector<int32_t> local_offsets;
+                        int64_t current_chunk = -1;
+                        auto flush = [&] {
+                            if (!local_offsets.empty()) {
+                                pins.push_back(
+                                    fixture.segment->chunk_views_by_offsets<
+                                        std::string_view>(nullptr,
+                                                          fixture.varchar_id,
+                                                          current_chunk,
+                                                          local_offsets));
+                                local_offsets.clear();
+                            }
+                        };
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            if (!candidates[row])
+                                continue;
+                            auto [chunk, offset] =
+                                fixture.segment->get_chunk_by_offset(
+                                    fixture.varchar_id, row);
+                            if (chunk != current_chunk) {
+                                flush();
+                                current_chunk = chunk;
+                            }
+                            local_offsets.push_back(offset);
+                            selected_rows.push_back(row);
+                        }
+                        flush();
+                        elapsed[4] = micros(start);
+                        start = Clock::now();
+                        size_t checked = 0;
+                        for (auto& pin : pins) {
+                            const auto& [values, valid] = pin.get();
+                            for (size_t j = 0; j < values.size(); ++j) {
+                                candidates[selected_rows[checked++]] =
+                                    (valid.empty() || valid[j]) &&
+                                    (!raw_searcher ||
+                                     raw_searcher->contains(values[j])) &&
+                                    matcher(values[j]);
+                            }
+                        }
+                        elapsed[5] = micros(start);
+                        elapsed[6] = micros(total_start);
+                        ASSERT_EQ(checked, selected_rows.size());
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            ASSERT_EQ(candidates[row],
+                                      input[row] && oracle(rows[row]))
+                                << name << " " << modes[mode] << " row=" << row;
+                        }
+                        if (round > 0) {
+                            for (size_t stage = 0; stage < elapsed.size();
+                                 ++stage)
+                                samples[mode][stage].push_back(elapsed[stage]);
+                        }
+                    }
+                }
+                for (int mode = 0; mode < 4; ++mode) {
+                    for (size_t stage = 0; stage < 7; ++stage) {
+                        auto& values = samples[mode][stage];
+                        std::sort(values.begin(), values.end());
+                        RecordProperty(name + "_" + modes[mode] +
+                                           (sparse ? "_sparse" : "_dense") +
+                                           (cold ? "_cold_" : "_warm_") +
+                                           stages[stage] + "_us",
+                                       std::to_string(values[1]));
+                    }
+                }
+            }
+        }
+    }
+    // Exercise production expression dispatch with mixed patterns. Every query
+    // owns fresh physical state and explicitly disables expression caching.
+    auto indexed = LoadSealedFMMatch(
+        121, 122, 123, 9101, rows, {}, false, nullptr, nullptr);
+    for (bool sparse : {false, true}) {
+        for (bool with_index : {false, true}) {
+            const auto& loaded = with_index ? indexed : fixture;
+            std::vector<double> samples;
+            for (int round = 0; round < 4; ++round) {
+                double total = 0;
+                for (const auto& [name, pattern] : workloads) {
+                    auto expression =
+                        MakeMatchTypedExpr(loaded.schema,
+                                           loaded.varchar_id,
+                                           pattern,
+                                           false,
+                                           proto::plan::RegexMatch);
+                    TargetBitmap input(rows.size(), !sparse);
+                    if (sparse) {
+                        for (size_t i = 0; i < rows.size(); i += 100)
+                            input.set(i);
+                    }
+                    const auto start = Clock::now();
+                    auto query_context = std::make_shared<exec::QueryContext>(
+                        DEAFULT_QUERY_ID,
+                        loaded.segment.get(),
+                        rows.size(),
+                        MAX_TIMESTAMP);
+                    query_context->set_enable_expr_cache(false);
+                    exec::ExecContext exec_context(query_context.get());
+                    auto compiled = exec::CompileExpressions(
+                        {expression}, &exec_context, {}, false);
+                    exec::EvalCtx context(&exec_context);
+                    context.set_bitmap_input(input.clone());
+                    VectorPtr output;
+                    compiled[0]->Eval(context, output);
+                    total += micros(start);
+                    auto result =
+                        std::dynamic_pointer_cast<ColumnVector>(output);
+                    ASSERT_NE(result, nullptr);
+                    ASSERT_EQ(result->size(), rows.size());
+                    TargetBitmapView hits(result->GetRawData(), rows.size());
+                    PartialRegexMatcher oracle(pattern);
+                    for (size_t row = 0; row < rows.size(); ++row) {
+                        if (input[row])
+                            EXPECT_EQ(hits[row], oracle(rows[row]))
+                                << name << " row=" << row;
+                    }
+                }
+                if (round > 0)
+                    samples.push_back(total / workloads.size());
+            }
+            std::sort(samples.begin(), samples.end());
+            RecordProperty(std::string("mixed_") +
+                               (sparse ? "sparse_" : "dense_") +
+                               (with_index ? "indexed_us" : "scan_us"),
+                           std::to_string(samples[1]));
+        }
+    }
+}
+
+// Opt-in: reports warm end-to-end expression execution, including expression
+// compilation, the routing guard, candidate generation, raw-column reads and
+// recheck. Index construction/loading is outside the timed query. Compare the
+// identical expression on two sealed segments, one with and one without FM.
+// Run with --gtest_also_run_disabled_tests
+// --gtest_filter=FMIndex.DISABLED_RegexEndToEndBenchmark
+// --gtest_output=xml:fm_regex_benchmark.xml
+TEST(FMIndex, DISABLED_RegexEndToEndBenchmark) {
+    std::vector<std::string> rows(20000, std::string(500, 'x'));
+    for (size_t i = 0; i < rows.size(); ++i) {
+        rows[i] += "COMMON";
+        if (i % 1000 == 0) {
+            rows[i] += "RARE123END";
+        } else if (i % 1000 == 1) {
+            rows[i] = "RAREwrong" + rows[i];  // rejected by exact recheck
+        }
+    }
+    auto indexed =
+        LoadSealedFMMatch(61, 62, 63, 8501, rows, {}, false, nullptr, nullptr);
+    auto scan = LoadSealedFMMatch(
+        71, 72, 73, 8601, rows, {}, false, nullptr, nullptr, false);
+    auto candidate_index = MakeRawDataIndex(rows);
+    const std::vector<std::pair<std::string, std::string>> workloads{
+        {"selective", R"(RARE\d+END)"},
+        {"unselective", "COMMON.*"},
+        {"interior", ".*RARE"},
+        {"common_prefix", "x.*RARE123END"},
+        {"long_literal", ".*x{500}COMMONRARE123END"},
+        {"rare_prefix", "RARE.*COMMON"},
+        {"mandatory_suffix", "(COMMON|WARN).*RARE"},
+        {"or_branches", "COMMON.*RARE123END|RAREwrong.*COMMON"},
+        {"no_literal", ".*"},
+        {"nullable_long", "(?:" + std::string(3000, 'x') + ")?"},
+        {"empty_branch", "RARE|"},
+        {"zero_hits", "ABSENT.*"},
+    };
+    // ExecuteQueryExpr constructs a fresh QueryContext with expression-result
+    // caching disabled (QueryContext's default); no result cache is reused.
+    RecordProperty("expression_result_cache", "disabled");
+    RecordProperty("rows", static_cast<int>(rows.size()));
+    RecordProperty("sa_sample_rate", 8);
+    RecordProperty(
+        "fmindex_cost_ratio",
+        std::to_string(
+            segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio()));
+    for (const auto& [name, pattern] : workloads) {
+        PartialRegexMatcher matcher(pattern);
+        const auto candidates =
+            candidate_index->PatternMatch(pattern, proto::plan::RegexMatch);
+        RecordProperty(name + "_candidates",
+                       static_cast<int>(candidates.count()));
+        auto measure = [&](const SealedFMMatch& fixture, bool cold = false) {
+            auto expression = MakeMatchTypedExpr(fixture.schema,
+                                                 fixture.varchar_id,
+                                                 pattern,
+                                                 false,
+                                                 proto::plan::RegexMatch);
+            auto node = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            std::vector<double> times;
+            for (int iteration = 0; iteration < 8; ++iteration) {
+                if (cold) {
+                    PartialRegexMatcher::PrepareIndexCondition(
+                        "__evict_benchmark_cache__");
+                }
+                const auto start = std::chrono::steady_clock::now();
+                auto got = milvus::query::ExecuteQueryExpr(
+                    node, fixture.segment.get(), rows.size(), MAX_TIMESTAMP);
+                const auto elapsed =
+                    std::chrono::duration<double, std::micro>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+                for (size_t i = 0; i < rows.size(); ++i) {
+                    EXPECT_EQ(got[i], matcher(rows[i])) << name << " row=" << i;
+                }
+                if (iteration != 0) {
+                    times.push_back(elapsed);
+                }
+            }
+            std::sort(times.begin(), times.end());
+            return times[times.size() / 2];
+        };
+        auto expression = MakeMatchTypedExpr(indexed.schema,
+                                             indexed.varchar_id,
+                                             pattern,
+                                             false,
+                                             proto::plan::RegexMatch);
+        RecordProperty(name + "_uses_index",
+                       CompiledUseIndexCursor(
+                           expression, indexed.segment.get(), rows.size()));
+        RecordProperty(name + "_scan_us", std::to_string(measure(scan)));
+        RecordProperty(name + "_indexed_us", std::to_string(measure(indexed)));
+        RecordProperty(name + "_indexed_cold_us",
+                       std::to_string(measure(indexed, true)));
+    }
 }
 
 namespace {

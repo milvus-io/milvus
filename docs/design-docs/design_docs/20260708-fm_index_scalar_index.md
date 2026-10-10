@@ -13,6 +13,9 @@
 - **Core implementation:** [`xiaofan-luan/fm-index-lite`](https://github.com/xiaofan-luan/fm-index-lite)
   (self-contained C++17, complete, benchmarked — this is PR 1 of the original plan)
 - **Related Issues:** #51577 (v1 anchored LIKE), #52683 (general Match)
+- **Regex follow-up:** [R01 candidate/recheck implementation draft](20261004-fmindex-regex-candidates.md)
+  (#53862). The release scope below describes the original implementation;
+  the follow-up specifies bounded regex acceleration and its validation method.
 - **Released:** TBD
 
 ## Summary
@@ -183,6 +186,9 @@ sample rate are tracked follow-ups.
   using its own O(|P|) count (`queryNode.fmindexCostRatio`, default 0.001).
 - General `Match` (`LIKE` with interior `%`/`_`): rarest literal fragment
   produces candidates; `ExecFMMatch` rechecks those rows on sealed VARCHAR.
+- **`RegexMatch` candidate pruning:** bounded RE2-derived Boolean conditions,
+  Count-selected FM candidates and canonical RE2 recheck on sealed VARCHAR;
+  see the [regex candidate design](20261004-fmindex-regex-candidates.md).
 - Standard scalar-index lifecycle: per-sealed-segment build, V3 single-file
   serialization, mmap (zero-copy view), caching-layer pinning.
 - Growing segments and any op the index declines fall back to the existing
@@ -199,9 +205,6 @@ sample rate are tracked follow-ups.
   must route the equality family to RawData before either method is reached.
 - **`TEXT`, `JSON` string paths, `ARRAY<VARCHAR>`, struct sub-fields** — other
   data types. Rejected at `create_index` for now (VARCHAR-only checker).
-- **`RegexMatch`** two-phase (required-literal extraction + recheck)
-  acceleration. Designed here but not wired (stays on the brute-force path).
-  Literal extraction is a harder problem than LIKE fragment splitting.
 - **Occurrence enumeration / count API** (`(pk, offset)` lists, batched
   scoring) surfaced as a user-facing decontamination primitive.
 
@@ -269,7 +272,7 @@ proto, or planner changes**:
 | `InnerMatch` | `MatchingDocs(P)` | **yes** | exact | none |
 | `Equal` / `In` / `NotIn` | *(library can do `LocatePrefixDocs(P)` ∩ length filter, but…)* | **no** — `ShouldUseOp` declines the equality family; routed to scan / `INVERTED` | exact via fallback | n/a |
 | `Match` | rarest literal fragment `VisitMatchingDocs`; VARCHAR `LikePatternMatcher` recheck | **yes** | exact after recheck | yes, sealed VARCHAR |
-| `RegexMatch` | `extract_literals_from_regex` → per-literal `MatchingDocs`, AND | **no** (follow-up) — brute-force path | — | — |
+| `RegexMatch` | Count-selected Boolean condition → FM candidate bitmaps | **yes, when the guard accepts** | candidate superset | canonical RE2 recheck |
 | `Range` (lexicographic) | — | **no** — `ShouldUseOp` = false → existing paths | — | n/a |
 
 Exactness contract: for the three anchored pattern rows the bitmap returned by
@@ -334,29 +337,19 @@ factor **order** constraint can be verified inside the index from
 eliminating phase 2 entirely. Ship recheck-based first; add if phase-2 reads
 dominate.
 
-### Regex (`RegexMatch`): required-literal extraction
+### Regex (`RegexMatch`): candidate extraction and recheck
 
-Milvus already ships `extract_literals_from_regex` (used by NGRAM's
-`CanHandleLiteral`, `NgramInvertedIndex.cpp:813-817`) — PR 3 reuses it: phase 1
-evaluates each extracted literal as `MatchingDocs(literal)` (batched via
-`CountBatch` first for the guard/ordering) and ANDs the bitmaps. Phase 2 runs
-the existing RE2 matcher (`internal/core/src/common/RegexQuery.h`) over
-surviving rows. Two FMINDEX-specific improvements over the NGRAM version:
-literals of **any length** are usable (NGRAM declines the whole query if any
-literal is shorter than `min_gram`), and each literal is matched exactly
-rather than via gram intersection.
+The regex follow-up uses RE2's `FilteredRE2` prefilter to derive a bounded
+Boolean condition over required byte literals. The condition preserves AND/OR
+relationships, maps RE2's lowercased atoms back to exact FM-index byte
+spellings, and weakens unsupported or over-budget branches conservatively.
+`FMIndex` counts the retained literals on the current segment, selects the
+lowest-cost child of each AND, evaluates the selected condition as candidate
+bitmaps, and rechecks candidate values with the canonical RE2 matcher.
 
-*Upgrade path:* RE2's `re2::Prefilter` / `FilteredRE2` (the Google-Code-Search
-analyzer, already a Milvus dependency) produces a full boolean AND/OR tree
-over required atoms — strictly stronger pruning for alternation-heavy
-patterns. Adopt when workloads show `extract_literals_from_regex` leaving
-pruning power on the table.
-
-Decline (scan-path fallback) when: extraction yields no required literal
-(`.*`, alternations with an empty branch, pure char-classes), or the pattern
-sets case-insensitive flags (`(?i)`) — literal matching would need folded
-search the index doesn't do in v1. This mirrors how ripgrep and code-search
-degrade, and is always correct: declining just means today's behavior.
+Patterns without a safe non-empty condition use the existing scan path. The
+full extraction contract, budgets and examples are maintained in the [regex
+candidate design](20261004-fmindex-regex-candidates.md).
 
 ### Count / enumeration API (kept from v1, now Phase 4)
 
@@ -493,9 +486,10 @@ All integration points verified against master (branch state of 2026-07-14).
   - `ShouldUseOp(op, pattern)`: `true` for the three anchored pattern ops
     (`PrefixMatch`/`PostfixMatch`/`InnerMatch`) and for general `Match`, gated
     by the count-first cost guard when a literal is supplied (`Match` uses
-    `MatchGuardAccepts` on the rarest factor, locate-only); `false` (fall back to the scan /
-    another index) for **everything else, including the `Equal`/`NotEqual`/`IN`/`NOT IN`
-    equality family**, `RegexMatch`, and `Range`. The default is `false`
+    `MatchGuardAccepts` on the rarest factor, locate-only), and for
+    `RegexMatch` when its selected condition passes the same guard; `false`
+    (fall back to the scan / another index) for the equality family and
+    `Range`. The default is `false`
     so any unhandled op safely downgrades rather than routing into a method that
     throws.
   - `In`/`NotIn` are required `ScalarIndex` overrides, but the equality family is
@@ -503,15 +497,14 @@ All integration points verified against master (branch state of 2026-07-14).
     `ThrowInfo(Unsupported)` (like `Range` and `Reverse_Lookup`) so an accidental
     future route fails loudly rather than returning wrong rows.
   - The count-first guard is folded into `ShouldUseOp(op, pattern)` above — there
-    is **no** separate `CanAccelerate` method; a future two-phase executor
-    (PR 3) would consult it the way NGRAM consults `CanHandleLiteral`.
+    is **no** separate `CanAccelerate` method; both `Match` and `RegexMatch`
+    consult it before candidate generation.
   - `HasRawData() = false`; `Reverse_Lookup` unsupported. General `Match`
     returns candidates from `PatternMatch`. `ExecFMMatch` rechecks them with
     `ProcessDataByOffsets<std::string_view>` and `LikePatternMatcher` on the
     sealed VARCHAR column. ISA is not materialized at load/build.
-  - RegexMatch two-phase entry points mirroring
-    `NgramInvertedIndex::ExecutePhase1/2` are still not wired; regex stays on
-    the scan.
+  - `RegexMatch` returns candidate rows from the selected Boolean condition;
+    the expression layer performs the canonical RE2 recheck on sealed VARCHAR.
 - **Registration**: `ScalarIndexType::FMINDEX` (`ScalarIndex.h:39-49` +
   To/FromString), `FMINDEX_INDEX_TYPE = "FMINDEX"` (`Meta.h`), param key
   `fm_sa_sample_rate` (`Meta.h`), `std::optional<FMIndexParams>` in
@@ -527,7 +520,8 @@ All integration points verified against master (branch state of 2026-07-14).
 - `Match` two-phase: `ExecFMMatch` mirrors `ExecNgramMatch`. Phase 1 caches
   `PatternMatch` candidates. Phase 2 groups sorted candidate offsets by chunk
   via `ProcessDataByOffsets` and runs `LikePatternMatcher` on the views.
-- `RegexMatch` two-phase remains a follow-up. Regex stays on the scan.
+- `RegexMatch` uses the FM candidate condition and the canonical RE2 matcher
+  for phase-2 verification on sealed VARCHAR.
 
 ### Go layer (`internal/util/indexparamcheck/`)
 
@@ -700,9 +694,8 @@ Reserved for future: `case_insensitive` (see above).
    equality family (`==` / `IN` / `NOT IN`) is **declined** (falls back to the
    scan / an equality index), not accelerated in this PR.
 3. **PR 3 — general `LIKE` + regex (two-phase).** Factor decomposition
-   (`split_by_wildcard`) and required-literal extraction
-   (`extract_literals_from_regex`), both reused; generalize the NGRAM
-   two-phase interface; conjunction integration; decline rules.
+   (`split_by_wildcard`) and bounded RE2-derived Boolean conditions; Count-based
+   selection, candidate bitmap evaluation and canonical matcher recheck.
 4. **PR 4 — count / enumeration API.** Query surface (open question below),
    proxy cross-segment aggregation, PK-dedup default, `CountBatch` bulk path.
 5. **PR 5 — TEXT / LOB.** Checker accepts TEXT; builder reads via LOB reader.
@@ -720,14 +713,17 @@ Reserved for future: `case_insensitive` (see above).
   (`\%`, `\\`, trailing `\`), `_` with multi-byte UTF-8 characters, patterns
   at row start/end, patterns longer than any row.
 - **Factor/literal extraction units:** LIKE tokenization parity with
-  `scanLikePattern`; regex decline cases (`.*`, `(?i)`, empty alternations);
-  anchoring correctness.
+  `scanLikePattern`; regex Boolean relationships, conservative weakening,
+  Count selection and anchoring correctness.
 - **Guard behavior:** degenerate patterns (`'%a%'`) take the scan path; the
   crossover threshold benchmarked, not assumed.
 - **Cross-segment:** same data in 1 vs N segments yields identical
   union/sum; flush/compaction exercised; delete-bitmap masking.
 - **Serialization/mmap:** V3 round-trip; mmap-view vs in-RAM result parity and
   throughput; corrupted-blob load fuzz (library ASan suite re-run in-tree).
+- **Regex candidates:** nested alternatives, short/folded branches, NULL/NOT,
+  batch and multi-chunk sealed reads, current-index selectivity and invalid
+  syntax.
 - **Count API (PR 4):** counts vs brute-force; cross-segment sums; PK-dedup.
 - **TEXT/LOB (PR 5):** values straddling the 64 KiB inline threshold;
   multi-MiB documents.
