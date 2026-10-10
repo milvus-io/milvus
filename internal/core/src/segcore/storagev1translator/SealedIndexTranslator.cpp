@@ -316,18 +316,14 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     options.enable_mmap = index_load_info_.enable_mmap;
     options.estimated_bytes = index_load_info_.index_size;
     options.op_ctx = ctx;
-    options.warmup = ToStorageWarmup(milvus::segcore::getCacheWarmupPolicy(
-        index_load_info_.warmup_policy,
-        IsVectorDataType(index_load_info_.field_type),
-        /* is_index */ true));
+    // Loaders stage local files under localStorage even without mmap.
+    const auto base_path =
+        std::filesystem::path(
+            LocalStagingRoot(index_load_info_.mmap_dir_path)) /
+        "index_files" / index_load_info_.index_id /
+        index_load_info_.segment_id / index_load_info_.field_id;
+    options.mmap_dir_path = (base_path / "index").string();
     if (index_load_info_.enable_mmap) {
-        AssertInfo(!index_load_info_.mmap_dir_path.empty(),
-                   "mmap directory path is empty");
-        auto base_path = std::filesystem::path(index_load_info_.mmap_dir_path) /
-                         "index_files" / index_load_info_.index_id /
-                         index_load_info_.segment_id /
-                         index_load_info_.field_id;
-        options.mmap_dir_path = (base_path / "index").string();
         config_[milvus::index::ENABLE_MMAP] = true;
         config_[milvus::index::MMAP_FILE_PATH] = options.mmap_dir_path;
         config_[milvus::index::EMB_LIST_META_PATH] =

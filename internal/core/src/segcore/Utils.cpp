@@ -43,6 +43,7 @@
 #include "google/protobuf/descriptor.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
+#include "index/ParamUtils.h"
 #include "index/Utils.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/sparse_utils.h"
@@ -1403,6 +1404,20 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             .is_text_match = false,
         });
         config = std::move(adapted.params);
+        // Persisted index_params never carry nullability, and an artifact
+        // without a validity sidecar rebuilds validity from its postings only
+        // when the field is nullable. Use the build boundary's rule: a typed
+        // JSON projection is nullable unless its cast is JSON or ARRAY_*.
+        bool nullable = load_index_info->schema.nullable();
+        if (field_type == DataType::JSON) {
+            const auto cast = JsonCastType::FromString(
+                config.at(JSON_CAST_TYPE).get<std::string>());
+            if (cast.data_type() != JsonCastType::DataType::JSON &&
+                cast.data_type() != JsonCastType::DataType::ARRAY) {
+                nullable = true;
+            }
+        }
+        config["nullable"] = nullable;
     }
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
