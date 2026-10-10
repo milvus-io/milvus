@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
 #include "index/LoadResource.h"
+#include "index/ParamUtils.h"
 #include "index/ResourceUsageUtils.h"
 #include "index/Meta.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
