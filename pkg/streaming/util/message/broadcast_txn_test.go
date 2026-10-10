@@ -40,12 +40,6 @@ func TestBroadcastTxnHeaderAndAdmission(t *testing.T) {
 	// The encoded header does not alias the caller's proto.
 	tc.TxnId = 100
 	require.Equal(t, uint64(99), msg.BroadcastHeader().Txn.TxnId)
-	same := NewDropCollectionMessageBuilderV1().WithHeader(&DropCollectionMessageHeader{CollectionId: 1}).WithBody(&msgpb.DropCollectionRequest{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
-	sameHeader := same.BroadcastHeader()
-	sameHeader.Txn = &messagespb.BroadcastTxnContext{TxnId: 1}
-	sameHeader.AckSyncUp = true
-	same.OverwriteBroadcastHeader(sameHeader).OverwriteBroadcastAdmissionKey(key.Key)
-	require.True(t, SameBroadcastOperation(msg, WithBroadcastControlChannel(same, "by-dev-rootcoord-dml_0_vcchan")))
 	header.Txn = &messagespb.BroadcastTxnContext{TxnId: 2, Kind: messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY, Sequence: 1}
 	msg.OverwriteBroadcastHeader(header)
 	require.Equal(t, uint64(2), msg.BroadcastHeader().Txn.TxnId)
@@ -63,6 +57,4 @@ func TestBroadcastTxnHeaderAndAdmission(t *testing.T) {
 	require.False(t, msg.BroadcastHeader().AckSyncUp)
 	require.Equal(t, []string{"v2"}, msg.BroadcastHeader().VChannels)
 	require.False(t, msg.Properties().Exist(broadcastAdmissionKey))
-	changed := NewDropCollectionMessageBuilderV1().WithHeader(&DropCollectionMessageHeader{CollectionId: 2}).WithBody(&msgpb.DropCollectionRequest{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
-	require.False(t, SameBroadcastOperation(msg, changed))
 }

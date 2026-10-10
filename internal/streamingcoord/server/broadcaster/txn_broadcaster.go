@@ -3,7 +3,6 @@ package broadcaster
 import (
 	"context"
 	"maps"
-	"slices"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -45,7 +44,7 @@ type broadcastTxn struct {
 	manager *broadcastTaskManager
 	id      uint64
 	op      chan struct{}
-	tasks   []*broadcastTask // protected by op; append only until GC
+	tasks   []*broadcastTask // sorted by sequence; protected by mu
 	deleted bool             // protected by op
 	mu      sync.Mutex
 	begin   *streamingpb.BroadcastTask // last successfully persisted Begin; protected by mu
@@ -54,6 +53,10 @@ type broadcastTxn struct {
 }
 
 func (bm *broadcastTaskManager) StartTxnBroadcastWithResourceKey(ctx context.Context, keys ...message.ResourceKey) (TxnBroadcaster, *TxnBroadcastResult, error) {
+	if err := bm.admission.Acquire(ctx, 1); err != nil {
+		return nil, nil, err
+	}
+	defer bm.admission.Release(1)
 	ctx, cancel := contextutil.MergeContext(ctx, bm.txnCtx)
 	defer cancel()
 	if err := bm.checkClusterRole(ctx); err != nil {
@@ -100,18 +103,14 @@ func (bm *broadcastTaskManager) StartTxnBroadcastWithResourceKey(ctx context.Con
 	if err := bm.checkClusterRole(ctx); err != nil {
 		return fail(err)
 	}
-	// The cluster S guard fences a concurrent replication configuration change.
-	config, err := resource.Resource().StreamingCatalog().GetReplicateConfiguration(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	if len(config.GetReplicateConfiguration().GetCrossClusterTopology()) != 0 {
-		return fail(merr.WrapErrServiceUnavailable("broadcast transactions do not yet support cross-cluster replication"))
-	}
 	return &txnBroadcaster{manager: bm, guards: guards, admission: admission, admissionKey: admissionKey, controlChannel: control}, nil, nil
 }
 
 func (bm *broadcastTaskManager) RecoverTxnBroadcast(ctx context.Context, id uint64) (TxnBroadcaster, error) {
+	if err := bm.admission.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer bm.admission.Release(1)
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("broadcaster is closing")
 	}
@@ -124,6 +123,9 @@ func (bm *broadcastTaskManager) RecoverTxnBroadcast(ctx context.Context, id uint
 	bm.mu.Unlock()
 	if group == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("broadcast transaction %d does not exist or has expired", id)
+	}
+	if err := group.checkOpen(); err != nil {
+		return nil, err
 	}
 	return &txnBroadcaster{manager: bm, group: group}, nil
 }
@@ -201,19 +203,14 @@ func (h *txnBroadcaster) BroadcastBegin(ctx context.Context, msg message.Broadca
 }
 
 func (h *txnBroadcaster) BroadcastBody(ctx context.Context, msg message.BroadcastMutableMessage) (*TxnBroadcastResult, error) {
-	return h.broadcastMember(ctx, msg, messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY, false)
+	return h.broadcastMember(ctx, msg, messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY)
 }
 
-func (h *txnBroadcaster) BroadcastCommit(ctx context.Context, msg message.BroadcastMutableMessage, opts ...TxnCommitOption) (*TxnBroadcastResult, error) {
-	for _, opt := range opts {
-		if opt != EnsureTxnCompleted {
-			return nil, merr.WrapErrParameterInvalidMsg("unknown transaction commit option")
-		}
-	}
-	return h.broadcastMember(ctx, msg, messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT, slices.Contains(opts, EnsureTxnCompleted))
+func (h *txnBroadcaster) BroadcastCommit(ctx context.Context, msg message.BroadcastMutableMessage) (*TxnBroadcastResult, error) {
+	return h.broadcastMember(ctx, msg, messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT)
 }
 
-func (h *txnBroadcaster) broadcastMember(ctx context.Context, msg message.BroadcastMutableMessage, kind messagespb.BroadcastTxnKind, ensure bool) (*TxnBroadcastResult, error) {
+func (h *txnBroadcaster) broadcastMember(ctx context.Context, msg message.BroadcastMutableMessage, kind messagespb.BroadcastTxnKind) (*TxnBroadcastResult, error) {
 	ctx, cancel := contextutil.MergeContext(ctx, h.manager.txnCtx)
 	defer cancel()
 	h.mu.Lock()
@@ -238,7 +235,7 @@ func (h *txnBroadcaster) broadcastMember(ctx context.Context, msg message.Broadc
 	if err := group.acquire(ctx); err != nil {
 		return nil, err
 	}
-	task, duplicated, err := group.admit(ctx, msg, kind, ensure)
+	task, duplicated, err := group.admit(ctx, msg, kind)
 	group.release()
 	if err != nil {
 		return nil, err
@@ -258,33 +255,59 @@ func (g *broadcastTxn) acquire(ctx context.Context) error {
 }
 func (g *broadcastTxn) release() { <-g.op }
 
+// checkOpen uses the durable Begin tombstone, including before group GC.
+func (g *broadcastTxn) checkOpen() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.begin.GetState() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+		return merr.WrapErrParameterInvalidMsg("broadcast transaction %d has completed", g.id)
+	}
+	return nil
+}
+
 // admit holds op, but never mu while waiting for a previous member.
-func (g *broadcastTxn) admit(ctx context.Context, msg message.BroadcastMutableMessage, kind messagespb.BroadcastTxnKind, ensure bool) (*broadcastTask, bool, error) {
+func (g *broadcastTxn) admit(ctx context.Context, msg message.BroadcastMutableMessage, kind messagespb.BroadcastTxnKind) (*broadcastTask, bool, error) {
 	if g.deleted {
 		return nil, false, merr.WrapErrParameterInvalidMsg("broadcast transaction has expired")
 	}
+	if err := g.checkOpen(); err != nil {
+		return nil, false, err
+	}
+	members := g.members()
+	beginHeader := members[0].Header()
+	header := msg.BroadcastHeader()
+	if len(header.ResourceKeys) != 0 && !maps.Equal(header.ResourceKeys, beginHeader.ResourceKeys) {
+		return nil, false, merr.WrapErrParameterInvalidMsg("message resource keys differ from the transaction's resources")
+	}
+	channels := typeutil.NewSet(header.VChannels...)
+	channels.Insert(streaming.WAL().ControlChannel())
+	if !maps.Equal(channels, typeutil.NewSet(beginHeader.VChannels...)) {
+		return nil, false, merr.WrapErrServiceInternalMsg("message channels differ from the transaction's channels")
+	}
+	last := members[len(members)-1]
+	if last.Header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
+		if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
+			// The first terminal owns completion. A concurrent caller only waits
+			// for its result; it cannot replace the selected business message.
+			return last, true, nil
+		}
+		return nil, false, merr.WrapErrParameterInvalidMsg("broadcast transaction is completing")
+	}
 	if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY && message.IdempotencyKeyOf(msg) != "" {
 		scope := idempotencyScopeOfMessage(msg)
-		for _, task := range g.tasks[1:] {
+		for _, task := range members[1:] {
 			if task.IdempotencyScope() == scope {
 				return task, true, nil
 			}
 		}
 	}
-	last := g.tasks[len(g.tasks)-1]
-	if last.Header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
-		if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT && (ensure || message.SameBroadcastOperation(last.BroadcastMessage(), msg)) {
-			return last, true, nil
-		}
-		return nil, false, merr.WrapErrParameterInvalidMsg("broadcast transaction already has a different terminal operation")
-	}
 	if _, err := txnResult(ctx, last, false); err != nil {
 		return nil, false, err
 	}
-	if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY && len(g.tasks) >= maxTxnMembers-1 {
+	if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY && len(members) >= maxTxnMembers-1 {
 		return nil, false, merr.WrapErrParameterInvalidMsg("broadcast transaction member limit reached; Commit remains available")
 	}
-	prepared, err := prepareTxnMessage(ctx, msg, g.id, kind, uint32(len(g.tasks)), g.tasks[0].Header().ResourceKeys.Collect(), streaming.WAL().ControlChannel())
+	prepared, err := prepareTxnMessage(ctx, msg, g.id, kind, uint32(len(members)), members[0].Header().ResourceKeys.Collect(), streaming.WAL().ControlChannel())
 	if err != nil {
 		return nil, false, err
 	}
@@ -294,7 +317,9 @@ func (g *broadcastTxn) admit(ctx context.Context, msg message.BroadcastMutableMe
 	task := newBroadcastTaskFromBroadcastMessage(prepared, g.manager.metrics, g.manager.ackScheduler)
 	task.txn = g
 	task.SetLogger(g.manager.Logger())
+	g.mu.Lock()
 	g.tasks = append(g.tasks, task)
+	g.mu.Unlock()
 	g.manager.mu.Lock()
 	g.manager.tasks[prepared.BroadcastHeader().BroadcastID] = task
 	g.manager.mu.Unlock()
@@ -303,6 +328,9 @@ func (g *broadcastTxn) admit(ctx context.Context, msg message.BroadcastMutableMe
 }
 
 func prepareTxnMessage(ctx context.Context, msg message.BroadcastMutableMessage, id uint64, kind messagespb.BroadcastTxnKind, seq uint32, keys []message.ResourceKey, control string) (message.BroadcastMutableMessage, error) {
+	if msg.IsUnreplicable() || msg.ReplicateHeader() != nil || msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+		return nil, merr.WrapErrParameterInvalidMsg("transaction members must be replicable business messages")
+	}
 	if supplied := msg.BroadcastHeader().ResourceKeys; len(supplied) != 0 && !maps.Equal(supplied, typeutil.NewSet(keys...)) {
 		return nil, merr.WrapErrParameterInvalidMsg("message resource keys differ from the transaction's resources")
 	}

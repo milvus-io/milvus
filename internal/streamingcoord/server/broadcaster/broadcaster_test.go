@@ -402,7 +402,7 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	)
 	replicatedTask := newBroadcastTaskFromProto(replicatedProto, metrics, ackScheduler)
 
-	// Task 3: PENDING state but ALL vchannels acked -> should NOT be returned (no pending messages)
+	// Task 3: All vchannels ACKed but callback pending -> promotion must wait for it.
 	allAckedProto := createNewWaitAckBroadcastTaskFromMessage(
 		createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(3),
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -429,8 +429,8 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 
 	result := bm.getIncompleteBroadcastTasks()
 
-	// Should return exactly 2 tasks: the pending task (ID=1) and the replicated task (ID=2)
-	assert.Len(t, result, 2)
+	// Include the callback-pending task (ID=3) as well.
+	assert.Len(t, result, 3)
 
 	// Collect the broadcast IDs from the result
 	resultIDs := make(map[uint64]struct{})
@@ -439,7 +439,7 @@ func TestGetIncompleteBroadcastTasks(t *testing.T) {
 	}
 	assert.Contains(t, resultIDs, uint64(1), "PENDING task with pending messages should be returned")
 	assert.Contains(t, resultIDs, uint64(2), "REPLICATED task with pending messages should be returned")
-	assert.NotContains(t, resultIDs, uint64(3), "PENDING task with all vchannels acked should not be returned")
+	assert.Contains(t, resultIDs, uint64(3), "callback-pending task must be drained before promotion")
 	assert.NotContains(t, resultIDs, uint64(4), "TOMBSTONE task should not be returned")
 }
 

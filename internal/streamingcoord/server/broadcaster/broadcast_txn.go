@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // saveMember is called with the member mutex held. The group mutex serializes
@@ -59,8 +60,9 @@ func (g *broadcastTxn) drop(ctx context.Context) error {
 		return merr.WrapErrServiceInternalMsg("cannot GC an open broadcast transaction")
 	}
 	g.mu.Unlock()
-	removals := make(map[uint64]*streamingpb.BroadcastTask, len(g.tasks))
-	for _, task := range g.tasks {
+	members := g.members()
+	removals := make(map[uint64]*streamingpb.BroadcastTask, len(members))
+	for _, task := range members {
 		removals[task.Header().BroadcastID] = &streamingpb.BroadcastTask{State: streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE}
 	}
 	err := resource.Resource().StreamingCatalog().SaveBroadcastTasks(ctx, removals)
@@ -72,7 +74,7 @@ func (g *broadcastTxn) drop(ctx context.Context) error {
 	bm := g.manager
 	bm.mu.Lock()
 	delete(bm.txns, g.id)
-	for _, task := range g.tasks {
+	for _, task := range members {
 		task.mu.Lock()
 		task.ObserveStateChanged(streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE)
 		task.mu.Unlock()
@@ -88,18 +90,28 @@ func validateBroadcastTxn(tasks []*streamingpb.BroadcastTask) error {
 		return merr.WrapErrServiceInternalMsg("invalid broadcast transaction member count")
 	}
 	first := message.NewBroadcastMutableMessageBeforeAppend(tasks[0].Message.Payload, tasks[0].Message.Properties).BroadcastHeader()
-	closed := tasks[0].State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	closed := first.Txn.GetSequence() == 0 && tasks[0].State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	previous := int64(-1)
+	contiguous := true
 	ids := make(map[uint64]bool, len(tasks))
 	for idx, task := range tasks {
 		msg := message.NewBroadcastMutableMessageBeforeAppend(task.GetMessage().GetPayload(), task.GetMessage().GetProperties())
 		header := msg.BroadcastHeader()
 		tc := header.Txn
-		if first.Txn.GetTxnId() == 0 || tc.GetTxnId() != first.Txn.GetTxnId() || int(tc.GetSequence()) != idx || header.BroadcastID == 0 || ids[header.BroadcastID] {
+		if first.Txn.GetTxnId() == 0 || tc.GetTxnId() != first.Txn.GetTxnId() || int64(tc.GetSequence()) <= previous || tc.GetSequence() >= maxTxnMembers || header.BroadcastID == 0 || ids[header.BroadcastID] {
 			return merr.WrapErrServiceInternalMsg("invalid broadcast transaction identity or sequence")
 		}
 		ids[header.BroadcastID] = true
-		if !maps.Equal(first.ResourceKeys, header.ResourceKeys) || (idx > 0 && message.BroadcastAdmissionKeyOf(msg) != "") {
+		contiguous = contiguous && int(tc.GetSequence()) == idx
+		previous = int64(tc.GetSequence())
+		if (!contiguous && msg.ReplicateHeader() == nil) || msg.IsUnreplicable() {
+			return merr.WrapErrServiceInternalMsg("non-replicated transaction has a missing predecessor or unreplicable member")
+		}
+		if !maps.Equal(first.ResourceKeys, header.ResourceKeys) || (tc.GetSequence() > 0 && message.BroadcastAdmissionKeyOf(msg) != "") {
 			return merr.WrapErrServiceInternalMsg("invalid broadcast transaction ownership")
+		}
+		if !maps.Equal(typeutil.NewSet(first.VChannels...), typeutil.NewSet(header.VChannels...)) {
+			return merr.WrapErrServiceInternalMsg("inconsistent broadcast transaction channels")
 		}
 		for key := range header.ResourceKeys {
 			if key.Domain == messagespb.ResourceDomain_ResourceDomainIdempotency {
@@ -107,22 +119,26 @@ func validateBroadcastTxn(tasks []*streamingpb.BroadcastTask) error {
 			}
 		}
 		kind := tc.GetKind()
-		if (idx == 0 && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BEGIN) ||
-			(idx > 0 && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT) ||
+		if (tc.GetSequence() == 0 && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BEGIN) ||
+			(tc.GetSequence() > 0 && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_BODY && kind != messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT) ||
 			(kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT && idx != len(tasks)-1) {
 			return merr.WrapErrServiceInternalMsg("invalid broadcast transaction member kind")
 		}
 		switch task.State {
+		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED:
+			if msg.ReplicateHeader() == nil || closed {
+				return merr.WrapErrServiceInternalMsg("invalid replicated transaction member")
+			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING:
 			if closed || idx != len(tasks)-1 {
 				return merr.WrapErrServiceInternalMsg("broadcast transaction has an incomplete predecessor")
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TXN_INFLIGHT:
-			if idx != 0 || closed {
+			if tc.GetSequence() != 0 || closed {
 				return merr.WrapErrServiceInternalMsg("only an open Begin can be TXN_INFLIGHT")
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:
-			if kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT && !closed {
+			if !contiguous || (kind == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT && !closed) {
 				return merr.WrapErrServiceInternalMsg("terminal completed without closing Begin")
 			}
 		default:

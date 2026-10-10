@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -202,16 +201,20 @@ func TestTxnBroadcastLifecycle(t *testing.T) {
 				require.NotEqual(t, messagespb.ResourceDomain_ResourceDomainIdempotency, key.Domain)
 			}
 		}
-		same, err := recovered.BroadcastCommit(ctx, commitMsg)
-		require.NoError(t, err)
-		require.Equal(t, done.BroadcastResult.BroadcastID, same.BroadcastResult.BroadcastID)
+		_, err = bm.RecoverTxnBroadcast(ctx, 99)
+		require.ErrorContains(t, err, "has completed")
+		// Handles acquired before the tombstone cannot append or replay old Bodies.
+		_, err = recovered.BroadcastCommit(ctx, commitMsg)
+		require.ErrorContains(t, err, "has completed")
 		_, err = recovered.BroadcastCommit(ctx, newImportMsgWithKey("abort"))
-		require.Error(t, err)
-		ensured, err := recovered.BroadcastCommit(ctx, newImportMsgWithKey("abort"), EnsureTxnCompleted)
+		require.ErrorContains(t, err, "has completed")
+		_, err = recovered.BroadcastBody(ctx, body)
+		require.ErrorContains(t, err, "has completed")
+		require.Len(t, store.snapshot(99), 3)
+		// Begin admission deduplication still returns the original request result.
+		_, dup, err = bm.StartTxnBroadcastWithResourceKey(ctx, key, business)
 		require.NoError(t, err)
-		require.Equal(t, done.BroadcastResult.BroadcastID, ensured.BroadcastResult.BroadcastID)
-		_, err = recovered.BroadcastBody(ctx, newImportMsgWithKey("new-body"))
-		require.Error(t, err)
+		require.Equal(t, begin.BroadcastResult.BroadcastID, dup.BroadcastResult.BroadcastID)
 		require.NoError(t, bm.DropTombstone(ctx, done.BroadcastResult.BroadcastID))
 		require.Nil(t, store.snapshot(99))
 		_, err = bm.RecoverTxnBroadcast(ctx, 99)
@@ -318,7 +321,7 @@ func TestTxnRecoveryAndUnsubmittedClose(t *testing.T) {
 }
 
 func TestTxnCompetingTerminalsAndAckSyncUp(t *testing.T) {
-	mockey.PatchConvey("terminal choice persists before ACK and rejects conflicts", t, func() {
+	mockey.PatchConvey("only the selected terminal is broadcast; completion fences every handle", t, func() {
 		bm, store := setupTxnTest(t)
 		defer bm.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -342,20 +345,57 @@ func TestTxnCompetingTerminalsAndAckSyncUp(t *testing.T) {
 		// Append success cannot close a member with AckSyncUp.
 		_, err = bm.resourceKeyLocker.FastLock(rk)
 		require.Error(t, err)
-		_, err = second.BroadcastCommit(ctx, newImportMsgWithKey("rollback"))
-		require.Error(t, err)
+		// Recover still works while the terminal is in flight. A different message
+		// waits for the existing terminal instead of being compared or appended.
+		pending, err := bm.RecoverTxnBroadcast(ctx, 5)
+		require.NoError(t, err)
+		defer pending.Close()
+		retryCtx, retryCancel := context.WithTimeout(ctx, 20*time.Millisecond)
+		defer retryCancel()
+		_, err = second.BroadcastCommit(retryCtx, newImportMsgWithKey("rollback"))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Len(t, store.snapshot(5), 2)
+		_, err = pending.BroadcastBody(ctx, newImportMsgWithKey("late-body"))
+		require.ErrorContains(t, err, "is completing")
 		g := bm.txns[5]
 		require.NoError(t, g.acquire(ctx))
 		task := g.tasks[1]
 		g.release()
+		joined := make(chan struct{})
+		var originalResult func(context.Context, *broadcastTask, bool) (*TxnBroadcastResult, error)
+		mockey.Mock(txnResult).Origin(&originalResult).To(func(ctx context.Context, task *broadcastTask, duplicated bool) (*TxnBroadcastResult, error) {
+			if duplicated {
+				close(joined)
+			}
+			return originalResult(ctx, task, duplicated)
+		}).Build()
+		duplicateResult := make(chan *TxnBroadcastResult, 1)
+		duplicateErr := make(chan error, 1)
+		go func() {
+			result, err := second.BroadcastCommit(ctx, newImportMsgWithKey("rollback"))
+			duplicateResult <- result
+			duplicateErr <- err
+		}()
+		select {
+		case <-joined:
+		case <-ctx.Done():
+			t.Fatal("retry did not join the selected terminal")
+		}
 		for _, vc := range task.Header().VChannels {
 			task.mu.Lock()
 			immutable := task.getImmutableMessageFromVChannel(vc, &types.AppendResult{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 2})
 			task.mu.Unlock()
 			require.NoError(t, bm.Ack(ctx, immutable))
 		}
+		require.NoError(t, <-duplicateErr)
+		duplicate := <-duplicateResult
+		require.Equal(t, task.Header().BroadcastID, duplicate.BroadcastResult.BroadcastID)
+		require.Equal(t, end.MessageType(), duplicate.BroadcastResult.Duplicated.MessageType())
 		_, err = second.BroadcastCommit(ctx, end)
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "has completed")
+		_, err = bm.RecoverTxnBroadcast(ctx, 5)
+		require.ErrorContains(t, err, "has completed")
+		require.Equal(t, end.MessageType(), task.BroadcastMessage().MessageType())
 		require.Len(t, store.snapshot(5), 2)
 		guards, err := bm.resourceKeyLocker.FastLock(rk)
 		require.NoError(t, err)
@@ -401,10 +441,12 @@ func TestTxnFailedCompletionRetainsResources(t *testing.T) {
 		recovered, err := RecoverBroadcaster(ctx)
 		require.NoError(t, err)
 		bm = recovered.(*broadcastTaskManager)
-		h, err = bm.RecoverTxnBroadcast(ctx, 6)
+		// Recovery finishes the persisted terminal without a new caller message.
+		members := bm.txns[6].members()
+		_, err = members[len(members)-1].BlockUntilDone(ctx)
 		require.NoError(t, err)
-		_, err = h.BroadcastCommit(ctx, createNewBroadcastMsg([]string{"v1"}))
-		require.NoError(t, err)
+		_, err = bm.RecoverTxnBroadcast(ctx, 6)
+		require.ErrorContains(t, err, "has completed")
 		guards, err := bm.resourceKeyLocker.FastLock(rk)
 		require.NoError(t, err)
 		guards.Unlock()
@@ -458,8 +500,6 @@ func TestTxnAdmissionBeforeBeginAndValidation(t *testing.T) {
 		_, err = h.BroadcastBody(ctx, beginTxnMessage(124))
 		require.Error(t, err)
 		_, err = h.BroadcastBody(ctx, createNewBroadcastMsg([]string{"v1"}, message.NewExclusiveCollectionNameResourceKey("db", "other")))
-		require.Error(t, err)
-		_, err = h.BroadcastCommit(ctx, createNewBroadcastMsg([]string{"v1"}), TxnCommitOption(99))
 		require.Error(t, err)
 		_, err = h.BroadcastCommit(ctx, createNewBroadcastMsg([]string{"v1"}))
 		require.NoError(t, err)
@@ -526,14 +566,6 @@ func TestTxnCapacityAndFailureBeforeAdmission(t *testing.T) {
 		_, err = bm.RecoverTxnBroadcast(ctx, 1)
 		require.ErrorIs(t, err, ErrNotPrimary)
 		store.roleErr = nil
-		store.configErr = context.DeadlineExceeded
-		_, _, err = bm.StartTxnBroadcastWithResourceKey(ctx, key, rk)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		store.configErr = nil
-		store.config = &streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: &commonpb.ReplicateConfiguration{CrossClusterTopology: []*commonpb.CrossClusterTopology{{}}}}
-		_, _, err = bm.StartTxnBroadcastWithResourceKey(ctx, key, rk)
-		require.Error(t, err)
-		store.config = nil
 		h, _, err := bm.StartTxnBroadcastWithResourceKey(ctx, key, rk)
 		require.NoError(t, err)
 		bad := beginTxnMessage(1).OverwriteBroadcastAdmissionKey("different")
@@ -635,7 +667,7 @@ func TestTxnRecoveryRejectsInconsistentGroup(t *testing.T) {
 		require.Error(t, bm.DropTombstone(ctx, end.BroadcastResult.BroadcastID))
 		require.Len(t, store.snapshot(44), 2)
 		_, err = bm.RecoverTxnBroadcast(ctx, 44)
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "has completed")
 		store.mu.Lock()
 		store.beforeSave = nil
 		store.mu.Unlock()
@@ -730,5 +762,60 @@ func TestTxnRecoveryGroupsUnorderedTaskKeys(t *testing.T) {
 		require.Error(t, err)
 		_, _, err = splitBroadcastTasks([]*streamingpb.BroadcastTask{first[0], first[2]})
 		require.Error(t, err)
+	})
+}
+
+func TestTxnMembersKeepBeginResourcesAndChannels(t *testing.T) {
+	mockey.PatchConvey("member scope is fixed before admission and deduplication", t, func() {
+		bm, store := setupTxnTest(t)
+		defer bm.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		key := message.NewExclusiveCollectionNameResourceKey("db", "c")
+		h, _, err := bm.StartTxnBroadcastWithResourceKey(ctx, key)
+		require.NoError(t, err)
+		defer h.Close()
+		begin := beginTxnMessage(99)
+		header := begin.BroadcastHeader()
+		header.VChannels = []string{"v1", "v2"}
+		_, err = h.BroadcastBegin(ctx, begin.OverwriteBroadcastHeader(header))
+		require.NoError(t, err)
+
+		// Order is irrelevant; callers may omit the automatically added CChannel.
+		body := newImportMsgWithKey("body-scope")
+		header = body.BroadcastHeader()
+		header.VChannels = []string{"v2", txnControlChannel, "v1"}
+		body.OverwriteBroadcastHeader(header)
+		original, err := h.BroadcastBody(ctx, body)
+		require.NoError(t, err)
+		for _, channels := range [][]string{{"v1"}, {"v1", "v2", "v3"}, {"v1", "v3"}} {
+			header.VChannels = channels
+			body.OverwriteBroadcastHeader(header)
+			_, err = h.BroadcastBody(ctx, body) // same idempotency key must not bypass validation
+			require.ErrorContains(t, err, "channels differ")
+			_, err = h.BroadcastCommit(ctx, createNewBroadcastMsg(channels))
+			require.ErrorContains(t, err, "channels differ")
+		}
+		header.VChannels = []string{"v1", "v2"}
+		header.ResourceKeys = map[message.ResourceKey]struct{}{message.NewSharedCollectionNameResourceKey("db", "c"): {}}
+		body.OverwriteBroadcastHeader(header)
+		_, err = h.BroadcastBody(ctx, body)
+		require.ErrorContains(t, err, "resource keys differ")
+		_, err = h.BroadcastCommit(ctx, body)
+		require.ErrorContains(t, err, "resource keys differ")
+		require.Len(t, store.snapshot(99), 2, "rejected messages must not create tasks")
+		_, err = bm.resourceKeyLocker.FastLock(key)
+		require.Error(t, err, "invalid members must not release the transaction lock")
+
+		header.ResourceKeys = nil // inherited from Begin
+		body.OverwriteBroadcastHeader(header)
+		duplicate, err := h.BroadcastBody(ctx, body)
+		require.NoError(t, err)
+		require.Equal(t, original.BroadcastResult.BroadcastID, duplicate.BroadcastResult.BroadcastID)
+		_, err = h.BroadcastCommit(ctx, createNewBroadcastMsg([]string{"v2", "v1"}))
+		require.NoError(t, err)
+		guards, err := bm.resourceKeyLocker.FastLock(key)
+		require.NoError(t, err)
+		guards.Unlock()
 	})
 }

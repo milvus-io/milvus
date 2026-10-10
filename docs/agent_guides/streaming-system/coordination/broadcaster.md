@@ -63,11 +63,18 @@ header fields in place, including Txn; `BroadcastBegin` fills Kind/Sequence.
 Admission identity remains a separate `_bik` property set through
 `OverwriteBroadcastAdmissionKey`. Preparation copies properties once to isolate
 background tasks from caller changes. `RecoverTxnBroadcast(ctx, id)` returns a
-handle to the same internal controller without acquiring resources.
+handle to the same unfinished internal controller without acquiring resources.
+A durable Begin tombstone rejects recovery before GC as well as after restart.
 `BroadcastBody` and `BroadcastCommit` fill its TxnID and serialize across handles.
-Bodies can use `_ik` for group-local retries. An already selected terminal rejects
-a conflicting terminal until GC; `EnsureTxnCompleted` instead waits for that
-selected result. The business still chooses commit or rollback messages.
+All members must use the same ResourceKeys (including Shared/Exclusive modes)
+and VChannel set as Begin. Omitted member ResourceKeys are inherited; explicitly
+supplied keys must match. Channel comparison ignores order and includes the
+automatically added CChannel. Admission validates this before deduplication;
+replicated ACKs and recovery enforce the same durable invariant.
+Bodies can use `_ik` for group-local retries. The first terminal is selected once;
+concurrent Commit calls wait for that original result without comparing messages.
+After durable completion, existing handles reject Body/Commit as well. There is
+no separate cleanup option. The business still chooses commit or rollback messages.
 
 Each member waits for its ACK policy and callback. Begin becomes `TXN_INFLIGHT`
 and retains business locks. Body completes without releasing them. Commit saves
@@ -80,17 +87,33 @@ All task persistence uses `SaveBroadcastTasks`: ordinary updates pass one task,
 terminal completion passes Begin and Commit, and whole-group GC passes all members.
 Each call uses a single `MultiSaveAndRemove` that must never be split into batches. Recovery reads `ListBroadcastTask`, groups transaction
 members by Header.TxnID and orders them by Sequence, then restores one set of
-business locks per open group. Open groups never enter GC; a closed group
+business locks per open group on the primary. Secondary replay has no such long locks. Open groups never enter GC; a closed group
 occupies one retention unit, and all its task keys are deleted atomically.
 An old handle cannot recreate a GC'd group. Persistence uses the same single
 active coordinator and reliable write lifecycle as ordinary broadcast tasks;
 there is no separate group record or revision/CAS protocol.
 
-This initial API supports local primary operation only. Start rejects configured
-cross-cluster topology; replicated transaction ACKs are rejected rather than
-executed as ordinary broadcasts. CDC ordering and force-promotion ownership are
-not implemented. No Import or other business path uses this API yet. Existing
-ordinary and replicated broadcasts continue through their previous path.
+Primary operation supports configured replicas. Replicated ACKs reconstruct the
+same transaction from its existing task records without acquiring primary business
+locks. The existing CChannel admission order is retained; a member's callback also
+waits for its predecessor's durable completion, including when resources are Shared.
+Data-channel ACKs may arrive before Begin and are persisted without executing the
+member early. Waiting conflicting callbacks cannot be bypassed by later readers.
+
+Normal switchover's Cluster X waits for open source transactions to complete.
+Force promotion fences replication and supplements missing channel copies of known
+members through the existing broadcast scheduler. It drains callbacks (not just ACKs),
+then transfers open transactions' business locks before opening public admission.
+A cancellable admission gate covers the transfer from Cluster X to the groups;
+recovery reinstates the gate for an unfinished local promotion. A wholly missing
+member prevents promotion from opening admission; no Begin or terminal is fabricated.
+Commit/rollback remains a business decision. TxnID must remain unique across the
+replication topology, including promotion, and must not be reused.
+
+All members must be replicable business messages; unreplicable messages and
+replication configuration changes cannot be transaction members. No Import or other
+business path uses this API yet. Upgrade both coordinators before enabling callers;
+old coordinators do not understand TXN_INFLIGHT or atomic group GC.
 
 Transactions are bounded: at most 64 members including Begin and Commit, each
 message at most 256 KiB and 128 channels including CChannel. A member slot is reserved for Commit so the whole group stays within one atomic

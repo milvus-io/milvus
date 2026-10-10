@@ -230,7 +230,7 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i].GetTimeTick() != 0) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
@@ -542,7 +542,6 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	}
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
-		close(b.done)
 		b.dirty = true
 	}
 
@@ -555,6 +554,11 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 		// if the broadcast task is recovered from the remote cluster by replication,
 		// it doesn't hold the resource key lock, so skip it.
 		b.guards.Unlock()
+	}
+	select {
+	case <-b.done:
+	default:
+		close(b.done)
 	}
 	return nil
 }
@@ -603,7 +607,7 @@ func (b *broadcastTask) completeTxnMember(ctx context.Context) error {
 	b.dirty = false
 	b.ObserveStateChanged(next.State)
 	if b.header().Txn.GetKind() == messagespb.BroadcastTxnKind_BROADCAST_TXN_KIND_COMMIT {
-		begin := b.txn.tasks[0]
+		begin := b.txn.members()[0]
 		begin.mu.Lock()
 		begin.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 		begin.ObserveStateChanged(begin.task.State)
