@@ -608,7 +608,49 @@ func (o *idfOracle) activateSealedStatsLocked(segStats *sealedBm25Stats, stats b
 	return true
 }
 
-func (o *idfOracle) activateExistingSealedStats(segmentID int64, stats bm25Stats) (bool, error) {
+// errReopenStateChanged tells LoadSealedForReopen's caller to retry: the segment changed between what
+// the reopen read outside the oracle lock and what it found under it.
+func errReopenStateChanged(segmentID int64) error {
+	return merr.WrapErrServiceUnavailableMsg("sealed bm25 stats for segment %d changed during reopen", segmentID)
+}
+
+// reopenView is what LoadSealedForReopen saw of a segment outside the oracle lock and decided from.
+type reopenView struct {
+	seg     *sealedBm25Stats // nil if the segment had no entry
+	version uint64
+	active  bool
+	// the stats of every field the segment had, read only when the reopen activates an inactive segment
+	existing bm25Stats
+}
+
+// observeForReopen reads the segment's state, and its existing stats if the reopen is going to activate it.
+func observeForReopen(seg *sealedBm25Stats, activateIfReadable bool) (reopenView, error) {
+	if seg == nil {
+		return reopenView{}, nil
+	}
+	seg.RLock()
+	defer seg.RUnlock()
+	view := reopenView{seg: seg, version: seg.version, active: seg.activate.Load()}
+	if activateIfReadable && !view.active {
+		existing, err := seg.fetchFieldsLocked(seg.fieldList)
+		if err != nil {
+			return reopenView{}, err
+		}
+		view.existing = existing
+	}
+	return view, nil
+}
+
+// stillHolds reports whether the segment's entry is the same and unchanged since view was taken.
+// Caller holds the oracle write lock and seg's lock if seg is not nil.
+func (v reopenView) stillHolds(seg *sealedBm25Stats, existed bool) bool {
+	if v.seg == nil {
+		return !existed
+	}
+	return existed && seg == v.seg && !seg.removed && seg.version == v.version
+}
+
+func (o *idfOracle) activateExistingSealedStats(segmentID int64, view reopenView) (bool, error) {
 	o.Lock()
 	defer o.Unlock()
 
@@ -622,7 +664,10 @@ func (o *idfOracle) activateExistingSealedStats(segmentID int64, stats bm25Stats
 	if segStats.removed {
 		return false, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
 	}
-	return o.activateSealedStatsLocked(segStats, stats), nil
+	if !view.stillHolds(segStats, existed) {
+		return false, errReopenStateChanged(segmentID)
+	}
+	return o.activateSealedStatsLocked(segStats, view.existing), nil
 }
 
 func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
@@ -717,6 +762,14 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 	return err
 }
 
+// reopenBeforeLockHook runs in tests after LoadSealedForReopen has decided outside the oracle lock and before it takes it.
+var reopenBeforeLockHook func()
+
+// LoadSealedForReopen installs the BM25 fields a reopened segment does not have yet, and activates the
+// segment if activateIfReadable is set and it is inactive. What to do is decided from the segment's state
+// read outside the oracle lock; if the segment changes before the lock is taken (a target sync activates
+// or deactivates it, SyncFunctions drops a field, or it is removed), it returns a retryable error and
+// changes nothing, so the caller's retry decides again from the new state.
 func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager, activateIfReadable bool) error {
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
@@ -741,11 +794,14 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 		}
 		if len(missingPaths) == 0 {
 			if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
-				existingStats, err := segStats.FetchStats()
+				view, err := observeForReopen(segStats, true)
 				if err != nil {
 					return nil, err
 				}
-				activated, err := o.activateExistingSealedStats(segmentID, existingStats)
+				if reopenBeforeLockHook != nil {
+					reopenBeforeLockHook()
+				}
+				activated, err := o.activateExistingSealedStats(segmentID, view)
 				if err != nil {
 					return nil, err
 				}
@@ -775,25 +831,39 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			return nil, err
 		}
 
-		var existingStats bm25Stats
-		if existedBeforeLoad && activateIfReadable && !segStats.activate.Load() {
-			existingStats, err = segStats.FetchStats()
-			if err != nil {
-				return nil, err
-			}
+		var observed *sealedBm25Stats
+		if existedBeforeLoad {
+			observed = segStats
+		}
+		view, err := observeForReopen(observed, activateIfReadable)
+		if err != nil {
+			return nil, err
+		}
+		if reopenBeforeLockHook != nil {
+			reopenBeforeLockHook()
 		}
 
 		o.Lock()
 		segStats, existed := o.sealed.Get(segmentID)
 		if existed {
 			segStats.Lock()
-			if segStats.removed {
+		}
+		unlock := func() {
+			if existed {
 				segStats.Unlock()
-				o.Unlock()
-				return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
 			}
+			o.Unlock()
+		}
+		if existed && segStats.removed {
+			unlock()
+			return nil, merr.WrapErrServiceInternalMsg("sealed bm25 stats for segment %d already removed", segmentID)
+		}
+		if !view.stillHolds(segStats, existed) {
+			unlock()
+			return nil, errReopenStateChanged(segmentID)
+		}
 
-			wasActive := segStats.activate.Load()
+		if existed {
 			installedFields := make([]int64, 0, len(result.fieldList))
 			installedStats := make(bm25Stats, len(result.fieldList))
 			for _, fieldID := range result.fieldList {
@@ -806,25 +876,23 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 				}
 			}
 			if len(installedFields) == 0 {
-				segStats.Unlock()
-				o.Unlock()
+				unlock()
 				return nil, nil
 			}
 
 			segStats.addFieldsLocked(installedFields)
 			segStats.diskSize += result.diskSize
 			switch {
-			case wasActive:
+			case view.active:
 				o.current.MergeExclusive(installedStats)
 			case activateIfReadable:
-				// Inactive entries have not contributed any field to current, so activation must merge the full segment.
-				if existingStats == nil {
-					existingStats = make(bm25Stats, len(installedStats))
-				}
-				existingStats.Merge(installedStats)
-				o.activateSealedStatsLocked(segStats, existingStats)
+				// Inactive entries have not contributed any field to current, so activation must merge the
+				// full segment: the existing fields read with the view, which are unchanged since, and the new ones.
+				full := make(bm25Stats, len(view.existing)+len(installedStats))
+				full.Merge(view.existing)
+				full.Merge(installedStats)
+				o.activateSealedStatsLocked(segStats, full)
 			}
-			segStats.Unlock()
 		} else {
 			segStats = &sealedBm25Stats{
 				ts:        time.Now(),
@@ -841,7 +909,7 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 		}
 		o.sealedDiskSize.Add(result.diskSize)
 		installed = true
-		o.Unlock()
+		unlock()
 
 		o.syncResource()
 		return nil, nil

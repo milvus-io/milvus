@@ -25,6 +25,7 @@ import (
 	"path"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -395,4 +397,168 @@ func TestBuildIDFConcurrentWithGrowingUpdates(t *testing.T) {
 	readers.Wait()
 
 	assertCurrentField(t, o, 102, expected)
+}
+
+// reopenWithRetry calls LoadSealedForReopen the way loadBM25StatsForReopen does: readability is sampled
+// before each attempt and retryable errors are retried. hook runs once, after the first attempt has
+// decided outside the oracle lock and before it takes the lock.
+func reopenWithRetry(t *testing.T, o *idfOracle, seg *syncTestSegment, readable func() bool, hook func(), fieldIDs ...int64) {
+	t.Helper()
+	var once sync.Once
+	reopenBeforeLockHook = func() { once.Do(hook) }
+	defer func() { reopenBeforeLockHook = nil }()
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = o.LoadSealedForReopen(context.Background(), seg.id, seg.loadInfo(fieldIDs...), seg.cm, readable())
+		if err == nil || !merr.IsRetryableErr(err) {
+			break
+		}
+	}
+	require.NoError(t, err)
+}
+
+// syncTestSnapshotUnreadable is syncTestSnapshot with the unreadable segments kept in reserve.
+func syncTestSnapshotUnreadable(version int64, readable []int64, unreadable ...int64) *snapshot {
+	snap := syncTestSnapshot(version, readable...)
+	for _, segID := range unreadable {
+		snap.dist[0].Segments = append(snap.dist[0].Segments, SegmentEntry{NodeID: 1, SegmentID: segID, TargetVersion: unreadableTargetVersion})
+	}
+	return snap
+}
+
+// A reopen that decided outside the lock that an active segment only needs its new field merged, while a
+// target sync deactivates the segment into the reserve set: the reopen must not activate it with the new
+// field alone. When a later target includes the segment again, both fields must count.
+func TestReopenAddsFieldWhileSyncDeactivatesSegment(t *testing.T) {
+	r := rand.New(rand.NewSource(10))
+	o := newSyncTestOracle(t, 102, 104)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{
+		102: randomSyncTestStats(r, 3),
+		104: randomSyncTestStats(r, 4),
+	})
+	seg.load(t, o, 102) // preloaded, active
+	syncWithHook(t, o, syncTestSnapshot(1, 1), func() {})
+
+	readable := true
+	reopenWithRetry(t, o, seg, func() bool { return readable }, func() {
+		syncWithHook(t, o, syncTestSnapshotUnreadable(2, nil, 1), func() {})
+		readable = false
+	}, 102, 104)
+
+	syncWithHook(t, o, syncTestSnapshot(3, 1), func() {})
+	assertCurrentField(t, o, 102, seg.stats[102])
+	assertCurrentField(t, o, 104, seg.stats[104])
+}
+
+// A reopen that read an inactive segment's fields to activate it, while SyncFunctions drops one of them:
+// the dropped field must not come back into current.
+func TestReopenActivatesWhileSyncFunctionsDropsField(t *testing.T) {
+	r := rand.New(rand.NewSource(11))
+	o := newSyncTestOracle(t, 102, 104)
+	o.targetVersion.Store(1)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{
+		102: randomSyncTestStats(r, 3),
+		104: randomSyncTestStats(r, 4),
+	})
+	seg.load(t, o, 102, 104) // inactive
+
+	reopenWithRetry(t, o, seg, func() bool { return true }, func() {
+		require.NoError(t, o.SyncFunctions(syncTestFunctions(104)))
+	}, 104)
+
+	_, err := o.current.GetStats(102)
+	assert.Error(t, err)
+	assertCurrentField(t, o, 104, seg.stats[104])
+}
+
+// A reopen that adds a field to a segment a target sync removes while the field downloads: the reopen
+// must not recreate the segment with the new field alone, it must load the segment again in full.
+func TestReopenAddsFieldToSegmentRemovedDuringDownload(t *testing.T) {
+	r := rand.New(rand.NewSource(12))
+	o := newSyncTestOracle(t, 102, 104)
+	o.targetVersion.Store(1)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{
+		102: randomSyncTestStats(r, 3),
+		104: randomSyncTestStats(r, 4),
+	})
+	seg.load(t, o, 102) // inactive
+
+	reopenWithRetry(t, o, seg, func() bool { return false }, func() {
+		syncWithHook(t, o, syncTestSnapshot(2), func() {})
+		require.False(t, o.sealed.Contain(1))
+	}, 102, 104)
+
+	entry, ok := o.sealed.Get(1)
+	require.True(t, ok)
+	assert.ElementsMatch(t, []int64{102, 104}, entry.FieldList())
+	stats, err := entry.FetchStats()
+	require.NoError(t, err)
+	assert.Equal(t, seg.stats[102].NumRow(), stats[102].NumRow())
+	assert.Equal(t, seg.stats[104].NumRow(), stats[104].NumRow())
+
+	syncWithHook(t, o, syncTestSnapshot(3, 1), func() {})
+	assertCurrentField(t, o, 102, seg.stats[102])
+	assertCurrentField(t, o, 104, seg.stats[104])
+}
+
+// newHandoffDistribution builds a distribution with the oracle attached, like the delegator does.
+func newHandoffDistribution(o *idfOracle) *distribution {
+	d := NewDistribution("sync-test-channel", NewChannelQueryView(nil, map[int64]int64{}, []int64{1}, initialTargetVersion))
+	d.SetIDFOracle(o)
+	return d
+}
+
+// syncHandoffTarget publishes a target through distribution.SyncTargetVersion with the given sealed
+// segments, which replace the growing segments of the same ID.
+func syncHandoffTarget(d *distribution, version int64, sealed ...int64) {
+	rows := make(map[int64]int64, len(sealed))
+	for _, id := range sealed {
+		rows[id] = 1
+	}
+	d.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         version,
+		SealedInTarget:        sealed,
+		SealedSegmentRowCount: rows,
+	}, []int64{1})
+}
+
+// Through the real caller, a growing segment handed off to its sealed copy in the first target must count once.
+func TestGrowingHandoffFirstTargetCountsOnce(t *testing.T) {
+	r := rand.New(rand.NewSource(13))
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	sealedStats := randomSyncTestStats(r, 6)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{102: sealedStats})
+
+	o.RegisterGrowing(1, bm25Stats{102: sealedStats.Clone()})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	seg.load(t, o, 102)
+	d.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+
+	syncHandoffTarget(d, 1, 1)
+	require.Equal(t, int64(1), o.TargetVersion())
+	assertCurrentField(t, o, 102, sealedStats)
+}
+
+// Through the real caller, a growing segment handed off to its sealed copy in a later target must count once.
+func TestGrowingHandoffLaterTargetCountsOnce(t *testing.T) {
+	r := rand.New(rand.NewSource(14))
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	base := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{102: randomSyncTestStats(r, 4)})
+	base.load(t, o, 102)
+	d.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	syncHandoffTarget(d, 1, 1)
+	require.Equal(t, int64(1), o.TargetVersion())
+
+	sealedStats := randomSyncTestStats(r, 6)
+	handedOff := newSyncTestSegment(t, 2, map[int64]*storage.BM25Stats{102: sealedStats})
+	o.RegisterGrowing(2, bm25Stats{102: sealedStats.Clone()})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 2, PartitionID: 1})
+	handedOff.load(t, o, 102)
+	d.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 2, PartitionID: 1})
+
+	syncHandoffTarget(d, 2, 1, 2)
+	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 10*time.Second, 10*time.Millisecond)
+	assertCurrentField(t, o, 102, sumStats(base.stats[102], sealedStats))
 }
