@@ -37,7 +37,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${ROOT}/internal/core/src"
 
 # Test sources are exempt: they throw std:: exceptions on purpose to drive the
-# handlers under test.
+# handlers under test. TestBase.h and TestUtils.h headers are support code
+# included only by tests and other test helpers.
 #
 # internal/core/src/index/test_utils/ is the index_tests support library. Its
 # files carry ordinary names (ScalarReaderFactory.cpp, CaseTestDriver.h, ...)
@@ -46,7 +47,8 @@ SRC="${ROOT}/internal/core/src"
 # none of its throws can reach the cgo boundary. It is test code by build
 # configuration, exempt for the same reason *Test.cpp is.
 is_test_file() {
-    [[ "$1" =~ Test\.cpp$ || "$1" =~ _test\.(cpp|h)$ || "$1" =~ /test_[^/]*\.(cpp|h)$ || "$1" =~ test_case \
+    [[ "$1" =~ Test\.cpp$ || "$1" =~ Test(Base|Utils)\.h$ \
+       || "$1" =~ _test\.(cpp|h)$ || "$1" =~ /test_[^/]*\.(cpp|h)$ || "$1" =~ test_case \
        || "$1" =~ ^internal/core/src/index/test_utils/ ]]
 }
 
