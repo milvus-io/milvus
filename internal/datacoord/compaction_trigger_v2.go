@@ -171,6 +171,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.singlePolicy.remainingCapacity = m.inspector.getRemainingCapacity
 
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
@@ -574,6 +575,17 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, triggerType CompactionTriggerType) {
 	log := mlog.With(mlog.String("trigger type", triggerType.String()), mlog.String("view", view.String()))
 
+	// A single compaction view consumed an admission token; give it back if
+	// the view never reaches the queue, as the legacy trigger does.
+	enqueued := false
+	if triggerType == TriggerTypeSingle {
+		defer func() {
+			if !enqueued {
+				getSingleCompactionAdmitter().refund(1)
+			}
+		}()
+	}
+
 	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because get collection fail", mlog.Err(err))
@@ -629,6 +641,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 			mlog.Err(err))
 		return
 	}
+	enqueued = true
 	log.Info(ctx, "Finish to submit a single compaction task",
 		mlog.Int64("triggerID", task.GetTriggerID()),
 		mlog.Int64("planID", task.GetPlanID()),

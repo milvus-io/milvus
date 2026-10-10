@@ -267,6 +267,51 @@ func (_c *MockCompactionInspector_isFull_Call) RunAndReturn(run func() bool) *Mo
 	return _c
 }
 
+// getRemainingCapacity provides a mock function with no fields
+func (_m *MockCompactionInspector) getRemainingCapacity() int {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for getRemainingCapacity")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockCompactionInspector_getRemainingCapacity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'getRemainingCapacity'
+type MockCompactionInspector_getRemainingCapacity_Call struct {
+	*mock.Call
+}
+
+// getRemainingCapacity is a helper method to define mock.On call
+func (_e *MockCompactionInspector_Expecter) getRemainingCapacity() *MockCompactionInspector_getRemainingCapacity_Call {
+	return &MockCompactionInspector_getRemainingCapacity_Call{Call: _e.mock.On("getRemainingCapacity")}
+}
+
+func (_c *MockCompactionInspector_getRemainingCapacity_Call) Run(run func()) *MockCompactionInspector_getRemainingCapacity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionInspector_getRemainingCapacity_Call) Return(_a0 int) *MockCompactionInspector_getRemainingCapacity_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionInspector_getRemainingCapacity_Call) RunAndReturn(run func() int) *MockCompactionInspector_getRemainingCapacity_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // removeTasksByChannel provides a mock function with given fields: channel
 func (_m *MockCompactionInspector) removeTasksByChannel(channel string) {
 	_m.Called(channel)
