@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -517,20 +518,9 @@ func unmarshalFloatArray(b []byte, fa *schemapb.FloatArray) error {
 // --- wire primitives ---
 
 func consumeVarint(b []byte) (uint64, int) {
-	var x uint64
-	var s uint
-	for i := 0; i < len(b); i++ {
-		c := b[i]
-		if c < 0x80 {
-			if i > 9 || (i == 9 && c > 1) {
-				return 0, -1 // overflow
-			}
-			return x | uint64(c)<<s, i + 1
-		}
-		x |= uint64(c&0x7f) << s
-		s += 7
-	}
-	return 0, 0 // truncated
+	// The official primitive uses unrolled fast paths and rejects varints
+	// longer than ten bytes without scanning the remaining message.
+	return protowire.ConsumeVarint(b)
 }
 
 func consumeTag(b []byte) (num int, wtype int, n int) {
