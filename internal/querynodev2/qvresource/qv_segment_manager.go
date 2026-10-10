@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type queryViewPhysicalSegmentLoader struct{ loader qvSegmentLoader }
@@ -50,7 +49,7 @@ func NewQueryViewSegmentManager(ctx context.Context, budget *segments.LoadResour
 		Estimator:      newQueryViewSegmentResourceEstimator(budget),
 		LoadInfoStream: segmentLoadInfoStream,
 		Collections:    newQueryViewCollectionRuntimeManager(meta),
-		Buffer:         qvtransformlogbuffer.New(streams, paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt()),
+		Buffer:         qvtransformlogbuffer.New(ctx, streams),
 	}), nil
 }
 

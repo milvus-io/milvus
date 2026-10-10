@@ -61,7 +61,7 @@ func testLocalPoison(t *testing.T, stage string) {
 	apply := mockey.Mock((*fakeSegment).ApplyTransform).Return(merr.WrapErrServiceUnavailableMsg("injected delete failure")).Build()
 	defer apply.UnPatch()
 	streams := newFakeStreamManager()
-	buffer := New(streams, 1)
+	buffer := newBuffer(streams, 1)
 	streamPatch := mockey.Mock((*poisonLoadInfoStream).Subscribe).To(func(_ *poisonLoadInfoStream, opt qnview.SegmentLoadInfoSubscriptionOption) qnview.SegmentLoadInfoSubscription {
 		require.NoError(t, opt.Handler.Handle(qnview.SegmentLoadInfoSnapshot{CollectionID: opt.CollectionID, SegmentID: opt.SegmentID, DataVersion: opt.DataVersion, Revision: qnview.SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: opt.SegmentID}}))
 		return &poisonLoadInfoSubscription{}

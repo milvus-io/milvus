@@ -426,8 +426,13 @@ that replacement. There is no physical reset interface or second ref table.
 
 `TransformLogBuffer` groups replay tasks by PChannel. All VChannels and logical
 stream generations for one PChannel share the same concurrency limit
-(`queryNode.queryView.transformLogDrainConcurrency`, defaulting to 4 per
-PChannel). Physical RPC reconnects do not replace this scheduling unit.
+(`queryView.transformLog.catchupConcurrencyRatio`, defaulting to 0.25). Each
+PChannel independently allows `max(1, floor(CPU cores * ratio))` concurrent
+tasks, using the process CPU count reported by `hardware.GetCPUNum`. The ratio
+is dynamically refreshable: increases immediately start queued work; decreases
+let running tasks finish and retire excess workers before taking another task.
+The config watcher is removed when the owning context ends. Physical RPC
+reconnects do not replace this scheduling unit.
 Workers are started on demand; once a queue is empty and its last worker exits,
 the buffer removes that queue. Idle PChannels retain no replay worker pool.
 

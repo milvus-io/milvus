@@ -24,20 +24,20 @@ type Buffer struct {
 	streamsByPChannel map[string]*streamState
 	channels          map[string]*vchannelBuffer
 
-	drainConcurrency int
-	drainQueues      map[string]*drainQueue
+	catchupConcurrency int
+	drainQueues        map[string]*drainQueue
 }
 
-func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
-	if drainConcurrency <= 0 {
+func newBuffer(streams wal.TransformLogStreamManager, catchupConcurrency int) *Buffer {
+	if catchupConcurrency <= 0 {
 		panic("query view transform log drain concurrency must be positive")
 	}
 	b := &Buffer{
-		streams:           streams,
-		streamsByPChannel: make(map[string]*streamState),
-		channels:          make(map[string]*vchannelBuffer),
-		drainConcurrency:  drainConcurrency,
-		drainQueues:       make(map[string]*drainQueue),
+		streams:            streams,
+		streamsByPChannel:  make(map[string]*streamState),
+		channels:           make(map[string]*vchannelBuffer),
+		catchupConcurrency: catchupConcurrency,
+		drainQueues:        make(map[string]*drainQueue),
 	}
 	return b
 }
@@ -129,7 +129,13 @@ func (b *Buffer) scheduleDrain(task *catchupTask) {
 		b.cancelDrain(queue, task, context.Cause(task.reg.ctx))
 	})
 	task.stopCancellation = func() { stopTask(); stopRegistration() }
-	if queue.workers < b.drainConcurrency {
+	b.startDrainWorkersLocked(pchannel, queue)
+}
+
+// startDrainWorkersLocked immediately uses newly available capacity, including
+// when a config update grows the limit without any new task submissions.
+func (b *Buffer) startDrainWorkersLocked(pchannel string, queue *drainQueue) {
+	for n := min(b.catchupConcurrency-queue.workers, queue.tasks.Len()); n > 0; n-- {
 		queue.workers++
 		go b.drainWorker(pchannel, queue)
 	}
@@ -169,7 +175,7 @@ func (b *Buffer) drainWorker(pchannel string, queue *drainQueue) {
 	for {
 		b.mu.Lock()
 		front := queue.tasks.Front()
-		if front == nil {
+		if front == nil || queue.workers > b.catchupConcurrency {
 			queue.workers--
 			if queue.workers == 0 {
 				delete(b.drainQueues, pchannel)
