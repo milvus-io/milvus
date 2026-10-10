@@ -82,9 +82,10 @@ TEST(CTokenizer, Default) {
 }
 
 TEST(CTokenizer, LegacyEnglishStems) {
-    for (const auto* params : {
-             R"({"type":"english"})",
-             R"({"tokenizer":"standard","filter":["lowercase",{"type":"stemmer","language":"english"}]})"}) {
+    for (
+        const auto* params :
+        {R"({"type":"english"})",
+         R"({"tokenizer":"standard","filter":["lowercase",{"type":"stemmer","language":"english"}]})"}) {
         CTokenizer tokenizer;
         auto status = create_tokenizer(params, &tokenizer);
         ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
