@@ -22,9 +22,18 @@
 #include "ArrayOffsets.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "knowhere/config.h"
+#include "nlohmann/json.hpp"
+
+// SearchInfo is the execution layer's aggregate. Vector callers project its
+// search parameters, metric, topk, and trace context into VectorSearchParams.
+// Use nlohmann::json here to avoid a knowhere configuration-header dependency;
+// the parameter contents still follow knowhere's search schema.
 
 namespace milvus {
+
+// The search-parameter blob. Same underlying type as `knowhere::Json`, named
+// without the knowhere header — see the note above.
+using SearchParamsJson = nlohmann::json;
 
 struct SearchIteratorV2Info {
     std::string token = "";
@@ -51,7 +60,7 @@ struct SearchInfo {
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
-    knowhere::Json search_params_;
+    SearchParamsJson search_params_;
     BruteForceIndexParams brute_force_index_params_;
     std::vector<FieldId>
         group_by_field_ids_;  // Group by field IDs (single or multi-field)
