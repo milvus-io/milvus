@@ -3,6 +3,7 @@
 mod analyzer;
 mod build_in_analyzer;
 mod filter;
+mod stemmer_filter;
 mod stop_words;
 mod tokenizers;
 mod util;

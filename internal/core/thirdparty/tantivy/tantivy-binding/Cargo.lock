@@ -3557,6 +3557,15 @@ dependencies = [
 [[package]]
 name = "rust-stemmers"
 version = "1.2.0"
+source = "git+https://github.com/milvus-io/rust-stemmers.git?rev=3b2545218f76e797baecbf91fa1cbd2c0db60726#3b2545218f76e797baecbf91fa1cbd2c0db60726"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
+name = "rust-stemmers"
+version = "1.2.0"
 source = "git+https://github.com/milvus-io/rust-stemmers.git#3b2545218f76e797baecbf91fa1cbd2c0db60726"
 dependencies = [
  "serde",
@@ -3938,7 +3947,7 @@ dependencies = [
  "oneshot",
  "rayon",
  "regex",
- "rust-stemmers 1.2.0",
+ "rust-stemmers 1.2.0 (git+https://github.com/milvus-io/rust-stemmers.git)",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -4042,6 +4051,7 @@ dependencies = [
  "rand 0.9.2",
  "regex",
  "reqwest",
+ "rust-stemmers 1.2.0 (git+https://github.com/milvus-io/rust-stemmers.git?rev=3b2545218f76e797baecbf91fa1cbd2c0db60726)",
  "scopeguard",
  "serde_json",
  "tantivy 0.21.1",
