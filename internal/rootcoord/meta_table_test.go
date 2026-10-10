@@ -3196,6 +3196,66 @@ func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
 }
 
 func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
+	t.Run("grant cleanup does not hold ddl lock", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
+
+		cleanupStarted := make(chan struct{})
+		cleanupRelease := make(chan struct{})
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, "testdb", "collection",
+		).Run(func(mock.Arguments) {
+			close(cleanupStarted)
+			<-cleanupRelease
+		}).Return(nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection", DBID: 1, State: pb.CollectionState_CollectionCreated},
+			},
+			dbName2Meta: map[string]*model.Database{
+				"testdb": {ID: 1, Name: "testdb"},
+			},
+			fileResourceRefCnt: make(map[int64]int),
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("testdb", "collection", 100)
+
+		dropDone := make(chan error, 1)
+		go func() {
+			dropDone <- meta.DropCollection(context.Background(), 100, 9999)
+		}()
+
+		select {
+		case <-cleanupStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("grant cleanup did not start")
+		}
+
+		lockAcquired := make(chan struct{})
+		go func() {
+			meta.ddLock.Lock()
+			close(lockAcquired)
+			meta.ddLock.Unlock()
+		}()
+
+		select {
+		case <-lockAcquired:
+		case <-time.After(3 * time.Second):
+			close(cleanupRelease)
+			t.Fatal("ddl lock is held while grant cleanup is blocked")
+		}
+
+		close(cleanupRelease)
+		require.NoError(t, <-dropDone)
+	})
+
 	t.Run("grant cleanup on drop", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
