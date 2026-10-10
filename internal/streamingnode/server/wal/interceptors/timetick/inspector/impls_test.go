@@ -1,7 +1,6 @@
 package inspector
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -34,27 +33,27 @@ func TestMaybeForcePersistedSync(t *testing.T) {
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	i.operators.Insert("test", operator)
 
-	persistedCalled := make(chan bool, 4)
-	operator.EXPECT().Sync(mock.Anything, mock.Anything).Run(func(_ context.Context, persisted bool) {
-		persistedCalled <- persisted
-	}).Times(2)
+	operator.EXPECT().Sync(mock.Anything, true).Times(2)
+	waitForSync := func() {
+		t.Helper()
+		// A notification from inside Sync can arrive before asyncSync releases
+		// the working slot. Wait for that cleanup before requesting another sync.
+		require.Eventually(t, func() bool {
+			return !i.working.Contain("test")
+		}, 10*time.Second, time.Millisecond, "sync should release its working slot")
+	}
 
 	now := time.Now()
 	// First call: no record yet, so a persisted sync must be triggered.
-	i.maybeForcePersistedSync("test", now)
-	assert.True(t, <-persistedCalled, "first sync should be persisted")
+	require.True(t, i.maybeForcePersistedSync("test", now), "first sync should be launched")
+	waitForSync()
 
 	// Second call within the interval: no new sync.
-	i.maybeForcePersistedSync("test", now.Add(30*time.Second))
-	select {
-	case <-persistedCalled:
-		t.Fatal("unexpected sync within the sync period")
-	default:
-	}
+	require.False(t, i.maybeForcePersistedSync("test", now.Add(30*time.Second)), "no sync within the sync period")
 
 	// Interval elapsed: trigger again.
-	i.maybeForcePersistedSync("test", now.Add(2*time.Minute))
-	assert.True(t, <-persistedCalled, "sync after the sync period should be persisted")
+	require.True(t, i.maybeForcePersistedSync("test", now.Add(2*time.Minute)), "sync after the sync period should be launched")
+	waitForSync()
 
 	// The recorded time is refreshed only when a sync is triggered.
 	last, ok := i.lastPersistedSync.Get("test")
