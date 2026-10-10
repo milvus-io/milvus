@@ -35,6 +35,7 @@ impl StemmerLanguageParser for &str {
         match self.to_lowercase().as_str() {
             "arabic" => Ok(Language::Arabic),
             "arabig" => Ok(Language::Arabic), // typo
+            "czech" => Ok(Language::Czech),
             "danish" => Ok(Language::Danish),
             "dutch" => Ok(Language::Dutch),
             "english" => Ok(Language::English),
@@ -57,5 +58,27 @@ impl StemmerLanguageParser for &str {
                 other
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StemmerLanguageParser;
+    use tantivy::tokenizer::Language;
+
+    #[test]
+    fn test_czech_language() {
+        assert_eq!("czech".into_language().unwrap(), Language::Czech);
+    }
+
+    #[test]
+    fn test_czech_language_case_insensitive() {
+        assert_eq!("Czech".into_language().unwrap(), Language::Czech);
+        assert_eq!("CZECH".into_language().unwrap(), Language::Czech);
+    }
+
+    #[test]
+    fn test_unsupported_language() {
+        assert!("klingon".into_language().is_err());
     }
 }
