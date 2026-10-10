@@ -889,14 +889,16 @@ std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
-    auto data_array = std::make_unique<DataArray>();
+    // Initialize vector metadata even if all selected rows are null. Later
+    // shard reduction can use this column as its output-field template.
+    auto data_array = field_meta.is_vector()
+                          ? CreateEmptyVectorDataArray(0, field_meta)
+                          : std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
     auto nullable = field_meta.is_nullable();
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
-    if (field_meta.is_vector()) {
-        data_array->mutable_vectors();
-    } else {
+    if (!field_meta.is_vector()) {
         data_array->mutable_scalars();
     }
     auto* dst_valid_data =

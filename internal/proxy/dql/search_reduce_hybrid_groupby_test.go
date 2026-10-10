@@ -44,13 +44,17 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 	t.Cleanup(func() { paramtable.Get().Save(policyKey, originalPolicy) })
 
 	for _, tc := range []struct {
-		name      string
-		policy    string
-		namespace bool
+		name            string
+		policy          string
+		namespace       bool
+		allNullTemplate bool
+		legacyTemplate  bool
 	}{
 		{name: "no output fields", policy: "OutputFields"},
 		{name: "namespace output vector", policy: "OutputVector", namespace: true},
 		{name: "namespace always", policy: "Always", namespace: true},
+		{name: "all-null vector template", policy: "Always", namespace: true, allNullTemplate: true},
+		{name: "legacy all-null vector template", policy: "Always", namespace: true, allNullTemplate: true, legacyTemplate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			paramtable.Get().Save(policyKey, tc.policy)
@@ -66,6 +70,10 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
 					},
 					{FieldID: 103, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+					{
+						FieldID: 104, Name: "search_vec", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+					},
 				},
 			}
 			placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{
@@ -103,7 +111,7 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				task.request.SubReqs = append(task.request.SubReqs, &milvuspb.SubSearchRequest{
 					Nq: 2, PlaceholderGroup: placeholder,
 					SearchParams: []*commonpb.KeyValuePair{
-						{Key: AnnsFieldKey, Value: "vec"},
+						{Key: AnnsFieldKey, Value: "search_vec"},
 						{Key: TopKKey, Value: "3"},
 						{Key: common.MetricTypeKey, Value: metric.IP},
 						{Key: ParamsKey, Value: `{}`},
@@ -158,6 +166,12 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 							valid = []bool{true, true, false}
 							vectorValid = []bool{true, false, true}
 						}
+						if tc.allNullTemplate && shardIdx == 1 {
+							vectorValid = []bool{false, false, false}
+						}
+						if tc.allNullTemplate && shardIdx == 2 {
+							vectorValid = []bool{true, true, true}
+						}
 						var vectors []float32
 						for i, id := range ids {
 							if vectorValid[i] {
@@ -175,6 +189,12 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 									Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
 								}},
 							},
+						}
+						if tc.legacyTemplate && shardIdx == 1 {
+							// Older QueryNodes omit dimension and the data oneof
+							// when every materialized vector in this shard is null.
+							fields[102].GetVectors().Dim = 0
+							fields[102].GetVectors().Data = nil
 						}
 						for _, fieldID := range plan.GetOutputFieldIds() {
 							data.FieldsData = append(data.FieldsData, fields[fieldID])
@@ -235,16 +255,21 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 				value := reduce.FindFieldDataByID(result.FieldsData, 103)
 				require.Equal(t, ids, value.GetScalars().GetLongData().GetData())
 				vector := reduce.FindFieldDataByID(result.FieldsData, 102)
+				require.Equal(t, int64(2), vector.GetVectors().GetDim())
 				var expectedValueValid, expectedVectorValid []bool
 				var expectedVectors []float32
 				for _, id := range ids {
 					expectedValueValid = append(expectedValueValid, id%100 != 20 && id%100 != 60)
 					valid := id%100 != 10 && id%100 != 50
+					if tc.allNullTemplate {
+						valid = id%100 >= 40
+					}
 					expectedVectorValid = append(expectedVectorValid, valid)
 					if valid {
 						expectedVectors = append(expectedVectors, float32(id), float32(id))
 					}
 				}
+				require.NotEmpty(t, expectedVectors, "assembly must select a valid vector from a later shard")
 				require.Equal(t, expectedValueValid, typeutil.GetFieldDataValidData(value))
 				require.Equal(t, expectedVectorValid, typeutil.GetFieldDataValidData(vector))
 				require.Equal(t, expectedVectors, vector.GetVectors().GetFloatVector().GetData())

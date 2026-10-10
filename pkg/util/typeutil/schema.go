@@ -1521,6 +1521,11 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				}
 			}
 			dstVector := dstFieldData.GetVectors()
+			if dstVector.GetDim() == 0 && IsFixDimVectorType(fieldData.GetType()) {
+				// Older QueryNodes omit the dimension for all-null columns.
+				// Recover it when a later shard supplies vector metadata.
+				dstVector.Dim = dim
+			}
 			isNullRow := fieldIdx < 0 || (len(srcValidData) > 0 && !srcValidData[idx])
 
 			switch srcVector := fieldType.Vectors.Data.(type) {

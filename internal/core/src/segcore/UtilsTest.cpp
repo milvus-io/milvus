@@ -240,6 +240,64 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     ASSERT_TRUE(merged_valid_data[4]);
 }
 
+TEST(Util_Segcore, MergeDataArrayPreservesAllNullVectorMetadata) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    for (auto data_type : {DataType::VECTOR_FLOAT,
+                           DataType::VECTOR_BINARY,
+                           DataType::VECTOR_FLOAT16,
+                           DataType::VECTOR_BFLOAT16,
+                           DataType::VECTOR_INT8}) {
+        SCOPED_TRACE(fmt::format("data_type={}", data_type));
+        constexpr int64_t dim = 16;
+        auto schema = std::make_shared<Schema>();
+        auto vec = schema->AddDebugField("embeddings",
+                                         data_type,
+                                         dim,
+                                         data_type == DataType::VECTOR_BINARY
+                                             ? knowhere::metric::HAMMING
+                                             : knowhere::metric::L2,
+                                         true);
+        auto& field_meta = (*schema)[vec];
+        auto source = CreateEmptyVectorDataArray(0, field_meta);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        auto expected_data_case = source->vectors().data_case();
+        std::map<FieldId, std::unique_ptr<DataArray>> output_fields;
+        output_fields[vec] = std::move(source);
+
+        // Both empty output and non-empty, entirely null output must carry
+        // enough metadata to serve as the template for a later shard.
+        for (size_t count : {0, 2}) {
+            SCOPED_TRACE(count);
+            std::vector<MergeBase> merge_bases;
+            for (size_t row = 0; row < count; ++row) {
+                merge_bases.emplace_back(&output_fields, row);
+            }
+            auto merged = MergeDataArray(merge_bases, field_meta);
+            DataArray decoded;
+            ASSERT_TRUE(decoded.ParseFromString(merged->SerializeAsString()));
+            EXPECT_EQ(decoded.field_id(), vec.get());
+            EXPECT_EQ(decoded.type(), proto::schema::DataType(data_type));
+            EXPECT_EQ(decoded.vectors().dim(), dim);
+            EXPECT_EQ(decoded.vectors().data_case(), expected_data_case);
+            const auto& valid_data = GetFieldDataRowValidData(decoded);
+            ASSERT_EQ(valid_data.size(), count);
+            for (auto valid : valid_data) {
+                EXPECT_FALSE(valid);
+            }
+            // No physical vector values should be allocated for null rows.
+            auto expected = CreateEmptyVectorDataArray(0, field_meta);
+            for (size_t row = 0; row < count; ++row) {
+                MutableFieldDataRowValidData(expected.get())->Add(false);
+            }
+            EXPECT_EQ(decoded.SerializeAsString(),
+                      expected->SerializeAsString());
+        }
+    }
+}
+
 TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
     using namespace milvus;
     using namespace milvus::segcore;
