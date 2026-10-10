@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -32,9 +33,12 @@ const (
 )
 
 var (
-	once         sync.Once
-	params       ComponentParam
-	runtimeParam = runtimeConfig{
+	once               sync.Once
+	initialized        atomic.Bool
+	params             ComponentParam
+	fastPBEnabledState atomic.Bool
+	fastPBUpdateMu     sync.Mutex
+	runtimeParam       = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
 	}
 	hookParams   hookConfig
@@ -55,6 +59,7 @@ func Init() {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
@@ -64,12 +69,41 @@ func InitWithBaseTable(baseTable *BaseTable) {
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
 		cipherParams.init(hookBaseTable)
+		initialized.Store(true)
 	})
 }
 
 func Get() *ComponentParam {
 	Init()
 	return &params
+}
+
+// GetIfInitialized returns the shared parameters after initialization has completed.
+// Unlike Get, it does not initialize configuration or start configuration sources.
+func GetIfInitialized() *ComponentParam {
+	if !initialized.Load() {
+		return nil
+	}
+	return &params
+}
+
+// FastPBEnabled returns the lock-free snapshot of common.enableFastPB. Before
+// paramtable finishes initialization, fast protobuf decoding remains enabled.
+func FastPBEnabled() bool {
+	if GetIfInitialized() == nil {
+		return true
+	}
+	return fastPBEnabledState.Load()
+}
+
+func updateFastPBEnabled() {
+	// Serialize the read and publication so concurrent refreshes cannot publish
+	// an older snapshot after a newer one. RPC decoding only reads the atomic.
+	fastPBUpdateMu.Lock()
+	defer fastPBUpdateMu.Unlock()
+	// Exact-key handlers run before typed-cache eviction. Read the uncached
+	// effective value, including runtime overrides and the default after DELETE.
+	fastPBEnabledState.Store(getAsBool(params.CommonCfg.EnableFastPB.GetValue()))
 }
 
 // RefreshRemoteConfigsLinearizable makes the etcd config source re-read every key with a

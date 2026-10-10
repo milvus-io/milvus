@@ -473,6 +473,7 @@ type commonConfig struct {
 	SyncTaskPoolReleaseTimeoutSeconds ParamItem `refreshable:"true"`
 	NodeSchedulerMaxConcurrencyRatio  ParamItem `refreshable:"true"`
 
+	EnableFastPB                      ParamItem `refreshable:"true"`
 	EnabledOptimizeExpr               ParamItem `refreshable:"true"`
 	EnableDriverPrefetch              ParamItem `refreshable:"true"`
 	EnabledJSONKeyStats               ParamItem `refreshable:"true"`
@@ -1805,6 +1806,28 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
+
+	p.EnableFastPB = ParamItem{
+		Key:          "common.enableFastPB",
+		Version:      "3.0",
+		DefaultValue: "true",
+		Doc:          "Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.",
+		Export:       true,
+	}
+	p.EnableFastPB.Init(base.mgr)
+	// Only mirror the process-global ParamItem used by RPC decoding.
+	// Standalone ComponentParam instances in tests must not change that state.
+	if p == &params.CommonCfg {
+		// The dispatcher matches normalized aliases, including etcd's key without
+		// separators. Refresh from the effective config rather than event.Value.
+		base.mgr.Dispatcher.Register(p.EnableFastPB.Key, config.NewHandler("common.enableFastPB.atomic", func(event *config.Event) {
+			switch event.EventType {
+			case config.CreateType, config.UpdateType, config.DeleteType:
+				updateFastPBEnabled()
+			}
+		}))
+		updateFastPBEnabled()
+	}
 
 	p.EnabledOptimizeExpr = ParamItem{
 		Key:          "common.enabledOptimizeExpr",
