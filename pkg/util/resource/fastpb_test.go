@@ -19,6 +19,7 @@ package resource
 import (
 	"os"
 	"os/exec"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -87,6 +89,121 @@ func TestFastPBRuntimeResultDecoderSelection(t *testing.T) {
 			require.Error(t, retrieveErr)
 			require.Error(t, searchErr)
 		}
+	}
+}
+
+// fastPBConfigSource publishes separator-free keys like the etcd source.
+type fastPBConfigSource struct {
+	name   string
+	mu     sync.RWMutex
+	values map[string]string
+}
+
+func (s *fastPBConfigSource) GetConfigurations() (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make(map[string]string, len(s.values))
+	for key, value := range s.values {
+		values[key] = value
+	}
+	return values, nil
+}
+
+func (s *fastPBConfigSource) GetConfigurationByKey(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.values[key]
+	if !ok {
+		return "", config.ErrKeyNotFound
+	}
+	return value, nil
+}
+
+func (s *fastPBConfigSource) GetPriority() int                    { return config.HighPriority }
+func (s *fastPBConfigSource) GetSourceName() string               { return s.name }
+func (s *fastPBConfigSource) SetEventHandler(config.EventHandler) {}
+func (s *fastPBConfigSource) SetManager(config.ConfigManager)     {}
+func (s *fastPBConfigSource) UpdateOptions(config.Options)        {}
+func (s *fastPBConfigSource) Close()                              {}
+
+func TestFastPBConfigSourceEvents(t *testing.T) {
+	params := initFastPBTestParams(t)
+	key := params.CommonCfg.EnableFastPB.Key
+	etcdKey := config.EtcdConfigKey(key)
+	manager := paramtable.GetBaseTable().Manager()
+	source := &fastPBConfigSource{name: t.TempDir(), values: make(map[string]string)}
+	require.NoError(t, manager.AddSource(source))
+	send := func(eventType, value string) {
+		source.mu.Lock()
+		if eventType == config.DeleteType {
+			delete(source.values, etcdKey)
+		} else {
+			source.values[etcdKey] = value
+		}
+		source.mu.Unlock()
+		// Do not evict the typed cache here: the fastPB handler must also work
+		// when it runs before the dispatcher's cache-eviction prefix handler.
+		manager.OnEvent(&config.Event{
+			EventSource: source.name,
+			EventType:   eventType,
+			Key:         etcdKey,
+			Value:       value,
+		})
+	}
+	t.Cleanup(func() {
+		send(config.DeleteType, "")
+		require.NoError(t, params.Reset(key))
+	})
+	check := func(enabled bool) {
+		t.Helper()
+		// Reading this before the next event also warms the typed cache.
+		require.Equal(t, enabled, params.CommonCfg.EnableFastPB.GetAsBool())
+		require.Equal(t, enabled, paramtable.FastPBEnabled())
+		retrieveErr := (releaseCodec{}).Unmarshal(mem.BufferSlice{mem.SliceBuffer(invalidResultString())}, &internalpb.RetrieveResults{})
+		searchErr := UnmarshalSearchResultData(invalidResultString(), &schemapb.SearchResultData{})
+		if enabled {
+			require.NoError(t, retrieveErr)
+			require.NoError(t, searchErr)
+		} else {
+			require.Error(t, retrieveErr)
+			require.Error(t, searchErr)
+		}
+	}
+
+	require.NoError(t, params.Reset(key))
+	check(true)
+	send(config.CreateType, "false")
+	check(false)
+	send(config.UpdateType, "true")
+	check(true)
+
+	// An underlying source event must not override the effective runtime value.
+	require.NoError(t, params.Save(key, "false"))
+	check(false)
+	send(config.UpdateType, "false")
+	check(false)
+	send(config.UpdateType, "true")
+	check(false)
+	require.NoError(t, params.Reset(key))
+	check(true)
+
+	send(config.UpdateType, "false")
+	check(false)
+	send(config.DeleteType, "false")
+	check(true)
+
+	// Reset without an underlying value emits DELETE and restores the default.
+	require.NoError(t, params.Save(key, "false"))
+	check(false)
+	require.NoError(t, params.Reset(key))
+	check(true)
+
+	// Runtime events also accept the same normalized aliases as source events.
+	for _, alias := range []string{etcdKey, "COMMON_ENABLEFASTPB"} {
+		require.NoError(t, params.Save(alias, "false"))
+		check(false)
+		require.NoError(t, params.Reset(alias))
+		check(true)
 	}
 }
 
