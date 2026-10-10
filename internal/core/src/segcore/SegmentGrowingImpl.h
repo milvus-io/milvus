@@ -521,9 +521,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!insert_record_.get_data_base(field_id)->empty()) {
             return true;
         }
-        return IsVectorDataType(
-                   get_schema_snapshot()->operator[](field_id).get_data_type()) &&
-               HasRawData(field_id.get());
+        if (!IsVectorDataType(
+                get_schema_snapshot()->operator[](field_id).get_data_type())) {
+            return false;
+        }
+        // Compact all-null vectors need only validity; synchronized indexes
+        // can retain the vectors after the raw column has been reclaimed.
+        // HasRawData also reports capability for unindexed, unwritten fields.
+        return (insert_record_.is_valid_data_exist(field_id) &&
+                !insert_record_.get_valid_data(field_id)->empty()) ||
+               CanReadRawVectorFromIndex(field_id);
     }
 
     bool
