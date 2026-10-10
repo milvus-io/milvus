@@ -30,19 +30,31 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, elementType sch
 		if !lo.Contains(validJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported", castType)
 		}
-		castFunction, exist := params[common.JSONCastFunctionKey]
-		if exist {
-			switch castFunction {
-			case "STRING_TO_DOUBLE":
-				if castType != "DOUBLE" {
-					return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported for json_cast_type %v", castFunction, castType)
-				}
-			default:
-				return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported", castFunction)
-			}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
 		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
+}
+
+// checkJSONCastFunction validates json_cast_function for a JSON index of any
+// type. STRING_TO_DOUBLE applies only to a DOUBLE cast. Segcore ignores an
+// unknown or inapplicable function so existing indexes keep building; new
+// indexes with one are rejected here.
+func checkJSONCastFunction(castType string, params map[string]string) error {
+	castFunction, exist := params[common.JSONCastFunctionKey]
+	if !exist {
+		return nil
+	}
+	switch castFunction {
+	case "STRING_TO_DOUBLE":
+		if castType != "DOUBLE" {
+			return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported for json_cast_type %v", castFunction, castType)
+		}
+	default:
+		return merr.WrapErrParameterInvalidMsg("json_cast_function %v is not supported", castFunction)
+	}
+	return nil
 }
 
 func (c *INVERTEDChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

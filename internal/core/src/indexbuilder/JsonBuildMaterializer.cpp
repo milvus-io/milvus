@@ -138,11 +138,18 @@ ParseProjectionParams(DataType value_type,
         family_supported = index_type == index::NGRAM_INDEX_TYPE && scalar &&
                            value_type == DataType::VARCHAR;
     }
-    AssertInfo(
-        family_supported && (scalar || family == index::families::kInverted),
-        "typed JSON cast {} is not supported by family {}",
-        cast_type,
-        family);
+    // AdaptIndexType checks the cast element type only, so an ARRAY cast on a
+    // scalar-only family reaches here from a config the Go checkers accepted
+    // when it was created (the NGRAM checker had no cast check before
+    // #44157). Unsupported fails the build task once instead of re-dispatching
+    // it.
+    if (!family_supported ||
+        (!scalar && family != index::families::kInverted)) {
+        ThrowInfo(Unsupported,
+                  "typed JSON cast {} is not supported by family {}",
+                  cast_type,
+                  family);
+    }
 
     const bool has_json_path = params.contains(JSON_PATH);
     const bool has_nested_path = params.contains("nested_path");
@@ -159,18 +166,18 @@ ParseProjectionParams(DataType value_type,
     static_cast<void>(index::JsonProjectedIndexSpec(path, cast_type, 0));
     auto path_tokens = parse_json_pointer(path);
 
-    const auto cast_function_name =
-        ReadString(params, JSON_CAST_FUNCTION, false);
-    AssertInfo(cast_function_name.empty() ||
-                   (cast_function_name == "STRING_TO_DOUBLE" &&
-                    cast_type.data_type() == JsonCastType::DataType::DOUBLE),
-               "unsupported typed JSON cast function {} for {}",
-               cast_function_name,
-               cast_type);
+    // An unknown or inapplicable json_cast_function is ignored, as the legacy
+    // builder did: FromString maps an unknown name to kUnknown, and
+    // ExtractScalar applies a function only to the scalar type it matches
+    // (STRING_TO_DOUBLE on a DOUBLE cast). Array and NGRAM projections never
+    // apply one. Existing indexes can carry such a function because only the
+    // INVERTED checker validated the key when they were created;
+    // indexparamcheck rejects these combinations for new indexes.
     return {std::move(path),
             std::move(path_tokens),
             cast_type,
-            JsonCastFunction::FromString(cast_function_name),
+            JsonCastFunction::FromString(
+                ReadString(params, JSON_CAST_FUNCTION, false)),
             family != index::families::kNgram};
 }
 
