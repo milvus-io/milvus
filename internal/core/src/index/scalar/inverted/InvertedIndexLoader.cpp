@@ -224,7 +224,15 @@ ReadNullOffsets(bool use_async,
         const auto bytes = storage::LocalFileSize(
             local.Path(), "failed to determine inverted entry size for");
 
-        if (bytes == 0 || bytes % sizeof(size_t) != 0) {
+        // 2.5.0 and 2.5.1 wrote index_null_offset unconditionally (until
+        // #38834), so INVERTED and HYBRID-selected INVERTED indexes on a field
+        // without nulls carry the entry with an empty payload. The legacy
+        // loader read it as no nulls.
+        if (bytes == 0) {
+            local.RemoveChecked("inverted staging file");
+            co_return std::make_shared<const std::vector<size_t>>();
+        }
+        if (bytes % sizeof(size_t) != 0) {
             ThrowInfo(DataFormatBroken,
                       "invalid inverted null-offset byte size {}",
                       bytes);
