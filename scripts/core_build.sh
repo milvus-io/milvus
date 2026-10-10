@@ -98,6 +98,7 @@ CUDA_ARCH="DEFAULT"
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
+USE_TSAN="${USE_TSAN:-OFF}"
 USE_DYNAMIC_SIMD="ON"
 USE_SVS="OFF"
 WITH_CRT="OFF"
@@ -113,7 +114,7 @@ fi
 : "${USE_UNITY_BUILD:="OFF"}"
 : "${USE_SPLIT_DWARF:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:T:y:x:f:S:R:ulcgbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -150,6 +151,9 @@ while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
         USE_ASAN="ON"
     fi
     ;;
+  T)
+    USE_TSAN=$OPTARG
+    ;;
   y)
     USE_DYNAMIC_SIMD=$OPTARG
     ;;
@@ -180,6 +184,7 @@ parameter:
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
+-T: build milvus with ThreadSanitizer (ON/OFF, default: OFF; Linux CPU only)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
 -S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
 -R: build milvus-storage with AWS S3 CRT read path(default: OFF)
@@ -198,12 +203,28 @@ usage:
   esac
 done
 
+case "${USE_TSAN}" in
+  ON|OFF) ;;
+  *) echo "ERROR: -T must be ON or OFF" >&2; exit 1 ;;
+esac
+if [[ "${USE_TSAN}" == "ON" ]]; then
+  if [[ "${USE_ASAN}" == "ON" || "${GPU_VERSION}" == "ON" ]]; then
+    echo "ERROR: ThreadSanitizer cannot be combined with AddressSanitizer or GPU builds" >&2
+    exit 1
+  fi
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "ERROR: ThreadSanitizer builds currently require Linux" >&2
+    exit 1
+  fi
+fi
+export USE_TSAN
+
 # Azure SDK build has been removed as we now use Arrow with Azure support directly
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
-source ${ROOT_DIR}/scripts/setenv.sh
+source ${ROOT_DIR}/scripts/setenv.sh || exit 1
 
 # Use Ninja if available for faster builds, fallback to Unix Makefiles
 if command -v ninja &> /dev/null; then
@@ -283,6 +304,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DUSE_ASAN=${USE_ASAN} \
+-DUSE_TSAN=${USE_TSAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
 -DWITH_SVS=${USE_SVS} \
@@ -300,7 +322,7 @@ CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 
 echo "CC $CC"
 echo ${CMAKE_CMD}
-${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
+${CMAKE_CMD} -G "${CMAKE_GENERATOR}" || exit 1
 
 # Export PROTOC for Rust crates (e.g. lance-encoding) that need it at build time
 if [ -z "$PROTOC" ]; then
