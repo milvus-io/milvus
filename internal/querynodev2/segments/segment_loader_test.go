@@ -274,8 +274,9 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
-	initcore.InitLocalArrowFileSystem(suite.rootPath)
-	initcore.InitRemoteArrowFileSystem(paramtable.Get())
+	// Like the query node, initialize the process-wide default filesystem once
+	// from common.storageType so it matches the remote ChunkManager.
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
