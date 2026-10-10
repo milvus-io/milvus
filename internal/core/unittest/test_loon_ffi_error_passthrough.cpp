@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 
 #include <string>
@@ -25,17 +26,15 @@
 
 // milvus_table_c.cpp exports this without a header of its own.
 extern "C" LoonFFIResult
-loon_milvus_table_create_manifest_from_segment_manifests(
-    const char* base_path,
-    char** source_manifest_paths,
-    const int64_t* source_row_counts,
-    size_t num_source_manifests,
-    char** target_columns,
-    size_t num_target_columns,
-    const char* external_source,
-    const LoonProperties* properties,
-    int has_external_primary_key,
-    char** out_manifest_path);
+loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
+                                          char** source_manifest_paths,
+                                          const int64_t* source_row_counts,
+                                          size_t num_source_manifests,
+                                          char** target_columns,
+                                          size_t num_target_columns,
+                                          const char* external_source,
+                                          const LoonProperties* properties,
+                                          int has_external_primary_key);
 
 // The err_code a loon FFI call reports must survive milvus's OWN C-ABI export
 // layer (milvus_table_c.cpp), whose tail returns a LoonFFIResult. That tail
@@ -57,32 +56,55 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     std::vector<char*> manifests{missing_manifest.data()};
     std::vector<int64_t> row_counts{1};
     std::vector<char*> columns{column.data()};
-    char* out_manifest_path = nullptr;
 
-    auto result = loon_milvus_table_create_manifest_from_segment_manifests(
-        base_path.c_str(),
+    // Both the target transaction and the nested source read require valid
+    // properties. A null configuration fails with LOON_INVALID_ARGS before
+    // reaching the missing manifest, which is the failure this test exercises.
+    const char* keys[] = {loon_properties_fs_storage_type,
+                          loon_properties_fs_root_path};
+    const char* values[] = {"local", "/"};
+    LoonProperties properties{};
+    auto props_result = loon_properties_create(keys, values, 2, &properties);
+    SCOPE_EXIT {
+        loon_ffi_free_result(&props_result);
+        loon_properties_free(&properties);
+    };
+    ASSERT_NE(loon_ffi_is_success(&props_result), 0)
+        << loon_ffi_get_errmsg(&props_result);
+
+    LoonTransactionHandle transaction = 0;
+    auto begin = loon_transaction_begin(base_path.c_str(),
+                                        &properties,
+                                        0,
+                                        LOON_TRANSACTION_RESOLVE_OVERWRITE,
+                                        10,
+                                        &transaction);
+    SCOPE_EXIT {
+        loon_ffi_free_result(&begin);
+        loon_transaction_destroy(transaction);
+    };
+    ASSERT_NE(loon_ffi_is_success(&begin), 0) << loon_ffi_get_errmsg(&begin);
+
+    auto result = loon_milvus_table_append_source_manifests(
+        transaction,
         manifests.data(),
         row_counts.data(),
         manifests.size(),
         columns.data(),
         columns.size(),
         /*external_source=*/nullptr,
-        /*properties=*/nullptr,
-        /*has_external_primary_key=*/0,
-        &out_manifest_path);
+        &properties,
+        /*has_external_primary_key=*/0);
+    SCOPE_EXIT {
+        loon_ffi_free_result(&result);
+    };
 
-    ASSERT_EQ(loon_ffi_is_success(&result), 0)
-        << "a missing source manifest must fail";
-    EXPECT_NE(result.err_code, LOON_GOT_EXCEPTION)
-        << "the export boundary collapsed the producer's err_code to "
-           "LOON_GOT_EXCEPTION; Go then classifies every failure of this entry "
-           "point as permanent";
+    EXPECT_EQ(result.err_code, LOON_FILE_NOT_FOUND)
+        << "the export boundary must preserve the missing-manifest error, not "
+           "an argument error or a generic exception: "
+        << loon_ffi_get_errmsg(&result);
     // The classification the Go side derives from the code must round-trip
     // through milvus's own mapper as well.
-    EXPECT_NE(milvus::storage::LoonErrCodeToErrorCode(result.err_code),
-              milvus::ErrorCode::UnexpectedError);
-    loon_ffi_free_result(&result);
-    if (out_manifest_path != nullptr) {
-        free(out_manifest_path);
-    }
+    EXPECT_EQ(milvus::storage::LoonErrCodeToErrorCode(result.err_code),
+              milvus::ErrorCode::ObjectNotExist);
 }

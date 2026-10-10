@@ -134,6 +134,9 @@ func GetManifestStats(
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
+	if cManifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("manifest %s returned a nil handle", manifestPath)
+	}
 	defer C.loon_manifest_destroy(cManifest)
 
 	numStats := int(cManifest.stats.num_stats)
@@ -142,23 +145,54 @@ func GetManifestStats(
 	if numStats == 0 {
 		return result, nil
 	}
+	stats := &cManifest.stats
+	// Every top-level array is indexed by num_stats. Validate all parallel
+	// arrays before unsafe.Slice so a malformed manifest becomes a regular
+	// data-integrity error instead of crashing the DataNode process.
+	if stats.stat_keys == nil || stats.stat_files == nil || stats.stat_file_counts == nil ||
+		stats.stat_metadata_keys == nil || stats.stat_metadata_values == nil || stats.stat_metadata_counts == nil {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s has %d stats but incomplete top-level stat arrays",
+			manifestPath,
+			numStats,
+		)
+	}
 
-	statKeys := unsafe.Slice(cManifest.stats.stat_keys, numStats)
-	statFiles := unsafe.Slice(cManifest.stats.stat_files, numStats)
-	statFileCounts := unsafe.Slice(cManifest.stats.stat_file_counts, numStats)
-	statMetaKeys := unsafe.Slice(cManifest.stats.stat_metadata_keys, numStats)
-	statMetaValues := unsafe.Slice(cManifest.stats.stat_metadata_values, numStats)
-	statMetaCounts := unsafe.Slice(cManifest.stats.stat_metadata_counts, numStats)
+	statKeys := unsafe.Slice(stats.stat_keys, numStats)
+	statFiles := unsafe.Slice(stats.stat_files, numStats)
+	statFileCounts := unsafe.Slice(stats.stat_file_counts, numStats)
+	statMetaKeys := unsafe.Slice(stats.stat_metadata_keys, numStats)
+	statMetaValues := unsafe.Slice(stats.stat_metadata_values, numStats)
+	statMetaCounts := unsafe.Slice(stats.stat_metadata_counts, numStats)
 
 	for i := 0; i < numStats; i++ {
+		if statKeys[i] == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest %s stat %d has no key", manifestPath, i)
+		}
 		key := C.GoString(statKeys[i])
 
 		// Read paths
 		fileCount := int(statFileCounts[i])
 		paths := make([]string, fileCount)
 		if fileCount > 0 {
+			if statFiles[i] == nil {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"manifest %s stat %s has %d files but no file array",
+					manifestPath,
+					key,
+					fileCount,
+				)
+			}
 			files := unsafe.Slice(statFiles[i], fileCount)
 			for j := 0; j < fileCount; j++ {
+				if files[j] == nil {
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"manifest %s stat %s file %d has no path",
+						manifestPath,
+						key,
+						j,
+					)
+				}
 				paths[j] = C.GoString(files[j])
 			}
 		}
@@ -167,9 +201,25 @@ func GetManifestStats(
 		metaCount := int(statMetaCounts[i])
 		metadata := make(map[string]string, metaCount)
 		if metaCount > 0 {
+			if statMetaKeys[i] == nil || statMetaValues[i] == nil {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"manifest %s stat %s has %d metadata entries but incomplete metadata arrays",
+					manifestPath,
+					key,
+					metaCount,
+				)
+			}
 			mKeys := unsafe.Slice(statMetaKeys[i], metaCount)
 			mValues := unsafe.Slice(statMetaValues[i], metaCount)
 			for j := 0; j < metaCount; j++ {
+				if mKeys[j] == nil || mValues[j] == nil {
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"manifest %s stat %s metadata %d is incomplete",
+						manifestPath,
+						key,
+						j,
+					)
+				}
 				metadata[C.GoString(mKeys[j])] = C.GoString(mValues[j])
 			}
 		}

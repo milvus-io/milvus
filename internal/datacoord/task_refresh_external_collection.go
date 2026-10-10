@@ -384,11 +384,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				continue
 			}
 			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
+				// Replaying a patch is NOT harmless: replacing placeholders
+				// from the same incoming result could discard text or JSON stats
+				// built since the first apply, orphaning their files. A genuine
+				// patch always installs a strictly newer manifest, so it still
+				// applies.
 				alreadyAppliedSegments[segmentID] = struct{}{}
 				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
@@ -645,8 +645,11 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
-	cloned.TextStatsLogs = nil
-	cloned.JsonKeyStats = nil
+	// The incoming placeholders describe the stats carried by the incoming
+	// manifest. Apply both atomically so deltalog-only refreshes do not trigger
+	// redundant text or JSON stats rebuilds.
+	cloned.TextStatsLogs = incoming.GetTextStatsLogs()
+	cloned.JsonKeyStats = incoming.GetJsonKeyStats()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
