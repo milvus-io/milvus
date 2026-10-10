@@ -353,7 +353,10 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		const collectionID = int64(993004)
-		_, nameSchemaLoads := newCache(t, collectionID)
+		cache, nameSchemaLoads := newCache(t, collectionID)
+		// 2.6's legacy replication check still looks up collection info by name.
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "default", aliasName, int64(0)).
+			Return(&collectionInfo{collID: collectionID}, nil).Once()
 		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
 			PolicyName: "delete_policy",
 			PolicyType: rlsutil.PolicyTypePermissive,
