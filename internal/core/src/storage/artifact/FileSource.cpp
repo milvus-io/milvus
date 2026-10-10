@@ -927,8 +927,8 @@ class V1RemoteSource::Impl {
         return total;
     }
 
-    // Read only envelopes with synchronous ChunkManager range I/O; cache sizes,
-    // never payloads, and introduce no dependency on an executor.
+    // Read only envelopes with synchronous range I/O; cache sizes, never
+    // payloads, and introduce no dependency on an executor.
     int64_t
     Measure(std::string_view name) {
         auto known = entry_sizes.find(std::string(name));
@@ -941,6 +941,7 @@ class V1RemoteSource::Impl {
             auto found = file_infos.find(path);
             if (found == file_infos.end()) {
                 auto info = InspectLegacyIndexFile(context.chunkManagerPtr,
+                                                   context.fs,
                                                    path,
                                                    load_priority,
                                                    cancellation_token);
