@@ -16,16 +16,15 @@
 
 #pragma once
 
-#include <algorithm>
-#include <filesystem>
-#include <optional>
-#include <unordered_set>
-
-#include "storage/DiskFileManagerImpl.h"
-#include "index/ScalarIndex.h"
+#include "common/EasyAssert.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus::index {
 
+/**
+ * @brief Decode required persisted metadata, reporting missing/invalid values
+ * as DataFormatBroken while preserving allocation and existing Segcore errors.
+ */
 template <typename T>
 T
 ReadRequiredIndexMeta(const nlohmann::json& source, const char* key) {
@@ -47,67 +46,6 @@ ReadRequiredIndexMeta(const nlohmann::json& source, const char* key) {
             key,
             e.what());
     }
-}
-
-// Owns the directory lease until plan commit or failure cleanup.
-struct IndexDirectoryLoadContext {
-    ~IndexDirectoryLoadContext() {
-        if (manager && !path.empty() &&
-            (files.empty() ||
-             !std::all_of(files.begin(), files.end(), [](const auto& file) {
-                 return file->Committed();
-             }))) {
-            manager->RemoveIndexFiles();
-        }
-    }
-
-    std::shared_ptr<storage::DiskFileManagerImpl> manager;
-    std::string path;
-    std::vector<std::shared_ptr<storage::IndexFileTarget>> files;
-    std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease> lease;
-};
-
-inline std::shared_ptr<IndexDirectoryLoadContext>
-PlanIndexDirectory(const storage::IndexEntryDirectory& directory,
-                   const nlohmann::json& metadata,
-                   const std::shared_ptr<storage::DiskFileManagerImpl>& manager,
-                   bool retain_on_success,
-                   IndexLoadPlan& plan) {
-    AssertInfo(manager != nullptr, "Directory load requires DiskFileManager");
-    auto context = std::make_shared<IndexDirectoryLoadContext>();
-    const auto file_names =
-        ReadRequiredIndexMeta<std::vector<std::string>>(metadata, "file_names");
-    if (file_names.empty()) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt scalar index: file_names is empty");
-    }
-    std::unordered_set<std::string_view> names;
-    names.reserve(file_names.size());
-    for (const auto& name : file_names) {
-        const auto path = std::filesystem::path(name);
-        if (name.empty() || name.find('\0') != std::string::npos ||
-            path.is_absolute() || path.has_parent_path() ||
-            path.filename() != path || name == "." || name == ".." ||
-            !names.insert(name).second || !directory.HasEntry(name)) {
-            ThrowInfo(
-                ErrorCode::DataFormatBroken,
-                "corrupt scalar index: invalid, duplicate or missing file '{}'",
-                name);
-        }
-    }
-    context->path = manager->GetLocalIndexObjectPrefix();
-    context->lease.emplace(manager->AcquireLocalDirWriteLease(context->path));
-    context->manager = manager;
-    context->files.reserve(file_names.size());
-    plan.entries.reserve(plan.entries.size() + file_names.size());
-    for (const auto& name : file_names) {
-        const auto size = directory.At(name).plaintext_size;
-        auto file = std::make_shared<storage::IndexFileTarget>(
-            context->path + "/" + name, size, retain_on_success);
-        context->files.push_back(file);
-        plan.entries.push_back({name, storage::FileEntryTarget{file, 0, size}});
-    }
-    return context;
 }
 
 }  // namespace milvus::index
