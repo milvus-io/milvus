@@ -214,24 +214,6 @@ DecodeEmptyEmbeddingList(const knowhere::BinarySet& entries) {
     return result;
 }
 
-// Translate the load policy to Knowhere configuration; reject unknown policy
-// values.
-void
-SetWarmup(Config& config, storage::WarmupPolicy warmup) {
-    switch (warmup) {
-        case storage::WarmupPolicy::Disable:
-            config[WARMUP] = "disable";
-            return;
-        case storage::WarmupPolicy::Sync:
-            config[WARMUP] = "sync";
-            return;
-        case storage::WarmupPolicy::Async:
-            config[WARMUP] = "async";
-            return;
-    }
-    ThrowInfo(UnexpectedError, "unknown vector warmup policy");
-}
-
 // Preserve the Knowhere status category while adding deserialization context.
 [[noreturn]] void
 ThrowDeserializeError(knowhere::Status status) {
@@ -317,13 +299,15 @@ PopulateState(bool use_async,
     config.erase(MMAP_FILE_PATH);
     config.erase(EMB_LIST_META_PATH);
     config.erase(EMB_LIST_RAW_INDEX_PATH);
-    SetWarmup(config, opts.warmup);
 
     // The id map's derived arrays may be file-backed, and knowhere removes
     // each backing file with its mapping, so the staging directory only has to
     // outlive the engine. A metadata-only artifact owns no engine file, so it
-    // creates that directory on its own when mmap was requested.
-    const auto id_map_mmap_requested = params.id_map_mmap.Any();
+    // creates that directory on its own when mmap was requested. A non-mmap
+    // load also receives a staging parent, but its id map stays in memory
+    // because the memory load estimate charges no disk bytes for it.
+    const auto id_map_mmap_requested =
+        opts.enable_mmap && params.id_map_mmap.Any();
     auto stage_id_map_mmap_dir = [&]() -> folly::coro::Task<std::string> {
         if (!plan.has_validity || !id_map_mmap_requested)
             co_return std::string{};
@@ -364,7 +348,7 @@ PopulateState(bool use_async,
                     FinalizeRestoredIdMap(state.engine.native_index.Node(),
                                           "empty embedding-list vector load");
                 };
-                if (use_async && params.id_map_mmap.Any()) {
+                if (use_async && id_map_mmap_requested) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
                 } else {
                     local_io();
@@ -390,7 +374,7 @@ PopulateState(bool use_async,
                     FinalizeRestoredIdMap(state.engine.native_index.Node(),
                                           "all-null nullable vector load");
                 };
-                if (use_async && params.id_map_mmap.Any()) {
+                if (use_async && id_map_mmap_requested) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
                 } else {
                     local_io();
@@ -484,7 +468,23 @@ PopulateState(bool use_async,
             }
             entries.clear();
         }
-        state.engine.SetDim(state.engine.native_index.Dim());
+        auto loaded_dim = state.engine.native_index.Dim();
+        if (plan.has_emb_raw) {
+            // The ANN payload is encoded. An empty retrieval reports the raw
+            // sidecar's dimension without reading any vector payload.
+            auto shape = state.engine.native_index.GetEmbListByIds(
+                knowhere::GenIdsDataSet(0, nullptr), params.metric_type);
+            if (!shape.has_value()) {
+                ThrowDeserializeError(shape.error());
+            }
+            if (shape.value() == nullptr) {
+                ThrowInfo(KnowhereError,
+                          "knowhere returned a null embedding-list shape "
+                          "dataset");
+            }
+            loaded_dim = shape.value()->GetDim();
+        }
+        state.engine.SetDim(loaded_dim);
         ValidateLoadedDimension(params,
                                 state.engine.Dim(),
                                 DimensionSource::PersistedArtifact,
@@ -533,7 +533,7 @@ VectorMemLoader::LoadLegacy(storage::FileSource& source,
                   "in-memory vector indexes have no V3 persisted format");
     }
     const auto plan = PlanEntries(source, params);
-    if (plan.has_validity && params.id_map_mmap.Any() &&
+    if (plan.has_validity && opts.enable_mmap && params.id_map_mmap.Any() &&
         opts.mmap_dir_path.empty()) {
         ThrowInfo(UnexpectedError,
                   "nullable vector mmap mapping requires a staging parent");

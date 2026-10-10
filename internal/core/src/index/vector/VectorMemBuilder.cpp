@@ -497,7 +497,10 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                       static_cast<int>(status),
                       knowhere::Status2String(status));
         }
-        engine.SetDim(engine.native_index.Dim());
+        // Encoded embedding-list indexes use a different ANN dimension;
+        // queries and raw-vector retrieval still use the input dimension.
+        engine.SetDim(prepared.embedding_list ? input.dim
+                                              : engine.native_index.Dim());
         // An embedding-list dataset searched with an ordinary metric builds a
         // flat vector index, and knowhere then materializes an element-domain
         // identity map instead of consuming the list validity, so the row
