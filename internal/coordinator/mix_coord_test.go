@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
@@ -102,6 +104,78 @@ func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	err = core.Stop()
 	assert.NoError(t, err)
+}
+
+// A mixcoord that is still STANDBY when it is stopped never ran initInternal,
+// and its standby goroutine sees context.Canceled from the session. Stop must
+// neither touch the missing file resource observer nor leave that goroutine
+// to mistake the cancellation for an activation failure and panic.
+func TestMixcoord_StopWhileStandby(t *testing.T) {
+	randVal := rand.Int()
+	paramtable.Init()
+	testutil.ResetEnvironment()
+	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	kvfactory.CloseEtcdClient()
+	paramtable.Get().Save(Params.MixCoordCfg.EnableActiveStandby.Key, "true")
+	defer paramtable.Get().Reset(Params.MixCoordCfg.EnableActiveStandby.Key)
+
+	// Allocate both server IDs from the fresh rootPath, so a node ID left over
+	// from an earlier test cannot collide with the other session's.
+	oldNodeID := paramtable.GetNodeID()
+	paramtable.SetNodeID(0)
+	defer paramtable.SetNodeID(oldNodeID)
+
+	ctx := context.Background()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+
+	core, err := NewMixCoordServer(ctx, dependency.NewDefaultFactory(true))
+	assert.NoError(t, err)
+	core.SetEtcdClient(etcdCli)
+	core.SetTiKVClient(tikv.SetupLocalTxn())
+	assert.NoError(t, core.Init())
+
+	// Another mixcoord session holds the ACTIVE key, so the one under test
+	// stays in STANDBY.
+	active := sessionutil.NewSession(ctx, sessionutil.WithResueNodeID(false))
+	active.Init(typeutil.MixCoordRole, "localhost:1", true)
+	active.SetEnableActiveStandBy(true)
+	active.Register()
+	assert.NoError(t, active.ProcessActiveStandBy(nil))
+	defer active.Stop()
+
+	type standbyResult struct {
+		err    error
+		ctxErr error
+	}
+	entered := make(chan struct{})
+	result := make(chan standbyResult, 1)
+	var origin func(*sessionutil.Session, func() error) error
+	mocker := mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
+		func(s *sessionutil.Session, activateFunc func() error) error {
+			close(entered)
+			err := origin(s, activateFunc)
+			// The Register goroutine decides between "shutdown" and panic on
+			// core.ctx right after this returns.
+			result <- standbyResult{err: err, ctxErr: core.ctx.Err()}
+			return err
+		}).Origin(&origin).Build()
+	defer mocker.UnPatch()
+
+	assert.NoError(t, core.Register())
+	<-entered
+	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
+
+	assert.NotPanics(t, func() {
+		assert.NoError(t, core.Stop())
+	})
+
+	select {
+	case r := <-result:
+		assert.Error(t, r.err)
+		assert.ErrorIs(t, r.ctxErr, context.Canceled)
+	case <-time.After(10 * time.Second):
+		t.Fatal("standby process did not exit after Stop")
+	}
 }
 
 func TestMixCoord_FlushAll(t *testing.T) {
