@@ -341,3 +341,36 @@ func (crr *CompositeBinlogRecordReader) Close() error {
 	}
 	return nil
 }
+
+// TryRecordColumn checks field presence without panicking for built-in records.
+func TryRecordColumn(rec Record, fieldID FieldID) (col arrow.Array, ok bool) {
+	if rec == nil {
+		return nil, false
+	}
+	switch r := rec.(type) {
+	case interface {
+		TryColumn(FieldID) (arrow.Array, bool)
+	}:
+		return r.TryColumn(fieldID)
+	case *simpleArrowRecord:
+		colIdx, ok := r.field2Col[fieldID]
+		if !ok {
+			return nil, false
+		}
+		if colIdx < 0 || colIdx >= int(r.r.NumCols()) {
+			return nil, false
+		}
+		return r.r.Column(colIdx), true
+	case *compositeRecord:
+		col := r.Column(fieldID)
+		return col, col != nil
+	case *selectiveRecord:
+		if r.fieldId != fieldID {
+			return nil, false
+		}
+		return TryRecordColumn(r.r, fieldID)
+	}
+
+	col = rec.Column(fieldID)
+	return col, col != nil
+}

@@ -18,6 +18,7 @@ package storage
 
 import (
 	"strconv"
+	"sync/atomic"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -43,8 +45,27 @@ func isNullableDenseVectorArrowType(dataType schemapb.DataType) bool {
 	}
 }
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
+type appendValueDefault struct {
+	value       *schemapb.ValueField
+	geometryWKB []byte
+}
+
+func newAppendValueDefault(field *schemapb.FieldSchema) (appendValueDefault, error) {
+	defaultValue := field.GetDefaultValue()
+	ret := appendValueDefault{value: defaultValue}
+	if defaultValue != nil && field.GetDataType() == schemapb.DataType_Geometry {
+		val, err := common.ConvertWKTToWKB(defaultValue.GetStringData())
+		if err != nil {
+			return ret, merr.WrapErrServiceInternalErr(err, "invalid default value for geometry field %s", field.GetName())
+		}
+		ret.geometryWKB = val
+	}
+	return ret, nil
+}
+
+func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemapb.FieldSchema, appendDefault appendValueDefault) (uint64, error) {
 	// a could never be nil here
+	defaultValue := appendDefault.value
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
@@ -117,7 +138,11 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
-				b.Append(defaultValue.GetLongData())
+				if field.GetDataType() == schemapb.DataType_Timestamptz {
+					b.Append(defaultValue.GetTimestamptzData())
+				} else {
+					b.Append(defaultValue.GetLongData())
+				}
 				return 8, nil
 			}
 			b.AppendNull()
@@ -157,6 +182,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetDoubleData())
+				return 8, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -190,6 +219,9 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			// could be internal $meta json
 			if defaultValue != nil {
 				val := defaultValue.GetBytesData()
+				if field.GetDataType() == schemapb.DataType_Geometry {
+					val = appendDefault.geometryWKB
+				}
 				b.Append(val)
 				return uint64(len(val)), nil
 			}
@@ -343,17 +375,80 @@ type RecordBuilder struct {
 	fields      []*schemapb.FieldSchema
 	arrowFields []arrow.Field
 	builders    []array.Builder
+	allocator   *recordBuilderAllocator
+	defaults    []appendValueDefault
 
 	nRows int
 	size  uint64
 }
 
+// Each output batch has its own allocator counter. Records handed to a writer
+// can outlive the builder and can be released from another goroutine.
+type recordBuilderAllocator struct {
+	memory.Allocator
+	size atomic.Int64
+}
+
+func (a *recordBuilderAllocator) Allocate(size int) []byte {
+	buf := a.Allocator.Allocate(size)
+	a.size.Add(int64(len(buf)))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Reallocate(size int, buf []byte) []byte {
+	oldSize := len(buf)
+	buf = a.Allocator.Reallocate(size, buf)
+	a.size.Add(int64(len(buf) - oldSize))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Free(buf []byte) {
+	a.Allocator.Free(buf)
+	a.size.Add(-int64(len(buf)))
+}
+
+func (b *RecordBuilder) prepareAppendDefaults() error {
+	if b.defaults != nil {
+		return nil
+	}
+	defaults := make([]appendValueDefault, len(b.fields))
+	for i, field := range b.fields {
+		appendDefault, err := newAppendValueDefault(field)
+		if err != nil {
+			return err
+		}
+		defaults[i] = appendDefault
+	}
+	b.defaults = defaults
+	return nil
+}
+
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if err := b.prepareAppendDefaults(); err != nil {
+		return err
+	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := rec.Column(f.FieldID)
-			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
+			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
+			// reader's representation instead of treating decoded text as a ref.
+			if f.GetDataType() == schemapb.DataType_Text &&
+				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
+				col.DataType().ID() != builder.Type().ID() {
+				if builder.NullN() == builder.Len() {
+					// Missing TEXT fields can have been filled with binary nulls.
+					nulls := builder.Len()
+					builder.Release()
+					builder = array.NewBuilder(b.allocator, col.DataType())
+					builder.AppendNulls(nulls)
+					b.builders[i] = builder
+				} else if col.IsNull(offset) {
+					builder.AppendNull()
+					continue
+				}
+			}
+			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())
 			}
@@ -372,6 +467,19 @@ func (b *RecordBuilder) GetSize() uint64 {
 	return b.size
 }
 
+func (b *RecordBuilder) GetMemorySize() uint64 {
+	// Count allocated Arrow buffers, including null slots, validity/offset
+	// buffers and spare capacity. Payload bytes alone can severely undercount
+	// wide nullable schemas. This excludes batches already handed to writers.
+	return uint64(b.allocator.size.Load())
+}
+
+func (b *RecordBuilder) Release() {
+	for _, builder := range b.builders {
+		builder.Release()
+	}
+}
+
 func (b *RecordBuilder) Build() Record {
 	arrays := make([]arrow.Array, len(b.builders))
 	fields := make([]arrow.Field, len(b.builders))
@@ -386,8 +494,22 @@ func (b *RecordBuilder) Build() Record {
 	}
 
 	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(b.nRows)), field2Col)
+	// NewRecord retained every column; drop the builder-side creator refs so the
+	// record is the sole owner and columns can actually reach refcount zero.
+	for _, arr := range arrays {
+		arr.Release()
+	}
 	b.nRows = 0
 	b.size = 0
+	// NewArray transfers the buffers but keeps the allocator on each builder.
+	// Start fresh builders/counters so retained output Records cannot affect
+	// the next batch's accounting when their buffers are eventually released.
+	b.allocator = &recordBuilderAllocator{Allocator: b.allocator.Allocator}
+	for i, builder := range b.builders {
+		dataType := builder.Type()
+		builder.Release()
+		b.builders[i] = array.NewBuilder(b.allocator, dataType)
+	}
 	return rec
 }
 
@@ -401,6 +523,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 
 	builders := make([]array.Builder, len(fields))
 	arrowFields := make([]arrow.Field, len(fields))
+	allocator := &recordBuilderAllocator{Allocator: memory.DefaultAllocator}
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
 
@@ -409,14 +532,14 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			elementType = field.GetElementType()
 		}
 		if field.GetNullable() && isNullableDenseVectorArrowType(field.DataType) {
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else if field.DataType == schemapb.DataType_Text {
 			// TEXT fields are stored as binary (LOB references) in manifest storage,
 			// so the builder must use binary type to match what the reader returns.
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType)
-			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
+			builders[i] = array.NewBuilder(allocator, arrowType)
 		}
 		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
 	}
@@ -425,6 +548,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 		fields:      fields,
 		arrowFields: arrowFields,
 		builders:    builders,
+		allocator:   allocator,
 	}
 }
 
