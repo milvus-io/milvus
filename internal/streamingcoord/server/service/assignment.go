@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
@@ -263,21 +262,17 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	}
 
 	// Create the AlterReplicateConfigMessage with force promote flag
-	controlChannel := streaming.WAL().ControlChannel()
-	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
-		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
-			return controlChannel
-		}
-		return pchannel
-	})
-
+	cc := message.ClusterChannels{
+		Channels:       pchannels,
+		ControlChannel: streaming.WAL().ControlChannel(),
+	}
 	msg := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: forcePromoteConfig,
 			ForcePromote:           true, // marks as force promote
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
-		WithBroadcast(broadcastPChannels, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
+		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()). // Disable fast DDL ack
 		MustBuildBroadcast()
 
 	// Use Broadcast() to broadcast the message
