@@ -414,7 +414,7 @@ func (m *ViewScopedPhysicalSegmentManager) nextSegmentUpdateLocked(ctx context.C
 		OnFailed: func(error) {
 			m.failSegmentUpdate(segmentID, state, epoch)
 		},
-	})
+	}, m.estimator)
 	return segmentUpdateSubmission{task: task, state: state, epoch: epoch}, true
 }
 

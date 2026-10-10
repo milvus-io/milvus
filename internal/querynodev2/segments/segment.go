@@ -211,6 +211,14 @@ func compactSegmentLoadInfoForRuntime(loadInfo *querypb.SegmentLoadInfo) *queryp
 	}
 }
 
+// FinalizeLoad caches resource estimates and discards load-only metadata after
+// all data, index, delta and PK metadata consumers have finished.
+func FinalizeLoad(segment Segment) {
+	if local, ok := segment.(*LocalSegment); ok {
+		local.compactLoadInfoForRuntime()
+	}
+}
+
 func (s *baseSegment) compactLoadInfoForRuntime() {
 	if s.segmentType != SegmentTypeSealed || s.Level() == datapb.SegmentLevel_L0 {
 		return

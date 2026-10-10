@@ -246,14 +246,32 @@ consume that same private copy. Reopen/index updates prepare a private copy as
 well, since legacy Reopen mutates index parameters in place. Local settings must
 never modify the shared snapshot or its content-based revision.
 
+Historical deltalogs use the shared loader's format-aware path: ordinary external
+formats are skipped there, while milvus-table manifests and source-side deletes
+are loaded with the source storage context. External milvus-table segments with
+real primary keys require source Bloom Filters even when the global Bloom Filter
+switch is disabled; only virtual-PK segments use encoded Segment-ID matching.
+After data/index, delta and PK loading all finish, `segments.FinalizeLoad` caches
+resource estimates and trims Go load-only metadata. No consumer may depend on
+that trimmed metadata after physical readiness is reported.
+
 Update task behavior:
 
 1. classify the revision change into the required physical update actions;
 2. refresh collection index meta from the new snapshot;
-3. call `PhysicalSegmentLoader.Update`;
+3. reserve resources through the same optional estimator as initial loading,
+   then call `PhysicalSegmentLoader.Update`; release the reservation on every
+   outcome before reporting completion;
 4. return `nodescheduler.ErrDelay` for non-cancellation failures so the same
    task is retried;
 5. update only the physical segment state's applied revision after success.
+
+Update resource estimation currently matches legacy `ReopenSegments`: reserve
+the full new load-info estimate conservatively. Incremental native-diff peak
+estimation remains future work. Reservation failure retries the same task without
+advancing the applied revision. A combined Reopen/index update executes only one
+physical Reopen because the current native load-diff implementation also applies
+index replacements; an index-only action still uses the LoadIndex entry.
 
 The subscription's delivered revision is independent from the physical applied
 revision. It advances when the handler has accepted the complete snapshot,

@@ -88,7 +88,7 @@ func TestQueryViewUpdatePreparesPrivateInfo(t *testing.T) {
 			}}, qnview.SegmentLoadInfoSnapshot{LoadInfo: info}, action)
 			require.NoError(t, err)
 			require.True(t, proto.Equal(original, info))
-			if action.Has(qnview.SegmentUpdateLoadIndex) {
+			if action == qnview.SegmentUpdateLoadIndex {
 				require.Len(t, loader.infos, 1)
 				require.True(t, loader.infos[0].GetUseTakeForOutput())
 				require.NotEmpty(t, funcutil.KeyValuePair2Map(loader.infos[0].IndexInfos[0].IndexParams)[indexparams.NumLoadThreadKey])
@@ -134,6 +134,7 @@ func TestQueryViewPhysicalLoadFailureReleasesSegment(t *testing.T) {
 		{"data", (*fakeQVLoader).LoadSegment},
 		{"delta", (*fakeQVLoader).LoadDeltaLogs},
 		{"bloom_filter", (*fakeQVLoader).LoadPKCandidate},
+		{"finalize", (*fakeQVLoader).FinalizeLoad},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			patch := mockey.Mock(tc.method).Return(assert.AnError).Build()

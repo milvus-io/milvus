@@ -38,6 +38,7 @@ func TestQueryViewPhysicalSegmentLoader_LoadBorrowsCollectionAndWrapsSegment(t *
 	assert.True(t, loader.loadCalled)
 	assert.True(t, loader.deltaCalled)
 	assert.True(t, loader.pkCalled)
+	assert.True(t, loader.finalized)
 	assert.Equal(t, int64(10), loaded.ID())
 	assert.Equal(t, int64(100), loaded.PartitionID())
 	assert.Equal(t, "v1", loaded.VChannel())
@@ -85,7 +86,7 @@ func TestQueryViewPhysicalSegmentLoaderUpdateUnwrapsTransformSegment(t *testing.
 	)
 	require.NoError(t, err)
 	assert.True(t, loader.reopenCalled)
-	assert.True(t, loader.loadIndexCalled)
+	assert.False(t, loader.loadIndexCalled, "Reopen already applies index updates")
 }
 
 type testTransformSegmentWrapper struct {

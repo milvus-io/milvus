@@ -81,6 +81,7 @@ type fakeQVLoader struct {
 	loadIndexCalled bool
 	deltaCalled     bool
 	pkCalled        bool
+	finalized       bool
 	err             error
 }
 
@@ -162,6 +163,11 @@ func (l *fakeQVLoader) LoadDeltaLogs(_ context.Context, segment qvLoadedSegment,
 func (l *fakeQVLoader) LoadPKCandidate(_ context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error {
 	l.pkCalled = true
 	l.infos = append(l.infos, info)
+	return l.err
+}
+
+func (l *fakeQVLoader) FinalizeLoad(qvLoadedSegment) error {
+	l.finalized = true
 	return l.err
 }
 

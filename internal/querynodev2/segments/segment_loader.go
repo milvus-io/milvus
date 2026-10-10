@@ -417,9 +417,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
-		if localSegment, ok := segment.(*LocalSegment); ok {
-			localSegment.compactLoadInfoForRuntime()
-		}
+		FinalizeLoad(segment)
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil

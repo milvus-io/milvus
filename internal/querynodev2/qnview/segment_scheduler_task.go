@@ -80,8 +80,11 @@ func (t *SegmentLoadTask) reserve(ctx context.Context, info *querypb.SegmentLoad
 	return t.estimator.Reserve(ctx, info, t.Collection)
 }
 
-func newSegmentUpdateTask(loader PhysicalSegmentLoader, task SegmentUpdateTask) *SegmentUpdateTask {
+func newSegmentUpdateTask(loader PhysicalSegmentLoader, task SegmentUpdateTask, estimators ...SegmentResourceEstimator) *SegmentUpdateTask {
 	task.loader = loader
+	if len(estimators) > 0 {
+		task.estimator = estimators[0]
+	}
 	return &task
 }
 
@@ -113,13 +116,28 @@ func (t *SegmentUpdateTask) update(ctx context.Context) error {
 	if err := updateCollectionIndexMeta(ctx, t.Collection, t.Snapshot.IndexInfos); err != nil {
 		return err
 	}
-	if err := t.loader.Update(ctx, t.Segment, t.Collection, t.Snapshot, action); err != nil {
+	if err := t.applyUpdate(ctx, action); err != nil {
 		return err
 	}
 	if t.OnUpdated != nil {
 		t.OnUpdated(t.Snapshot.Revision)
 	}
 	return nil
+}
+
+func (t *SegmentUpdateTask) applyUpdate(ctx context.Context, action SegmentUpdateAction) error {
+	if t.estimator != nil {
+		// Match legacy ReopenSegments' conservative full-load reservation until
+		// the estimator can account for the native load diff's peak resource use.
+		reservation, err := t.estimator.Reserve(ctx, t.Snapshot.LoadInfo, t.Collection)
+		if err != nil {
+			return err
+		}
+		if reservation != nil {
+			defer reservation.Release()
+		}
+	}
+	return t.loader.Update(ctx, t.Segment, t.Collection, t.Snapshot, action)
 }
 
 func (t *SegmentUpdateTask) fail(err error) {

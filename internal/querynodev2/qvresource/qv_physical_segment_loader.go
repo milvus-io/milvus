@@ -45,6 +45,9 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 	if err := l.loader.LoadPKCandidate(ctx, loaded, info); err != nil {
 		return nil, err
 	}
+	if err := l.loader.FinalizeLoad(loaded); err != nil {
+		return nil, err
+	}
 	releaseOnFailure = false
 	return newQueryViewTransformSegment(loaded, l.segments, qvSegmentVChannel(info), qvSegmentTransformStartAfter(info)), nil
 }
@@ -66,9 +69,8 @@ func (l *queryViewPhysicalSegmentLoader) Update(ctx context.Context, segment qnv
 		return err
 	}
 	if action.Has(qnview.SegmentUpdateReopen) {
-		if err := l.loader.ReopenSegment(ctx, transform.segment, info); err != nil {
-			return err
-		}
+		// Reopen applies the complete load-info diff, including index changes.
+		return l.loader.ReopenSegment(ctx, transform.segment, info)
 	}
 	if action.Has(qnview.SegmentUpdateLoadIndex) {
 		// SegmentLoadInfoRevision is a content hash used only for equality. It is
@@ -154,13 +156,8 @@ func (l realQVSegmentLoader) LoadDeltaLogs(ctx context.Context, segment qvLoaded
 	if err != nil {
 		return err
 	}
-	collection := local.Collection()
-	if collection == nil {
-		return merr.WrapErrCollectionNotFound(local.collectionID)
-	}
-	if typeutil.IsExternalCollection(collection.Schema()) {
-		return nil
-	}
+	// The shared loader handles milvus-table source deletes and skips only
+	// external formats that do not carry historical deltalogs.
 	return l.loader.LoadDeltaLogsWithoutResource(ctx, local.segment, info)
 }
 
@@ -176,7 +173,9 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 	if collection == nil {
 		return merr.WrapErrCollectionNotFound(local.collectionID)
 	}
-	if typeutil.IsExternalCollection(collection.Schema()) {
+	schema := collection.Schema()
+	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() && segments.HasExternalPrimaryKey(schema)
+	if typeutil.IsExternalCollection(schema) && !isMilvusTableRealPK {
 		local.segment.SetPKCandidate(pkoracle.NewExternalSegmentCandidate(
 			info.GetSegmentID(),
 			info.GetPartitionID(),
@@ -184,7 +183,7 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 		))
 		return nil
 	}
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
 		return nil
 	}
 	bfs, err := l.loader.LoadBloomFilterSet(ctx, info.GetCollectionID(), info)
@@ -195,6 +194,15 @@ func (l realQVSegmentLoader) LoadPKCandidate(ctx context.Context, segment qvLoad
 		return merr.WrapErrServiceInternalMsg("query view physical loader expected one bloom filter set, got %d", len(bfs))
 	}
 	local.segment.SetPKCandidate(bfs[0])
+	return nil
+}
+
+func (l realQVSegmentLoader) FinalizeLoad(segment qvLoadedSegment) error {
+	local, err := asQVLocalSegment(segment)
+	if err != nil {
+		return err
+	}
+	segments.FinalizeLoad(local.segment)
 	return nil
 }
 

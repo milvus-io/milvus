@@ -47,4 +47,5 @@ type qvSegmentLoader interface {
 	LoadIndex(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo, version int64) error
 	LoadDeltaLogs(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error
 	LoadPKCandidate(ctx context.Context, segment qvLoadedSegment, info *querypb.SegmentLoadInfo) error
+	FinalizeLoad(segment qvLoadedSegment) error
 }

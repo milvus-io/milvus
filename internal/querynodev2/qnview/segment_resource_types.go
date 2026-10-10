@@ -225,7 +225,8 @@ type SegmentLoadTask struct {
 }
 
 type SegmentUpdateTask struct {
-	loader PhysicalSegmentLoader
+	loader    PhysicalSegmentLoader
+	estimator SegmentResourceEstimator
 
 	Context    context.Context
 	Segment    TransformSegment
