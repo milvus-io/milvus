@@ -52,6 +52,22 @@ GetArrowReaderProperties() {
     return arrow_reader_properties;
 }
 
+parquet::ArrowReaderProperties
+GetArrowReaderProperties(bool eager_prebuffer) {
+    auto properties = GetArrowReaderProperties();
+    if (!eager_prebuffer) {
+        return properties;
+    }
+    // Only when the ranges are fetched changes. The coalescing limits stay as
+    // configured, so an eager reader issues the same requests as a lazy one.
+    auto cache_options = properties.cache_options();
+    cache_options.lazy = false;
+    cache_options.prefetch_limit = 0;
+    properties.set_pre_buffer(true);
+    properties.set_cache_options(cache_options);
+    return properties;
+}
+
 void
 ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
                                int64_t range_size_limit_bytes) {
