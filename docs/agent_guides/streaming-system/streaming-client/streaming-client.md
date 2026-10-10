@@ -8,3 +8,9 @@ Append and Read route to the StreamingNode owning the target PChannel via [Chann
 
 - `internal/distributed/streaming/` — `WALAccesser` singleton, producer, consumer
 - `internal/streamingnode/client/` — `HandlerClient`, local/remote dispatch
+
+## Analyzer
+
+`streaming.WAL().AnalyzerClient()` exposes the handler client's native SN analyzer
+API. It reuses streaming discovery and connections independently of QueryView.
+See [Analyzer execution](analyzer.md) for routing, schema and lifetime rules.

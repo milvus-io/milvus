@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -173,6 +174,9 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
+	AnalyzerClient() handler.AnalyzerClient
+
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService
 
