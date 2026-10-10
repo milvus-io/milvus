@@ -94,6 +94,37 @@ func Test_CheckStrByValues(t *testing.T) {
 	}
 }
 
+func TestGetSparseAutoIndexParams(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().AutoIndexConfig
+	assert.NotPanics(t, CheckAutoIndexConfig)
+	t.Cleanup(func() {
+		paramtable.Get().Reset(cfg.SparseIndexParams.Key)
+		paramtable.Get().Reset(cfg.SparseIPIndexParams.Key)
+		paramtable.Get().Reset(cfg.SparseBM25IndexParams.Key)
+	})
+
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseIPIndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP", "drop_ratio_build": 0.1}`))
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseBM25IndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "drop_ratio_build": 0.3}`))
+	assert.Equal(t, "0.1", GetSparseAutoIndexParams(metric.IP, schemapb.FunctionType_Unknown)["drop_ratio_build"])
+	assert.Equal(t, "0.3", GetSparseAutoIndexParams("", schemapb.FunctionType_BM25)["drop_ratio_build"])
+
+	assert.NoError(t, paramtable.Get().Reset(cfg.SparseIPIndexParams.Key))
+	assert.NoError(t, paramtable.Get().Reset(cfg.SparseBM25IndexParams.Key))
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseIndexParams.Key,
+		`{"index_type": "SPARSE_WAND", "drop_ratio_build": 0.2}`))
+	ipParams := GetSparseAutoIndexParams(metric.IP, schemapb.FunctionType_Unknown)
+	bm25Params := GetSparseAutoIndexParams("", schemapb.FunctionType_BM25)
+	assert.Equal(t, "SPARSE_WAND", ipParams[common.IndexTypeKey])
+	assert.Equal(t, "0.2", ipParams["drop_ratio_build"])
+	assert.Equal(t, metric.IP, ipParams[common.MetricTypeKey])
+	assert.Equal(t, "SPARSE_WAND", bm25Params[common.IndexTypeKey])
+	assert.Equal(t, "0.2", bm25Params["drop_ratio_build"])
+	assert.Equal(t, metric.BM25, bm25Params[common.MetricTypeKey])
+}
+
 func Test_CheckAutoIndex(t *testing.T) {
 	t.Run("index type not found", func(t *testing.T) {
 		mgr := config.NewManager()
