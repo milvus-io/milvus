@@ -92,6 +92,7 @@ func testLocalPoison(t *testing.T, stage string) {
 	h.ApplyViews([]handler.ApplyView{{View: view, OnReport: report}})
 	require.Eventually(t, func() bool { return streams.stream("p") != nil }, time.Second, time.Millisecond)
 	stream := streams.stream("p")
+	requireSubscriptionVChannels(t, stream, []string{"p_1v0"})
 	if stage == "partial" {
 		stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 9}})
 		partial := nextReport()

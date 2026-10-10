@@ -1,6 +1,7 @@
 package transformlogbuffer
 
 import (
+	"container/list"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -23,7 +24,8 @@ type Buffer struct {
 	streamsByPChannel map[string]*streamState
 	channels          map[string]*vchannelBuffer
 
-	drainTasks chan catchupTask
+	drainConcurrency int
+	drainQueues      map[string]*drainQueue
 }
 
 func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
@@ -34,10 +36,8 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 		streams:           streams,
 		streamsByPChannel: make(map[string]*streamState),
 		channels:          make(map[string]*vchannelBuffer),
-		drainTasks:        make(chan catchupTask, 1024),
-	}
-	for i := 0; i < drainConcurrency; i++ {
-		go b.drainWorker()
+		drainConcurrency:  drainConcurrency,
+		drainQueues:       make(map[string]*drainQueue),
 	}
 	return b
 }
@@ -101,8 +101,44 @@ type catchupTask struct {
 	onComplete func(error)
 }
 
-func (b *Buffer) drainWorker() {
-	for task := range b.drainTasks {
+// drainQueue is shared by all VChannels and logical stream generations of a
+// PChannel. Buffer.mu protects its tasks and worker count.
+type drainQueue struct {
+	tasks   list.List
+	workers int
+}
+
+func (b *Buffer) scheduleDrain(task catchupTask) {
+	pchannel := task.reg.buffer.pchannel
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	queue := b.drainQueues[pchannel]
+	if queue == nil {
+		queue = &drainQueue{}
+		b.drainQueues[pchannel] = queue
+	}
+	// Submission must not occupy a physical-loading worker waiting for replay.
+	queue.tasks.PushBack(task)
+	if queue.workers < b.drainConcurrency {
+		queue.workers++
+		go b.drainWorker(pchannel, queue)
+	}
+}
+
+func (b *Buffer) drainWorker(pchannel string, queue *drainQueue) {
+	for {
+		b.mu.Lock()
+		front := queue.tasks.Front()
+		if front == nil {
+			queue.workers--
+			if queue.workers == 0 {
+				delete(b.drainQueues, pchannel)
+			}
+			b.mu.Unlock()
+			return
+		}
+		task := queue.tasks.Remove(front).(catchupTask)
+		b.mu.Unlock()
 		err := task.reg.buffer.drainRegistration(task.ctx, task.reg)
 		if err != nil {
 			task.reg.Unregister()
@@ -726,14 +762,16 @@ func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *r
 }
 
 func (r *registration) Catchup(ctx context.Context, onComplete func(error)) {
-	select {
-	case r.buffer.owner.drainTasks <- catchupTask{ctx: ctx, reg: r, onComplete: onComplete}:
-	case <-r.ctx.Done():
-		onComplete(r.ctx.Err())
-	case <-ctx.Done():
+	if err := ctx.Err(); err != nil {
 		r.Unregister()
-		onComplete(ctx.Err())
+		onComplete(err)
+		return
 	}
+	if err := r.ctx.Err(); err != nil {
+		onComplete(err)
+		return
+	}
+	r.buffer.owner.scheduleDrain(catchupTask{ctx: ctx, reg: r, onComplete: onComplete})
 }
 
 func (r *registration) Unregister() {
