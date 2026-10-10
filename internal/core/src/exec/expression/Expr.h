@@ -20,6 +20,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -2868,19 +2869,36 @@ class SegmentExpr : public Expr {
                             json_pointer.size(),
                             json_pointer,
                             family);
+                        const auto compute_validity = [&]() {
+                            if (!exact_path) {
+                                return null_reader_->IsNotNull();
+                            }
+                            // EXISTS includes descendants of an object path.
+                            // CONTAINS needs values at this exact path, of any
+                            // primitive family, independent of its literals.
+                            TargetBitmap validity(active_count_, false);
+                            for (const auto* cast :
+                                 {"BOOL", "DOUBLE", "VARCHAR"}) {
+                                auto resolved = json_reader_->Resolve(
+                                    json_pointer, JsonCastType::FromString(cast));
+                                const auto* nulls = dynamic_cast<
+                                    const index::INullReader*>(resolved.get());
+                                AssertInfo(nulls != nullptr,
+                                           "JSON flat path lacks {} validity",
+                                           cast);
+                                validity |= nulls->IsNotNull();
+                            }
+                            return validity;
+                        };
                         if (ExprResCacheManager::IsEnabled()) {
                             auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_, signature, active_count_, [&]() {
-                                    return exact_path
-                                               ? json_reader_->Exists(
-                                                     json_pointer)
-                                               : null_reader_->IsNotNull();
-                                });
+                                segment_,
+                                signature,
+                                active_count_,
+                                compute_validity);
                             valid_res = std::move(*validity);
                         } else {
-                            valid_res = exact_path
-                                            ? json_reader_->Exists(json_pointer)
-                                            : null_reader_->IsNotNull();
+                            valid_res = compute_validity();
                         }
                     } else if (cached_is_nested_index_ &&
                                func_returns_row_level) {
@@ -3515,9 +3533,13 @@ class SegmentExpr : public Expr {
 
     bool
     PinnedJsonIndexIsFlat() const {
+        // Typed projections also route paths, but retain their scalar value
+        // type. Only a field-level JSON reader exposes JsonFlat's numeric
+        // predicates for both int64 and double.
         return field_type_ == DataType::JSON &&
                selected_index_entry_.has_value() &&
-               selected_index_entry_->caps.json_paths;
+               selected_index_entry_->caps.json_paths &&
+               selected_index_entry_->value_type == DataType::JSON;
     }
 
     static bool
@@ -3642,8 +3664,18 @@ class SegmentExpr : public Expr {
     void
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
-            const_cast<SegmentExpr*>(this)->DetermineExecPath();
+            // Publish a terminal failure as well as a successful path. Letting
+            // an exception escape can leave pthread_once active on this runtime,
+            // so cleanup's second call would wait forever after prefetch fails.
+            try {
+                const_cast<SegmentExpr*>(this)->DetermineExecPath();
+            } catch (...) {
+                determine_exec_path_error_ = std::current_exception();
+            }
         });
+        if (determine_exec_path_error_) {
+            std::rethrow_exception(determine_exec_path_error_);
+        }
     }
 
     // Determine the path during prefetch or lazily before evaluation. Metadata-only
@@ -3988,6 +4020,7 @@ class SegmentExpr : public Expr {
     double json_stats_shredding_latency_us_{0.0};
     double json_stats_shared_latency_us_{0.0};
     std::optional<folly::Future<folly::Unit>> prefetch_future_;
+    mutable std::exception_ptr determine_exec_path_error_;
 
     // ==== BEGIN cross-group block owned by P1b (membership filters) ========
     // Added for #53100. Kept at the end of the class, in one delimited block,
