@@ -89,11 +89,17 @@ Hybrid 可以在此调用内探测和重遍历相同批次，不触发调用方�
 binlog、column group 或 manifest 传输形态无关。例如 JSON 列投影并 cast 为 DOUBLE 时，
 `value_type` 是 DOUBLE；`ARRAY<INT64>` 的 `value_type` 是 INT64。
 
-`expected_rows` 是字段最终的逻辑行数。`missing_rows` 只表示缺失的起始前缀
-`[0, missing_rows)`，例如字段新增前已经存在的历史行，不表示文件损坏、下载失败或任意
-source 缺口。schema 提供且支持 default 时填 default；否则 nullable 字段填 null；
-non-nullable 且无 default 时拒绝构建。V1 adapter 从 `lack_binlog_rows` 得到该前缀；
-columnar 构建根据 `expected_rows` 与实际读取的行数独立推导缺失数量。
+`expected_rows` 是字段最终的逻辑行数。source 只保存字段写入后的行；字段新增前已经存在的
+历史行构成缺失的起始前缀，其长度是 `expected_rows` 减去实际解码的行数。请求中的
+`lack_binlog_rows`（由 binlog `EntriesNum` 计算）不参与推导。schema 提供且支持 default
+时前缀填 default；否则 nullable 字段填 null；non-nullable 且无 default 时拒绝构建。
+解码行数超过 `expected_rows`，或列出的文件读取、解码失败，都使构建失败，不计入缺失前缀。
+
+前缀必须先于 source 行交付给物化器。V1 binlog 只有解码后才知道行数：首遍按无前缀流式交付并
+累计解码行数，行数不足时丢弃该物化器，新建物化器先填前缀，再流式读取一遍；两遍解码行数
+不一致时报 `DataFormatBroken`。只有缺少起始行的 binlog 才付出第二遍读取，没有 binlog 的
+字段无需重读。column group 和 manifest source 先保留解码批次，得到行数后先填前缀再交付；
+其中磁盘向量直接流式交付且不填前缀，行数不足时由 `FinishPrimary` 拒绝。
 
 - 普通标量保留原始 `FieldData` 及稳定视图；字符串、数组和 validity 的传递后备数据
   必须活到 Build 返回或抛错。投影输入保留自己的结果，不同时缓存另一份完整原始列。

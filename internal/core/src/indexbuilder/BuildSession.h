@@ -85,18 +85,17 @@ struct BuildRequest {
     // field data is transported; they do not determine value_type.
     BuildSource source{V1BinlogBuildSource{}};
 
-    // Final logical row count for the field after any absent leading prefix
-    // has been filled.
+    // Final logical row count for the field. A source holds only the rows
+    // written with the field, so rows written before the field was added form
+    // an absent leading prefix. The session derives that prefix as
+    // expected_rows minus the rows it actually decodes, and fills it with the
+    // schema default when present, otherwise null for a nullable field; a
+    // non-nullable field without a default is rejected. Disk-vector builds
+    // from column groups or a manifest fill no prefix and reject a short
+    // source. Decoding more than expected_rows rows is an error, and a listed
+    // source file that cannot be read or decoded fails the build instead of
+    // becoming missing rows.
     int64_t expected_rows{0};
-
-    // Number of rows in the absent leading prefix [0, missing_rows), such as
-    // historical rows written before the field was added. This is not a
-    // recovery path for unreadable or failed source files. The session fills a
-    // supported schema default when present, otherwise null for a nullable
-    // field, and rejects a non-nullable field without a default. The V1 adapter
-    // obtains missing_rows from lack_binlog_rows; columnar sources derive the
-    // missing count independently from expected_rows and the rows visited.
-    int64_t missing_rows{0};
 
     // Borrowed parent for family-owned build staging. The session injects it
     // into normalized builder parameters but never removes it.

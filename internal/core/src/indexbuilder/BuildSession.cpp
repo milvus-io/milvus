@@ -423,6 +423,19 @@ VisitBuildField(const BuildSource& build_source,
                 if (mapping_it != context.storage_column_mappings.end()) {
                     mapping = mapping_it->second;
                 }
+                const bool external_column =
+                    mapping.has_value()
+                        ? mapping->is_external_column
+                        : !field_meta.field_schema.external_field().empty();
+                if (field_type == DataType::TEXT && !external_column) {
+                    // A Milvus-written TEXT column stores LOB-encoded cells
+                    // that only the LOB-aware reader turns back into text.
+                    return storage::VisitTextFieldDataFromManifest(
+                        source.manifest_path,
+                        context.loon_ffi_properties,
+                        field_meta,
+                        visitor);
+                }
                 return storage::VisitFieldDataFromManifest(
                     source.manifest_path,
                     context.loon_ffi_properties,
@@ -598,11 +611,6 @@ BuildSession::NormalizeAndValidateRequest() {
                "normalized index-build parameters must be an object");
     AssertInfo(req_.expected_rows >= 0,
                "index-build expected row count must be non-negative");
-    AssertInfo(
-        req_.missing_rows >= 0 && req_.missing_rows <= req_.expected_rows,
-        "index-build missing row count {} is outside [0, {}]",
-        req_.missing_rows,
-        req_.expected_rows);
     AssertInfo(
         req_.field_id.get() == file_manager_context_.fieldDataMeta.field_id,
         "index-build field {} conflicts with FileManagerContext field "
@@ -795,21 +803,14 @@ BuildSession::RunToArtifact() {
             }
         };
 
-        const auto materialize_primary = [&](auto& materializer,
-                                             int64_t manifest_inflight_bytes,
-                                             const char* label) {
-            const bool columnar_source =
-                std::holds_alternative<StorageV2BuildSource>(req_.source) ||
-                std::holds_alternative<ManifestBuildSource>(req_.source);
-            const bool accumulate_columnar =
-                columnar_source && req_.family != index::families::kVectorDisk;
-
-            if (!columnar_source) {
-                add_missing_rows(materializer, req_.missing_rows);
-            }
-
-            std::vector<FieldDataPtr> columnar_batches;
-            int64_t columnar_rows = 0;
+        // Visits the primary field, hands each batch to consume, and returns
+        // the number of rows decoded. A batch that would take the count past
+        // row_limit is rejected before consume sees it.
+        const auto visit_primary = [&](int64_t manifest_inflight_bytes,
+                                       const char* label,
+                                       int64_t row_limit,
+                                       const auto& consume) {
+            int64_t decoded_rows = 0;
             const auto outcome = VisitBuildField(
                 req_.source,
                 nullptr,
@@ -821,107 +822,167 @@ BuildSession::RunToArtifact() {
                 file_manager_context_.fieldDataMeta,
                 file_manager_context_,
                 [&](FieldDataPtr batch) {
-                    if (!accumulate_columnar) {
-                        materializer.Add(batch);
-                        return storage::VisitControl::Continue;
-                    }
-
                     AssertInfo(batch != nullptr,
-                               "columnar source produced a null field-data "
-                               "batch");
+                               "{} source produced a null field-data batch",
+                               label);
                     const auto rows = batch->Length();
-                    AssertInfo(
-                        rows <= static_cast<size_t>(
-                                    std::numeric_limits<int64_t>::max()) &&
-                            columnar_rows <= req_.expected_rows &&
-                            static_cast<int64_t>(rows) <=
-                                req_.expected_rows - columnar_rows,
-                        "columnar source exceeds expected row count {}",
-                        req_.expected_rows);
-                    columnar_rows += static_cast<int64_t>(rows);
-                    columnar_batches.push_back(std::move(batch));
+                    if (rows >
+                        static_cast<size_t>(row_limit - decoded_rows)) {
+                        ThrowInfo(DataFormatBroken,
+                                  "{} source decoded more than {} rows",
+                                  label,
+                                  row_limit);
+                    }
+                    decoded_rows += static_cast<int64_t>(rows);
+                    consume(std::move(batch));
                     return storage::VisitControl::Continue;
                 },
                 manifest_inflight_bytes);
             AssertInfo(outcome != storage::VisitOutcome::Stopped,
                        "always-continue {} visitor stopped early",
                        label);
+            return decoded_rows;
+        };
 
-            if (accumulate_columnar) {
-                add_missing_rows(materializer,
-                                 req_.expected_rows - columnar_rows);
-                for (auto& batch : columnar_batches) {
-                    materializer.Add(batch);
-                    batch.reset();
+        // Feeds the primary field into *materializer. A source holds only the
+        // rows written with the field; the absent leading prefix is
+        // expected_rows minus the rows actually decoded, never request
+        // metadata, and must reach the materializer before any source row.
+        // make_materializer returns a fresh, unfed materializer.
+        const auto materialize_primary = [&](auto& materializer,
+                                             const auto& make_materializer,
+                                             const char* label) {
+            const auto add = [&](FieldDataPtr batch) {
+                materializer->Add(batch);
+            };
+            if (std::holds_alternative<V1BinlogBuildSource>(req_.source)) {
+                // Binlogs reveal their row count only when decoded. Stream
+                // them assuming no prefix; when the field turns out short,
+                // start over with the prefix and stream the binlogs again.
+                // Only binlogs lacking leading rows pay the second read; a
+                // field without binlogs has nothing to read again.
+                const auto decoded_rows =
+                    visit_primary(storage::kStreamingInflightBytes,
+                                  label,
+                                  req_.expected_rows,
+                                  add);
+                if (decoded_rows == req_.expected_rows) {
+                    return;
                 }
+                materializer = make_materializer();
+                add_missing_rows(*materializer,
+                                 req_.expected_rows - decoded_rows);
+                const auto replayed_rows =
+                    visit_primary(storage::kStreamingInflightBytes,
+                                  label,
+                                  decoded_rows,
+                                  add);
+                if (replayed_rows != decoded_rows) {
+                    ThrowInfo(DataFormatBroken,
+                              "{} source decoded {} rows on its second read "
+                              "and {} on its first",
+                              label,
+                              replayed_rows,
+                              decoded_rows);
+                }
+                return;
+            }
+            if (req_.family == index::families::kVectorDisk) {
+                // Column-group and manifest disk-vector sources fill no
+                // prefix; FinishPrimary rejects a short source.
+                visit_primary(storage::kStreamingInflightBytes,
+                              label,
+                              req_.expected_rows,
+                              add);
+                return;
+            }
+            // Column-group and manifest sources: retain the decoded batches so
+            // the prefix length is known before any row is fed.
+            std::vector<FieldDataPtr> batches;
+            const auto decoded_rows =
+                visit_primary(storage::kAccumulatingInflightBytes,
+                              label,
+                              req_.expected_rows,
+                              [&](FieldDataPtr batch) {
+                                  batches.push_back(std::move(batch));
+                              });
+            add_missing_rows(*materializer, req_.expected_rows - decoded_rows);
+            for (auto& batch : batches) {
+                materializer->Add(batch);
+                batch.reset();
             }
         };
 
         if (req_.family == index::families::kVectorDisk) {
-            VectorDiskBuildMaterializer materializer(
-                req_.staging_parent,
-                field_spec_.field_type,
-                req_.value_type,
-                file_manager_context_.indexMeta.dim,
-                field_spec_.nullable,
-                req_.expected_rows,
-                req_.family,
-                req_.params);
-            const auto spec = materializer.InputSpec();
+            const auto make_materializer = [&] {
+                return std::make_unique<VectorDiskBuildMaterializer>(
+                    req_.staging_parent,
+                    field_spec_.field_type,
+                    req_.value_type,
+                    file_manager_context_.indexMeta.dim,
+                    field_spec_.nullable,
+                    req_.expected_rows,
+                    req_.family,
+                    req_.params);
+            };
+            auto materializer = make_materializer();
+            const auto spec = materializer->InputSpec();
             ValidateInputSpec(spec);
             const auto vector_side_input = PrepareVectorSideInputPlan(
                 req_, field_spec_, file_manager_context_, spec);
 
-            materialize_primary(
-                materializer, storage::kStreamingInflightBytes, "disk vector");
-            materializer.FinishPrimary();
-            if (materializer.RequiresEngineBuild() &&
+            materialize_primary(materializer, make_materializer, "disk vector");
+            materializer->FinishPrimary();
+            if (materializer->RequiresEngineBuild() &&
                 vector_side_input.has_value()) {
                 auto scalar_info =
                     MaterializeVectorScalarInfo(*vector_side_input,
                                                 req_,
                                                 file_manager_context_,
-                                                materializer.PrimaryLayout());
-                materializer.SetScalarInfo(std::move(scalar_info));
+                                                materializer->PrimaryLayout());
+                materializer->SetScalarInfo(std::move(scalar_info));
             }
-            return BuildProduct::FromArtifact(std::move(materializer).Build());
+            return BuildProduct::FromArtifact(std::move(*materializer).Build());
         }
 
         if (req_.family == index::families::kVectorMem) {
-            VectorBuildMaterializer materializer(
-                field_spec_.field_type,
-                req_.value_type,
-                file_manager_context_.indexMeta.dim,
-                req_.expected_rows,
-                req_.family,
-                req_.params);
-            const auto spec = materializer.InputSpec();
+            const auto make_materializer = [&] {
+                return std::make_unique<VectorBuildMaterializer>(
+                    field_spec_.field_type,
+                    req_.value_type,
+                    file_manager_context_.indexMeta.dim,
+                    req_.expected_rows,
+                    req_.family,
+                    req_.params);
+            };
+            auto materializer = make_materializer();
+            const auto spec = materializer->InputSpec();
             ValidateInputSpec(spec);
             const auto vector_side_input = PrepareVectorSideInputPlan(
                 req_, field_spec_, file_manager_context_, spec);
-            materialize_primary(materializer,
-                                storage::kAccumulatingInflightBytes,
-                                "resident vector");
+            materialize_primary(
+                materializer, make_materializer, "resident vector");
             if (vector_side_input.has_value()) {
                 auto scalar_info =
                     MaterializeVectorScalarInfo(*vector_side_input,
                                                 req_,
                                                 file_manager_context_,
-                                                materializer.PrimaryLayout());
-                materializer.SetScalarInfo(std::move(scalar_info));
+                                                materializer->PrimaryLayout());
+                materializer->SetScalarInfo(std::move(scalar_info));
             }
-            return BuildProduct::FromArtifact(std::move(materializer).Build());
+            return BuildProduct::FromArtifact(std::move(*materializer).Build());
         }
 
-        auto materializer =
-            MakeScalarBuildInputMaterializer(field_spec_.field_type,
-                                             req_.value_type,
-                                             req_.expected_rows,
-                                             req_.family,
-                                             req_.params);
+        const auto make_materializer = [&] {
+            return MakeScalarBuildInputMaterializer(field_spec_.field_type,
+                                                    req_.value_type,
+                                                    req_.expected_rows,
+                                                    req_.family,
+                                                    req_.params);
+        };
+        auto materializer = make_materializer();
         ValidateInputSpec(materializer->InputSpec());
-        materialize_primary(
-            *materializer, storage::kAccumulatingInflightBytes, "scalar");
+        materialize_primary(materializer, make_materializer, "scalar");
         return BuildProduct::FromArtifact(std::move(*materializer).Build());
     } catch (const SegcoreError& error) {
         if (error.get_error_code() == DataIsEmpty) {
