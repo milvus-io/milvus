@@ -30,6 +30,10 @@ type ShardStats struct {
 	// Zero when no view is currently Up.
 	UpLoadInfoVersion uint64
 
+	// Schema revisions of the serving and in-flight views.
+	UpSchemaVersion        int32
+	PreparingSchemaVersion int32
+
 	// PreparingVersion is the version of the current Preparing or Ready view,
 	// if any. Nil when there is no in-flight view.
 	PreparingVersion *qviews.QueryViewVersion

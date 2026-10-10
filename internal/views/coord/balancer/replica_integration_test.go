@@ -51,7 +51,7 @@ func TestReplicaControllerZeroCapacityHandoff(t *testing.T) {
 	c := replicaCache(1, 1)
 	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
 	c.MarkReady()
-	controller := NewDefaultBalancer(c, registry, nil)
+	controller := NewDefaultBalancer(c, registry, nil, nil)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	id := cacheShard(1, 10)
@@ -140,7 +140,7 @@ func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 	t.Cleanup(store.RegisterLoadConfigListener(cache.PublishLoadConfig))
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
-	controller := NewDefaultBalancer(cache, registry, nil)
+	controller := NewDefaultBalancer(cache, registry, nil, nil)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	awaitServing := func(count int) {

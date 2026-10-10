@@ -29,7 +29,6 @@ func TestLoadInfoVersionCanonicalPersistedIdentity(t *testing.T) {
 	reordered.Replicas[0].Priority = commonpb.LoadPriority_LOW
 	require.Equal(t, version, loadInfoVersion(reordered), "unpersisted scheduling priority is not load identity")
 	for name, change := range map[string]func(*LoadConfig){
-		"schema":         func(c *LoadConfig) { c.SchemaVersion++ },
 		"index":          func(c *LoadConfig) { c.LoadFields[0].IndexId++ },
 		"field":          func(c *LoadConfig) { c.LoadFields[0].FieldId++ },
 		"partition":      func(c *LoadConfig) { c.PartitionIDs[0]++ },

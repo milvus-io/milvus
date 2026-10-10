@@ -83,6 +83,15 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 		}
 		return actionNone
 	}
+	// Supersede an in-flight view whose schema can no longer be fetched. This
+	// check must precede the normal "wait for Preparing" rule.
+	latestSchema := snap.SchemaVersion(desired.CollectionID)
+	if hasPreparing && stats.PreparingSchemaVersion < latestSchema {
+		return actionMust
+	}
+	if !hasPreparing && hasUpView && stats.UpSchemaVersion < latestSchema {
+		return actionMust
+	}
 	if hasPreparing {
 		if entry := snap.ShardEntry(shardID); entry != nil {
 			for _, node := range entry.PreparingNodes() {

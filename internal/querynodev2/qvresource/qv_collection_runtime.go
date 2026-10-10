@@ -42,7 +42,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		return nil, false, merr.WrapErrServiceInternalMsg("collection metadata is incomplete")
 	}
 	if collection.GetSchema().GetVersion() != meta.GetSchemaVersion() {
-		return nil, true, merr.WrapErrServiceNotReadyMsg("query view requires schema %d, metadata has %d", meta.GetSchemaVersion(), collection.GetSchema().GetVersion())
+		return nil, collection.GetSchema().GetVersion() < meta.GetSchemaVersion(), merr.WrapErrServiceNotReadyMsg("query view requires schema %d, metadata has %d", meta.GetSchemaVersion(), collection.GetSchema().GetVersion())
 	}
 	loadInfo, err := m.loadInfo(ctx, meta)
 	if err != nil {

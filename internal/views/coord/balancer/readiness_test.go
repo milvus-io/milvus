@@ -40,7 +40,7 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 	config.TickerInterval = time.Hour
 	c := balancercache.New(config)
 	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
-	b := NewDefaultBalancer(c, registry, nil)
+	b := NewDefaultBalancer(c, registry, nil, nil)
 	waiting := observeReadyWait(t)
 	var calls atomic.Int64
 	var original func(*DefaultBalancePolicy, balancercache.Reader, []qviews.ShardID) *BalancePlan
@@ -97,7 +97,7 @@ func TestBalancerStopCancelsRecoveryWait(t *testing.T) {
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
-	b := NewDefaultBalancer(c, registry, nil)
+	b := NewDefaultBalancer(c, registry, nil, nil)
 	waiting := observeReadyWait(t)
 	b.Start(t.Context())
 	t.Cleanup(b.Stop)

@@ -56,6 +56,14 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		}
 		seen[shardID] = struct{}{}
 
+		// Layout publication can refresh cached inputs. A concurrently loaded
+		// collection may not have been included in this pass's metadata read.
+		if cfg := snap.ConfigForShard(shardID); cfg != nil && snap.schemaVersions != nil {
+			if _, ok := snap.schemaVersions[cfg.CollectionID]; !ok {
+				plan.Retries = append(plan.Retries, shardID)
+				continue
+			}
+		}
 		action := classifyShard(snap, shardID)
 		switch action {
 		case actionRelease:

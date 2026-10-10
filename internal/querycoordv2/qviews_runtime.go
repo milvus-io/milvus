@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -73,6 +74,7 @@ type qviewsRuntimeDependencies struct {
 	streamingNodeHandler        snhandler.HandlerClient
 	streamingNodeViewSyncClient snhandler.QueryViewSyncClient
 
+	schemaVersion   balancer.SchemaVersionProvider
 	balancerFactory func(*cache.Cache) qviewsBalancer
 }
 
@@ -130,7 +132,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	}
 
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil))
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil, deps.schemaVersion))
 	if deps.balancerFactory != nil {
 		balancerController = deps.balancerFactory(balanceCache)
 	}
@@ -200,7 +202,15 @@ func newDefaultQViewsRuntimeDependencies(
 	if source, ok := mixCoord.(dataViewProviderSource); ok {
 		dataViewProvider = source.DataViewProvider()
 	}
+	broker := meta.NewCoordinatorBroker(mixCoord)
 	deps := qviewsRuntimeDependencies{
+		schemaVersion: func(ctx context.Context, id int64) (int32, error) {
+			collection, err := broker.DescribeCollection(ctx, id)
+			if err != nil {
+				return 0, err
+			}
+			return collection.GetSchema().GetVersion(), nil
+		},
 		queryCoordCatalog:           queryCoordCatalog,
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
 		queryNodeClient:             queryNodeManager,

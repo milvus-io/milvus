@@ -67,13 +67,18 @@ func TestStats_UpOnly(t *testing.T) {
 
 	// Drive v1 to Up.
 	ver1 := testVersion(1, 1, 1)
-	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 2)))
+	b := testBuilder(1, 1, 2)
+	b.SetSchemaVersion(3)
+	require.NoError(t, mgr.AddPreparing(context.Background(), b))
+	require.Equal(t, int32(3), mgr.Stats().PreparingSchemaVersion)
 	simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateReady)
 	simulateNodeResponse(t, s, qviews.NewQueryNode(2), ver1, qviews.QueryViewStateReady)
 	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateReady)
 	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateUp)
 
 	stats := mgr.Stats()
+	require.Equal(t, int32(3), stats.UpSchemaVersion)
+	require.Zero(t, stats.PreparingSchemaVersion)
 	require.NotNil(t, stats.UpVersion)
 	assert.Equal(t, ver1, *stats.UpVersion)
 	assert.Nil(t, stats.PreparingVersion)

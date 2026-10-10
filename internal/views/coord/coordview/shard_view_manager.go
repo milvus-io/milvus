@@ -229,12 +229,14 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 			if stats.UpVersion == nil || version.GT(*stats.UpVersion) {
 				stats.UpVersion = &version
 				stats.UpLoadInfoVersion = sm.View().GetMeta().GetLoadInfoVersion()
+				stats.UpSchemaVersion = sm.View().GetMeta().GetSchemaVersion()
 				stats.UpNodes = viewNodeIDs(sm.View())
 				stats.UpPlacement = viewPlacement(sm)
 			}
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			if stats.PreparingVersion == nil || version.GT(*stats.PreparingVersion) {
 				stats.PreparingVersion = &version
+				stats.PreparingSchemaVersion = sm.View().GetMeta().GetSchemaVersion()
 				stats.PreparingNodes = viewNodeIDs(sm.View())
 				stats.PreparingPlacement = viewPlacement(sm)
 			}

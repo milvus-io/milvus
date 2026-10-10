@@ -162,7 +162,6 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 	})
 	return &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     c.Collection.DbID,
-		SchemaVersion:            c.Collection.GetSchemaVersion(),
 		CollectionId:             c.Collection.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
@@ -188,7 +187,6 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	})
 	header := &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     req.CollectionInfo.DbId,
-		SchemaVersion:            req.CollectionInfo.GetSchema().GetVersion(),
 		CollectionId:             req.CollectionInfo.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,

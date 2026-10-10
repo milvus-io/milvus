@@ -28,6 +28,7 @@ type Balancer interface {
 // drains dirty work, and applies the resulting BalancePlan.
 type DefaultBalancer struct {
 	cache         *balancercache.Cache
+	schemaVersion SchemaVersionProvider
 	reconcileMu   sync.Mutex
 	viewRegistry  *coordview.ShardViewRegistry
 	policy        BalancePolicy
@@ -39,17 +40,23 @@ type DefaultBalancer struct {
 	wg     sync.WaitGroup
 }
 
+// SchemaVersionProvider reads the latest published collection schema. Historical
+// schemas are not available; the result is never persisted as load configuration.
+type SchemaVersionProvider func(context.Context, int64) (int32, error)
+
 // NewDefaultBalancer constructs the standard Balancer controller.
 func NewDefaultBalancer(
 	cache *balancercache.Cache,
 	registry *coordview.ShardViewRegistry,
 	policy BalancePolicy,
+	schemaVersion SchemaVersionProvider,
 ) *DefaultBalancer {
 	if policy == nil {
 		policy = NewDefaultBalancePolicy()
 	}
 	balancer := &DefaultBalancer{
 		cache:         cache,
+		schemaVersion: schemaVersion,
 		viewRegistry:  registry,
 		policy:        policy,
 		queue:         newTriggerQueue(),
@@ -187,8 +194,9 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if len(dirty) == 0 {
 		return nil
 	}
+	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	plan := b.policy.Plan(reader, dirty)
-	return b.apply(ctx, plan)
+	return errors.CombineErrors(err, b.apply(ctx, plan))
 }
 
 func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
@@ -231,4 +239,38 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		err = errors.CombineErrors(err, e)
 	}
 	return err
+}
+
+// Read once per affected collection per pass, including startup recovery and
+// periodic reconciliation. Failed metadata reads leave serving views intact.
+func (b *DefaultBalancer) readSchemaVersions(ctx context.Context, reader *planningContext, dirty []qviews.ShardID) ([]qviews.ShardID, error) {
+	if b.schemaVersion == nil {
+		return dirty, nil
+	}
+	reader.schemaVersions = make(map[int64]int32)
+	failed := make(map[int64]error)
+	var result error
+	ready := make([]qviews.ShardID, 0, len(dirty))
+	for _, shard := range dirty {
+		cfg := reader.ConfigForShard(shard)
+		if cfg == nil {
+			ready = append(ready, shard) // Releases need no schema.
+			continue
+		}
+		id := cfg.CollectionID
+		if _, read := reader.schemaVersions[id]; !read && failed[id] == nil {
+			version, err := b.schemaVersion(ctx, id)
+			if err != nil {
+				failed[id] = err
+				result = errors.CombineErrors(result, err)
+				b.Trigger(TriggerScope{DirtyCollections: []int64{id}})
+			} else {
+				reader.schemaVersions[id] = version
+			}
+		}
+		if failed[id] == nil {
+			ready = append(ready, shard)
+		}
+	}
+	return ready, result
 }

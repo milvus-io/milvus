@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -20,16 +21,15 @@ func (s *Server) updateQueryViewSchema(ctx context.Context, req *querypb.UpdateL
 		if collection.GetSchema().GetVersion() < req.GetSchemaVersion() {
 			return merr.WrapErrServiceNotReadyMsg("collection %d schema %d is not published", collectionID, req.GetSchemaVersion())
 		}
-		loaded, err := s.qviewsRuntime.loadManager.UpdateSchema(ctx, collectionID, req.GetSchemaVersion())
-		if err != nil {
-			return err
-		}
-		if !loaded {
+		if !s.qviewsRuntime.loadConfigStore.Contains(collectionID) {
 			continue
 		}
-		err = s.waitCollectionReady(ctx, &querypb.EnsureCollectionReadyRequest{
+		// This is a wake-up, not a persisted schema requirement. Reconciliation
+		// always reads the latest published metadata, also after restart.
+		s.qviewsRuntime.balancer.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
+		err = s.waitCollectionReadyAtSchemaVersion(ctx, &querypb.EnsureCollectionReadyRequest{
 			CollectionID: collectionID, ExpectedVchannels: collection.GetVirtualChannelNames(),
-		})
+		}, req.GetSchemaVersion())
 		// Release removes the serving obligation. A subsequent load reads the
 		// already published schema, and cannot revive an old schema requirement.
 		if err != nil && !errors.Is(err, merr.ErrCollectionNotLoaded) {

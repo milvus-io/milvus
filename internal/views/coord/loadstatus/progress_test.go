@@ -67,6 +67,12 @@ func TestProgress(t *testing.T) {
 	check(50) // Preparing, without UpVersion.
 	up(10, "v1", version)
 	check(100)
+	// Load completion alone must not acknowledge a schema handoff.
+	require.False(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Ready())
+	stats[qviews.ShardID{ReplicaID: 10, VChannel: "v0"}].UpSchemaVersion = 2
+	require.Equal(t, int64(50), GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Percentage())
+	stats[qviews.ShardID{ReplicaID: 10, VChannel: "v1"}].UpSchemaVersion = 3
+	require.True(t, GetAtSchemaVersion(store, &coordview.ShardViewRegistry{}, 1, channels, 2).Ready())
 	cfg.Replicas = append(cfg.Replicas, &loadmgr.ReplicaAssignment{ReplicaID: 11})
 	require.NoError(t, store.Put(ctx, cfg))
 	version = store.GetConfigVersion(1)

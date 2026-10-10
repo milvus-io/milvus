@@ -845,7 +845,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
-    int32 schema_version = 11;
+    int32 schema_version = 11 [deprecated = true]; // Ignored: QueryViews use the latest collection schema.
 }
 
 message PartitionLoadInfo {

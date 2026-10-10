@@ -96,7 +96,7 @@ func TestCacheNodeAndResourceGroupScopes(t *testing.T) {
 func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	c := balancercache.New(nil)
 	registry := emptyRegistry(t)
-	controller := NewDefaultBalancer(c, registry, nil)
+	controller := NewDefaultBalancer(c, registry, nil, nil)
 	controller.Trigger()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

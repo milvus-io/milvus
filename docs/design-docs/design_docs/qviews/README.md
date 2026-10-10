@@ -86,29 +86,40 @@ execution; the ownership transfer changes no RPC fields or query semantics.
 
 ### Schema handoff
 
-Each QueryView carries `schema_version`, the logical `CollectionSchema.version`
-required by its query resources. This is distinct from DataVersion and from
-RootCoord's timestamp barrier. The durable collection load configuration also
-records this version; its content identity includes the schema requirement.
-Consequently a schema-only update creates a new QueryVersion even when the
-DataView and segment placement remain unchanged, and existing loading/readiness
-checks cannot mistake an old-schema Up view for completion.
+Each QueryView carries `schema_version`, sampled from the latest published
+`CollectionSchema.version` when Coord plans the view. Coord only serves the
+latest schema; this field does not identify a retrievable historical snapshot.
+Schema is not part of durable LoadConfig or its LoadInfoVersion. Legacy schema
+fields in load-config protos are ignored and retained only for wire compatibility.
 
 The AlterCollection acknowledgement follows this order:
 
 1. RootCoord persists and publishes the new schema in MetaTable.
 2. RootCoord refreshes DataCoord metadata and applies bound index metadata.
-3. RootCoord sends the published schema requirement to QueryCoord through
-   `UpdateLoadConfig.schema_version`. This path updates desired state directly;
-   it must not acquire another collection broadcast lock inside the callback.
-4. QueryCoord reconciles the new target. QN describes the collection and checks
-   the exact target schema revision before acquiring collection/segment resources.
-   SN applies AlterCollection to its shared query collection on the serialized
-   WAL path, including the Go schema used for insert conversion. An event barrier
-   and applied-version check precede SN Ready.
-5. RootCoord waits until every expected vchannel/replica has a matching Up view,
-   then completes the acknowledgement and expires Proxy caches. A released
-   collection has no serving obligation; a subsequent load reads published metadata.
+3. RootCoord requests schema handoff through `UpdateLoadConfig.schema_version`.
+   This is a reconciliation notification and a completion lower bound, not a
+   load-config write. It must not acquire another collection broadcast lock.
+4. Balancer reads the latest schema revision per affected collection for the
+   planning pass. A newer revision forces a new QueryVersion even with unchanged
+   DataView, load configuration and placement. It supersedes an older Preparing
+   view without waiting for that view to become Up. Startup and periodic passes
+   use the same latest-metadata read, so notification loss across restart cannot
+   strand an old schema. Metadata lookup failure preserves views and retries.
+5. QN calls DescribeCollection and checks the target revision before acquiring
+   resources. If metadata is older, preparation can retry; if metadata is newer,
+   the obsolete view is Unrecoverable and Coord builds its replacement from the
+   latest schema. QN never waits for an unavailable historical schema.
+   SN applies AlterCollection on its serialized WAL path; an event barrier and
+   applied-version check precede SN Ready.
+6. RootCoord waits until every expected vchannel/replica has a current-load-config
+   Up view whose schema revision is at least the DDL's revision, then completes
+   acknowledgement and expires Proxy caches. A released collection has no serving
+   obligation; a subsequent load generates views from current metadata.
+
+`GetQueryViewLoadInfo` remains a load-configuration API and does not return
+Schema. QN obtains Schema separately through DescribeCollection. This minimal
+scheme is not historical-schema serving: a newer publication may supersede work
+already in flight.
 
 New Search/Retrieve plans carry their schema version. Phase 1 rejects an Up view
 whose schema requirement is older, allowing the existing view retry path to wait

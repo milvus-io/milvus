@@ -14,7 +14,6 @@ import (
 type LoadConfig struct {
 	DbID                     int64
 	CollectionID             int64
-	SchemaVersion            int32
 	PartitionIDs             []int64
 	LoadFields               []*messagespb.LoadFieldConfig
 	UserSpecifiedReplicaMode bool
@@ -37,7 +36,6 @@ func (c *LoadConfig) Clone() *LoadConfig {
 	out := &LoadConfig{
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
-		SchemaVersion:            c.SchemaVersion,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 	}
 	if len(c.PartitionIDs) > 0 {
@@ -76,7 +74,6 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 	cfg := &LoadConfig{
 		DbID:                     msg.GetDbId(),
 		CollectionID:             msg.GetCollectionId(),
-		SchemaVersion:            msg.GetSchemaVersion(),
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
 	}
@@ -108,7 +105,6 @@ func buildFromPersisted(
 	cfg := &LoadConfig{
 		DbID:                     info.GetDbID(),
 		CollectionID:             info.GetCollectionID(),
-		SchemaVersion:            info.GetSchemaVersion(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
 	}
 
@@ -149,7 +145,6 @@ func buildFromPersisted(
 func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
 	info := &querypb.CollectionLoadInfo{
 		CollectionID:             c.CollectionID,
-		SchemaVersion:            c.SchemaVersion,
 		DbID:                     c.DbID,
 		ReplicaNumber:            int32(len(c.Replicas)),
 		Status:                   querypb.LoadStatus_Loaded,

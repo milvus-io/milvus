@@ -164,7 +164,12 @@ type QueryViewLoadMetadataProvider interface {
 
 Collection runtime acquisition resolves the QueryView's load-info version, then
 pins the local collection runtime through `collectionManager.PutOrRef` before
-any segment load task is submitted.
+any segment load task is submitted. Schema is fetched separately via
+DescribeCollection, which returns only the latest schema. Its logical revision
+must match QueryViewMeta.schema_version. Older metadata is retriable; newer
+metadata makes this view obsolete and reports Unrecoverable so Coord replaces it.
+The worker does not attempt to fetch a historical schema or mutate a view's target.
+LoadInfoVersion identifies load configuration only, not the schema revision.
 
 Segment metadata has a separate streaming boundary. QueryNode owns one shared
 `SegmentLoadInfoStream`. Every live physical segment state owns one subscription

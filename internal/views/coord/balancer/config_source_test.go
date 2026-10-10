@@ -29,7 +29,7 @@ func setBalanceParam(t *testing.T, p *paramtable.ComponentParam, key, value stri
 func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	p := newBalanceParams()
 	c := balancercache.New(nil)
-	b := NewDefaultBalancer(c, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
@@ -90,7 +90,7 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 		require.NoError(t, p.Save(key, value))
 	}
 	c := balancercache.New(nil)
-	b := NewDefaultBalancer(c, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
@@ -121,7 +121,7 @@ func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 	p := newBalanceParams()
 	c := balancercache.New(nil)
-	b := NewDefaultBalancer(c, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	var wg sync.WaitGroup
@@ -152,7 +152,7 @@ func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 func TestBalanceConfigRejectsZeroAndOverflowWeightSum(t *testing.T) {
 	p := newBalanceParams()
 	c := balancercache.New(nil)
-	b := NewDefaultBalancer(c, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
 	keys := []string{p.QueryViewCfg.BalancerShardWeight.Key, p.QueryViewCfg.BalancerCollectionWeight.Key, p.QueryViewCfg.BalancerGlobalWeight.Key, p.QueryViewCfg.BalancerFanoutPenaltyWeight.Key}
@@ -174,7 +174,7 @@ func TestBalanceLoopRefreshesLongTimerAndUnwatchesOnStop(t *testing.T) {
 	setBalanceParam(t, p, key, "1h")
 	c := balancercache.New(nil)
 	c.MarkReady()
-	b := NewDefaultBalancer(c, nil, nil)
+	b := NewDefaultBalancer(c, nil, nil, nil)
 	var calls atomic.Int64
 	patch := mockey.Mock((*DefaultBalancer).Reconcile).To(func(controller *DefaultBalancer, _ context.Context) error {
 		controller.queue.takePending()

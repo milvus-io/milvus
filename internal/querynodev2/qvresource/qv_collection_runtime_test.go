@@ -193,3 +193,17 @@ func TestQueryViewCollectionRuntimeWaitsForPublishedSchema(t *testing.T) {
 	require.False(t, retryable)
 	require.NotNil(t, guard)
 }
+
+func TestQueryViewCollectionRuntimeSupersededSchemaIsNotRetried(t *testing.T) {
+	provider := &fakeQVLoadMetadataProvider{}
+	patch := mockey.Mock((*fakeQVLoadMetadataProvider).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{Version: 3}}, nil).Build()
+	defer patch.UnPatch()
+	collection := &fakeQVCollectionManager{}
+	manager := newQueryViewCollectionRuntimeManager(provider, collection)
+	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, SchemaVersion: 2}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
+	guard, retryable, err := manager.Acquire(t.Context(), view)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	require.False(t, retryable, "the coordinator cannot serve historical schema V2")
+	require.Nil(t, guard)
+	require.Zero(t, collection.putCount)
+}

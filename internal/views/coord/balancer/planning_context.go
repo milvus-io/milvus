@@ -15,6 +15,7 @@ type balanceInput interface {
 	DataVersionForCollection(int64) (qviews.DataVersion, bool)
 	GetShardStats(qviews.ShardID) *coordview.ShardStats
 	ConfigVersion(int64) uint64
+	SchemaVersion(int64) int32
 	GetBalanceConfig() *BalanceConfig
 	NodesMap() map[int64]*BalanceNode
 	CandidateNodes(string) []int64
@@ -26,16 +27,17 @@ type balanceInput interface {
 
 type planningContext struct {
 	balancercache.Reader
-	collections  map[int64]*balancercache.CollectionEntry
-	nodeEntries  map[int64]*balancercache.NodeEntry
-	nodes        map[int64]*BalanceNode
-	groups       map[string][]int64
-	groupEntries map[string]*balancercache.ResourceGroupEntry
-	config       *BalanceConfig
-	targets      map[int64][]int64
-	replicaDelta map[int64]map[int64]int64
-	fanouts      map[qviews.ShardID]int
-	search       map[qviews.ShardID]*searchCursor
+	schemaVersions map[int64]int32
+	collections    map[int64]*balancercache.CollectionEntry
+	nodeEntries    map[int64]*balancercache.NodeEntry
+	nodes          map[int64]*BalanceNode
+	groups         map[string][]int64
+	groupEntries   map[string]*balancercache.ResourceGroupEntry
+	config         *BalanceConfig
+	targets        map[int64][]int64
+	replicaDelta   map[int64]map[int64]int64
+	fanouts        map[qviews.ShardID]int
+	search         map[qviews.ShardID]*searchCursor
 }
 
 func newPlanningContext(reader balancercache.Reader) *planningContext {
@@ -237,4 +239,9 @@ func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
 	for node, count := range rows {
 		delta[node] += count
 	}
+}
+
+// SchemaVersion is sampled from current collection metadata for this planning pass.
+func (p *planningContext) SchemaVersion(id int64) int32 {
+	return p.schemaVersions[id]
 }

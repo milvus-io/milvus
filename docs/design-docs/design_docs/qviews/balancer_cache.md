@@ -20,7 +20,11 @@ See [Balancer design](balancer_design.md) for the allocation algorithm,
 
 ## 1. Contract and ownership
 
-`cache.Cache` holds all facts required for reconciliation. Upstream managers
+`cache.Cache` holds placement, load-configuration and DataView facts required for
+reconciliation. The latest collection schema revision is read separately from
+Coord metadata once per affected loaded collection per planning pass; it is not
+persisted in LoadConfig or cached as a historical schema. See README's Schema
+handoff section. Upstream managers
 remain the authoritative owners and synchronously publish their committed
 in-memory state through registered hooks. The cache owns the derived indexes
 and aggregates. Balancer reads the cache through `Get` and key iteration;

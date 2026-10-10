@@ -193,6 +193,7 @@ with a missing/unready DataView waits or retries, rather than releasing views.
 | Source event | Cache publication | Reconcile scope |
 |---|---|---|
 | LoadConfig Put/Remove | Desired field and replica/RG indexes | Collection |
+| Published collection schema | No load-config mutation; latest metadata read before planning | Collection |
 | DataView publication/drop | Membership, RowNum, per-shard totals/counts | Collection |
 | Preparing completion / Unrecoverable | Actual shard and node contributions | Shard |
 | Ordinary progress report | Actual shard and affected node contributions | Periodic optimization may evaluate wider effects |
@@ -444,6 +445,15 @@ The default policy first repairs/reuses collection/RG layouts as described in
 [Replica Placement](replica_placement.md), retaining targets across calls. It
 then organizes shard work into three phases and processes all dirty shards
 in one batch so decisions across shards remain coordinated.
+
+Schema is separate from LoadConfig. Before planning, the controller reads the
+latest published schema revision once per affected loaded collection and retains
+it only for that pass. Classification forces replacement of both older Up and
+older Preparing views; this check precedes the ordinary no-stacking rule.
+Allocation copies that revision into QueryViewMeta. Failed schema reads preserve
+existing views and requeue the collection. Initial/recovery and periodic passes
+perform the same read. No historical schema lookup or schema load-config identity
+is maintained.
 
 The cache Reader supplies eligible nodes, actual node row totals and their
 contributions, per-segment RowNum, desired shard summaries, and current

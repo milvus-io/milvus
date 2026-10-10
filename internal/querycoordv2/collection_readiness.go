@@ -150,6 +150,10 @@ func (s *Server) prepareAutoLoadRequest(ctx context.Context, coll *milvuspb.Desc
 }
 
 func (s *Server) waitCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) error {
+	return s.waitCollectionReadyAtSchemaVersion(ctx, req, 0)
+}
+
+func (s *Server) waitCollectionReadyAtSchemaVersion(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, schemaVersion int32) error {
 	collectionID := req.GetCollectionID()
 	runtime := s.qviewsRuntime
 	// Subscribe before checking so state changes cannot be lost before blocking.
@@ -166,7 +170,7 @@ func (s *Server) waitCollectionReady(ctx context.Context, req *querypb.EnsureCol
 		// The same configuration-version-checked result drives public loading
 		// progress and AutoLoad readiness. Observe release again after the read
 		// so a coalesced release/reload cannot satisfy an older subscriber.
-		progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels())
+		progress := loadstatus.GetAtSchemaVersion(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels(), schemaVersion)
 		if progress.Config == nil {
 			return merr.WrapErrCollectionNotLoaded(collectionID)
 		}

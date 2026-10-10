@@ -29,6 +29,12 @@ func (p Progress) Ready() bool {
 // Get counts the full vchannel-by-replica product, including shards not yet in
 // the registry. vchannels must come from collection metadata, not resident views.
 func Get(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string) Progress {
+	return GetAtSchemaVersion(store, registry, collectionID, vchannels, 0)
+}
+
+// GetAtSchemaVersion additionally fences completion on the Up views' schema.
+// Newer schemas satisfy an earlier DDL; the load configuration is unchanged.
+func GetAtSchemaVersion(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32) Progress {
 	cfg, version := store.GetConfigWithVersion(collectionID)
 	if cfg == nil {
 		return Progress{}
@@ -42,7 +48,7 @@ func Get(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, 
 	stats := registry.SnapshotForShards(shards).StatsMap()
 	progress := Progress{Config: cfg, Total: int64(len(shards))}
 	for _, shard := range shards {
-		if stat := stats[shard]; stat != nil && stat.UpVersion != nil && stat.UpLoadInfoVersion == version {
+		if stat := stats[shard]; stat != nil && stat.UpVersion != nil && stat.UpLoadInfoVersion == version && stat.UpSchemaVersion >= schemaVersion {
 			progress.Loaded++
 		}
 	}

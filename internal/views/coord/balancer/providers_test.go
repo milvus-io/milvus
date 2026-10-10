@@ -68,7 +68,7 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	cache := balancercache.NewFromSources(policyTestConfig(), store, m, registry, nodes)
 	t.Cleanup(cache.Close)
 	require.True(t, cache.Ready())
-	controller := NewDefaultBalancer(cache, registry, nil)
+	controller := NewDefaultBalancer(cache, registry, nil, nil)
 	controller.Trigger(TriggerScope{DirtyCollections: []int64{1}})
 	require.NoError(t, controller.Reconcile(ctx))
 	stats := registry.Get(shardID).Stats()
@@ -126,12 +126,4 @@ func TestRecoveredLoadIdentityAvoidsRebuildButDetectsRealChanges(t *testing.T) {
 	require.Contains(t, plan.Prepares, id, "config change must be mandatory even with autoBalance disabled")
 	require.NotEqual(t, oldVersion, plan.Prepares[id].Build().Meta.LoadInfoVersion)
 	require.Empty(t, reusableResources(newPlanningContext(cache), id, segment, []int64{1}), "old resources must not alias the new load identity")
-	// Schema-only changes must rebuild even without a new DataView or placement.
-	schemaOnly := cfg.Clone()
-	schemaOnly.SchemaVersion = 2
-	require.NoError(t, after.Put(t.Context(), schemaOnly))
-	schemaPlan := policy.Plan(cache, []qviews.ShardID{id})
-	require.Contains(t, schemaPlan.Prepares, id)
-	require.Equal(t, int32(2), schemaPlan.Prepares[id].Build().Meta.SchemaVersion)
-	require.Equal(t, dv, schemaPlan.Prepares[id].DataVersion())
 }

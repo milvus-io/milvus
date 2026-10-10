@@ -32,7 +32,7 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	cache.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	cache.MarkReady()
-	b := NewDefaultBalancer(cache, reg, nil)
+	b := NewDefaultBalancer(cache, reg, nil, nil)
 
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -53,7 +53,7 @@ func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 	t.Cleanup(reg.RegisterPublicationListener(cache.PublishShard))
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	cache.MarkReady()
-	b := NewDefaultBalancer(cache, reg, nil)
+	b := NewDefaultBalancer(cache, reg, nil, nil)
 
 	b.Trigger(TriggerScope{DirtyCollections: []int64{collID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -74,7 +74,7 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
-	controller := NewDefaultBalancer(cache, registry, nil)
+	controller := NewDefaultBalancer(cache, registry, nil, nil)
 	var original func(*balancercache.Cache, int64) *balancercache.CollectionEntry
 	once := true
 	patch := mockey.Mock((*balancercache.Cache).GetCollection).Origin(&original).To(func(c *balancercache.Cache, id int64) *balancercache.CollectionEntry {
@@ -103,7 +103,7 @@ func TestBalancer_NodePublicationTriggersCollection(t *testing.T) {
 	cache.PublishDataView(collID, cacheData(collID, shardID.VChannel, 100))
 	t.Cleanup(reg.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
-	b := NewDefaultBalancer(cache, reg, nil)
+	b := NewDefaultBalancer(cache, reg, nil, nil)
 
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -123,7 +123,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 	t.Cleanup(reg.RegisterPublicationListener(cache.PublishShard))
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	cache.MarkReady()
-	b := NewDefaultBalancer(cache, reg, nil)
+	b := NewDefaultBalancer(cache, reg, nil, nil)
 
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -139,7 +139,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 
 func TestBalancer_StartStop(t *testing.T) {
 	reg := emptyRegistry(t)
-	b := NewDefaultBalancer(nil, reg, nil)
+	b := NewDefaultBalancer(nil, reg, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -160,7 +160,7 @@ func TestBalancerLoopInitialAndPeriodicFullReconcile(t *testing.T) {
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(reg.RegisterPublicationListener(c.PublishShard))
 	c.MarkReady()
-	b := NewDefaultBalancer(c, reg, nil)
+	b := NewDefaultBalancer(c, reg, nil, nil)
 	b.Start(t.Context())
 	b.Start(t.Context()) // A second Start must not create another loop.
 	t.Cleanup(b.Stop)
@@ -203,7 +203,7 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 		return plan
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	b := NewDefaultBalancer(c, reg, nil)
+	b := NewDefaultBalancer(c, reg, nil, nil)
 	b.Start(t.Context())
 	t.Cleanup(b.Stop)
 	select {
@@ -263,7 +263,7 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 	}).Build()
 	t.Cleanup(func() { preparePatch.UnPatch() })
 
-	balancer := NewDefaultBalancer(cache, registry, nil)
+	balancer := NewDefaultBalancer(cache, registry, nil, nil)
 	// Only the initial scan and apply's own retry can drive this test:
 	// neither cache notifications nor the periodic timer may rescue it.
 	cache.SetNotifier(nil)
@@ -318,7 +318,7 @@ func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.
 		return prepare(manager, ctx, builder)
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	controller := NewDefaultBalancer(nil, registry, nil)
+	controller := NewDefaultBalancer(nil, registry, nil, nil)
 	// Use a DataVersion retained by the real registry fixture.
 	builder := qviews.NewQueryViewAtCoordBuilder(blockedShard.ReplicaID, &viewpb.DataViewOfCollection{
 		CollectionId: 1,
