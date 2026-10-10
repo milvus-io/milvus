@@ -4141,8 +4141,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 		ManifestPath: oldManifest2,
 	})))
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "2")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key)
 
 	entered := make(chan string, 2)
 	release := make(chan struct{})

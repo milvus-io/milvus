@@ -43,6 +43,8 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
 	m := &meta{}
+	io := packed.NewManifestIOContext(8)
+	defer io.Close()
 	entered := make(chan struct{}, 8)
 	release := make(chan struct{})
 	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
@@ -56,7 +58,7 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := m.readManifestIndexes(context.Background(), "manifest", nil)
+			_, err := m.readManifestIndexesWithIO(context.Background(), io, "manifest", nil)
 			require.NoError(t, err)
 		}()
 	}
@@ -69,7 +71,7 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := m.readManifestIndexes(ctx, "canceled", nil)
+	_, err := m.readManifestIndexesWithIO(ctx, io, "canceled", nil)
 	require.ErrorIs(t, err, context.Canceled)
 	select {
 	case <-entered:
@@ -246,8 +248,8 @@ func TestManifestRecoveryContinuouslySchedulesReads(t *testing.T) {
 func TestManifestRecoverySingleExecutor(t *testing.T) {
 	oldRead := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("1")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(oldRead)
-	oldCommit := Params.DataCoordCfg.L0ManifestUpdatePoolSize.SwapTempValue("16")
-	defer Params.DataCoordCfg.L0ManifestUpdatePoolSize.SwapTempValue(oldCommit)
+	oldCommit := Params.DataCoordCfg.ManifestCommitConcurrency.SwapTempValue("16")
+	defer Params.DataCoordCfg.ManifestCommitConcurrency.SwapTempValue(oldCommit)
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	root := t.TempDir()

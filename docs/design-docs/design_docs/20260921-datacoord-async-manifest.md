@@ -28,16 +28,21 @@ explicit at the recovery and commit business entry points.
 No RPC, manifest format or catalog schema changes are introduced. The native
 storage dependency and all synchronous transaction-open call sites move together
 to the merged async ABI; the native libraries must be rebuilt with this revision.
-`dataCoord.compaction.levelzero.manifestUpdatePoolSize` is read once during metadata initialization
-and requires a DataCoord restart to change. The existing manifest read concurrency
-setting continues to control read admission. Neither reader nor executor performs
+`dataCoord.manifestCommitConcurrency` controls the shared commit executor, defaults
+to 16, and is clamped to [1, 256]. It is read once during metadata initialization
+and requires a DataCoord restart to change. The old
+`dataCoord.compaction.levelzero.manifestUpdatePoolSize` key is no longer used and
+is not a fallback for the global setting: remove that old override and configure
+the new key explicitly if the default global capacity is unsuitable. The existing
+manifest read concurrency setting continues to control read admission. Neither reader nor executor performs
 configuration lookup.
 
 ## Design details: ownership and execution
 
 Each recovery reader owns a `packed.ManifestIOContext` and closes it when the
-startup scan finishes. Standalone reads and sequential LOB scans also own their
-contexts. Commits use a separate, long-lived `manifestCommitExecutor` owned by
+startup scan finishes. Dropped-segment GC, unused-index GC and LOB scans each own
+one read context for the whole sweep, passing it to per-segment helpers and closing
+it on every exit. Commits use a separate, long-lived `manifestCommitExecutor` owned by
 `meta`; each single/batch commit leases its context for the I/O phase and passes
 it explicitly to nested operations. There is no executor shared between recovery
 and commits. Callers wait for admission and completion in Go. A bounded Go worker
@@ -65,15 +70,16 @@ the renamed `loon_transaction_open` entry point.
 The existing read concurrency setting bounds startup/restore/GC index reads
 through their shared admission budget. The recovery entry point reads that
 setting, caps it by segment count, and passes the resulting concurrency to the
-reader constructor. `newMeta` reads `L0ManifestUpdatePoolSize` once and passes
+reader constructor. `newMeta` reads `ManifestCommitConcurrency` once and passes
 it to `newManifestCommitExecutor`. Single and batch commits call `acquire(ctx)`
 without supplying concurrency; batch submission uses the component's fixed
-capacity, capped by batch size. Neither the reader nor the executor looks up
-configuration. Commit capacity remains fixed for the component's lifetime; this
+capacity. Workers start as accepted queued and running tasks exceed the existing
+worker count, up to that capacity; idle workers are reused until shutdown. Neither
+the reader nor the executor looks up configuration. Commit capacity remains fixed for the component's lifetime; this
 setting is not refreshable and changes require a DataCoord restart.
-Standalone reads and sequential LOB scans each need one executor worker. A commit reuses its
-executor for the read-back that verifies the index marker. No executor capacity
-is derived by combining read and commit settings. Waiting callers observe their
+Each sequential GC scan needs one executor worker. Commits derive index markers
+from their already-loaded input and staged mutations, without a read-back. No
+executor capacity is derived by combining read and commit settings. Waiting callers observe their
 context cancellation. Native admission/queue rejection is returned without
 waiting for a callback.
 

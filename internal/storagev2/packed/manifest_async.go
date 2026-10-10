@@ -62,6 +62,11 @@ type ManifestIOContext struct {
 	tasks     chan manifestTask
 	workers   sync.WaitGroup
 	slots     chan struct{}
+	// taskMu protects demand accounting, including tasks executing native code.
+	// Workers grow to meet demand and remain available until Close joins them.
+	taskMu       sync.Mutex
+	workerCount  int
+	pendingTasks int
 }
 
 func NewManifestIOContext(concurrency int) *ManifestIOContext {
@@ -86,14 +91,15 @@ func (io *ManifestIOContext) init() {
 		io.executor = nil
 		return
 	}
-	for i := 0; i < cap(io.slots); i++ {
-		io.workers.Add(1)
-		go func() {
-			defer io.workers.Done()
-			for task := range io.tasks {
-				C.milvusRunManifestTask(task.run, task.data)
-			}
-		}()
+}
+
+func (io *ManifestIOContext) runWorker() {
+	defer io.workers.Done()
+	for task := range io.tasks {
+		C.milvusRunManifestTask(task.run, task.data)
+		io.taskMu.Lock()
+		io.pendingTasks--
+		io.taskMu.Unlock()
 	}
 }
 
@@ -161,8 +167,16 @@ func (io *ManifestIOContext) Close() {
 //export milvusManifestSubmit
 func milvusManifestSubmit(executor unsafe.Pointer, task C.LoonAsyncTask, data unsafe.Pointer) C.int32_t {
 	io := cgo.Handle(*(*C.uintptr_t)(executor)).Value().(*ManifestIOContext)
+	io.taskMu.Lock()
+	defer io.taskMu.Unlock()
 	select {
 	case io.tasks <- manifestTask{task, data}:
+		io.pendingTasks++
+		if io.pendingTasks > io.workerCount && io.workerCount < cap(io.slots) {
+			io.workerCount++
+			io.workers.Add(1)
+			go io.runWorker()
+		}
 		return 0
 	default:
 		return 1 // Native admission rolls back; never retain or execute this task.
@@ -554,10 +568,4 @@ func CommitManifestUpdatesWithResultAsync(ctx context.Context, io *ManifestIOCon
 	}
 	result := <-done
 	return result.result, result.err
-}
-
-// CommitManifestUpdatesAsync waits for the terminal callback and returns its path.
-func CommitManifestUpdatesAsync(ctx context.Context, io *ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
-	result, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
-	return result.ManifestPath, err
 }

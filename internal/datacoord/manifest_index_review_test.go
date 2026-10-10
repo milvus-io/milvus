@@ -215,7 +215,7 @@ func TestManifestGCRejectsForeignArtifactDirectory(t *testing.T) {
 	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
 	defer reader.UnPatch()
 	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm})
-	gc.recycleDroppedSegment(ctx, segment.GetID(), segment)
+	gc.recycleDroppedSegment(ctx, newGCManifestReadIO(t), segment.GetID(), segment)
 	require.NotNil(t, m.GetSegment(ctx, segment.GetID()))
 	content, err := cm.Read(ctx, foreign)
 	require.NoError(t, err)

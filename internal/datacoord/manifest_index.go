@@ -179,14 +179,8 @@ func segmentIndexManifestReadConcurrency() int {
 	return max(1, limit)
 }
 
-// readManifestIndexes shares a read budget across startup, restore and GC.
+// readManifestIndexesWithIO shares a read budget across startup, restore and GC.
 // Waiting for admission is cancellable and does not enter cgo.
-func (m *meta) readManifestIndexes(ctx context.Context, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-	io := packed.NewManifestIOContext(1)
-	defer io.Close()
-	return m.readManifestIndexesWithIO(ctx, io, manifestPath, config)
-}
-
 func (m *meta) readManifestIndexesWithIO(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(segmentIndexManifestReadConcurrency())) })
 	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {

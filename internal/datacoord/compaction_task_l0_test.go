@@ -284,8 +284,8 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 	mockManifestUpdateSubmissions(t)
 	const targets = 3
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key, "16")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key)
 
 	mt, err := newMemoryMeta(t)
 	require.NoError(t, err)

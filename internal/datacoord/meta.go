@@ -300,7 +300,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
-	commitConcurrency := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	commitConcurrency := paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.GetAsInt()
 	mt := &meta{
 		manifestCommitExecutor:   newManifestCommitExecutor(commitConcurrency),
 		ctx:                      ctx,

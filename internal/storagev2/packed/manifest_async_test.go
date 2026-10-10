@@ -38,40 +38,113 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	base := path.Join(cfg.RootPath, "async-segment")
 	index := ManifestIndexInfo{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}
-	first, err := CommitManifestUpdatesAsync(ctx, io, base, 0, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
+	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, 0, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
 	require.NoError(t, err)
-	entries, err := GetManifestIndexInfosAsync(ctx, io, first, cfg)
+	entries, err := GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
-	syncEntries, err := GetManifestIndexInfos(first, cfg)
+	syncEntries, err := GetManifestIndexInfos(first.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Equal(t, entries, syncEntries)
-	lobs, err := GetManifestLobFilesAsync(ctx, io, first, cfg)
+	lobs, err := GetManifestLobFilesAsync(ctx, io, first.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Empty(t, lobs)
 	require.Equal(t, int64(2), entries[0].BuildID)
-	_, version, err := UnmarshalManifestPath(first)
+	_, version, err := UnmarshalManifestPath(first.ManifestPath)
 	require.NoError(t, err)
-	_, err = CommitManifestUpdatesAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 3}}})
+	_, err = CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 3}}})
 	require.Error(t, err)
-	second, err := CommitManifestUpdatesAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	second, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
 	require.NoError(t, err)
-	entries, err = GetManifestIndexInfosAsync(ctx, io, second, cfg)
+	entries, err = GetManifestIndexInfosAsync(ctx, io, second.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Empty(t, entries)
-	_, version, err = UnmarshalManifestPath(second)
+	_, version, err = UnmarshalManifestPath(second.ManifestPath)
 	require.NoError(t, err)
-	unchanged, err := CommitManifestUpdatesAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	unchanged, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
 	require.NoError(t, err)
-	require.Equal(t, second, unchanged)
+	require.Equal(t, second.ManifestPath, unchanged.ManifestPath)
 	// Closing one owner never shuts down another coordinator's context.
 	io.Close()
 	other := NewManifestIOContext(1)
 	defer other.Close()
-	_, err = GetManifestIndexInfosAsync(ctx, other, first, cfg)
+	_, err = GetManifestIndexInfosAsync(ctx, other, first.ManifestPath, cfg)
 	require.NoError(t, err)
-	_, err = GetManifestIndexInfosAsync(ctx, io, first, cfg)
+	_, err = GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+func TestAsyncManifestWorkersGrowOnDemand(t *testing.T) {
+	for _, limit := range []int{3, 1024} {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
+			io := NewManifestIOContext(limit)
+			defer io.Close()
+			workerCount := func() int {
+				io.taskMu.Lock()
+				defer io.taskMu.Unlock()
+				return io.workerCount
+			}
+			idle := func() bool {
+				io.taskMu.Lock()
+				defer io.taskMu.Unlock()
+				return io.pendingTasks == 0
+			}
+			// Sequential demand reuses one worker, even with a large upper bound.
+			for range 2 {
+				release := make(chan struct{})
+				var unblock sync.Once
+				defer unblock.Do(func() { close(release) })
+				entered, err := testQueueManifestBlock(io, release)
+				require.NoError(t, err)
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("worker did not start")
+				}
+				require.Equal(t, 1, workerCount())
+				unblock.Do(func() { close(release) })
+				require.Eventually(t, idle, time.Second, time.Millisecond)
+			}
+			// Three blocked native tasks must all progress without exceeding demand.
+			release := make(chan struct{})
+			var unblock sync.Once
+			defer unblock.Do(func() { close(release) })
+			for i := 1; i <= 3; i++ {
+				entered, err := testQueueManifestBlock(io, release)
+				require.NoError(t, err)
+				select {
+				case <-entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("workers did not grow with demand")
+				}
+				require.Equal(t, i, workerCount())
+			}
+			if limit == 3 {
+				entered, err := testQueueManifestBlock(io, release)
+				require.NoError(t, err)
+				require.Equal(t, 3, workerCount())
+				select {
+				case <-entered:
+					t.Fatal("worker count exceeded the limit")
+				default:
+				}
+			}
+			closed := make(chan struct{})
+			go func() { io.Close(); close(closed) }()
+			select {
+			case <-closed:
+				t.Fatal("Close returned before running tasks finished")
+			case <-time.After(20 * time.Millisecond):
+			}
+			unblock.Do(func() { close(release) })
+			select {
+			case <-closed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Close did not join workers")
+			}
+			require.True(t, idle())
+		})
+	}
 }
 
 // Expose a deadline without signaling Go cancellation, so this test can only

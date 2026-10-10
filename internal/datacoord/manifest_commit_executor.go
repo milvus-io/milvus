@@ -29,10 +29,9 @@ import (
 // lock to drain all leases before closing the context. No caller may acquire
 // another lease while holding one; pass its IO context to nested operations.
 type manifestCommitExecutor struct {
-	mu          sync.RWMutex
-	io          *packed.ManifestIOContext
-	concurrency int
-	closed      bool
+	mu     sync.RWMutex
+	io     *packed.ManifestIOContext
+	closed bool
 }
 
 // newManifestCommitExecutor fixes capacity for this component's lifetime.
@@ -40,8 +39,7 @@ type manifestCommitExecutor struct {
 func newManifestCommitExecutor(concurrency int) *manifestCommitExecutor {
 	concurrency = max(1, concurrency)
 	return &manifestCommitExecutor{
-		io:          packed.NewManifestIOContext(concurrency),
-		concurrency: concurrency,
+		io: packed.NewManifestIOContext(concurrency),
 	}
 }
 

@@ -381,7 +381,7 @@ func retireRejectedCopyTargets(t *testing.T, m *meta, task CopySegmentTask) {
 	for _, mapping := range task.GetIdMappings() {
 		id := mapping.GetTargetSegmentId()
 		if segment := m.GetSegment(context.Background(), id); segment != nil {
-			gc.recycleDroppedSegment(context.Background(), id, segment)
+			gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), id, segment)
 		}
 		require.Nil(t, m.GetSegment(context.Background(), id))
 	}

@@ -990,6 +990,8 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		loadedSegments.Insert(segmentID)
 	}
 
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -1029,7 +1031,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.recycleDroppedSegment(ctx, segmentID, segment)
+		gc.recycleDroppedSegment(ctx, io, segmentID, segment)
 	}
 }
 
@@ -1059,14 +1061,14 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 // surface NotFound, or batching RemoveSegmentIndex past the per-buildID
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
-func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, segment *SegmentInfo) {
 	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
 		return
 	}
 
-	segIndexes, indexFiles, blockReason := gc.getDroppedSegmentIndexFiles(ctx, segmentID)
+	segIndexes, indexFiles, blockReason := gc.getDroppedSegmentIndexFiles(ctx, io, segmentID)
 	switch blockReason {
 	case gcBlockedBySnapshot:
 		log.Info(ctx, "skip GC segment since segment index is protected by snapshot",
@@ -1119,7 +1121,7 @@ const (
 	gcBlockedByManifest
 )
 
-func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
 	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
 	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
@@ -1141,7 +1143,7 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, seg
 	// delete list is always the union of records and manifest, mirroring
 	// recycleUnusedSegIndexes.
 	segment := gc.meta.GetSegment(ctx, segmentID)
-	manifestIndexFiles, blocked, err := gc.getManifestIndexFiles(ctx, segment)
+	manifestIndexFiles, blocked, err := gc.getManifestIndexFiles(ctx, io, segment)
 	if err != nil {
 		if errors.Is(err, errManifestIndexEntryInvalid) {
 			// Deterministic: re-reading the same manifest cannot clear it,
@@ -1210,11 +1212,11 @@ var errManifestIndexEntryInvalid = errors.New("manifest carries an invalid index
 // validation failure is returned so callers can fail closed; a validation
 // rejection wraps errManifestIndexEntryInvalid so callers can tell "retry the
 // read" apart from "the manifest needs repair".
-func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *SegmentInfo) (map[string]struct{}, bool, error) {
+func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segment *SegmentInfo) (map[string]struct{}, bool, error) {
 	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
 		return nil, false, nil
 	}
-	manifestIndexes, err := gc.meta.readManifestIndexes(ctx, segment.GetManifestPath(), createStorageConfig())
+	manifestIndexes, err := gc.meta.readManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), createStorageConfig())
 	if err != nil {
 		return nil, false, merr.Wrap(err, "failed to read manifest index metadata")
 	}
@@ -1616,6 +1618,8 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		log.Info(ctx, "recycleUnusedSegIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
 	groups := make(map[int64][]*model.SegmentIndex)
 	segmentOrder := make([]int64, 0)
 	for _, candidate := range gc.meta.indexMeta.GetAllSegIndexes() {
@@ -1631,11 +1635,11 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		if ctx.Err() != nil {
 			return
 		}
-		gc.recycleUnusedSegIndexesForSegment(ctx, segmentID, groups[segmentID], signal)
+		gc.recycleUnusedSegIndexesForSegment(ctx, io, segmentID, groups[segmentID], signal)
 	}
 }
 
-func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, segmentID int64,
+func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64,
 	candidates []*model.SegmentIndex, signal <-chan gcCmd,
 ) {
 	segment := gc.meta.GetSegment(ctx, segmentID)
@@ -1700,7 +1704,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	manifestEntries := make(map[manifestIndexIdentity]packed.ManifestIndexInfo)
 	if segment != nil && isSegmentHealthy(segment) && segment.GetStorageVersion() == storage.StorageV3 &&
 		segment.GetManifestPath() != "" && segment.GetManifestHasIndex() {
-		indexes, err := gc.meta.readManifestIndexes(ctx, segment.GetManifestPath(), createStorageConfig())
+		indexes, err := gc.meta.readManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), createStorageConfig())
 		if err != nil {
 			mlog.Warn(ctx, "failed to read segment manifest index metadata, wait to retry",
 				mlog.Int64("segmentID", segmentID), mlog.Err(err))

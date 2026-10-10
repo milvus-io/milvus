@@ -898,6 +898,7 @@ dataCoord:
   # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
   targetScalarIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
+  manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
