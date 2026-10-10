@@ -483,11 +483,16 @@ func TestSetCustomWpConfigOperationalParams(t *testing.T) {
 		})
 	}
 	for _, tc := range []struct{ key, value string }{
-		{"grpc.connectBackoff.baseDelay", "0s"}, {"grpc.connectBackoff.maxDelay", "50ms"},
-		{"grpc.connectBackoff.multiplier", "bad"}, {"grpc.connectBackoff.multiplier", "NaN"},
-		{"grpc.connectBackoff.multiplier", "+Inf"}, {"grpc.connectBackoff.jitter", "bad"},
-		{"grpc.connectBackoff.jitter", "NaN"}, {"grpc.connectBackoff.jitter", "1.1"},
-		{"grpc.connectBackoff.jitter", "-0.1"}, {"segmentRead.activeTimeout", "21s"},
+		{"grpc.connectBackoff.baseDelay", "0s"},
+		{"grpc.connectBackoff.maxDelay", "50ms"},
+		{"grpc.connectBackoff.multiplier", "bad"},
+		{"grpc.connectBackoff.multiplier", "NaN"},
+		{"grpc.connectBackoff.multiplier", "+Inf"},
+		{"grpc.connectBackoff.jitter", "bad"},
+		{"grpc.connectBackoff.jitter", "NaN"},
+		{"grpc.connectBackoff.jitter", "1.1"},
+		{"grpc.connectBackoff.jitter", "-0.1"},
+		{"segmentRead.activeTimeout", "21s"},
 	} {
 		t.Run(tc.key+"/"+tc.value, func(t *testing.T) {
 			for key := range custom {

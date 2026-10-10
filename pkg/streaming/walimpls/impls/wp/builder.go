@@ -406,7 +406,8 @@ func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
-		etcdConfig.ClientOptions()...)
+		etcdConfig.ClientOptions()...,
+	)
 	if err != nil {
 		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", mlog.Err(err))
 		return nil, err
