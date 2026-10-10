@@ -184,7 +184,7 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	require.Empty(t, restarted.indexMeta.GetAllSegIndexes())
 	retryGC := newGarbageCollector(restarted, newMockHandler(), GcOption{cli: restarted.chunkManager})
 	defer retryGC.option.removeObjectPool.Release()
-	retryGC.recycleDroppedSegment(ctx, restartSegID, retained)
+	retryGC.recycleDroppedSegment(ctx, restartSegID)
 	require.Nil(t, restarted.GetSegment(ctx, restartSegID), "pending GC must remove the remaining catalog row")
 	again := bootMetaForRestart(t, catalog, restartCollID)
 	require.Nil(t, again.GetSegment(ctx, restartSegID))

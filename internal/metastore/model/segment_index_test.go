@@ -92,3 +92,15 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
 }
+
+func TestSegmentIndex_ManifestPublishedIsProcessLocal(t *testing.T) {
+	original := &SegmentIndex{BuildID: 1000, ManifestPublished: true}
+	cloned := CloneSegmentIndex(original)
+	assert.True(t, cloned.ManifestPublished)
+	cloned.ManifestPublished = false
+	assert.True(t, original.ManifestPublished)
+
+	restored := UnmarshalSegmentIndexModel(MarshalSegmentIndexModel(original))
+	assert.Equal(t, original.BuildID, restored.BuildID)
+	assert.False(t, restored.ManifestPublished, "catalog reload must not inherit manifest placement")
+}

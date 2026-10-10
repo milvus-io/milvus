@@ -1,0 +1,595 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+	"path"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func(context.Context, *meta) error
+	}{
+		{"deleted definition", func(ctx context.Context, m *meta) error {
+			return m.indexMeta.MarkIndexAsDeleted(ctx, restartCollID, []int64{restartIndexID})
+		}},
+		{"replaced build", func(ctx context.Context, m *meta) error {
+			old, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			replacement := model.CloneSegmentIndex(old)
+			replacement.BuildID++
+			return m.indexMeta.AddSegmentIndex(ctx, replacement)
+		}},
+		{"changed artifact version", func(_ context.Context, m *meta) error {
+			return m.indexMeta.UpdateVersion(restartBuildID, 10)
+		}},
+		{"changed level", func(ctx context.Context, m *meta) error {
+			return m.UpdateSegmentsInfo(ctx, UpdateSegmentLevelOperator(restartSegID, datapb.SegmentLevel_L0))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			store := newFakeManifestStore(t)
+			ctx := context.TODO()
+			catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+			m := bootMetaForRestart(t, catalog, restartCollID)
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			base := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			// The inspector has constructed its entry, but the framework has
+			// not acquired the locks that authorize publishing it yet.
+			var original func(*meta, context.Context, SegmentManifestCommit) error
+			var changeErr error
+			changed := false
+			patch := mockey.Mock((*meta).CommitSegmentManifest).Origin(&original).To(
+				func(receiver *meta, ctx context.Context, commit SegmentManifestCommit) error {
+					changed = true
+					changeErr = test.change(ctx, receiver)
+					if changeErr != nil {
+						return changeErr
+					}
+					return original(receiver, ctx, commit)
+				}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			err := newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID)
+			require.True(t, changed)
+			require.NoError(t, changeErr, "the competing operation must succeed before checking publication")
+			require.Error(t, err)
+			assert.Zero(t, store.commitCount, "stale candidate must fail before manifest I/O")
+			assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			assert.NotEmpty(t, rows)
+			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+		})
+	}
+}
+
+func TestManifestIndexBackfillBatchRevalidatesEveryRecord(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	store := newFakeManifestStore(t)
+	ctx := context.Background()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	records := seedLegacyBackfillIndexes(t, m, 2)
+	base := m.GetSegment(ctx, restartSegID).GetManifestPath()
+	withSegmentIndexManifestWrites(t, true)
+
+	// Change the second record after projection but before the batch locks.
+	// The first record must not be published on its own.
+	var original func(*meta, context.Context, SegmentManifestCommit) error
+	patch := mockey.Mock((*meta).CommitSegmentManifest).Origin(&original).To(
+		func(receiver *meta, ctx context.Context, commit SegmentManifestCommit) error {
+			if err := receiver.indexMeta.UpdateVersion(records[1].BuildID, 10); err != nil {
+				return err
+			}
+			return original(receiver, ctx, commit)
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	work, _ := inspector.scan(ctx)
+	assert.Zero(t, inspector.execute(ctx, work))
+	assert.Zero(t, store.commitCount)
+	assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	for _, record := range records {
+		assert.False(t, indexManifestPublished(t, m.indexMeta, record.BuildID))
+	}
+	patch.UnPatch()
+	work, _ = inspector.scan(ctx)
+	assert.Equal(t, 2, inspector.execute(ctx, work))
+	assert.Equal(t, 1, store.commitCount)
+}
+
+func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	old, ok := m.indexMeta.segmentBuildInfo.Get(restartBuildID)
+	require.True(t, ok)
+	replacement := model.CloneSegmentIndex(old)
+	replacement.BuildID++
+	withSegmentIndexManifestWrites(t, true)
+
+	// The old build is staged and locked. A new build can still take over its
+	// (segment, index) slot under a different BuildID lock during manifest I/O.
+	var original func(string, SegmentManifestCommit) (string, error)
+	patch := mockey.Mock(commitManifestMutation).Origin(&original).To(
+		func(base string, commit SegmentManifestCommit) (string, error) {
+			if err := m.indexMeta.AddSegmentIndex(ctx, replacement); err != nil {
+				return "", err
+			}
+			return original(base, commit)
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID))
+
+	assert.False(t, old.ManifestPublished, "a reader's existing snapshot must remain unchanged")
+	assert.True(t, indexManifestPublished(t, m.indexMeta, old.BuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, replacement.BuildID))
+	assert.Equal(t, replacement, m.indexMeta.GetSegmentIndexes(restartCollID, restartSegID)[restartIndexID])
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, replacement.BuildID, rows[0].BuildID)
+}
+
+func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
+	for _, scenario := range []string{"write fails", "pointer advances", "segment drops"} {
+		t.Run(scenario, func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			withManifestIndexBackfillEnabled(t, true)
+			store := newFakeManifestStore(t)
+			ctx := context.TODO()
+			catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+			m := bootMetaForRestart(t, catalog, restartCollID)
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			base := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			withSegmentIndexManifestWrites(t, true)
+			var original func(string, SegmentManifestCommit) (string, error)
+			inject := true
+			patch := mockey.Mock(commitManifestMutation).Origin(&original).To(
+				func(base string, commit SegmentManifestCommit) (string, error) {
+					if inject && scenario == "write fails" {
+						return "", merr.ErrIoTooManyRequests
+					}
+					result, err := original(base, commit)
+					if err != nil || !inject {
+						return result, err
+					}
+					if scenario == "pointer advances" {
+						err = m.UpdateSegmentsInfo(ctx, UpdateManifestVersion(restartSegID, 3))
+					} else {
+						err = m.SetState(ctx, restartSegID, commonpb.SegmentState_Dropped)
+					}
+					return result, err
+				}).Build()
+			t.Cleanup(func() { patch.UnPatch() })
+			inspector := newManifestIndexBackfillInspector(ctx, m)
+			err := inspector.backfillIndexes(ctx, restartSegID, restartBuildID)
+			require.Error(t, err)
+			switch scenario {
+			case "write fails":
+				assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+			case "pointer advances":
+				assert.ErrorIs(t, err, errSegmentManifestStale)
+			case "segment drops":
+				assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+			}
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+			assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
+			if scenario == "write fails" {
+				assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			}
+			inject = false
+			inspector.runOnce(ctx)
+			rows, err = catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			if scenario == "segment drops" {
+				assert.Len(t, rows, 1, "dropped segment remains owned by GC")
+				assert.Zero(t, inspector.lastPending)
+			} else {
+				assert.Empty(t, rows)
+				assert.Len(t, store.backfillEntriesAt(m.GetSegment(ctx, restartSegID).GetManifestPath()), 1)
+			}
+		})
+	}
+}
+
+func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	store := newFakeManifestStore(t)
+	ctx := context.TODO()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	observed := m.GetSegment(ctx, restartSegID)
+	record, _ := m.indexMeta.GetIndexJob(restartBuildID)
+	gc := newGarbageCollector(m, nil, GcOption{cli: m.chunkManager})
+	t.Cleanup(gc.close)
+	item := segmentIndexGCItem{segIdx: record, files: gc.getAllIndexFilesOfIndex(record)}
+	for file := range item.files {
+		require.NoError(t, m.chunkManager.Write(ctx, file, []byte("artifact")))
+		t.Cleanup(func() { _ = m.chunkManager.Remove(ctx, file) })
+	}
+	// Backfill passed its live-definition check before DDL retired the index.
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndexes(ctx, restartSegID, restartBuildID))
+	require.NoError(t, m.indexMeta.MarkIndexAsDeleted(ctx, restartCollID, []int64{restartIndexID}))
+	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
+	_, exists := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, exists, "stale GC must preserve the driver of manifest retraction")
+	for file := range item.files {
+		present, err := m.chunkManager.Exist(ctx, file)
+		require.NoError(t, err)
+		assert.True(t, present, "recheck precedes deletion")
+	}
+	gc.recycleUnusedSegIndexes(ctx, nil)
+	_, exists = m.indexMeta.GetIndexJob(restartBuildID)
+	assert.False(t, exists)
+	published := m.GetSegment(ctx, restartSegID)
+	assert.Empty(t, store.backfillEntriesAt(published.GetManifestPath()))
+	assert.False(t, published.GetManifestHasIndex(), "merged marker clearing stays effective")
+}
+
+func TestManifestIndexBackfillConcurrencyAndShutdown(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	withManifestIndexBackfillEnabled(t, true)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	for offset := int64(0); offset < 4; offset++ {
+		seedLegacyBackfillRecord(t, m, restartSegID+offset, restartBuildID+offset)
+	}
+	key := Params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key
+	previous := Params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetValue()
+	Params.Save(key, "2")
+	t.Cleanup(func() { Params.Save(key, previous) })
+	withSegmentIndexManifestWrites(t, true)
+	entered := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var once sync.Once
+	// A false condition forwards to the original function after the barrier.
+	// Avoid Origin: mockey 1.4.6 writes shared call arguments in that adapter,
+	// which races when multiple segment workers enter it concurrently.
+	patch := mockey.Mock(commitManifestMutation).When(func(_ string, _ SegmentManifestCommit) bool {
+		entered <- struct{}{}
+		<-release
+		return false
+	}).Build()
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	t.Cleanup(func() {
+		inspector.cancel()
+		once.Do(func() { close(release) })
+		inspector.Stop()
+		patch.UnPatch()
+	})
+	inspector.Start()
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("backfill did not fill its two worker slots")
+		}
+	}
+	select {
+	case <-entered:
+		t.Fatal("backfill exceeded configured concurrency")
+	default:
+	}
+	inspector.cancel()
+	stopped := make(chan struct{})
+	go func() { inspector.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned before in-flight manifest I/O drained")
+	default:
+	}
+	once.Do(func() { close(release) })
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("backfill did not stop after draining")
+	}
+	assert.Empty(t, entered, "queued segment groups must not enter manifest I/O after cancellation")
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(rows), 2, "unstarted work must remain durable for the next leader")
+}
+
+// Exercise the real packed FFI and durable catalog protocol together. The
+// artifact bytes are fixtures: this checks metadata/path recovery, not search.
+func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
+	for _, layout := range []indexpb.IndexStorePathVersion{
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+		indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+	} {
+		t.Run(layout.String(), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			withManifestIndexBackfillEnabled(t, true)
+			ctx := context.TODO()
+			root := t.TempDir()
+			for item, value := range map[*paramtable.ParamItem]string{
+				&Params.CommonCfg.StorageType: "local",
+				&Params.LocalStorageCfg.Path:  root,
+			} {
+				previous := item.GetValue()
+				Params.Save(item.Key, value)
+				t.Cleanup(func() { Params.Save(item.Key, previous) })
+			}
+			catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+			boot := func() *meta {
+				b := broker.NewMockBroker(t)
+				b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
+					Status:        merr.Success(),
+					DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
+				}, nil)
+				m, err := newMeta(ctx, catalog, storage.NewLocalChunkManager(objectstorage.RootPath(root)), b)
+				require.NoError(t, err)
+				return m
+			}
+			m := boot()
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			m.AddCollection(&collectionInfo{ID: restartCollID, Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: restartFieldID, Name: "vec", DataType: schemapb.DataType_FloatVector}},
+			}})
+			basePath := path.Join(root, "insert_log/300/30/8001")
+			cfg := createStorageConfig()
+			statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
+			require.NoError(t, packed.WriteFile(cfg, statPath, []byte("stats")))
+			initial, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+				Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}},
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateManifest(restartSegID, initial)))
+			first, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			first.IndexStorePathVersion = layout
+			require.NoError(t, m.indexMeta.alterSegmentIndexes([]*model.SegmentIndex{first}))
+			definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(restartCollID, "")[0])
+			definition.IndexID++
+			definition.IndexName = "second_idx"
+			require.NoError(t, m.indexMeta.CreateIndex(ctx, definition))
+			second := model.CloneSegmentIndex(first)
+			second.IndexID++
+			second.BuildID++
+			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, second))
+			gc := newGarbageCollector(m, nil, GcOption{cli: m.chunkManager})
+			t.Cleanup(gc.close)
+			for _, record := range []*model.SegmentIndex{first, second} {
+				for file := range gc.getAllIndexFilesOfIndex(record) {
+					require.NoError(t, m.chunkManager.Write(ctx, file, []byte("artifact")))
+				}
+			}
+			withSegmentIndexManifestWrites(t, true)
+			inspector := newManifestIndexBackfillInspector(ctx, m)
+			inspector.runOnce(ctx)
+			published := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			require.NotEqual(t, initial, published)
+			_, initialVersion, err := packed.UnmarshalManifestPath(initial)
+			require.NoError(t, err)
+			_, publishedVersion, err := packed.UnmarshalManifestPath(published)
+			require.NoError(t, err)
+			assert.Equal(t, initialVersion+1, publishedVersion, "both indexes must share one manifest revision")
+			entries, err := packed.GetManifestIndexInfos(published, cfg)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+			for _, entry := range entries {
+				assert.Equal(t, layout, entry.IndexStorePathVersion)
+				assert.Equal(t, "vec", entry.ColumnName)
+				for _, key := range entry.IndexFileKeys {
+					data, err := m.chunkManager.Read(ctx, path.Join(entry.Path, key))
+					require.NoError(t, err)
+					assert.Equal(t, []byte("artifact"), data)
+				}
+			}
+			stats, err := packed.GetManifestStats(published, cfg)
+			require.NoError(t, err)
+			assert.Contains(t, stats, "bloom_filter.100", "migration must preserve unrelated manifest sections")
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			inspector.runOnce(ctx)
+			assert.Equal(t, published, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			withSegmentIndexManifestWrites(t, false)
+			restarted := boot()
+			for _, record := range []*model.SegmentIndex{first, second} {
+				recovered, ok := restarted.indexMeta.GetIndexJob(record.BuildID)
+				require.True(t, ok)
+				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
+				assert.Equal(t, layout, recovered.IndexStorePathVersion)
+				assert.True(t, indexManifestPublished(t, restarted.indexMeta, record.BuildID))
+			}
+			_, pending := newManifestIndexBackfillInspector(ctx, restarted).scan(ctx)
+			assert.Zero(t, pending)
+		})
+	}
+}
+
+// Once the confirming scan finds no records, interval ticks must not cause
+// further work. Every catalog writer that can reintroduce a finished artifact
+// must wake the same inspector without restarting DataCoord.
+func TestManifestIndexBackfillIdleAndWake(t *testing.T) {
+	for _, writer := range []string{"copy install", "finish task", "version update"} {
+		t.Run(writer, func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			withManifestIndexBackfillEnabled(t, true)
+			newFakeManifestStore(t)
+			ctx := context.Background()
+			m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			// An in-flight task remains in etcd and must not keep migration polling.
+			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+				CollectionID: restartCollID, PartitionID: restartPartID, SegmentID: restartSegID,
+				IndexID: restartIndexID + 10, BuildID: restartBuildID + 10,
+				IndexState: commonpb.IndexState_InProgress,
+			}))
+			withSegmentIndexManifestWrites(t, true)
+			inspector := newManifestIndexBackfillInspector(ctx, m)
+			interval := mockey.Mock(manifestIndexBackfillInterval).Return(10 * time.Millisecond).Build()
+			t.Cleanup(func() { interval.UnPatch() })
+			var scans atomic.Int32
+			scanPatch := mockey.Mock((*manifestIndexBackfillInspector).scan).When(func(_ *manifestIndexBackfillInspector, _ context.Context) bool {
+				scans.Add(1)
+				return false
+			}).Build()
+			t.Cleanup(func() { scanPatch.UnPatch() })
+			inspector.Start()
+			t.Cleanup(inspector.Stop)
+			require.Eventually(t, func() bool { return scans.Load() >= 2 }, 5*time.Second, time.Millisecond)
+			assert.True(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+			require.Never(t, func() bool { return scans.Load() != 2 }, 100*time.Millisecond, time.Millisecond,
+				"an empty backlog must stop periodic scans")
+
+			buildID := restartBuildID
+			switch writer {
+			case "copy install":
+				record, ok := m.indexMeta.GetIndexJob(buildID)
+				require.True(t, ok)
+				record.BuildID++
+				buildID = record.BuildID
+				require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, record))
+			case "finish task":
+				require.NoError(t, m.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+					BuildID: buildID, State: commonpb.IndexState_Finished,
+					IndexFileKeys:         []string{"0", "1"},
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				}))
+			case "version update":
+				require.NoError(t, m.indexMeta.UpdateVersion(buildID, 10))
+			}
+			require.Eventually(t, func() bool {
+				record, ok := m.indexMeta.GetIndexJob(buildID)
+				return ok && record.ManifestPublished && scans.Load() >= 4
+			}, 5*time.Second, time.Millisecond)
+			require.Never(t, func() bool { return scans.Load() != 4 }, 100*time.Millisecond, time.Millisecond)
+			inspector.Stop()
+		})
+	}
+}
+
+func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	withManifestIndexBackfillEnabled(t, true)
+	newFakeManifestStore(t)
+	ctx := context.Background()
+	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	withSegmentIndexManifestWrites(t, true)
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	require.NoError(t, inspector.backfillIndexes(ctx, restartSegID, restartBuildID))
+
+	// Freeze the first empty scan after it observed zero, but before it can
+	// wait for notification. A record installed here must survive that handoff.
+	emptyScan := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var calls atomic.Int32
+	var original func(*manifestIndexBackfillInspector, context.Context) ([]segmentManifestIndexBackfill, int)
+	patch := mockey.Mock((*manifestIndexBackfillInspector).scan).Origin(&original).To(
+		func(receiver *manifestIndexBackfillInspector, ctx context.Context) ([]segmentManifestIndexBackfill, int) {
+			work, pending := original(receiver, ctx)
+			if calls.Add(1) == 1 && pending == 0 {
+				close(emptyScan)
+				<-release
+			}
+			return work, pending
+		}).Build()
+	t.Cleanup(func() {
+		inspector.cancel()
+		once.Do(func() { close(release) })
+		inspector.Stop()
+		patch.UnPatch()
+	})
+	inspector.Start()
+	select {
+	case <-emptyScan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial empty scan did not finish")
+	}
+	record, ok := m.indexMeta.GetIndexJob(restartBuildID)
+	require.True(t, ok)
+	record.BuildID++
+	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, record))
+	once.Do(func() { close(release) })
+	require.Eventually(t, func() bool {
+		current, ok := m.indexMeta.GetIndexJob(record.BuildID)
+		return ok && current.ManifestPublished
+	}, 5*time.Second, time.Millisecond, "late copy installation must wake without waiting for the 60 second interval")
+}
+
+func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.Background()
+	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	seedLegacyBackfillRecord(t, m, restartSegID+1, restartBuildID+1)
+	// Retain the old catalog row for GC but replace its current slot with a
+	// manifest-resident build. Neither record should cause a segment lookup.
+	replacement, ok := m.indexMeta.GetIndexJob(restartBuildID + 1)
+	require.True(t, ok)
+	replacement.BuildID++
+	require.NoError(t, m.indexMeta.AddSegmentIndexFromManifest(ctx, replacement))
+	var segmentLookups atomic.Int32
+	patch := mockey.Mock((*meta).GetSegment).When(func(_ *meta, _ context.Context, _ int64) bool {
+		segmentLookups.Add(1)
+		return false
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	segmentScan := mockey.Mock((*meta).SelectSegments).To(func(*meta, context.Context, ...SegmentFilter) []*SegmentInfo {
+		t.Error("backfill must not enumerate segments")
+		return nil
+	}).Build()
+	t.Cleanup(func() { segmentScan.UnPatch() })
+	work, pending := newManifestIndexBackfillInspector(ctx, m).scan(ctx)
+	require.Equal(t, 1, pending)
+	require.Len(t, work, 1)
+	require.Equal(t, restartBuildID, work[0].records[0].BuildID)
+	assert.EqualValues(t, 1, segmentLookups.Load())
+}

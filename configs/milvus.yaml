@@ -972,6 +972,22 @@ dataCoord:
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
     # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
+    manifestIndexBackfill:
+      # Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
+      # Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
+      # Enable only after every DataCoord replica that can become leader supports manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
+      # Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.
+      enabled: false
+      interval: 60 # Interval in seconds between manifest index backfill scans while work remains. Empty scans stop the timer; new catalog-backed finished index records wake the inspector.
+      batchSize: 1000 # Target number of SegmentIndex catalog records migrated per scan. Whole segments are selected, so the last segment may exceed this budget; the pending gauge counts the full backlog.
+      concurrency: 16 # Number of segments whose manifest index backfill may run in parallel. Each segment batches its indexes into one commit unless the etcd transaction operation limit requires splitting.
+    manifestIndexRollback:
+      # Restore StorageV3 manifest index records to etcd and remove their manifest entries atomically, preserving artifact files. This restart-scoped switch overrides forward manifest publication and backfill; new index completions use etcd.
+      # Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.
+      enabled: false
+      interval: 60 # Seconds between rollback scans while manifest-resident records remain. Scans stop after readiness and resume on manifest-resident record notifications. Nonpositive durations use 60 seconds.
+      batchSize: 1000 # Maximum segments visited per rollback scan. Each visit restores at most maxEtcdTxnNum-1 indexes atomically.
+      concurrency: 8 # Maximum segments processed concurrently during rollback, clamped to [1, 256].
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
