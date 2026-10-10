@@ -33,9 +33,10 @@
 #include "common/type_c.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
-#include "index/VectorMemIndex.h"
+#include "index/contracts/Registry.h"
+#include "index/IndexTypeAdapter.h"
+#include "storage/artifact/FileSource.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -63,9 +64,8 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/PbHelper.h"
-#include "test_utils/c_api_test_utils.h"
+#include "segcore/test_utils/ConsumerCApiTestUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -73,20 +73,66 @@ using namespace milvus::segcore;
 using namespace milvus::index;
 using namespace milvus::test;
 using namespace knowhere;
+using namespace milvus::test::consumer;
 
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
 namespace {
 
-class LocalDirOwningIndex : public milvus::index::IndexBase {
+// This source is limited to the materialized-entry load used below. It owns
+// the externally serialized Knowhere entries and introduces no filesystem path.
+class BinarySetSource final : public storage::FileSource {
  public:
-    explicit LocalDirOwningIndex(
-        const milvus::storage::FileManagerContext& file_manager_context)
-        : IndexBase("LOCAL_DIR_OWNING"),
-          disk_file_manager_(
-              std::make_shared<milvus::storage::DiskFileManagerImpl>(
-                  file_manager_context)),
+    explicit BinarySetSource(const knowhere::BinarySet& binary_set) {
+        for (const auto& [name, entry] : binary_set.binary_map_) {
+            entries_.emplace(name, std::vector<uint8_t>(
+                entry->data.get(), entry->data.get() + entry->size));
+        }
+    }
+
+    storage::Generation Gen() const override {
+        return storage::Generation::V1V2;
+    }
+    std::vector<std::string> EntryNames() const override {
+        std::vector<std::string> names;
+        for (const auto& [name, bytes] : entries_) {
+            names.push_back(name);
+        }
+        return names;
+    }
+    bool HasEntry(std::string_view name) const override {
+        return entries_.find(std::string(name)) != entries_.end();
+    }
+    int64_t EntrySize(std::string_view name) const override {
+        return entries_.at(std::string(name)).size();
+    }
+    std::vector<uint8_t> ReadEntry(std::string_view name) override {
+        return entries_.at(std::string(name));
+    }
+    void ReadEntryToLocalFile(std::string_view, const std::string&) override {
+        ThrowInfo(Unsupported, "binary-set consumer source is memory-only");
+    }
+    void ReadEntriesToLocalFile(const std::vector<std::string>&,
+                                const std::string&) override {
+        ThrowInfo(Unsupported, "binary-set consumer source is memory-only");
+    }
+    std::vector<std::string> ReadEntriesToLocalDir(
+        const std::vector<std::string>&, const std::string&) override {
+        ThrowInfo(Unsupported, "binary-set consumer source is memory-only");
+    }
+
+ private:
+    std::map<std::string, std::vector<uint8_t>> entries_;
+};
+
+// The C API releases its cache-owned reader. Each reader retains the same
+// DiskFileManager generation owner used by production load cleanup.
+class LocalDirOwningReader : public index::IIndexReaderBase {
+ public:
+    explicit LocalDirOwningReader(
+        const storage::FileManagerContext& context)
+        : disk_file_manager_(std::make_shared<storage::DiskFileManagerImpl>(context)),
           local_index_prefix_(disk_file_manager_->GetLocalIndexObjectPrefix()) {
     }
 
@@ -95,59 +141,22 @@ class LocalDirOwningIndex : public milvus::index::IndexBase {
         return local_index_prefix_;
     }
 
-    milvus::BinarySet
-    Serialize(const milvus::Config& /*config*/) override {
-        return {};
-    }
-
     void
-    Load(const milvus::BinarySet& /*binary_set*/,
-         const milvus::Config& /*config*/ = {}) override {
+    KeepGenerationAlive(index::IIndexReaderBasePtr reader) {
+        dependent_generations_.push_back(std::move(reader));
     }
 
-    void
-    Load(milvus::tracer::TraceContext /*ctx*/,
-         const milvus::Config& /*config*/ = {}) override {
-    }
-
-    void
-    BuildWithRawDataForUT(size_t /*n*/,
-                          const void* /*values*/,
-                          const milvus::Config& /*config*/ = {}) override {
-    }
-
-    void
-    BuildWithDataset(const milvus::DatasetPtr& /*dataset*/,
-                     const milvus::Config& /*config*/ = {}) override {
-    }
-
-    void
-    Build(const milvus::Config& /*config*/ = {}) override {
-    }
-
-    int64_t
-    Count() override {
-        return 0;
-    }
-
-    milvus::index::IndexStatsPtr
-    Upload(const milvus::Config& /*config*/ = {}) override {
-        return nullptr;
-    }
-
-    const bool
-    HasRawData() const override {
-        return false;
-    }
-
-    bool
-    IsMmapSupported() const override {
-        return false;
-    }
+    index::ReaderCaps Caps() const override { return {}; }
+    index::Domain CoordDomain() const override { return index::Domain::Row; }
+    int64_t Count() const override { return 0; }
+    DataType ValueType() const override { return DataType::VECTOR_FLOAT; }
+    int64_t MemoryUsage() const override { return 0; }
+    cachinglayer::ResourceUsage CellByteSize() const override { return {0, 0}; }
 
  private:
-    std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager_;
+    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     std::string local_index_prefix_;
+    std::vector<index::IIndexReaderBasePtr> dependent_generations_;
 };
 
 milvus::storage::FileManagerContext
@@ -178,14 +187,14 @@ MakeFileManagerContext(const milvus::segcore::LoadIndexInfo& load_index_info) {
         field_meta, index_meta, local_chunk_manager, nullptr);
 }
 
-std::pair<std::unique_ptr<LocalDirOwningIndex>, std::string>
-CreateLocalDirOwningIndexFile(
+std::pair<std::unique_ptr<LocalDirOwningReader>, std::string>
+CreateLocalDirOwningReaderFile(
     const milvus::storage::FileManagerContext& file_manager_context,
     const std::string& file_name) {
     auto local_chunk_manager =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager();
-    auto index = std::make_unique<LocalDirOwningIndex>(file_manager_context);
+    auto index = std::make_unique<LocalDirOwningReader>(file_manager_context);
     auto local_file = index->LocalIndexPrefix() + file_name;
     local_chunk_manager->CreateFile(local_file);
     EXPECT_TRUE(local_chunk_manager->Exist(local_file));
@@ -248,25 +257,41 @@ TEST(CApiTest, LoadIndexSearch) {
     knowhere::BinarySet binary_set;
     indexing.Serialize(binary_set);
 
-    // fill loadIndexInfo
-    milvus::segcore::LoadIndexInfo load_index_info;
-    auto& index_params = load_index_info.index_params;
-    index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
-    auto index = std::make_unique<VectorMemIndex<float>>(
-        DataType::NONE,
-        index_params["index_type"],
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    index->Load(binary_set);
-    index_params = GenIndexParams(index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(index));
+    // Load the external serialized engine through the public loader contract.
+    auto adapted = index::AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
+        .field_type = DataType::VECTOR_FLOAT,
+        .index_engine_version = knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = conf});
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    const auto loader = index::LoaderRegistry::Instance().Lookup(adapted.family);
+    ASSERT_TRUE(static_cast<bool>(loader));
+    auto reader = loader.Load({
+        index::OpenedIndexSource{index::LegacyIndexSource{
+            std::make_shared<BinarySetSource>(binary_set), false}}, options});
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Count(), N);
+    auto* vectors = dynamic_cast<const index::IVectorReader*>(reader.get());
+    ASSERT_NE(vectors, nullptr);
+    EXPECT_EQ(vectors->Dim(), DIM);
 
     // search
     auto query_dataset =
         knowhere::GenDataSet(num_query, DIM, raw_data.data() + BIAS * DIM);
 
     auto result = indexing.Search(query_dataset, conf, nullptr);
+    ASSERT_TRUE(result.has_value());
+    SearchResult loaded_result;
+    vectors->Search(query_dataset,
+                    {conf, knowhere::metric::L2, TOPK, {}},
+                    milvus::BitsetView{}, nullptr, loaded_result);
+    ASSERT_EQ(loaded_result.seg_offsets_.size(), num_query * TOPK);
+    ASSERT_EQ(loaded_result.distances_.size(), num_query * TOPK);
+    for (int64_t i = 0; i < num_query * TOPK; ++i) {
+        EXPECT_EQ(loaded_result.seg_offsets_[i], result.value()->GetIds()[i]);
+        EXPECT_FLOAT_EQ(loaded_result.distances_[i], result.value()->GetDistance()[i]);
+    }
 }
 
 TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
@@ -323,14 +348,15 @@ TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {
 
     auto file_manager_context = MakeFileManagerContext(load_index_info);
     auto [index, index_file] =
-        CreateLocalDirOwningIndexFile(file_manager_context, "index_data");
+        CreateLocalDirOwningReaderFile(file_manager_context, "index_data");
     auto [cache_index, cache_index_file] =
-        CreateLocalDirOwningIndexFile(file_manager_context, "cache_index_data");
-    auto [sibling_index, sibling_file] = CreateLocalDirOwningIndexFile(
+        CreateLocalDirOwningReaderFile(file_manager_context, "cache_index_data");
+    auto [sibling_index, sibling_file] = CreateLocalDirOwningReaderFile(
         file_manager_context, "sibling_index_data");
-    load_index_info.index = std::move(index);
-    load_index_info.cache_index = CreateTestCacheIndex(
-        "clean_loaded_index_cache", std::move(cache_index));
+    // Both owned generations leave with the cache; the independently held
+    // sibling generation must survive the C API cleanup.
+    index->KeepGenerationAlive(std::move(cache_index));
+    load_index_info.cache_index = CreateReaderCache(std::move(index));
     ASSERT_TRUE(local_chunk_manager->Exist(index_file));
     ASSERT_TRUE(local_chunk_manager->Exist(cache_index_file));
     ASSERT_NE(sibling_index, nullptr);
@@ -431,12 +457,17 @@ Test_Indexing_Without_Predicate() {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -452,7 +483,7 @@ Test_Indexing_Without_Predicate() {
 
     // load index for vec field, load raw data for scalar field
     auto load_index_info =
-        CreateTestLoadIndexInfo(std::move(indexing), TraitType::data_type, 100);
+        MakeLoadIndexInfo(std::move(indexing), TraitType::data_type, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -561,12 +592,17 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -581,7 +617,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -688,12 +724,17 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -708,7 +749,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -817,12 +858,17 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -837,7 +883,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -944,12 +990,17 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -964,7 +1015,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1071,12 +1122,17 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1091,7 +1147,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1202,12 +1258,17 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1222,7 +1283,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1333,12 +1394,17 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1353,7 +1419,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1464,12 +1530,17 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1484,7 +1555,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
@@ -1605,12 +1676,17 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(
+        query_dataset,
+        MakeVectorSearchParams(search_info),
+        milvus::BitsetView{},
+        nullptr,
+        result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1625,7 +1701,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     search_result_on_raw_index->distances_ = vec_dis;
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
+    auto load_index_info = MakeLoadIndexInfo(
         std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));

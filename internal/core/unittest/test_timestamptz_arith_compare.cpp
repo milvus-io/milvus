@@ -24,12 +24,12 @@
 #include "common/Types.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -124,7 +124,7 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
                          N,
                          dataset_->row_ids_.data(),
                          dataset_->timestamps_.data(),
-                         dataset_->raw_);
+                         dataset_->SharedRaw());
         sealed_ = CreateSealedWithFieldDataLoaded(schema_, *dataset_);
     }
 
@@ -201,13 +201,22 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
 
     void
     LoadTimestamptzIndex(const int64_t* values, bool drop_field_data) {
-        auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
-        scalar_index->Build(N, values, tstz_valid_.data());
+        // The physical int64 input must retain its logical timestamp type.
+        auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+            "sort",
+            N,
+            values,
+            tstz_valid_.data(),
+            {{"field_type", DataType::TIMESTAMPTZ},
+             {"value_type", DataType::TIMESTAMPTZ}});
+        ASSERT_EQ(scalar_index->ValueType(), DataType::TIMESTAMPTZ);
+        ASSERT_TRUE(scalar_index->Caps().value_lookup);
 
-        LoadIndexInfo load_index_info;
+        LoadIndexInfo load_index_info{};
         load_index_info.field_id = tstz_fid_.get();
         load_index_info.field_type = DataType::TIMESTAMPTZ;
-        load_index_info.index_params = GenIndexParams(scalar_index.get());
+        load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
         load_index_info.cache_index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));
         sealed_->LoadIndex(load_index_info);

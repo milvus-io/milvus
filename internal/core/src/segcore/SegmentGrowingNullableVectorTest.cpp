@@ -16,12 +16,16 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstring>
+#include <memory>
 #include <numeric>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "common/Utils.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "knowhere/dataset.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -177,7 +181,7 @@ class GrowingNullableVectorTest : public ::testing::Test {
                          count,
                          data.row_ids_.data(),
                          data.timestamps_.data(),
-                         data.raw_);
+                         std::make_shared<InsertRecordProto>(*data.raw_));
     }
 
     void
@@ -255,13 +259,18 @@ TEST_F(GrowingNullableVectorTest, IndexedTypesKeepLogicalOffsets) {
                              << int(type) << "/" << interim << "/" << nullable);
                 MakeSegment(type, nullable, interim);
                 Insert(100);
-                ASSERT_FALSE(
-                    impl_->get_indexing_record().SyncDataWithIndex(vec_));
+                ASSERT_FALSE(impl_->PinGrowingIndex(vec_));
                 Check({99, 14, 0, 14, 10});
                 Insert(2000);
-                ASSERT_TRUE(
-                    impl_->get_indexing_record().SyncDataWithIndex(vec_));
-                ASSERT_EQ(impl_->get_indexing_record().HasRawData(vec_),
+                const auto index_pin = impl_->PinGrowingIndex(vec_);
+                ASSERT_TRUE(index_pin);
+                EXPECT_EQ(index_pin.CoveredRowEnd(), expected_.size());
+                EXPECT_EQ(index_pin.Reader().Count(),
+                          std::count_if(expected_.begin(), expected_.end(),
+                                        [](const auto& row) {
+                                            return row.has_value();
+                                        }));
+                ASSERT_EQ(impl_->CanReadRawVectorFromIndex(vec_),
                           interim == "IVF_FLAT_CC");
                 std::vector<int64_t> offsets(expected_.size());
                 std::iota(offsets.begin(), offsets.end(), 0);
@@ -284,8 +293,8 @@ TEST_F(GrowingNullableVectorTest, IndexTakesOverBetweenFilteringAndFetch) {
         SCOPED_TRACE(int(type));
         MakeSegment(type, true, "IVF_FLAT_CC");
         Insert(100);
-        const auto& index = impl_->get_indexing_record();
-        ASSERT_FALSE(index.HasRawData(vec_));
+        ASSERT_FALSE(impl_->CanReadRawVectorFromIndex(vec_));
+        ASSERT_FALSE(impl_->PinGrowingIndex(vec_));
         const std::vector<int64_t> offsets = {14, 99, 12, 14, 0, -1, 100};
         auto filtered = impl_->FilterVectorValidOffsets(
             nullptr, vec_, offsets.data(), offsets.size());
@@ -297,7 +306,13 @@ TEST_F(GrowingNullableVectorTest, IndexTakesOverBetweenFilteringAndFetch) {
         // stages. Insert builds the index and reclaims the segment's chunks.
         // No sleeps or product-only test hooks are needed at this boundary.
         Insert(2000);
-        ASSERT_TRUE(index.HasRawData(vec_));
+        const auto index_pin = impl_->PinGrowingIndex(vec_);
+        ASSERT_TRUE(index_pin);
+        EXPECT_EQ(index_pin.CoveredRowEnd(), expected_.size());
+        const auto* index_reader =
+            dynamic_cast<const index::IVectorReader*>(&index_pin.Reader());
+        ASSERT_NE(index_reader, nullptr);
+        ASSERT_TRUE(index_reader->HasRawData());
         ASSERT_TRUE(vec->acquire_chunks().empty());
         ASSERT_FALSE(pinned_chunks.empty());
         const std::vector<int64_t> expected_offsets = {14, 99, 12, 14};
@@ -332,7 +347,22 @@ TEST_F(GrowingNullableVectorTest, IndexTakesOverBetweenFilteringAndFetch) {
                                  ->data();
             }
         }
-        index.GetDataFromIndex(vec_, ids, count, element_size, raw_output);
+        auto id_dataset = std::make_shared<knowhere::DataSet>();
+        id_dataset->SetRows(count);
+        id_dataset->SetDim(1);
+        id_dataset->SetIds(ids);
+        id_dataset->SetIsOwner(false);
+        if (type == DataType::VECTOR_SPARSE_U32_F32) {
+            auto retrieved = index_reader->GetSparseVector(id_dataset);
+            SparseRowsToProto(
+                [&](size_t i) { return retrieved.get() + i; },
+                count,
+                static_cast<proto::schema::SparseFloatArray*>(raw_output));
+        } else {
+            auto retrieved = index_reader->GetVector(id_dataset);
+            ASSERT_EQ(retrieved.size(), count * element_size);
+            std::memcpy(raw_output, retrieved.data(), retrieved.size());
+        }
         auto rows = VectorRows(*output, kDim);
         ASSERT_EQ(rows.size(), expected_offsets.size());
         for (size_t i = 0; i < rows.size(); ++i) {

@@ -134,6 +134,12 @@ ObserveNgram(const NgramCase& test_case,
                 << "NGRAM dropped exact hit offset " << offset;
         }
     }
+
+    // Candidate generation is an AND merge, so repeating the same request
+    // cannot remove any additional offset.
+    const auto once = candidates.clone();
+    ngram->Candidates(test_case.literal, test_case.op, candidates);
+    ExpectBitmap(candidates, once);
 }
 
 template <typename T>

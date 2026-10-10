@@ -26,6 +26,7 @@
 #include "index/contracts/query/INullReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
+#include "index/test_utils/TestArtifactIO.h"
 
 namespace milvus::index::test {
 namespace {
@@ -221,6 +222,30 @@ TEST(ReaderConvertibleTest, TextRamArtifactConvertsWithoutPersistence) {
     data.validity_present = false;
     const ScalarTestInput<std::string_view> input(data);
     auto artifact = backend.Build(input.View(), {.row_count = 2});
+
+    auto reader = IReaderConvertible::FromArtifact(std::move(artifact));
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Count(), 2);
+    EXPECT_EQ(reader->CoordDomain(), Domain::Row);
+    EXPECT_EQ(reader->ValueType(), DataType::VARCHAR);
+    EXPECT_TRUE(reader->Caps().text_match);
+    EXPECT_NE(dynamic_cast<const INullReader*>(reader.get()), nullptr);
+}
+
+TEST(ReaderConvertibleTest, PersistedArtifactCanThenBeConsumed) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("TextVarcharV7Heap");
+    ScalarTestData<std::string_view> data({"alpha beta", "gamma"});
+    data.validity_present = false;
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 2});
+    ASSERT_NE(artifact, nullptr);
+
+    TestArtifactData persisted;
+    TestArtifactSink sink(persisted, storage::Generation::V1V2);
+    artifact->Serialize(sink);
+    sink.Finish();
+    EXPECT_FALSE(persisted.entries.empty());
 
     auto reader = IReaderConvertible::FromArtifact(std::move(artifact));
     ASSERT_NE(reader, nullptr);

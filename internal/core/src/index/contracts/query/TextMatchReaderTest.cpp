@@ -156,6 +156,18 @@ AddStandardEnglishCases(IndexTestCases& cases) {
                 {8},
                 kStandardAnalyzer);
     AddTextCase(cases,
+                "MatchTwoTermsMin0UsesAtLeastOneTerm",
+                dataset,
+                {TextQueryKind::Match, "basketball swimming", 0},
+                {0, 2, 8, 11},
+                kStandardAnalyzer);
+    AddTextCase(cases,
+                "MatchMinExceedsTokenCount",
+                dataset,
+                {TextQueryKind::Match, "basketball swimming", 3},
+                {},
+                kStandardAnalyzer);
+    AddTextCase(cases,
                 "MatchEmptyQuery",
                 dataset,
                 {TextQueryKind::Match, "", 1},
@@ -216,6 +228,12 @@ AddStandardEnglishCases(IndexTestCases& cases) {
                 {TextQueryKind::Phrase, "football pingpang", 1},
                 {0, 9},
                 kStandardAnalyzer);
+    AddTextCase(cases,
+                "PhraseEmptyQuery",
+                dataset,
+                {TextQueryKind::Phrase, "", 0},
+                {},
+                kStandardAnalyzer);
 
     AddTextCase(cases,
                 "FuzzyFootbalDistance0",
@@ -240,6 +258,18 @@ AddStandardEnglishCases(IndexTestCases& cases) {
                 dataset,
                 {TextQueryKind::Fuzzy, "fotbal", 2},
                 {0, 2, 9, 11},
+                kStandardAnalyzer);
+    AddTextCase(cases,
+                "FuzzyExactTermDistance0",
+                dataset,
+                {TextQueryKind::Fuzzy, "football", 0},
+                {0, 2, 9, 11},
+                kStandardAnalyzer);
+    AddTextCase(cases,
+                "FuzzyEmptyQuery",
+                dataset,
+                {TextQueryKind::Fuzzy, "", 1},
+                {},
                 kStandardAnalyzer);
 }
 
@@ -293,9 +323,27 @@ AddNullEmptyAndUnicodeCases(IndexTestCases& cases) {
                 {},
                 kStandardAnalyzer);
     AddTextCase(cases,
+                "AllNullFuzzy",
+                "TextAllNull",
+                {TextQueryKind::Fuzzy, "football", 1},
+                {},
+                kStandardAnalyzer);
+    AddTextCase(cases,
                 "EmptyReaderMatch",
                 "TextEmpty",
                 {TextQueryKind::Match, "football", 1},
+                {},
+                kStandardAnalyzer);
+    AddTextCase(cases,
+                "EmptyReaderPhrase",
+                "TextEmpty",
+                {TextQueryKind::Phrase, "football swimming", 0},
+                {},
+                kStandardAnalyzer);
+    AddTextCase(cases,
+                "EmptyReaderFuzzy",
+                "TextEmpty",
+                {TextQueryKind::Fuzzy, "football", 1},
                 {},
                 kStandardAnalyzer);
     AddTextCase(cases,

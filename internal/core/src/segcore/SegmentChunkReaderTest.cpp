@@ -172,7 +172,7 @@ TEST(SegmentChunkReader, GrowingConjunctSkipKeepsNextBatchCorrect) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
 
     proto::plan::GenericValue gate_bound;
     gate_bound.set_int64_val(kBatch);

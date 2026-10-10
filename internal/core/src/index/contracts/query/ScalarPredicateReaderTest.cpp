@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -30,10 +31,62 @@
 #include <vector>
 
 #include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
 namespace {
+
+template <typename T>
+void
+CheckArrayRowsMultiKey(std::string_view type_name, T first, T last) {
+    for (const auto nullable : {true, false}) {
+        const auto dataset_name = "ArrayRows" + std::string(type_name) +
+                                  (nullable ? "Nullable" : "AllValid");
+        const auto& dataset = ScalarDataSets().Get<ArrayView>(dataset_name);
+        const auto backends = ScalarReaderBackends().ForInput<ArrayView>(
+            BackendInputShape::ArrayRows,
+            Domain::Row,
+            &ReaderCaps::predicate,
+            nullable,
+            detail::ScalarTestType<T>());
+        ASSERT_FALSE(backends.empty());
+        for (const auto& backend : backends) {
+            SCOPED_TRACE(dataset_name + "/" + backend.Name());
+            auto data = dataset.make_data();
+            const ScalarTestInput<ArrayView> input(data);
+            auto artifact = backend.Build(input.View(),
+                                          {.row_count = data.values.size()});
+            ASSERT_NE(artifact, nullptr);
+            auto reader = backend.Open(std::move(artifact), {.row_count = 4});
+            ASSERT_NE(reader, nullptr);
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<T>*>(reader.get());
+            ASSERT_NE(predicate, nullptr);
+
+            const std::array<T, 2> keys{first, last};
+            const auto in = predicate->In(keys.size(), keys.data());
+            const auto not_in = predicate->NotIn(keys.size(), keys.data());
+            ASSERT_EQ(in.size(), 4);
+            ASSERT_EQ(not_in.size(), 4);
+            for (size_t row = 0; row < 4; ++row) {
+                const bool expected_in = row == 0 || row == 3;
+                EXPECT_EQ(static_cast<bool>(in[row]), expected_in) << row;
+                EXPECT_EQ(static_cast<bool>(not_in[row]),
+                          data.validity[row] && !expected_in)
+                    << row;
+            }
+        }
+    }
+}
+
+TEST(ScalarPredicateReaderTest, ArrayRowsMultiKeyMembershipAndNullMask) {
+    CheckArrayRowsMultiKey<int8_t>("Int8", 1, 3);
+    CheckArrayRowsMultiKey<int16_t>("Int16", 1, 3);
+    CheckArrayRowsMultiKey<int32_t>("Int32", 1, 3);
+    CheckArrayRowsMultiKey<int64_t>("Int64", 1, 3);
+    CheckArrayRowsMultiKey<std::string_view>("Varchar", "a", "c");
+}
 
 template <typename T>
 using PredicateTestValue =
@@ -776,6 +829,64 @@ AddTypeCases(IndexTestCases& cases) {
 }
 
 template <typename T>
+void
+AddResultOwnershipCase(IndexTestCases& cases) {
+    cases.Add(IndexTestCase<T>{
+        .name = "ResultsRemainIndependentAcrossQueries",
+        .dataset = "PredicateEdges",
+        .input_lifetime = InputLifetime::ReleaseBeforeBody,
+        .body =
+            Observe<T>{
+                .capability = &ReaderCaps::predicate,
+                .run =
+                    [](const auto&, const auto& data, const auto& reader) {
+                        const auto* predicate =
+                            dynamic_cast<const IScalarPredicateReader<T>*>(
+                                reader.get());
+                        ASSERT_NE(predicate, nullptr);
+                        const auto values = CaseValues<T>();
+                        const T key = QueryReaderValue<T>(values.middle);
+                        auto in = predicate->In(1, &key);
+                        auto not_in = predicate->NotIn(1, &key);
+                        auto unary = predicate->Range(key, CompareOp::Equal);
+                        auto interval = predicate->Range(key, true, key, true);
+
+                        const auto expected_in = In<T>::Oracle(
+                            data, typename In<T>::Args{.keys = {values.middle}});
+                        const auto expected_not_in = NotIn<T>::Oracle(
+                            data,
+                            typename NotIn<T>::Args{.keys = {values.middle}});
+                        ExpectBitmap(in, expected_in);
+                        ExpectBitmap(not_in, expected_not_in);
+                        ExpectBitmap(unary, expected_in);
+                        ExpectBitmap(interval, expected_in);
+
+                        const auto expect_fresh = [&] {
+                            auto repeated_in = predicate->In(1, &key);
+                            auto repeated_not_in = predicate->NotIn(1, &key);
+                            auto repeated_unary =
+                                predicate->Range(key, CompareOp::Equal);
+                            auto repeated_interval =
+                                predicate->Range(key, true, key, true);
+                            ExpectBitmap(repeated_in, expected_in);
+                            ExpectBitmap(repeated_not_in, expected_not_in);
+                            ExpectBitmap(repeated_unary, expected_in);
+                            ExpectBitmap(repeated_interval, expected_in);
+                        };
+                        in.flip();
+                        expect_fresh();
+                        not_in.flip();
+                        expect_fresh();
+                        unary.flip();
+                        expect_fresh();
+                        interval.flip();
+                        expect_fresh();
+                    },
+            },
+    });
+}
+
+template <typename T>
 struct HighCardinalityCaseValues {
     std::vector<PredicateTestValue<T>> keys;
     PredicateTestValue<T> threshold;
@@ -934,6 +1045,9 @@ PredicateCases() {
         AddTypeCases<float>(cases);
         AddTypeCases<double>(cases);
         AddTypeCases<std::string_view>(cases);
+
+        AddResultOwnershipCase<int64_t>(cases);
+        AddResultOwnershipCase<std::string_view>(cases);
 
         cases.Add(IndexTestCase<bool>{
             .name = "InFalseAllFalse",

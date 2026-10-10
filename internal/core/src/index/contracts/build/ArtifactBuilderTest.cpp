@@ -20,6 +20,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <stdexcept>
@@ -41,10 +43,14 @@
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
 #include "index/test_utils/TestArtifactIO.h"
+#include "index/test_utils/VectorSideInputFixture.h"
 #include "index/vector/KnowhereEngine.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/artifact/LoadOptions.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index::test {
 namespace {
@@ -137,6 +143,76 @@ RunScalarArtifactLifecycle(const ReaderBackend& backend) {
     EXPECT_EQ(nulls[0], false);
     EXPECT_EQ(nulls[1], backend.Nullable());
     EXPECT_EQ(nulls[2], false);
+}
+
+bool
+IsOrdinaryLifecycleFamily(const ReaderBackend& backend);
+
+void
+RunScalarValidityBoundary(const ReaderBackend& backend,
+                          bool all_null,
+                          bool validity_present) {
+    auto data = SafeScalarData<int64_t>(false);
+    data.validity_present = validity_present;
+    if (all_null) {
+        for (size_t row = 0; row < data.values.size(); ++row) {
+            data.validity.reset(row);
+        }
+    }
+    const ScalarTestInput<int64_t> input(data);
+    auto builder = backend.CreateBuilder<int64_t>(
+        {.row_count = data.values.size()});
+    ASSERT_NE(builder, nullptr);
+    const auto initial_spec = builder->InputSpec();
+    EXPECT_EQ(builder->InputSpec().side_inputs, initial_spec.side_inputs);
+    EXPECT_TRUE(initial_spec.side_inputs.empty());
+
+    auto artifact = std::move(*builder).Build(input.View());
+    ASSERT_NE(artifact, nullptr);
+    auto reader = backend.Open(std::move(artifact),
+                               {.row_count = data.values.size()});
+    ASSERT_NE(reader, nullptr);
+    ASSERT_EQ(reader->Count(), 3);
+    const auto* null_reader = dynamic_cast<const INullReader*>(reader.get());
+    ASSERT_NE(null_reader, nullptr);
+    const auto nulls = null_reader->IsNull();
+    const auto not_nulls = null_reader->IsNotNull();
+    ASSERT_EQ(nulls.size(), 3);
+    ASSERT_EQ(not_nulls.size(), 3);
+    for (size_t row = 0; row < 3; ++row) {
+        EXPECT_EQ(nulls[row], all_null);
+        EXPECT_EQ(not_nulls[row], !all_null);
+    }
+}
+
+const std::vector<FilterParam>&
+ScalarValidityBoundaryCases() {
+    static const auto cases = [] {
+        std::vector<FilterParam> result;
+        for (auto& backend : ScalarReaderBackends().All<int64_t>(true)) {
+            if (backend.MmapRequested() ||
+                !IsOrdinaryLifecycleFamily(backend)) {
+                continue;
+            }
+            for (const auto& scenario :
+                 {std::pair{"AllNull", true},
+                  std::pair{"AllValidExplicit", false},
+                  std::pair{"AllValidImplicit", false}}) {
+                const bool validity_present =
+                    std::string_view(scenario.first) != "AllValidImplicit";
+                result.push_back({
+                    .name = backend.Name() + "_" + scenario.first,
+                    .run = [backend, all_null = scenario.second,
+                            validity_present] {
+                        RunScalarValidityBoundary(
+                            backend, all_null, validity_present);
+                    },
+                });
+            }
+        }
+        return result;
+    }();
+    return cases;
 }
 
 bool
@@ -538,6 +614,223 @@ INSTANTIATE_TEST_SUITE_P(ScalarBuilders,
                          ArtifactBuilderFailureTest,
                          ::testing::ValuesIn(ArtifactBuildFailureCases().All()),
                          FilterParamName);
+
+class ArtifactBuilderValidityTest
+    : public ::testing::TestWithParam<FilterParam> {};
+
+TEST_P(ArtifactBuilderValidityTest, StableInputSpecAndValidityBoundaries) {
+    GetParam().run();
+}
+
+INSTANTIATE_TEST_SUITE_P(ScalarBuilders,
+                         ArtifactBuilderValidityTest,
+                         ::testing::ValuesIn(ScalarValidityBoundaryCases()),
+                         FilterParamName);
+
+TEST(ArtifactBuilderInputTest, PreparedFilesRejectMissingAndEmptyPaths) {
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .field_type = DataType::VECTOR_FLOAT,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"}, {DIM_KEY, 4}},
+    });
+    ASSERT_EQ(adapted.family, families::kVectorDisk);
+    adapted.params["local_dir"] = "/tmp";
+    adapted.params[DISK_ANN_BUILD_THREAD_NUM] = 1;
+    const auto create = [&] {
+        return BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
+            .Create(adapted.family, adapted.params);
+    };
+
+    auto missing_raw = create();
+    ASSERT_NE(missing_raw, nullptr);
+    const auto initial_spec = missing_raw->InputSpec();
+    EXPECT_TRUE(initial_spec.side_inputs.empty());
+    EXPECT_EQ(missing_raw->InputSpec().side_inputs, initial_spec.side_inputs);
+    EXPECT_ANY_THROW(std::move(*missing_raw).Build({}));
+
+    auto empty_validity = create();
+    ASSERT_NE(empty_validity, nullptr);
+    EXPECT_ANY_THROW(std::move(*empty_validity)
+                         .Build({.raw_path = "/dev/null",
+                                 .validity_path = std::string{}}));
+
+    auto empty_offsets = create();
+    ASSERT_NE(empty_offsets, nullptr);
+    EXPECT_ANY_THROW(std::move(*empty_offsets)
+                         .Build({.raw_path = "/dev/null",
+                                 .embedding_offsets_path = std::string{}}));
+}
+
+TEST_F(VectorSideInputFixture,
+       DeclaredResidentScalarGroupsSurviveBuildPersistAndLoad) {
+    const auto adapted = AdaptedParams(knowhere::IndexEnum::INDEX_HNSW);
+    ASSERT_EQ(adapted.family, families::kVectorMem);
+    ExpectForwardedParams(adapted.params);
+
+    storage::ArtifactPtr artifact;
+    {
+        auto caller_params = adapted.params;
+        auto builder =
+            BuilderRegistry<VectorBuildInput<float>>::Instance().Create(
+                adapted.family, caller_params);
+        ASSERT_NE(builder, nullptr);
+        ExpectDeclaredField(*builder);
+        // The builder owns its declaration and parameters after Create.
+        caller_params[VEC_OPT_FIELDS] = OptFieldT{};
+        caller_params[PARTITION_KEY_ISOLATION_KEY] = false;
+        ExpectDeclaredField(*builder);
+
+        const PhysicalInput physical;
+        const auto categories = physical.CategoryViews();
+        const std::array<VectorScalarFieldGroups, 1> fields{
+            VectorScalarFieldGroups{FieldId(kFieldId), categories}};
+        const VectorBuildInput<float> input{
+            .physical_values = physical.values,
+            .logical_rows = kRows,
+            .physical_rows = kRows,
+            .dim = kDim,
+            .scalar_fields = fields,
+        };
+        artifact = std::move(*builder).Build(input);
+        ASSERT_NE(artifact, nullptr);
+    }
+
+    // The caller's tensor, category views, and builder are already gone.
+    TestArtifactData persisted;
+    TestArtifactSink sink(persisted, storage::Generation::V1V2);
+    artifact->Serialize(sink);
+    EXPECT_FALSE(sink.Finish().Files().empty());
+    artifact.reset();
+
+#ifndef KNOWHERE_WITH_CARDINAL
+    // Faiss's materialized-view header proves scalar_fields reached the real
+    // backend. A normal HNSW build that silently dropped them has no IHMV header.
+    const auto entry = persisted.entries.find(knowhere::IndexEnum::INDEX_HNSW);
+    ASSERT_NE(entry, persisted.entries.end());
+    ASSERT_GE(entry->second.size(), 3 * sizeof(uint32_t));
+    EXPECT_EQ(std::string(entry->second.begin(), entry->second.begin() + 4),
+              "IHMV");
+    uint32_t partition_count = 0;
+    std::memcpy(&partition_count,
+                entry->second.data() + 2 * sizeof(uint32_t),
+                sizeof(partition_count));
+    EXPECT_EQ(partition_count, 2);
+#endif
+
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    options.params.erase(VEC_OPT_FIELDS);
+    options.params.erase(VEC_OPT_FIELDS_PATH);
+    auto source = std::make_shared<TestArtifactSource>(
+        persisted, storage::Generation::V1V2);
+    auto reader = LoaderRegistry::Instance()
+                      .Lookup(adapted.family)
+                      .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                             options});
+    ASSERT_NE(reader, nullptr);
+    ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_HNSW);
+}
+
+TEST_F(VectorSideInputFixture,
+       DeclaredDiskScalarSidecarSurvivesBuildPersistAndLoad) {
+#ifndef BUILD_DISK_ANN
+    GTEST_SKIP() << "DiskANN is not enabled in this build";
+#else
+    const auto root = storage::LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "contract_vector_side_input_XXXXXX",
+        "vector side-input contract test");
+    const auto probe = storage::LocalDirectory::CreateOwned(
+        root->Path(), "capability_XXXXXX", "scalar support probe");
+    if (!DiskBackendSupportsScalarInput(probe)) {
+        GTEST_SKIP() << "The real DiskANN backend does not support additional "
+                        "scalar input with partition isolation";
+    }
+
+    auto adapted = AdaptedParams(knowhere::IndexEnum::INDEX_DISKANN);
+    ASSERT_EQ(adapted.family, families::kVectorDisk);
+    ExpectForwardedParams(adapted.params);
+    adapted.params["local_dir"] = root->Path();
+    // Complete input must override this stale build parameter.
+    adapted.params[VEC_OPT_FIELDS_PATH] = root->Path() + "/not-delivered";
+    storage::ArtifactPtr artifact;
+    {
+        const auto inputs = storage::LocalDirectory::CreateOwned(
+            root->Path(), "inputs_XXXXXX", "vector side-input files");
+        const auto raw_path = inputs->Path() + "/raw";
+        const auto scalar_path = inputs->Path() + "/scalar";
+        const PhysicalInput physical;
+        ASSERT_NO_FATAL_FAILURE(
+            WritePreparedFiles(physical, raw_path, scalar_path));
+
+        auto missing_delivery =
+            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
+                .Create(adapted.family, adapted.params);
+        ASSERT_NE(missing_delivery, nullptr);
+        ExpectDeclaredField(*missing_delivery);
+        EXPECT_ANY_THROW(std::move(*missing_delivery)
+                             .Build({.raw_path = raw_path}));
+
+        auto caller_params = adapted.params;
+        auto builder =
+            BuilderRegistry<PreparedVectorBuildFiles<float>>::Instance()
+                .Create(adapted.family, caller_params);
+        ASSERT_NE(builder, nullptr);
+        ExpectDeclaredField(*builder);
+        caller_params[VEC_OPT_FIELDS] = OptFieldT{};
+        caller_params[PARTITION_KEY_ISOLATION_KEY] = false;
+        ExpectDeclaredField(*builder);
+        const PreparedVectorBuildFiles<float> input{
+            .raw_path = raw_path,
+            .scalar_info_path = scalar_path,
+        };
+        artifact = std::move(*builder).Build(input);
+        ASSERT_NE(artifact, nullptr);
+    }
+
+    // Serialize only after the raw file and scalar sidecar have been removed.
+    storage::StorageConfig config;
+    config.storage_type = "local";
+    config.root_path = root->Path() + "/objects/";
+    std::filesystem::create_directories(config.root_path);
+    storage::FileManagerContext context(
+        {1, 2, 3, 100},
+        {3, 100, 1000, 1, "contract_vector_side_input", "vector",
+         DataType::VECTOR_FLOAT, kDim, false},
+        storage::CreateChunkManager(config),
+        storage::InitArrowFileSystem(config));
+    context.use_async_load = false;
+    storage::V1DiskSink sink(context);
+    artifact->Serialize(sink);
+    const auto stats = sink.Finish();
+    ASSERT_FALSE(stats.Files().empty());
+    std::vector<std::string> paths;
+    for (const auto& file : stats.Files()) {
+        paths.push_back(file.file_name);
+    }
+    artifact.reset();
+    sink.ReleaseLocalStaging();
+
+    storage::LoadOptions options;
+    options.params = adapted.params;
+    options.params.erase(VEC_OPT_FIELDS);
+    options.params.erase(VEC_OPT_FIELDS_PATH);
+    options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
+    auto reader = LoaderRegistry::Instance()
+                      .Lookup(adapted.family)
+                      .Load({IndexFiles{
+                                 context,
+                                 std::move(paths),
+                                 LegacyIndexStorageConfig{
+                                     storage::V1SourceLayout::DiskFiles}},
+                             options});
+    ASSERT_NE(reader, nullptr);
+    ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_DISKANN);
+#endif
+}
 
 }  // namespace
 }  // namespace milvus::index::test

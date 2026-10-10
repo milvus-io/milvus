@@ -40,6 +40,7 @@
 #include "index/Meta.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/scalar/bitmap/BitmapIndexLoader.h"
+#include "index/scalar/inverted/InvertedIndexLoader.h"
 #include "index/scalar/marisa/MarisaIndexLoader.h"
 #include "index/scalar/ngram/NgramIndexLoader.h"
 #include "index/scalar/sort/SortedIndexLoader.h"
@@ -254,6 +255,255 @@ TEST(ScalarIndexV3AsyncTest, JsonPathsValuesAndNulls) {
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
         ASSERT_NE(nulls, nullptr);
         ExpectHits(nulls->IsNull(), 5, {3});
+    }
+}
+
+// Exercise the real packed transport for each family. The memory artifact
+// round trips above cannot detect a loader that falls back to per-entry ReadAt.
+TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
+    milvus::test::ScopedLoadTransientBudget budget(0);
+    for (const auto* name : {"InvertedVarchar", "MarisaVarchar",
+                             "NgramVarcharMin2Max4Heap", "SpatialRTreeHeap",
+                             "FmIndexVarchar"}) {
+        const auto& backend =
+            ScalarReaderBackends().Get<std::string_view>(name);
+        const bool spatial = backend.Family() == families::kRTree;
+        const bool ngram = backend.Family() == families::kNgram;
+        std::vector<std::string> values{"alpha", "beta", "alphabet", "ignored"};
+        if (spatial) {
+            values = {
+                Geometry(GetThreadLocalGEOSContext(), "POINT(0 0)")
+                    .to_wkb_string(),
+                Geometry(GetThreadLocalGEOSContext(), "POINT(1 1)")
+                    .to_wkb_string(),
+                Geometry(GetThreadLocalGEOSContext(), "POINT(2 2)")
+                    .to_wkb_string(),
+                Geometry(GetThreadLocalGEOSContext(), "POINT(3 3)")
+                    .to_wkb_string()};
+        }
+        ScalarTestData<std::string_view> data(std::move(values));
+        data.validity.reset(3);
+        const ScalarTestInput<std::string_view> input(data);
+        auto artifact = backend.Build(input.View(), {.row_count = 4});
+        const auto packed = MakePackedArtifactBuffer(SerializeV3(*artifact));
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(name);
+            SCOPED_TRACE(mmap);
+            milvus::test::ControlledDirectReadFile* remote = nullptr;
+            auto source = std::shared_ptr<storage::AsyncIndexEntryReader>(
+                milvus::test::OpenDirectIndexEntryReader(
+                    std::vector<uint8_t>(packed->data(),
+                                         packed->data() + packed->size()),
+                    &remote));
+            const auto previous_read_at = remote->ReadAtCalls();
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "packed-family-XXXXXX",
+                "packed family test");
+            storage::LoadOptions options;
+            options.params = backend.LoadParams({.row_count = 4});
+            options.enable_mmap = mmap;
+            options.mmap_dir_path = staging->Path();
+            auto reader = LoaderRegistry::Instance()
+                              .Lookup(backend.Family())
+                              .Load({OpenedIndexSource{PackedIndexSource{source}},
+                                     options});
+            ASSERT_NE(reader, nullptr);
+            EXPECT_EQ(reader->Count(), 4);
+            EXPECT_FALSE(remote->DirectReadCalls().empty());
+            EXPECT_EQ(remote->ReadAtCalls(), previous_read_at);
+            EXPECT_EQ(remote->AsyncReadCalls(), 0);
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ExpectHits(nulls->IsNull(), 4, {3});
+            if (spatial) {
+                const auto* spatial_reader =
+                    dynamic_cast<const ISpatialReader*>(reader.get());
+                ASSERT_NE(spatial_reader, nullptr);
+                Geometry point(GetThreadLocalGEOSContext(), "POINT(1 1)");
+                ExpectHits(spatial_reader->Candidates(SpatialOp::Intersects,
+                                                      point),
+                           4,
+                           {1});
+            } else if (ngram) {
+                const auto* candidate_reader =
+                    dynamic_cast<const INgramReader*>(reader.get());
+                ASSERT_NE(candidate_reader, nullptr);
+                TargetBitmap candidates(4, true);
+                candidate_reader->Candidates(
+                    "alph", PatternOp::PrefixMatch, candidates);
+                ExpectHits(candidates, 4, {0, 2});
+            } else {
+                const auto* pattern =
+                    dynamic_cast<const IPatternMatchReader*>(reader.get());
+                ASSERT_NE(pattern, nullptr);
+                ExpectHits(pattern->PatternMatch("alph", PatternOp::PrefixMatch),
+                           4,
+                           {0, 2});
+            }
+            reader.reset();
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        }
+    }
+}
+
+TEST(ScalarIndexV3AsyncTest, BitmapUsesBufferedPlannedReads) {
+    milvus::test::ScopedLoadTransientBudget budget(0);
+    const auto& backend = ScalarReaderBackends().Get<int32_t>("BitmapInt32");
+    ScalarTestData<int32_t> data({1, 2, 1, 3, 4, 2, 1});
+    data.validity.reset(3);
+    const ScalarTestInput<int32_t> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 7});
+    const auto packed = MakePackedArtifactBuffer(SerializeV3(*artifact));
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        milvus::test::AsyncTrackingRandomAccessFile* remote = nullptr;
+        auto source = std::shared_ptr<storage::AsyncIndexEntryReader>(
+            milvus::test::OpenAsyncIndexEntryReader(
+                std::vector<uint8_t>(packed->data(),
+                                     packed->data() + packed->size()),
+                &remote));
+        const auto previous_read_at = remote->ReadAtCalls();
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "packed-bitmap-XXXXXX",
+            "packed bitmap test");
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 7});
+        options.enable_mmap = mmap;
+        options.mmap_dir_path = staging->Path();
+        auto reader = LoaderRegistry::Instance()
+                          .Lookup(backend.Family())
+                          .Load({OpenedIndexSource{PackedIndexSource{source}},
+                                 options});
+        ASSERT_NE(reader, nullptr);
+        EXPECT_GT(remote->AsyncReadCalls(), 0);
+        EXPECT_EQ(remote->ReadAtCalls(), previous_read_at);
+        const auto* predicate =
+            dynamic_cast<const IScalarPredicateReader<int32_t>*>(reader.get());
+        ASSERT_NE(predicate, nullptr);
+        const int32_t key = 1;
+        ExpectHits(predicate->In(1, &key), 7, {0, 2, 6});
+        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+        ASSERT_NE(nulls, nullptr);
+        ExpectHits(nulls->IsNull(), 7, {3});
+        reader.reset();
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
+
+TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
+    milvus::test::ScopedLoadTransientBudget budget(0);
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("InvertedVarchar");
+    ScalarTestData<std::string_view> data(
+        {"alpha", "beta", "alphabet", "ignored"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    const auto packed = MakePackedArtifactBuffer(SerializeV3(*artifact));
+    auto run = []<typename T>(folly::coro::Task<T> task) {
+        return folly::coro::blockingWait(folly::coro::co_withExecutor(
+            storage::ResolveAsyncLoadExecutor(
+                {}, proto::common::LoadPriority::HIGH),
+            std::move(task)));
+    };
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        milvus::test::ControlledDirectReadFile* remote = nullptr;
+        auto source = std::shared_ptr<storage::AsyncIndexEntryReader>(
+            milvus::test::OpenDirectIndexEntryReader(
+                std::vector<uint8_t>(packed->data(),
+                                     packed->data() + packed->size()),
+                &remote));
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "inverted-retry-XXXXXX",
+            "inverted retry test");
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 4});
+        options.enable_mmap = mmap;
+        options.mmap_dir_path = staging->Path();
+        auto loader = run(InvertedIndexLoader::Create(
+            OpenedIndexSource{PackedIndexSource{source}}, options));
+        remote->SetAutoComplete(false);
+        folly::CancellationSource cancellation;
+        OpContext context(cancellation.getToken());
+        auto loading = std::async(std::launch::async,
+                                  [&] { return run(loader->Load(&context)); });
+        auto drain = folly::makeGuard([&] {
+            cancellation.requestCancellation();
+            remote->SetAutoComplete(true);
+            for (size_t i = 0; i < remote->DirectReadCalls().size(); ++i)
+                remote->Complete(i);
+            if (loading.valid())
+                loading.wait();
+        });
+        ASSERT_TRUE(remote->WaitForCallCount(1));
+        cancellation.requestCancellation();
+        remote->SetAutoComplete(true);
+        for (size_t i = 0; i < remote->DirectReadCalls().size(); ++i)
+            remote->Complete(i);
+        ExpectPackedLoadError(FollyCancel,
+                              [&] { static_cast<void>(loading.get()); });
+        drain.dismiss();
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        OpContext retry;
+        auto reader = run(loader->Load(&retry));
+        ASSERT_NE(reader, nullptr);
+        const auto* pattern =
+            dynamic_cast<const IPatternMatchReader*>(reader.get());
+        ASSERT_NE(pattern, nullptr);
+        ExpectHits(pattern->PatternMatch("alph", PatternOp::PrefixMatch),
+                   4,
+                   {0, 2});
+        reader.reset();
+        loader.reset();
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
+
+TEST(ScalarIndexV3AsyncTest, FmPackedNullBitmapHandlesWordAndTailBoundaries) {
+    constexpr std::string_view bitmap_entry = "fm_index_null_bitmap";
+    for (const size_t rows : {size_t{8}, size_t{9}, size_t{63},
+                              size_t{64}, size_t{65}}) {
+        ScalarTestData<std::string_view> data(
+            std::vector<std::string>(rows, "value"));
+        for (size_t row = 0; row < rows; row += 3)
+            data.validity.reset(row);
+        const ScalarTestInput<std::string_view> input(data);
+        const auto& build_backend =
+            ScalarReaderBackends().Get<std::string_view>("FmIndexVarchar");
+        auto artifact = build_backend.Build(input.View(), {.row_count = rows});
+        const auto persisted = SerializeV3(*artifact);
+        ASSERT_TRUE(persisted.entries.contains(std::string(bitmap_entry)));
+        ASSERT_EQ(persisted.entries.at(std::string(bitmap_entry)).size(),
+                  (rows + 7) / 8);
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(rows);
+            SCOPED_TRACE(mmap);
+            const auto& backend = ScalarReaderBackends().Get<std::string_view>(
+                mmap ? "FmIndexVarcharMmap" : "FmIndexVarchar");
+            auto reader =
+                OpenV3(backend, persisted, {.row_count = rows}, true);
+            ASSERT_NE(reader, nullptr);
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            const auto null_bitmap = nulls->IsNull();
+            EXPECT_EQ(null_bitmap.size(), rows);
+            for (size_t row = 0; row < rows; ++row)
+                EXPECT_EQ(null_bitmap[row], row % 3 == 0) << row;
+            EXPECT_EQ(nulls->IsNotNull().count(), rows - (rows + 2) / 3);
+            if (rows % 8 != 0) {
+                auto corrupted = persisted;
+                corrupted.entries.at(std::string(bitmap_entry)).back() |=
+                    0x80;
+                ExpectPackedLoadError(DataFormatBroken, [&] {
+                    static_cast<void>(OpenV3(
+                        backend, corrupted, {.row_count = rows}, true));
+                });
+            }
+        }
     }
 }
 

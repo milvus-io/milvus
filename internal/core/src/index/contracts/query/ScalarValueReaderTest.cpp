@@ -309,6 +309,17 @@ ValueCases() {
                                "GatherAcrossEmptyBatches",
                                "PredicateEdgesWithEmptyBatches",
                                {5, 0, 2, 1, 0});
+        AddLookupAllCase<int64_t>(result,
+                                  "LookupAcrossPackedBitBoundary",
+                                  "BitBoundaryNullable");
+        AddGatherCase<int64_t>(result,
+                               "GatherAcrossPackedBitBoundary",
+                               "BitBoundaryNullable",
+                               {65, 64, 63, 62, 61, 66, 0, 69, 62});
+        AddGatherCase<std::string_view>(result,
+                                        "GatherBinaryUnicodeAndNull",
+                                        "PredicateEdges",
+                                        {3, 4, 5, 3, 0, 6});
 
         result.Add(IndexTestCase<std::string_view>{
             .name = "LookupOwnsStringAfterLaterQueryAndReaderDestruction",

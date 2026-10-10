@@ -17,12 +17,13 @@
 #include <utility>
 #include <vector>
 
+#include "roaring/roaring.hh"
+
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "common/resource_c.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/BitmapIndex.h"
+#include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "knowhere/version.h"
 #include "segcore/Types.h"
@@ -214,7 +215,13 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {{"index_type", "STL_SORT"},
          {"mmap", "false"},
          {"field_type", "string"}},
-        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, true}),
+        // Legacy sort loads reserve a staging copy, including string sorts;
+        // the reservation is transient and final_disk_cost remains zero.
+        {2UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024,
+         0UL,
+         true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "STL_SORT"},
          {"mmap", "true"},
@@ -279,7 +286,7 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         // Unknown row count reserves all 2^16 containers (64 bytes each),
         // plus the Roaring object rounded up to the 32-byte frozen alignment.
         {4UL * 1024 * 1024 * 1024 +
-             2 * milvus::index::BITMAP_FROZEN_BATCH_BYTES +
+              2 * milvus::index::kBitmapFrozenBatchBytes +
              3 * ((1UL << 16) * 64 +
                   ((sizeof(roaring::Roaring) + 31) / 32) * 32),
          2UL * 1024 * 1024 * 1024,
@@ -333,7 +340,7 @@ INSTANTIATE_TEST_SUITE_P(IndexTypeLoadInfo,
                          kIndexLoadTestValues);
 
 TEST_P(IndexLoadTest, ResourceEstimate) {
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
 
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
@@ -348,7 +355,6 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_version = 1;
     loadIndexInfo.index_params = index_params;
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
@@ -366,7 +372,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
 }
 
 TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
-    milvus::segcore::LoadIndexInfo load_index_info;
+    milvus::segcore::LoadIndexInfo load_index_info{};
     load_index_info.field_type = milvus::DataType::VECTOR_SPARSE_U32_F32;
     load_index_info.element_type = milvus::DataType::NONE;
     load_index_info.index_params = {
@@ -384,7 +390,7 @@ TEST(IndexLoadTest, SparseIndexResourceEstimateHasRawData) {
 }
 
 TEST(IndexLoadTest, LoadResourceRequestCacheIsOptional) {
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
     ASSERT_FALSE(loadIndexInfo.load_resource_request.has_value());
 
     LoadResourceRequest request{1, 2, 3, 4, true};
@@ -410,7 +416,7 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t);
 
     auto make_load_info = [] {
-        milvus::segcore::LoadIndexInfo loadIndexInfo;
+        milvus::segcore::LoadIndexInfo loadIndexInfo{};
         loadIndexInfo.collection_id = 1;
         loadIndexInfo.partition_id = 2;
         loadIndexInfo.segment_id = 3;
@@ -427,7 +433,6 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
             {"nlist", "1024"},
         };
         loadIndexInfo.index_files = {"/tmp/index/1"};
-        loadIndexInfo.index = nullptr;
         loadIndexInfo.cache_index = nullptr;
         loadIndexInfo.uri = "";
         loadIndexInfo.index_engine_version =
@@ -470,7 +475,7 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
 TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
     constexpr uint64_t kIndexSize = 1024UL * 1024;
 
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
     loadIndexInfo.segment_id = 3;
@@ -507,7 +512,7 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     constexpr uint64_t kLegacyAuxBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t) + kValidBitsetBytes;
 
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
     loadIndexInfo.segment_id = 3;
@@ -523,7 +528,6 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
@@ -552,7 +556,7 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     constexpr uint64_t kLegacyAuxBytes =
         static_cast<uint64_t>(kNumRows) * sizeof(int32_t) + kValidBitsetBytes;
 
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
     loadIndexInfo.segment_id = 3;
@@ -568,7 +572,6 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
@@ -598,7 +601,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     constexpr uint64_t kLegacyCsrPeakBytes =
         (3 * static_cast<uint64_t>(kNumRows) + 1) * sizeof(uint32_t);
 
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
     loadIndexInfo.segment_id = 3;
@@ -614,7 +617,6 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
@@ -638,7 +640,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
 
 // Test that warmup policy is kept in index_params and passed to Knowhere
 TEST(IndexLoadWarmupTest, WarmupPolicyKeptInIndexParams) {
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
 
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
@@ -651,7 +653,6 @@ TEST(IndexLoadWarmupTest, WarmupPolicyKeptInIndexParams) {
     loadIndexInfo.index_build_id = 6;
     loadIndexInfo.index_version = 1;
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.index = nullptr;
     loadIndexInfo.cache_index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =

@@ -39,9 +39,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/VectorIndex.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
@@ -73,6 +71,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
+using namespace milvus::test::consumer;
 
 std::unique_ptr<float[]>
 GenRandomFloatVecData(int rows, int dim, int seed = 42) {
@@ -418,6 +417,43 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
         options.nprobe = 16;
         options.dense_vector_interim_index_type = dense_vec_intermin_index_type;
         ApplyInterimIndexConfigForTest(options);
+    }
+
+    OpenedIndex
+    BuildFinalVectorIndex() {
+        const auto config = Config{
+            {knowhere::meta::METRIC_TYPE, metric_type},
+            {knowhere::meta::DIM, data_d},
+            {knowhere::indexparam::NLIST, 64}};
+        auto build = [&]<typename T>() {
+            // Keep the original logical row map: the engine tensor omits null
+            // rows, while search filters/results still use segment offsets.
+            return BuildVectorReader<T>(
+                data_type, index_type, metric_type, data_d, data_n,
+                static_cast<const typename index::VectorBuildInput<T>::value_type*>(
+                    raw_dataset->GetTensor()),
+                config, true,
+                nullable ? ValidityView::FromPacked(valid_data.data())
+                         : ValidityView{},
+                valid_count);
+        };
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT:
+                return build.template operator()<float>();
+            case DataType::VECTOR_FLOAT16:
+                return build.template operator()<knowhere::fp16>();
+            case DataType::VECTOR_BFLOAT16:
+                return build.template operator()<knowhere::bf16>();
+            case DataType::VECTOR_BINARY:
+                return build.template operator()<bin1>();
+            case DataType::VECTOR_INT8:
+                return build.template operator()<int8_t>();
+            case DataType::VECTOR_SPARSE_U32_F32:
+                return build.template operator()<sparse_u32_f32>();
+            default:
+                ThrowInfo(UnexpectedError,
+                          "unsupported vector type in binlog consumer fixture");
+        }
     }
 
     void
@@ -809,30 +845,12 @@ TEST(test_chunk_segment,
     ASSERT_TRUE(segment->HasFieldData(vec_field_id));
     ASSERT_EQ(segment->get_row_count(), data_n);
 
-    auto raw_dataset =
-        knowhere::GenDataSet(valid_count, dim, vec_values.data());
-    raw_dataset->SetIsOwner(false);
-
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::L2;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, milvus::storage::FileManagerContext());
-
-    auto build_conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "16"}};
-    indexing->BuildWithDataset(raw_dataset, build_conf);
-
-    LoadIndexInfo load_info;
-    load_info.field_id = vec_field_id.get();
-    load_info.index_params = GenIndexParams(indexing.get());
-    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
-    load_info.index_params["metric_type"] = knowhere::metric::L2;
+    auto indexing = BuildVectorReader<float>(
+        DataType::VECTOR_FLOAT, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::metric::L2, dim, valid_count, vec_values.data(),
+        {{knowhere::indexparam::NLIST, 16}});
+    auto load_info = MakeLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, vec_field_id.get());
     ASSERT_NO_THROW(segment->LoadIndex(load_info));
     ASSERT_TRUE(segment->HasIndex(vec_field_id));
 
@@ -1023,42 +1041,9 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
     if (null_percent != 100 && supports_interim_index) {
         {
-            milvus::index::CreateIndexInfo create_index_info;
-            create_index_info.field_type = data_type;
-            create_index_info.metric_type = metric_type;
-            create_index_info.index_type = index_type;
-            create_index_info.index_engine_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
-            auto indexing =
-                milvus::index::IndexFactory::GetInstance().CreateIndex(
-                    create_index_info, milvus::storage::FileManagerContext());
-
-            auto build_conf =
-                knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
-                               {knowhere::meta::DIM, std::to_string(data_d)},
-                               {knowhere::indexparam::NLIST, "64"}};
-
-            indexing->BuildWithDataset(raw_dataset, build_conf);
-
-            // IVF-series indexes need a Serialize/Load round-trip before
-            // GetVectorByIds works (faiss DirectMap is set up on load).
-            {
-                auto vec_indexing_for_serde =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing_for_serde, nullptr);
-                knowhere::Json load_conf{
-                    {knowhere::meta::METRIC_TYPE, metric_type}};
-                auto binary_set = indexing->Serialize(load_conf);
-                vec_indexing_for_serde->Load(binary_set, load_conf);
-            }
-
-            LoadIndexInfo load_info;
-            load_info.field_id = vec_field_id.get();
-            load_info.index_params = GenIndexParams(indexing.get());
-            load_info.cache_index =
-                CreateTestCacheIndex("test", std::move(indexing));
-            load_info.index_params["metric_type"] = metric_type;
-
+            auto indexing = BuildFinalVectorIndex();
+            auto load_info = MakeLoadIndexInfo(
+                std::move(indexing), data_type, vec_field_id.get());
             ASSERT_NO_THROW(segment->LoadIndex(load_info));
 
             EXPECT_TRUE(segment->HasIndex(vec_field_id));
@@ -1295,41 +1280,9 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     if (null_percent != 100 && supports_interim_index) {
         // 3. update vector index
         {
-            milvus::index::CreateIndexInfo create_index_info;
-            create_index_info.field_type = data_type;
-            create_index_info.metric_type = metric_type;
-            create_index_info.index_type = index_type;
-            create_index_info.index_engine_version =
-                knowhere::Version::GetCurrentVersion().VersionNumber();
-            auto indexing =
-                milvus::index::IndexFactory::GetInstance().CreateIndex(
-                    create_index_info, milvus::storage::FileManagerContext());
-
-            auto build_conf =
-                knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
-                               {knowhere::meta::DIM, std::to_string(data_d)},
-                               {knowhere::indexparam::NLIST, "64"}};
-
-            indexing->BuildWithDataset(raw_dataset, build_conf);
-
-            // IVF-series indexes need a Serialize/Load round-trip before
-            // GetVectorByIds works (faiss DirectMap is set up on load).
-            {
-                auto vec_indexing_for_serde =
-                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-                ASSERT_NE(vec_indexing_for_serde, nullptr);
-                knowhere::Json load_conf{
-                    {knowhere::meta::METRIC_TYPE, metric_type}};
-                auto binary_set = indexing->Serialize(load_conf);
-                vec_indexing_for_serde->Load(binary_set, load_conf);
-            }
-
-            LoadIndexInfo load_info;
-            load_info.field_id = vec_field_id.get();
-            load_info.index_params = GenIndexParams(indexing.get());
-            load_info.cache_index =
-                CreateTestCacheIndex("test", std::move(indexing));
-            load_info.index_params["metric_type"] = metric_type;
+            auto indexing = BuildFinalVectorIndex();
+            auto load_info = MakeLoadIndexInfo(
+                std::move(indexing), data_type, vec_field_id.get());
             ASSERT_NO_THROW(segment->LoadIndex(load_info));
             EXPECT_TRUE(segment->HasIndex(vec_field_id));
             EXPECT_EQ(segment->get_row_count(), data_n);
@@ -1432,41 +1385,9 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
 
     if (null_percent != 100 && supports_final_index) {
         // load vector index
-        milvus::index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = data_type;
-        create_index_info.metric_type = metric_type;
-        create_index_info.index_type = index_type;
-        create_index_info.index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber();
-        auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, milvus::storage::FileManagerContext());
-
-        auto build_conf =
-            knowhere::Json{{knowhere::meta::METRIC_TYPE, metric_type},
-                           {knowhere::meta::DIM, std::to_string(data_d)},
-                           {knowhere::indexparam::NLIST, "64"}};
-
-        indexing->BuildWithDataset(raw_dataset, build_conf);
-
-        // IVF-series indexes need a Serialize/Load round-trip before
-        // GetVectorByIds works (faiss DirectMap is set up on load).
-        {
-            auto vec_indexing_for_serde =
-                dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
-            ASSERT_NE(vec_indexing_for_serde, nullptr);
-            knowhere::Json load_conf{
-                {knowhere::meta::METRIC_TYPE, metric_type}};
-            auto binary_set = indexing->Serialize(load_conf);
-            vec_indexing_for_serde->Load(binary_set, load_conf);
-        }
-
-        LoadIndexInfo load_info;
-        load_info.field_id = vec_field_id.get();
-        load_info.index_params = GenIndexParams(indexing.get());
-        load_info.cache_index =
-            CreateTestCacheIndex("test", std::move(indexing));
-        load_info.index_params["metric_type"] = metric_type;
-
+        auto indexing = BuildFinalVectorIndex();
+        auto load_info = MakeLoadIndexInfo(
+            std::move(indexing), data_type, vec_field_id.get());
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);

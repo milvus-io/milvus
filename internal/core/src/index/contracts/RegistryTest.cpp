@@ -136,6 +136,49 @@ struct LoaderProbeA : IndexLoader {
     }
 };
 
+struct LoaderFailureProbe : IndexLoader {
+    static constexpr std::string_view kFamily = "test.registry.loader.failure";
+    std::string mode;
+
+    static ReaderCaps
+    DeriveCaps(const Config&) {
+        return {};
+    }
+
+    static folly::coro::Task<std::unique_ptr<IndexLoader>>
+    Create(OpenedIndexSource, storage::LoadOptions options) {
+        const auto mode = options.params.value("mode", std::string{});
+        if (mode == "create_error") {
+            ThrowInfo(DataFormatBroken, "loader creation failed");
+        }
+        if (mode == "null_loader") {
+            co_return std::unique_ptr<IndexLoader>{};
+        }
+        auto loader = std::make_unique<LoaderFailureProbe>();
+        loader->mode = mode;
+        co_return loader;
+    }
+
+    folly::coro::Task<IIndexReaderBasePtr>
+    Load(milvus::OpContext*) override {
+        if (mode == "load_error") {
+            ThrowInfo(DataFormatBroken, "reader loading failed");
+        }
+        co_return std::make_unique<EmptyReader>();
+    }
+};
+
+IndexLoadRequest
+ProbeLoadRequest(TestArtifactSource& source,
+                 Config params = Config::object()) {
+    storage::LoadOptions options;
+    options.params = std::move(params);
+    return {OpenedIndexSource{LegacyIndexSource{
+                std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
+                false}},
+            std::move(options)};
+}
+
 std::string
 UniqueFamily(std::string_view prefix) {
     static std::atomic<uint64_t> next{0};
@@ -212,6 +255,49 @@ TEST(RegistryTest, BuilderTablesAreTypedAndReceiveParametersUnchanged) {
     EXPECT_EQ(typed->marker, 17);
 }
 
+TEST(RegistryTest, SameFamilyCanBuildDifferentInputShapesIndependently) {
+    const auto family = UniqueFamily("test.registry.builder.shared_family");
+    auto integer_calls = std::make_shared<int>(0);
+    auto float_calls = std::make_shared<int>(0);
+    BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Register(
+        family, [integer_calls](const Config& params) {
+            ++*integer_calls;
+            return std::make_unique<EmptyBuilder<int64_t>>(
+                params.at("marker").get<int>());
+        });
+    BuilderRegistry<ScalarBuildInput<float>>::Instance().Register(
+        family, [float_calls](const Config&) {
+            ++*float_calls;
+            return std::make_unique<EmptyBuilder<float>>(29);
+        });
+
+    auto first = BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Create(
+        family, {{"marker", 11}});
+    auto second = BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Create(
+        family, {{"marker", 12}});
+    auto floating = BuilderRegistry<ScalarBuildInput<float>>::Instance().Create(
+        family, {});
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(floating, nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(*integer_calls, 2);
+    EXPECT_EQ(*float_calls, 1);
+    auto first_artifact = std::move(*first).Build({});
+    auto second_artifact = std::move(*second).Build({});
+    auto float_artifact = std::move(*floating).Build({});
+    const auto* first_value = dynamic_cast<EmptyArtifact*>(first_artifact.get());
+    const auto* second_value =
+        dynamic_cast<EmptyArtifact*>(second_artifact.get());
+    const auto* float_value = dynamic_cast<EmptyArtifact*>(float_artifact.get());
+    ASSERT_NE(first_value, nullptr);
+    ASSERT_NE(second_value, nullptr);
+    ASSERT_NE(float_value, nullptr);
+    EXPECT_EQ(first_value->marker, 11);
+    EXPECT_EQ(second_value->marker, 12);
+    EXPECT_EQ(float_value->marker, 29);
+}
+
 TEST(RegistryTest, FactoryExceptionIsPreserved) {
     const auto family = UniqueFamily("test.registry.builder.throw");
     BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Register(
@@ -229,6 +315,19 @@ TEST(RegistryTest, FactoryExceptionIsPreserved) {
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
     }
+}
+
+TEST(RegistryTest, NullBuilderFactoryResultIsReturnedUnchanged) {
+    const auto family = UniqueFamily("test.registry.builder.null_result");
+    BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Register(
+        family,
+        [](const Config&)
+            -> std::unique_ptr<IArtifactBuilder<ScalarBuildInput<int64_t>>> {
+            return nullptr;
+        });
+    EXPECT_EQ(BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Create(
+                  family, Config::object()),
+              nullptr);
 }
 
 TEST(RegistryTest, InvalidAndDuplicateBuilderRegistrationKeepOriginalEntry) {
@@ -277,6 +376,71 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_EQ(LoaderProbeA::create_thread, std::this_thread::get_id());
     EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
+}
+
+TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
+    const LoaderEntry entry{&LoaderProbeA::DeriveCaps,
+                            &LoaderProbeA::Create};
+    TestArtifactData artifact;
+    TestArtifactSource source(artifact);
+    storage::LoadOptions options;
+    options.params = {{"predicate", true}};
+    auto reader = entry.Load(
+        {OpenedIndexSource{LegacyIndexSource{
+             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
+             true}},
+         options});
+    ASSERT_NE(reader, nullptr);
+    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_NE(LoaderProbeA::create_thread, std::this_thread::get_id());
+    EXPECT_NE(LoaderProbeA::load_thread, std::this_thread::get_id());
+}
+
+TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
+    EXPECT_FALSE(LoaderEntry{});
+    EXPECT_FALSE((LoaderEntry{&LoaderProbeA::DeriveCaps, nullptr}));
+    EXPECT_FALSE((LoaderEntry{nullptr, &LoaderProbeA::Create}));
+    EXPECT_TRUE((LoaderEntry{&LoaderProbeA::DeriveCaps,
+                             &LoaderProbeA::Create}));
+
+    TestArtifactData artifact;
+    TestArtifactSource source(artifact);
+    const LoaderEntry incomplete{&LoaderProbeA::DeriveCaps, nullptr};
+    ExpectSegcoreError(ErrorCode::UnexpectedError, [&] {
+        static_cast<void>(incomplete.Load(ProbeLoadRequest(source)));
+    });
+}
+
+TEST(RegistryTest, DuplicateLoaderRegistrationKeepsOriginalEntry) {
+    auto& registry = LoaderRegistry::Instance();
+    registry.Register<LoaderFailureProbe>();
+    const auto original = registry.Lookup(
+        std::string(LoaderFailureProbe::kFamily));
+    ASSERT_TRUE(original);
+    ExpectSegcoreError(ErrorCode::UnexpectedError,
+                       [&] { registry.Register<LoaderFailureProbe>(); });
+    const auto retained = registry.Lookup(
+        std::string(LoaderFailureProbe::kFamily));
+    ASSERT_TRUE(retained);
+    EXPECT_EQ(retained.create, original.create);
+    EXPECT_EQ(retained.derive_caps, original.derive_caps);
+}
+
+TEST(RegistryTest, LoaderCreationAndLoadFailuresPreserveErrorCode) {
+    const LoaderEntry entry{&LoaderFailureProbe::DeriveCaps,
+                            &LoaderFailureProbe::Create};
+    TestArtifactData artifact;
+    TestArtifactSource source(artifact);
+    for (const auto mode : {"create_error", "null_loader", "load_error"}) {
+        SCOPED_TRACE(mode);
+        const auto expected = std::string_view(mode) == "null_loader"
+                                  ? ErrorCode::UnexpectedError
+                                  : ErrorCode::DataFormatBroken;
+        ExpectSegcoreError(expected, [&] {
+            static_cast<void>(entry.Load(
+                ProbeLoadRequest(source, {{"mode", mode}})));
+        });
+    }
 }
 
 TEST(RegistryTest, IndependentConcurrentRegistrationAndLookupAreSafe) {

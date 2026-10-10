@@ -20,11 +20,15 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarReaderFactory.h"
+#include "index/test_utils/ScalarTestData.h"
 
 namespace milvus::index::test {
 namespace {
@@ -95,6 +99,38 @@ TEST(BitmapIndexReaderTest, ProvidesVarcharQueries) {
                   reader.get()),
               nullptr);
     EXPECT_NE(dynamic_cast<const IPatternMatchReader*>(reader.get()), nullptr);
+}
+
+TEST(BitmapIndexReaderTest, NullablePackedWordBoundaryKeepsFinalAllocation) {
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        const auto& backend = ScalarReaderBackends().Get<int32_t>(
+            mmap ? "BitmapInt32Mmap" : "BitmapInt32");
+        std::array<int64_t, 2> resident{};
+        for (const size_t rows : {size_t{64}, size_t{65}}) {
+            ScalarTestData<int32_t> data(
+                std::vector<int32_t>(rows, int32_t{7}));
+            data.validity.reset(0);
+            const ScalarTestInput<int32_t> input(data);
+            auto artifact = backend.Build(input.View(), {.row_count = rows});
+            auto reader =
+                OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
+            ASSERT_NE(reader, nullptr);
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<int32_t>*>(
+                    reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ASSERT_NE(predicate, nullptr);
+            ExpectHits(nulls->IsNull(), rows, {0});
+            const int32_t key = 7;
+            EXPECT_EQ(predicate->In(1, &key).count(), rows - 1);
+            resident[rows == 64 ? 0 : 1] = reader->CellByteSize().memory_bytes;
+        }
+        // The 65th row expands one validity word and one dense posting word.
+        // Retaining a second validity staging buffer would add another word.
+        EXPECT_EQ(resident[1] - resident[0], 2 * sizeof(uint64_t));
+    }
 }
 
 }  // namespace

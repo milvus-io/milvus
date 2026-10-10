@@ -65,8 +65,7 @@ AddSpatialCase(IndexTestCases& cases,
 
                         const Geometry query(GetThreadLocalGEOSContext(),
                                              test_case.query_wkt.c_str());
-                        const auto actual =
-                            spatial->Candidates(test_case.op, query);
+                        auto actual = spatial->Candidates(test_case.op, query);
                         ASSERT_EQ(actual.size(), data.values.size());
                         for (const auto offset : test_case.required_offsets) {
                             ASSERT_LT(offset, actual.size());
@@ -74,6 +73,8 @@ AddSpatialCase(IndexTestCases& cases,
                                 << "spatial candidates dropped exact hit "
                                 << offset;
                         }
+                        auto repeated = spatial->Candidates(test_case.op, query);
+                        ExpectBitmap(actual, repeated);
                         ExpectNullState(data, *reader);
                     },
             },

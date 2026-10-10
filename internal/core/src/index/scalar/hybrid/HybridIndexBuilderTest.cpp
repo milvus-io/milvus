@@ -34,6 +34,7 @@
 #include "index/contracts/build/IReaderConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/hybrid/HybridIndexArtifact.h"
 #include "index/scalar/sort/SortedIndexFormat.h"
@@ -276,6 +277,49 @@ TEST(HybridIndexBuilderTest, EveryPossibleDelegateSupportsPredicates) {
     ExpectPredicateProfiles<float>("Float");
     ExpectPredicateProfiles<double>("Double");
     ExpectPredicateProfiles<std::string_view>("Varchar");
+}
+
+TEST(HybridIndexBuilderTest, JsonProjectionCountsOnlyCastableValidRows) {
+    const auto& backend =
+        ScalarReaderBackends().Get<double>("JsonProjectedHybridDouble");
+    for (size_t distinct : {size_t{15}, size_t{16}}) {
+        SCOPED_TRACE(distinct);
+        std::vector<double> values;
+        values.reserve(distinct + 20);
+        for (size_t i = 0; i < distinct; ++i)
+            values.push_back(static_cast<double>(i));
+        for (size_t i = 0; i < 20; ++i)
+            values.push_back(static_cast<double>(1000 + i));
+        ScalarTestData<double> data(std::move(values));
+        for (size_t row = distinct; row < data.values.size(); ++row)
+            data.validity.reset(row);
+        std::vector<size_t> missing_path_rows;
+        for (size_t row = distinct + 10; row < data.values.size(); ++row)
+            missing_path_rows.push_back(row);
+        const BackendCaseMetadata metadata{
+            .row_count = data.values.size(),
+            .values = {{"json_path", "/a"},
+                       {"non_exist_offsets", missing_path_rows}}};
+        const ScalarTestInput<double> input(data);
+        auto artifact = backend.Build(input.View(), metadata);
+        ASSERT_NE(artifact, nullptr);
+        EXPECT_EQ(PersistedSelector(*artifact),
+                  distinct == 15 ? ScalarIndexType::BITMAP
+                                 : ScalarIndexType::STLSORT);
+        auto reader = OpenV3(backend, SerializeV3(*artifact), metadata);
+        ASSERT_NE(reader, nullptr);
+        const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
+        ASSERT_NE(json, nullptr);
+        EXPECT_EQ(json->Exists("/a").count(), distinct + 10);
+        auto resolved =
+            json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
+        ASSERT_TRUE(resolved);
+        const auto* predicate =
+            dynamic_cast<const IScalarPredicateReader<double>*>(resolved.get());
+        ASSERT_NE(predicate, nullptr);
+        const double first = 0;
+        ExpectHits(predicate->In(1, &first), data.values.size(), {0});
+    }
 }
 
 TEST(HybridIndexBuilderTest, VarcharRoutingDependsOnSelectedDelegate) {

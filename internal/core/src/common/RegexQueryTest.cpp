@@ -14,11 +14,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <ratio>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -31,10 +33,10 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/InvertedIndexTantivy.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
+#include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "index/Meta.h"
+#include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
@@ -50,9 +52,9 @@
 #include "segcore/TimestampIndex.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/GenExprProto.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/GenExprProto.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -119,7 +121,7 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     void
@@ -207,11 +209,51 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
     ASSERT_TRUE(final[4]);
 }
 
-struct MockStringIndex : index::StringIndexMarisa {
-    const bool
-    HasRawData() const override {
-        return true;
+// Keep the fallback fixture's original distinction: reverse lookup is
+// available, while the installed reader has no pattern query capability.
+class StringValueOnlyReader final
+    : public index::IIndexReaderBase,
+      public index::IScalarValueReader<std::string_view> {
+ public:
+    explicit StringValueOnlyReader(index::IIndexReaderBasePtr reader)
+        : reader_(std::move(reader)),
+          values_(dynamic_cast<const index::IScalarValueReader<
+                      std::string_view>*>(reader_.get())) {
+        AssertInfo(values_ != nullptr, "fallback fixture needs string values");
     }
+
+    index::ReaderCaps
+    Caps() const override {
+        return {.value_lookup = true,
+                .cheap_value_lookup = reader_->Caps().cheap_value_lookup};
+    }
+
+    index::Domain CoordDomain() const override { return reader_->CoordDomain(); }
+    int64_t Count() const override { return reader_->Count(); }
+    DataType ValueType() const override { return reader_->ValueType(); }
+    int64_t MemoryUsage() const override { return reader_->MemoryUsage(); }
+    cachinglayer::ResourceUsage
+    CellByteSize() const override {
+        return reader_->CellByteSize();
+    }
+
+    std::optional<std::string>
+    Lookup(int64_t offset) const override {
+        return values_->Lookup(offset);
+    }
+
+    void
+    Gather(const int64_t* offsets,
+           int64_t count,
+           const std::function<
+               void(int64_t, const std::string_view*, bool)>& output)
+        const override {
+        values_->Gather(offsets, count, output);
+    }
+
+ private:
+    index::IIndexReaderBasePtr reader_;
+    const index::IScalarValueReader<std::string_view>* values_;
 };
 
 class SealedSegmentRegexQueryTest : public ::testing::Test {
@@ -266,42 +308,39 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
 
     void
     LoadStlSortIndex() {
-        auto index = index::CreateScalarIndexSort<int64_t>();
-        index->BuildWithRawDataForUT(N, raw_int.data());
-        LoadIndexInfo info{};
-        info.field_id = schema->get_field_id(FieldName("another_int64")).get();
-        info.index_params = GenIndexParams(index.get());
-        info.cache_index = CreateTestCacheIndex("test", std::move(index));
-        seg->LoadIndex(info);
+        const auto field_id = schema->get_field_id(FieldName("another_int64"));
+        test::expr_index::InstallIndex(
+            *seg,
+            field_id,
+            DataType::INT64,
+            test::consumer::BuildScalarReader<int64_t>(
+                field_id, DataType::INT64, index::ASCENDING_SORT, N,
+                raw_int.data()));
     }
 
     void
     LoadInvertedIndex() {
-        auto index =
-            std::make_unique<index::InvertedIndexTantivy<std::string>>();
-        index->BuildWithRawDataForUT(N, raw_str.data());
-        LoadIndexInfo info{};
-        info.field_id = schema->get_field_id(FieldName("str")).get();
-        info.index_params = GenIndexParams(index.get());
-        info.cache_index = CreateTestCacheIndex("test", std::move(index));
-        seg->LoadIndex(info);
+        const auto field_id = schema->get_field_id(FieldName("str"));
+        test::expr_index::InstallIndex(
+            *seg,
+            field_id,
+            DataType::VARCHAR,
+            test::expr_index::BuildIndex(
+                field_id, DataType::VARCHAR, index::INVERTED_INDEX_TYPE,
+                {test::expr_index::StringField(raw_str)}));
     }
 
     void
     LoadMockIndex() {
-        proto::schema::StringArray arr;
-        for (int64_t i = 0; i < N; i++) {
-            *(arr.mutable_data()->Add()) = raw_str[i];
-        }
-        auto index = std::make_unique<MockStringIndex>();
-        std::vector<uint8_t> buffer(arr.ByteSizeLong());
-        ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
-        index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
-        LoadIndexInfo info{};
-        info.field_id = schema->get_field_id(FieldName("str")).get();
-        info.index_params = GenIndexParams(index.get());
-        info.cache_index = CreateTestCacheIndex("test", std::move(index));
-        seg->LoadIndex(info);
+        const auto field_id = schema->get_field_id(FieldName("str"));
+        auto opened = test::expr_index::BuildIndex(
+            field_id, DataType::VARCHAR, index::MARISA_TRIE,
+            {test::expr_index::StringField(raw_str)});
+        opened.reader =
+            std::make_unique<StringValueOnlyReader>(std::move(opened.reader));
+        opened.caps = opened.reader->Caps();
+        test::expr_index::InstallIndex(
+            *seg, field_id, DataType::VARCHAR, std::move(opened));
     }
 
  public:
@@ -581,10 +620,13 @@ TEST(InvertedIndexRegexQueryTest, RegexQueryUsesRe2CharacterClassSemantics) {
         "\xD9\xA3",
     };
 
-    auto index = std::make_unique<index::InvertedIndexTantivy<std::string>>();
-    index->BuildWithRawDataForUT(raw_str.size(), raw_str.data());
-
-    auto bitset = index->PatternMatch("^\\d+$", OpType::RegexMatch);
+    auto opened = test::expr_index::BuildIndex(
+        FieldId(100), DataType::VARCHAR, index::INVERTED_INDEX_TYPE,
+        {test::expr_index::StringField(raw_str)});
+    const auto* patterns =
+        dynamic_cast<const index::IPatternMatchReader*>(opened.reader.get());
+    ASSERT_NE(patterns, nullptr);
+    auto bitset = patterns->PatternMatch("^\\d+$", index::PatternOp::RegexMatch);
     ASSERT_TRUE(bitset[0]);
     ASSERT_FALSE(bitset[1]);
 }

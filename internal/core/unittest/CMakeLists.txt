@@ -48,8 +48,6 @@ set(MILVUS_TEST_FILES
         test_float16.cpp
         test_search_group_by.cpp
         test_iterative_filter.cpp
-        test_indexing.cpp
-        test_index_wrapper.cpp
         test_integer_overflow.cpp
         test_query.cpp
         test_scorer.cpp
@@ -88,15 +86,14 @@ set(MILVUS_TEST_FILES
         )
 
 set(INDEX_TEST_FILES
-        ${CMAKE_HOME_DIRECTORY}/src/storage/FileWriterTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LegacyIndexLoadTest.cpp
-        ${CMAKE_HOME_DIRECTORY}/src/storage/LegacyIndexFileIOTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/MaterializerArrayTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LoadResourceTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/PackedIndexLoadTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/RegistryTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/build/ArtifactBuilderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/build/ReaderConvertibleTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/growing/GrowingIndexTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/IndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/JsonIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/NgramReaderTest.cpp
@@ -106,13 +103,17 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/ScalarValueReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/SpatialReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/TextMatchReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/VectorReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexLibraryTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/hybrid/HybridIndexBuilderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/json/JsonProjectedHybridIndexBuilderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramIndexReaderTest.cpp
@@ -122,8 +123,9 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/spatial/RTreeIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/text/TextIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/CaseTestDriverTest.cpp
-        ${CMAKE_HOME_DIRECTORY}/src/storage/artifact/FileSinkTest.cpp
-        ${CMAKE_HOME_DIRECTORY}/src/storage/artifact/LocalDirectoryTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/IndexUtilsTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorFamilyTest.cpp
         )
 set(INDEX_TEST_SUPPORT_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/JsonDataSets.cpp
@@ -155,8 +157,7 @@ endif()
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "BitsetTest\\.cpp$")
 
 if (NOT (LINUX OR APPLE))
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ScalarIndexCreatorTest\\.cpp$")
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "StringIndexTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "(BuildSession.*|GISIndexRefinement)Test\\.cpp$")
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrayTest\\.cpp$")
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ExprArrayTest\\.cpp$")
 endif()
@@ -224,8 +225,9 @@ target_link_libraries(all_tests
 # Link plan parser library using full path and set RPATH
 target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
 target_link_libraries(all_tests milvus-planparser-cpp)
+# Load this build's core before any stale installed copy in output/lib.
 set_target_properties(all_tests PROPERTIES
-        BUILD_RPATH "${PLANPARSER_LIB_DIR}"
+        BUILD_RPATH "$<TARGET_FILE_DIR:milvus_core>;${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
         )
 

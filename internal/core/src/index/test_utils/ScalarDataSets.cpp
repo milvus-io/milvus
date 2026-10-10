@@ -353,6 +353,13 @@ MakePatternAllNull() {
 }
 
 ScalarTestData<std::string_view>
+MakePatternAllEmptyValid() {
+    ScalarTestData<std::string_view> data({"", "", "", ""});
+    data.validity_present = false;
+    return data;
+}
+
+ScalarTestData<std::string_view>
 MakePatternSelective() {
     std::vector<std::string> values;
     values.reserve(1000);
@@ -369,6 +376,13 @@ MakePatternSelective() {
         }
         values.push_back(std::move(value));
     }
+    return ScalarTestData<std::string_view>(std::move(values));
+}
+
+ScalarTestData<std::string_view>
+MakePatternShortSelective() {
+    std::vector<std::string> values(5000, std::string(200, 'y'));
+    values.front() += "RARE";
     return ScalarTestData<std::string_view>(std::move(values));
 }
 
@@ -674,8 +688,16 @@ ScalarDataSets() {
             .make_data = MakePatternAllNull,
         });
         catalog.Add<std::string_view>({
+            .name = "PatternAllEmptyValid",
+            .make_data = MakePatternAllEmptyValid,
+        });
+        catalog.Add<std::string_view>({
             .name = "PatternSelective",
             .make_data = MakePatternSelective,
+        });
+        catalog.Add<std::string_view>({
+            .name = "PatternShortSelective",
+            .make_data = MakePatternShortSelective,
         });
         catalog.Add<std::string_view>({
             .name = "PatternRandomBytes",

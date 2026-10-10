@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,6 +70,21 @@ ObserveReaderMetadata(const ReaderBackend& backend,
     EXPECT_EQ(reader->ValueType(), backend.ExpectedValueType());
 
     const auto caps = reader->Caps();
+    const auto advertised = backend.DeriveCaps(
+        {.row_count = data.values.size(), .values = data.metadata});
+    for (const auto field : {&ReaderCaps::predicate,
+                             &ReaderCaps::pattern_match,
+                             &ReaderCaps::text_match,
+                             &ReaderCaps::ngram_candidates,
+                             &ReaderCaps::spatial,
+                             &ReaderCaps::nested,
+                             &ReaderCaps::value_lookup,
+                             &ReaderCaps::cheap_value_lookup,
+                             &ReaderCaps::json_paths,
+                             &ReaderCaps::exact}) {
+        EXPECT_EQ(caps.*field, advertised.*field);
+        EXPECT_EQ(reader->Caps().*field, caps.*field);
+    }
     EXPECT_EQ(caps.nested, data.domain == Domain::Element);
     EXPECT_FALSE(caps.cheap_value_lookup && !caps.value_lookup);
     if (caps.nested || caps.ngram_candidates || caps.spatial) {
@@ -86,6 +102,9 @@ ObserveReaderMetadata(const ReaderBackend& backend,
     const auto second_usage = reader->CellByteSize();
     EXPECT_EQ(second_usage.memory_bytes, first_usage.memory_bytes);
     EXPECT_EQ(second_usage.file_bytes, first_usage.file_bytes);
+    EXPECT_EQ(reader->Count(), data.values.size());
+    EXPECT_EQ(reader->CoordDomain(), data.domain);
+    EXPECT_EQ(reader->ValueType(), backend.ExpectedValueType());
 }
 
 template <typename T>
@@ -102,6 +121,18 @@ AddReaderMetadataCases(IndexTestCases& cases) {
         .dataset = "NestedElements",
         .input_shape = BackendInputShape::NestedElements,
         .domain = Domain::Element,
+        .input_lifetime = InputLifetime::ReleaseBeforeBody,
+        .body = Observe<T>{.run = ObserveReaderMetadata<T>},
+    });
+    cases.Add(IndexTestCase<T>{
+        .name = "MultiBatchMetadataAndInterfaces",
+        .dataset = "PredicateEdgesMultiBatch",
+        .input_lifetime = InputLifetime::ReleaseBeforeBody,
+        .body = Observe<T>{.run = ObserveReaderMetadata<T>},
+    });
+    cases.Add(IndexTestCase<T>{
+        .name = "AllNullMetadataAndInterfaces",
+        .dataset = "PredicateAllNull",
         .input_lifetime = InputLifetime::ReleaseBeforeBody,
         .body = Observe<T>{.run = ObserveReaderMetadata<T>},
     });
