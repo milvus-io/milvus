@@ -772,7 +772,7 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, structFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", structFieldSchema.GetName())
 	}
-	if err := ValidateStructArrayField(structFieldSchema, schema); err != nil {
+	if err := validateStructArrayField(structFieldSchema, schema); err != nil {
 		return err
 	}
 	if err := validateAddStructSubFieldProperties(structFieldSchema); err != nil {
