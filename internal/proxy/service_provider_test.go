@@ -384,7 +384,7 @@ func TestProjectDescribeCollectionSchema_CopyOnWriteAndFinalization(t *testing.T
 		}},
 	}
 
-	projected, err := projectDescribeCollectionSchema(source, true)
+	projected, err := ProjectDescribeCollectionSchema(source, true)
 	assert.NoError(t, err)
 	assert.Len(t, projected.GetFields(), 2)
 	assert.Same(t, ordinaryField, projected.GetFields()[0], "ordinary immutable fields should not be cloned")
@@ -461,17 +461,13 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return proto.Clone(raw).(*milvuspb.DescribeCollectionResponse), nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
-	remoteResp := remoteTask.result
+	remoteResp := remoteTask.Result()
 	assert.NoError(t, finalizeDescribeCollectionResponse(remoteResp))
 
 	cacheSchema := proto.Clone(raw.GetSchema()).(*schemapb.CollectionSchema)
@@ -513,14 +509,10 @@ func TestDescribeCollectionCachedAndRemoteNotFoundStatusEquivalent(t *testing.T)
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(notFound)}, nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
 
@@ -530,7 +522,7 @@ func TestDescribeCollectionCachedAndRemoteNotFoundStatusEquivalent(t *testing.T)
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	assert.True(t, proto.Equal(remoteTask.result.GetStatus(), cachedResp.GetStatus()))
+	assert.True(t, proto.Equal(remoteTask.Result().GetStatus(), cachedResp.GetStatus()))
 	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, cachedResp.GetStatus().GetErrorCode())
 	assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), cachedResp.GetStatus().GetCode())
 	assert.Equal(t, "true", cachedResp.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
@@ -548,14 +540,10 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(notFound)}, nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
 
@@ -565,7 +553,7 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	assert.True(t, proto.Equal(remoteTask.result.GetStatus(), cachedResp.GetStatus()))
+	assert.True(t, proto.Equal(remoteTask.Result().GetStatus(), cachedResp.GetStatus()))
 	assert.ErrorIs(t, merr.Error(cachedResp.GetStatus()), merr.ErrDatabaseNotFound)
 	// The deprecated ErrorCode enum cannot represent database-not-found; the
 	// typed Code below is the authoritative wire value.

@@ -227,6 +227,19 @@ func (node *Proxy) ResolveRLSEnforcement(ctx context.Context, cache Cache, rlsEn
 	return resolveRLSEnforcement(ctx, cache, rlsEnabled, rlsForce, skipRLS, dbName, collectionName, operation)
 }
 
+// CheckManageRLSPrivilege verifies the caller holds the ManageRLS privilege
+// before a content-driven RLS property mutation, via the root-owned
+// privilege machinery.
+func (node *Proxy) CheckManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
+	return checkManageRLSPrivilege(ctx, metaCache, req, dbName, collectionName)
+}
+
+// CheckClusterPrivilege authorizes a cluster-scoped privilege via the
+// root-owned casbin enforcement path.
+func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
+	return CheckClusterPrivilege(ctx, req, fullMethod, objectPrivilege)
+}
+
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
 // TooManyRequests. The REST layer probes it (via interface assertion, like
 // GetMetaCache) to reject search/query before paying for body decoding.

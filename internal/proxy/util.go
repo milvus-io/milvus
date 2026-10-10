@@ -116,6 +116,17 @@ func restoreStructFieldNames(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// storedStructSubFieldName returns the flattened name of a struct-array
+// sub-field, preserving already-flattened names. Duplicated in the ddl package
+// (which owns the add-field DDL paths); the root copy backs the struct data
+// helpers that stay in this package.
+func storedStructSubFieldName(structName string, fieldName string) string {
+	if typeutil.IsStructSubField(fieldName) {
+		return fieldName
+	}
+	return typeutil.ConcatStructFieldName(structName, fieldName)
+}
+
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {

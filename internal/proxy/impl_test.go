@@ -3566,8 +3566,8 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	mockEnqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, queued taskmodel.Task) error {
 		_ = queued.OnEnqueue()
 		addTask := queued.(*addCollectionFieldTask)
-		assert.Equal(t, externalSchema, addTask.oldSchema)
-		addTask.result = merr.Success()
+		assert.Equal(t, externalSchema, addTask.OldSchema())
+		addTask.SetResult(merr.Success())
 		return nil
 	}).Build()
 	defer mockEnqueue.UnPatch()
@@ -3671,9 +3671,9 @@ func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
 				addTask := queued.(*addCollectionFieldTask)
 				err := addTask.PreExecute(context.Background())
 				if err != nil {
-					addTask.result = merr.Status(err)
+					addTask.SetResult(merr.Status(err))
 				} else {
-					addTask.result = merr.Success()
+					addTask.SetResult(merr.Success())
 				}
 				addTask.Notify(err)
 				return nil
@@ -3716,7 +3716,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -3745,7 +3745,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 

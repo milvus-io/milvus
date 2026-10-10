@@ -336,7 +336,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
 				return
 			}
-			ctx = describeCollectionRPCContext(ctx)
+			ctx = DescribeCollectionRPCContext(ctx)
 		}
 		// A verified management administrator retains the operator view,
 		// independently of data-plane RootShouldBindRole grants.

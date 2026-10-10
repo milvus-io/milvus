@@ -200,15 +200,12 @@ func TestDescribeCollectionRemoteForwardsAuthenticatedIdentity(t *testing.T) {
 	})
 	ctx := NewContextWithMetadata(context.Background(), "alice", "tenant_a")
 	ctx = metadata.AppendToOutgoingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode("root:root"))
-	task := &describeCollectionTask{
-		mixCoord: mix,
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			CollectionID: 77, DbName: "tenant_a",
-		},
-	}
+	task := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		CollectionID: 77, DbName: "tenant_a",
+	})
 	require.NoError(t, task.Execute(ctx))
-	require.ErrorIs(t, merr.Error(task.result.GetStatus()), merr.ErrPrivilegeNotPermitted)
-	require.Nil(t, task.result.GetSchema())
+	require.ErrorIs(t, merr.Error(task.Result().GetStatus()), merr.ErrPrivilegeNotPermitted)
+	require.Nil(t, task.Result().GetSchema())
 }
 
 func TestDescribeCollectionRPCContextPreservesRequest(t *testing.T) {
@@ -222,7 +219,7 @@ func TestDescribeCollectionRPCContextPreservesRequest(t *testing.T) {
 		"request-id", "describe-request",
 	))
 
-	rpcCtx := describeCollectionRPCContext(ctx)
+	rpcCtx := DescribeCollectionRPCContext(ctx)
 	md, ok := metadata.FromOutgoingContext(rpcCtx)
 	require.True(t, ok)
 	require.Equal(t, []string{crypto.Base64Encode("alice:alice")}, md.Get(util.HeaderAuthorize))

@@ -187,6 +187,14 @@ func (n *namespaceRequeryMockNode) ResolveRLSEnforcement(_ context.Context, _ me
 	return rlsEnabled, nil
 }
 
+func (n *namespaceRequeryMockNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
+	return nil
+}
+
+func (n *namespaceRequeryMockNode) CheckClusterPrivilege(_ context.Context, _ interface{}, _, _ string) error {
+	return nil
+}
+
 func (n *namespaceRequeryMockNode) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	panic("ExecuteQuery must be patched by mockey")
 }

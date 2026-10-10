@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -47,42 +48,42 @@ import (
 )
 
 const (
-	InsertTaskName                = "InsertTask"
-	CreateCollectionTaskName      = "CreateCollectionTask"
-	DropCollectionTaskName        = "DropCollectionTask"
-	TruncateCollectionTaskName    = "TruncateCollectionTask"
-	HasCollectionTaskName         = "HasCollectionTask"
-	DescribeCollectionTaskName    = "DescribeCollectionTask"
-	ShowCollectionTaskName        = "ShowCollectionTask"
-	CreatePartitionTaskName       = "CreatePartitionTask"
-	DropPartitionTaskName         = "DropPartitionTask"
-	HasPartitionTaskName          = "HasPartitionTask"
-	ShowPartitionTaskName         = "ShowPartitionTask"
-	FlushTaskName                 = "FlushTask"
-	FlushAllTaskName              = "FlushAllTask"
-	LoadCollectionTaskName        = "LoadCollectionTask"
-	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
-	LoadPartitionTaskName         = "LoadPartitionsTask"
-	ReleasePartitionTaskName      = "ReleasePartitionsTask"
-	DeleteTaskName                = "DeleteTask"
-	CreateAliasTaskName           = "CreateAliasTask"
-	DropAliasTaskName             = "DropAliasTask"
-	AlterAliasTaskName            = "AlterAliasTask"
-	DescribeAliasTaskName         = "DescribeAliasTask"
-	ListAliasesTaskName           = "ListAliasesTask"
-	AlterCollectionTaskName       = "AlterCollectionTask"
-	AlterCollectionFieldTaskName  = "AlterCollectionFieldTask"
-	AlterCollectionFunctionTask   = "AlterCollectionFunctionTask"
-	UpsertTaskName                = "UpsertTask"
-	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
-	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
-	DropResourceGroupTaskName     = "DropResourceGroupTask"
-	TransferNodeTaskName          = "TransferNodeTask"
-	TransferReplicaTaskName       = "TransferReplicaTask"
-	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
-	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
-	RunAnalyzerTaskName           = "RunAnalyzer"
-	HighlightTaskName             = "Highlight"
+	InsertTaskName                  = "InsertTask"
+	CreateCollectionTaskName        = "CreateCollectionTask"
+	DropCollectionTaskName          = "DropCollectionTask"
+	TruncateCollectionTaskName      = "TruncateCollectionTask"
+	HasCollectionTaskName           = "HasCollectionTask"
+	DescribeCollectionTaskName      = "DescribeCollectionTask"
+	ShowCollectionTaskName          = "ShowCollectionTask"
+	CreatePartitionTaskName         = "CreatePartitionTask"
+	DropPartitionTaskName           = "DropPartitionTask"
+	HasPartitionTaskName            = "HasPartitionTask"
+	ShowPartitionTaskName           = "ShowPartitionTask"
+	FlushTaskName                   = "FlushTask"
+	FlushAllTaskName                = "FlushAllTask"
+	LoadCollectionTaskName          = "LoadCollectionTask"
+	ReleaseCollectionTaskName       = "ReleaseCollectionTask"
+	LoadPartitionTaskName           = "LoadPartitionsTask"
+	ReleasePartitionTaskName        = "ReleasePartitionsTask"
+	DeleteTaskName                  = "DeleteTask"
+	CreateAliasTaskName             = "CreateAliasTask"
+	DropAliasTaskName               = "DropAliasTask"
+	AlterAliasTaskName              = "AlterAliasTask"
+	DescribeAliasTaskName           = "DescribeAliasTask"
+	ListAliasesTaskName             = "ListAliasesTask"
+	AlterCollectionTaskName         = "AlterCollectionTask"
+	AlterCollectionFieldTaskName    = "AlterCollectionFieldTask"
+	AlterCollectionFunctionTaskName = "AlterCollectionFunctionTask"
+	UpsertTaskName                  = "UpsertTask"
+	CreateResourceGroupTaskName     = "CreateResourceGroupTask"
+	UpdateResourceGroupsTaskName    = "UpdateResourceGroupsTask"
+	DropResourceGroupTaskName       = "DropResourceGroupTask"
+	TransferNodeTaskName            = "TransferNodeTask"
+	TransferReplicaTaskName         = "TransferReplicaTask"
+	ListResourceGroupsTaskName      = "ListResourceGroupsTask"
+	DescribeResourceGroupTaskName   = "DescribeResourceGroupTask"
+	RunAnalyzerTaskName             = "RunAnalyzer"
+	HighlightTaskName               = "Highlight"
 
 	CreateDatabaseTaskName   = "CreateCollectionTask"
 	DropDatabaseTaskName     = "DropDatabaseTaskName"
@@ -96,7 +97,7 @@ const (
 )
 
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
-	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 	return nil
@@ -117,13 +118,13 @@ func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 // New writes always compute the function output at flush, so create_collection with a function is
 // unaffected; this guard applies only to add-function on an existing collection. See issue #51167.
 func validateAddFunctionRequiresStorageV3() error {
-	if !Params.CommonCfg.UseLoonFFI.GetAsBool() {
+	if !paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
 	}
-	if !Params.DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
 	}
-	if !Params.DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
+	if !paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
 	}
 	return nil
@@ -160,7 +161,7 @@ func validateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function
 	return nil
 }
 
-type createCollectionTask struct {
+type CreateCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreateCollectionRequest
@@ -170,39 +171,39 @@ type createCollectionTask struct {
 	schema   *schemapb.CollectionSchema
 }
 
-func (t *createCollectionTask) TraceCtx() context.Context {
+func (t *CreateCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *createCollectionTask) ID() UniqueID {
+func (t *CreateCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *createCollectionTask) SetID(uid UniqueID) {
+func (t *CreateCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *createCollectionTask) Name() string {
+func (t *CreateCollectionTask) Name() string {
 	return CreateCollectionTaskName
 }
 
-func (t *createCollectionTask) Type() commonpb.MsgType {
+func (t *CreateCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *createCollectionTask) BeginTs() Timestamp {
+func (t *CreateCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *createCollectionTask) EndTs() Timestamp {
+func (t *CreateCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *createCollectionTask) SetTs(ts Timestamp) {
+func (t *CreateCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *createCollectionTask) OnEnqueue() error {
+func (t *CreateCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -211,7 +212,7 @@ func (t *createCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
+func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context) error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsPartitionKey() {
@@ -236,7 +237,7 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("the specified partitions should be greater than 0 if partition key is used")
 			}
 
-			maxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
+			maxPartitionNum := paramtable.Get().RootCoordCfg.MaxPartitionNum.GetAsInt64()
 			if t.GetNumPartitions() > maxPartitionNum {
 				return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d)",
 					t.GetNumPartitions(), maxPartitionNum)
@@ -265,7 +266,7 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 		}
 	}
 
-	mustPartitionKey := Params.ProxyCfg.MustUsePartitionKey.GetAsBool()
+	mustPartitionKey := paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool()
 	if mustPartitionKey && idx == -1 {
 		return merr.WrapErrParameterMissingMsg("partition key must be set when creating the collection" +
 			" because the mustUsePartitionKey config is true")
@@ -284,7 +285,7 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 	return nil
 }
 
-func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error {
+func (t *CreateCollectionTask) validateClusteringKey(ctx context.Context) error {
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
@@ -355,7 +356,7 @@ func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSc
 	return false, nil
 }
 
-func (t *createCollectionTask) validateTTL() error {
+func (t *CreateCollectionTask) validateTTL() error {
 	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
 	if err != nil {
 		return err
@@ -372,7 +373,7 @@ func (t *createCollectionTask) validateTTL() error {
 	return nil
 }
 
-func (t *createCollectionTask) PreExecute(ctx context.Context) error {
+func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -415,18 +416,18 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("external collection does not support multiple shards, got ShardsNum=%d", t.ShardsNum)
 	}
 
-	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
-		return merr.WrapErrParameterInvalidMsg("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
+	if t.ShardsNum > paramtable.Get().ProxyCfg.MaxShardNum.GetAsInt32() {
+		return merr.WrapErrParameterInvalidMsg("maximum shards's number should be limited to %d", paramtable.Get().ProxyCfg.MaxShardNum.GetAsInt())
 	}
 
 	totalFieldsNum := typeutil.GetTotalFieldsNum(t.schema)
-	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+	if totalFieldsNum > paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	vectorFields := len(typeutil.GetVectorFieldSchemas(t.schema))
-	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	if vectorFields > paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
 	if vectorFields == 0 {
@@ -579,17 +580,17 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *createCollectionTask) Execute(ctx context.Context) error {
+func (t *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.CreateCollection(ctx, t.CreateCollectionRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *createCollectionTask) PostExecute(ctx context.Context) error {
+func (t *CreateCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type addCollectionFieldTask struct {
+type AddCollectionFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AddCollectionFieldRequest
@@ -600,39 +601,39 @@ type addCollectionFieldTask struct {
 	oldSchema   *schemapb.CollectionSchema
 }
 
-func (t *addCollectionFieldTask) TraceCtx() context.Context {
+func (t *AddCollectionFieldTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *addCollectionFieldTask) ID() UniqueID {
+func (t *AddCollectionFieldTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *addCollectionFieldTask) SetID(uid UniqueID) {
+func (t *AddCollectionFieldTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *addCollectionFieldTask) Name() string {
+func (t *AddCollectionFieldTask) Name() string {
 	return AddFieldTaskName
 }
 
-func (t *addCollectionFieldTask) Type() commonpb.MsgType {
+func (t *AddCollectionFieldTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *addCollectionFieldTask) BeginTs() Timestamp {
+func (t *AddCollectionFieldTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addCollectionFieldTask) EndTs() Timestamp {
+func (t *AddCollectionFieldTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addCollectionFieldTask) SetTs(ts Timestamp) {
+func (t *AddCollectionFieldTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *addCollectionFieldTask) OnEnqueue() error {
+func (t *AddCollectionFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -641,7 +642,7 @@ func (t *addCollectionFieldTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
+func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
@@ -665,17 +666,17 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *addCollectionFieldTask) Execute(ctx context.Context) error {
+func (t *AddCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AddCollectionField(ctx, t.AddCollectionFieldRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *addCollectionFieldTask) PostExecute(ctx context.Context) error {
+func (t *AddCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type addCollectionStructFieldTask struct {
+type AddCollectionStructFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AddCollectionStructFieldRequest
@@ -686,39 +687,39 @@ type addCollectionStructFieldTask struct {
 	oldSchema         *schemapb.CollectionSchema
 }
 
-func (t *addCollectionStructFieldTask) TraceCtx() context.Context {
+func (t *AddCollectionStructFieldTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *addCollectionStructFieldTask) ID() UniqueID {
+func (t *AddCollectionStructFieldTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *addCollectionStructFieldTask) SetID(uid UniqueID) {
+func (t *AddCollectionStructFieldTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *addCollectionStructFieldTask) Name() string {
+func (t *AddCollectionStructFieldTask) Name() string {
 	return AddStructFieldTaskName
 }
 
-func (t *addCollectionStructFieldTask) Type() commonpb.MsgType {
+func (t *AddCollectionStructFieldTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *addCollectionStructFieldTask) BeginTs() Timestamp {
+func (t *AddCollectionStructFieldTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addCollectionStructFieldTask) EndTs() Timestamp {
+func (t *AddCollectionStructFieldTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *addCollectionStructFieldTask) SetTs(ts Timestamp) {
+func (t *AddCollectionStructFieldTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *addCollectionStructFieldTask) OnEnqueue() error {
+func (t *AddCollectionStructFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -727,7 +728,7 @@ func (t *addCollectionStructFieldTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *addCollectionStructFieldTask) PreExecute(ctx context.Context) error {
+func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add struct field task")
 	}
@@ -746,13 +747,13 @@ func (t *addCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *addCollectionStructFieldTask) Execute(ctx context.Context) error {
+func (t *AddCollectionStructFieldTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AddCollectionStructField(ctx, t.AddCollectionStructFieldRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *addCollectionStructFieldTask) PostExecute(ctx context.Context) error {
+func (t *AddCollectionStructFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
@@ -783,8 +784,8 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	}
 
 	totalFieldsNum := typeutil.GetTotalFieldsNum(schema) + len(structFieldSchema.GetFields()) + 1
-	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+	if totalFieldsNum > paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
@@ -793,8 +794,8 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 			vectorFields++
 		}
 	}
-	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	if vectorFields > paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
 	return nil
@@ -889,8 +890,8 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	for _, structArrayField := range schema.GetStructArrayFields() {
 		fieldList.Insert(structArrayField.GetName())
 	}
-	if typeutil.GetTotalFieldsNum(schema) >= Params.ProxyCfg.MaxFieldNum.GetAsInt() {
-		return merr.WrapErrParameterInvalidMsg("The number of fields has reached the maximum value %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
+	if typeutil.GetTotalFieldsNum(schema) >= paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("The number of fields has reached the maximum value %d", paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 	if fieldList.Contain(newFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("duplicated field name %s", newFieldSchema.GetName())
@@ -951,14 +952,14 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	}
 	if typeutil.IsVectorType(newFieldSchema.DataType) {
 		vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
-		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
-			return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		if vectorFields >= paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 		}
 	}
 
 	// NOTE: The nullable requirement for added fields is enforced by callers that deal with
-	// user-defined fields (e.g. addCollectionFieldTask). Function output fields managed by
-	// alterCollectionSchemaTask are explicitly prohibited from being nullable by the function validator,
+	// user-defined fields (e.g. AddCollectionFieldTask). Function output fields managed by
+	// AlterCollectionSchemaTask are explicitly prohibited from being nullable by the function validator,
 	// so the check is intentionally left to callers rather than enforced here universally.
 	//
 	// Dense vector types require a dimension TypeParam. This check applies unconditionally
@@ -978,50 +979,55 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 	return nil
 }
 
-type alterCollectionSchemaTask struct {
+type AlterCollectionSchemaTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionSchemaRequest
 	*milvuspb.AlterCollectionSchemaResponse
 	ctx                  context.Context
+	node                 taskmodel.TaskNode
 	mixCoord             types.MixCoordClient
 	oldSchema            *schemapb.CollectionSchema
 	collectionProperties []*commonpb.KeyValuePair
+
+	// checkVecIndexWithDataType is injected by the composition root; it backs
+	// the cgo check that must stay in the root package.
+	checkVecIndexWithDataType func(name string, dataType, elementType schemapb.DataType) bool
 }
 
-func (t *alterCollectionSchemaTask) TraceCtx() context.Context {
+func (t *AlterCollectionSchemaTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *alterCollectionSchemaTask) ID() UniqueID {
+func (t *AlterCollectionSchemaTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *alterCollectionSchemaTask) SetID(uid UniqueID) {
+func (t *AlterCollectionSchemaTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *alterCollectionSchemaTask) Name() string {
+func (t *AlterCollectionSchemaTask) Name() string {
 	return AlterCollectionSchemaTaskName
 }
 
-func (t *alterCollectionSchemaTask) Type() commonpb.MsgType {
+func (t *AlterCollectionSchemaTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *alterCollectionSchemaTask) BeginTs() Timestamp {
+func (t *AlterCollectionSchemaTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionSchemaTask) EndTs() Timestamp {
+func (t *AlterCollectionSchemaTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionSchemaTask) SetTs(ts Timestamp) {
+func (t *AlterCollectionSchemaTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *alterCollectionSchemaTask) OnEnqueue() error {
+func (t *AlterCollectionSchemaTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1030,7 +1036,7 @@ func (t *alterCollectionSchemaTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
+func (t *AlterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in alter collection schema task")
 	}
@@ -1050,7 +1056,7 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	}
 }
 
-func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
+func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	addRequest := t.GetAction().GetAddRequest()
 	plan, err := schemautil.ParseAlterSchemaAddRequest(addRequest)
 	if err != nil {
@@ -1103,7 +1109,7 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := checkTrain(ctx, plan.Field, indexParamsMap); err != nil {
+		if err := checkTrain(ctx, plan.Field, indexParamsMap, t.checkVecIndexWithDataType); err != nil {
 			return err
 		}
 	}
@@ -1127,7 +1133,7 @@ func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
+func (t *AlterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 	dropReq := t.GetAction().GetDropRequest()
 
 	switch id := dropReq.GetIdentifier().(type) {
@@ -1164,13 +1170,13 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 	}
 }
 
-func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
+func (t *AlterCollectionSchemaTask) Execute(ctx context.Context) error {
 	var err error
 	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
 	return merr.CheckRPCCall(t.GetAlterStatus(), err)
 }
 
-func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {
+func (t *AlterCollectionSchemaTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
@@ -1342,7 +1348,7 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 	return nil
 }
 
-type dropCollectionTask struct {
+type DropCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropCollectionRequest
@@ -1352,39 +1358,39 @@ type dropCollectionTask struct {
 	chMgr    channelmgr.ChannelsMgr
 }
 
-func (t *dropCollectionTask) TraceCtx() context.Context {
+func (t *DropCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *dropCollectionTask) ID() UniqueID {
+func (t *DropCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *dropCollectionTask) SetID(uid UniqueID) {
+func (t *DropCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *dropCollectionTask) Name() string {
+func (t *DropCollectionTask) Name() string {
 	return DropCollectionTaskName
 }
 
-func (t *dropCollectionTask) Type() commonpb.MsgType {
+func (t *DropCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *dropCollectionTask) BeginTs() Timestamp {
+func (t *DropCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *dropCollectionTask) EndTs() Timestamp {
+func (t *DropCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *dropCollectionTask) SetTs(ts Timestamp) {
+func (t *DropCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *dropCollectionTask) OnEnqueue() error {
+func (t *DropCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1393,7 +1399,7 @@ func (t *dropCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
+func (t *DropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
@@ -1410,17 +1416,17 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *dropCollectionTask) Execute(ctx context.Context) error {
+func (t *DropCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.DropCollection(ctx, t.DropCollectionRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
+func (t *DropCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type truncateCollectionTask struct {
+type TruncateCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.TruncateCollectionRequest
@@ -1430,39 +1436,39 @@ type truncateCollectionTask struct {
 	chMgr    channelmgr.ChannelsMgr
 }
 
-func (t *truncateCollectionTask) TraceCtx() context.Context {
+func (t *TruncateCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *truncateCollectionTask) ID() UniqueID {
+func (t *TruncateCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *truncateCollectionTask) SetID(uid UniqueID) {
+func (t *TruncateCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *truncateCollectionTask) Name() string {
+func (t *TruncateCollectionTask) Name() string {
 	return TruncateCollectionTaskName
 }
 
-func (t *truncateCollectionTask) Type() commonpb.MsgType {
+func (t *TruncateCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *truncateCollectionTask) BeginTs() Timestamp {
+func (t *TruncateCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *truncateCollectionTask) EndTs() Timestamp {
+func (t *TruncateCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *truncateCollectionTask) SetTs(ts Timestamp) {
+func (t *TruncateCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *truncateCollectionTask) OnEnqueue() error {
+func (t *TruncateCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1471,7 +1477,7 @@ func (t *truncateCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
+func (t *TruncateCollectionTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -1494,17 +1500,17 @@ func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *truncateCollectionTask) Execute(ctx context.Context) error {
+func (t *TruncateCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.TruncateCollection(ctx, t.TruncateCollectionRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *truncateCollectionTask) PostExecute(ctx context.Context) error {
+func (t *TruncateCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type hasCollectionTask struct {
+type HasCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.HasCollectionRequest
@@ -1513,39 +1519,39 @@ type hasCollectionTask struct {
 	result   *milvuspb.BoolResponse
 }
 
-func (t *hasCollectionTask) TraceCtx() context.Context {
+func (t *HasCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *hasCollectionTask) ID() UniqueID {
+func (t *HasCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *hasCollectionTask) SetID(uid UniqueID) {
+func (t *HasCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *hasCollectionTask) Name() string {
+func (t *HasCollectionTask) Name() string {
 	return HasCollectionTaskName
 }
 
-func (t *hasCollectionTask) Type() commonpb.MsgType {
+func (t *HasCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *hasCollectionTask) BeginTs() Timestamp {
+func (t *HasCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *hasCollectionTask) EndTs() Timestamp {
+func (t *HasCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *hasCollectionTask) SetTs(ts Timestamp) {
+func (t *HasCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *hasCollectionTask) OnEnqueue() error {
+func (t *HasCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1554,14 +1560,14 @@ func (t *hasCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *hasCollectionTask) PreExecute(ctx context.Context) error {
+func (t *HasCollectionTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *hasCollectionTask) Execute(ctx context.Context) error {
+func (t *HasCollectionTask) Execute(ctx context.Context) error {
 	t.result = &milvuspb.BoolResponse{
 		Status: merr.Success(),
 	}
@@ -1577,11 +1583,11 @@ func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *hasCollectionTask) PostExecute(ctx context.Context) error {
+func (t *HasCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type describeCollectionTask struct {
+type DescribeCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
@@ -1590,39 +1596,39 @@ type describeCollectionTask struct {
 	result   *milvuspb.DescribeCollectionResponse
 }
 
-func (t *describeCollectionTask) TraceCtx() context.Context {
+func (t *DescribeCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *describeCollectionTask) ID() UniqueID {
+func (t *DescribeCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *describeCollectionTask) SetID(uid UniqueID) {
+func (t *DescribeCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *describeCollectionTask) Name() string {
+func (t *DescribeCollectionTask) Name() string {
 	return DescribeCollectionTaskName
 }
 
-func (t *describeCollectionTask) Type() commonpb.MsgType {
+func (t *DescribeCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *describeCollectionTask) BeginTs() Timestamp {
+func (t *DescribeCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *describeCollectionTask) EndTs() Timestamp {
+func (t *DescribeCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *describeCollectionTask) SetTs(ts Timestamp) {
+func (t *DescribeCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *describeCollectionTask) OnEnqueue() error {
+func (t *DescribeCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1631,7 +1637,7 @@ func (t *describeCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
+func (t *DescribeCollectionTask) PreExecute(ctx context.Context) error {
 	if t.CollectionID != 0 && len(t.CollectionName) == 0 {
 		return nil
 	}
@@ -1639,7 +1645,7 @@ func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
 	return validateCollectionName(t.CollectionName)
 }
 
-func (t *describeCollectionTask) Execute(ctx context.Context) error {
+func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result = &milvuspb.DescribeCollectionResponse{
 		Status:               merr.Success(),
@@ -1650,14 +1656,14 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = describeCollectionRPCContext(ctx)
+	ctx = DescribeCollectionRPCContext(ctx)
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
 	}
 
 	if !merr.Ok(result.GetStatus()) {
-		t.result.Status = describeCollectionErrorStatus(
+		t.result.Status = DescribeCollectionErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
 	}
@@ -1665,7 +1671,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		t.result.CollectionName = result.GetCollectionName()
 	}
 
-	t.result.Schema, err = projectDescribeCollectionSchema(result.GetSchema(), false)
+	t.result.Schema, err = ProjectDescribeCollectionSchema(result.GetSchema(), false)
 	if err != nil {
 		return err
 	}
@@ -1689,11 +1695,11 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *describeCollectionTask) PostExecute(ctx context.Context) error {
+func (t *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type showCollectionsTask struct {
+type ShowCollectionsTask struct {
 	baseTask
 	Condition
 	*milvuspb.ShowCollectionsRequest
@@ -1702,46 +1708,46 @@ type showCollectionsTask struct {
 	result   *milvuspb.ShowCollectionsResponse
 }
 
-func (t *showCollectionsTask) TraceCtx() context.Context {
+func (t *ShowCollectionsTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *showCollectionsTask) ID() UniqueID {
+func (t *ShowCollectionsTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *showCollectionsTask) SetID(uid UniqueID) {
+func (t *ShowCollectionsTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *showCollectionsTask) Name() string {
+func (t *ShowCollectionsTask) Name() string {
 	return ShowCollectionTaskName
 }
 
-func (t *showCollectionsTask) Type() commonpb.MsgType {
+func (t *ShowCollectionsTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *showCollectionsTask) BeginTs() Timestamp {
+func (t *ShowCollectionsTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *showCollectionsTask) EndTs() Timestamp {
+func (t *ShowCollectionsTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *showCollectionsTask) SetTs(ts Timestamp) {
+func (t *ShowCollectionsTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *showCollectionsTask) OnEnqueue() error {
+func (t *ShowCollectionsTask) OnEnqueue() error {
 	t.Base = commonpbutil.NewMsgBase()
 	t.Base.MsgType = commonpb.MsgType_ShowCollections
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
-func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
+func (t *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 	if t.GetType() == milvuspb.ShowType_InMemory {
 		for _, collectionName := range t.CollectionNames {
 			if err := validateCollectionName(collectionName); err != nil {
@@ -1753,7 +1759,7 @@ func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *showCollectionsTask) Execute(ctx context.Context) error {
+func (t *ShowCollectionsTask) Execute(ctx context.Context) error {
 	ctx = AppendUserInfoForRPC(ctx)
 	respFromRootCoord, err := t.mixCoord.ShowCollections(ctx, t.ShowCollectionsRequest)
 	if err = merr.CheckRPCCall(respFromRootCoord, err); err != nil {
@@ -1846,52 +1852,53 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *showCollectionsTask) PostExecute(ctx context.Context) error {
+func (t *ShowCollectionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type alterCollectionTask struct {
+type AlterCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
 	ctx      context.Context
+	node     taskmodel.TaskNode
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 }
 
-func (t *alterCollectionTask) TraceCtx() context.Context {
+func (t *AlterCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *alterCollectionTask) ID() UniqueID {
+func (t *AlterCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *alterCollectionTask) SetID(uid UniqueID) {
+func (t *AlterCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *alterCollectionTask) Name() string {
+func (t *AlterCollectionTask) Name() string {
 	return AlterCollectionTaskName
 }
 
-func (t *alterCollectionTask) Type() commonpb.MsgType {
+func (t *AlterCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *alterCollectionTask) BeginTs() Timestamp {
+func (t *AlterCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionTask) EndTs() Timestamp {
+func (t *AlterCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionTask) SetTs(ts Timestamp) {
+func (t *AlterCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *alterCollectionTask) OnEnqueue() error {
+func (t *AlterCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -1981,7 +1988,7 @@ func detectBoolPropChange(
 	deleteKeys []string,
 	parseFn func() (bool, error),
 ) (newValue bool, changed bool, err error) {
-	// this is duplicated with the check in alterCollectionTask PreExecute
+	// this is duplicated with the check in AlterCollectionTask PreExecute
 	if len(properties) > 0 && len(deleteKeys) > 0 {
 		return false, false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
@@ -2011,7 +2018,7 @@ func detectQueryModeChange(
 	properties []*commonpb.KeyValuePair,
 	deleteKeys []string,
 ) (newQueryMode string, changed bool, err error) {
-	// this is duplicated with the check in alterCollectionTask PreExecute
+	// this is duplicated with the check in AlterCollectionTask PreExecute
 	if len(properties) > 0 && len(deleteKeys) > 0 {
 		return "", false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
@@ -2059,7 +2066,7 @@ func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartit
 	return true, nil
 }
 
-func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
+func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 && len(t.GetDeleteKeys()) > 0 {
 		return merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}
@@ -2105,9 +2112,14 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		if canonicalDBName == "" {
 			canonicalDBName = t.GetDbName()
 		}
-		if err := checkManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
-			canonicalDBName, collInfo.Schema.GetName()); err != nil {
-			return err
+		// The node is always injected by the composition root; white-box tests
+		// that build the task without a node run with authorization disabled,
+		// for which the root privilege check is a no-op anyway.
+		if t.node != nil {
+			if err := t.node.CheckManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
+				canonicalDBName, collInfo.Schema.GetName()); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -2296,7 +2308,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionTask) Execute(ctx context.Context) error {
+func (t *AlterCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterCollection(ctx, t.AlterCollectionRequest)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
@@ -2305,11 +2317,11 @@ func (t *alterCollectionTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionTask) PostExecute(ctx context.Context) error {
+func (t *AlterCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type alterCollectionFieldTask struct {
+type AlterCollectionFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionFieldRequest
@@ -2318,39 +2330,39 @@ type alterCollectionFieldTask struct {
 	result   *commonpb.Status
 }
 
-func (t *alterCollectionFieldTask) TraceCtx() context.Context {
+func (t *AlterCollectionFieldTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *alterCollectionFieldTask) ID() UniqueID {
+func (t *AlterCollectionFieldTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
+func (t *AlterCollectionFieldTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *alterCollectionFieldTask) Name() string {
+func (t *AlterCollectionFieldTask) Name() string {
 	return AlterCollectionTaskName
 }
 
-func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
+func (t *AlterCollectionFieldTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *alterCollectionFieldTask) BeginTs() Timestamp {
+func (t *AlterCollectionFieldTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionFieldTask) EndTs() Timestamp {
+func (t *AlterCollectionFieldTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *alterCollectionFieldTask) SetTs(ts Timestamp) {
+func (t *AlterCollectionFieldTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *alterCollectionFieldTask) OnEnqueue() error {
+func (t *AlterCollectionFieldTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -2468,7 +2480,7 @@ func validateAlterAnalyzerFieldParam(collSchema *schemapb.CollectionSchema, fiel
 	return nil
 }
 
-func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
+func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
@@ -2542,7 +2554,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("%s should be an integer, but got %T", prop.Key, prop.Value)
 			}
 
-			defaultMaxVarCharLength := Params.ProxyCfg.MaxVarCharLength.GetAsInt64()
+			defaultMaxVarCharLength := paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
 			if int64(value) > defaultMaxVarCharLength {
 				return merr.WrapErrParameterInvalidMsg("%s exceeds the maximum allowed value %s", prop.Value, strconv.FormatInt(defaultMaxVarCharLength, 10))
 			}
@@ -2564,7 +2576,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			if err != nil {
 				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
-			maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
 				return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 			}
@@ -2600,7 +2612,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
+func (t *AlterCollectionFieldTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterCollectionField(ctx, t.AlterCollectionFieldRequest)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
@@ -2609,11 +2621,11 @@ func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *alterCollectionFieldTask) PostExecute(ctx context.Context) error {
+func (t *AlterCollectionFieldTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type createPartitionTask struct {
+type CreatePartitionTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreatePartitionRequest
@@ -2622,39 +2634,39 @@ type createPartitionTask struct {
 	result   *commonpb.Status
 }
 
-func (t *createPartitionTask) TraceCtx() context.Context {
+func (t *CreatePartitionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *createPartitionTask) ID() UniqueID {
+func (t *CreatePartitionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *createPartitionTask) SetID(uid UniqueID) {
+func (t *CreatePartitionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *createPartitionTask) Name() string {
+func (t *CreatePartitionTask) Name() string {
 	return CreatePartitionTaskName
 }
 
-func (t *createPartitionTask) Type() commonpb.MsgType {
+func (t *CreatePartitionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *createPartitionTask) BeginTs() Timestamp {
+func (t *CreatePartitionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *createPartitionTask) EndTs() Timestamp {
+func (t *CreatePartitionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *createPartitionTask) SetTs(ts Timestamp) {
+func (t *CreatePartitionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *createPartitionTask) OnEnqueue() error {
+func (t *CreatePartitionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -2663,7 +2675,7 @@ func (t *createPartitionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *createPartitionTask) PreExecute(ctx context.Context) error {
+func (t *CreatePartitionTask) PreExecute(ctx context.Context) error {
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -2686,7 +2698,7 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
+func (t *CreatePartitionTask) Execute(ctx context.Context) (err error) {
 	resp, err := t.mixCoord.CreatePartitionV2(ctx, t.CreatePartitionRequest)
 	if err != nil {
 		return err
@@ -2708,11 +2720,11 @@ func (t *createPartitionTask) Execute(ctx context.Context) (err error) {
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *createPartitionTask) PostExecute(ctx context.Context) error {
+func (t *CreatePartitionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type dropPartitionTask struct {
+type DropPartitionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropPartitionRequest
@@ -2721,39 +2733,39 @@ type dropPartitionTask struct {
 	result   *commonpb.Status
 }
 
-func (t *dropPartitionTask) TraceCtx() context.Context {
+func (t *DropPartitionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *dropPartitionTask) ID() UniqueID {
+func (t *DropPartitionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *dropPartitionTask) SetID(uid UniqueID) {
+func (t *DropPartitionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *dropPartitionTask) Name() string {
+func (t *DropPartitionTask) Name() string {
 	return DropPartitionTaskName
 }
 
-func (t *dropPartitionTask) Type() commonpb.MsgType {
+func (t *DropPartitionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *dropPartitionTask) BeginTs() Timestamp {
+func (t *DropPartitionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *dropPartitionTask) EndTs() Timestamp {
+func (t *DropPartitionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *dropPartitionTask) SetTs(ts Timestamp) {
+func (t *DropPartitionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *dropPartitionTask) OnEnqueue() error {
+func (t *DropPartitionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -2762,7 +2774,7 @@ func (t *dropPartitionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
+func (t *DropPartitionTask) PreExecute(ctx context.Context) error {
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -2811,16 +2823,16 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *dropPartitionTask) Execute(ctx context.Context) (err error) {
+func (t *DropPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.mixCoord.DropPartition(ctx, t.DropPartitionRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *dropPartitionTask) PostExecute(ctx context.Context) error {
+func (t *DropPartitionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type hasPartitionTask struct {
+type HasPartitionTask struct {
 	baseTask
 	Condition
 	*milvuspb.HasPartitionRequest
@@ -2829,39 +2841,39 @@ type hasPartitionTask struct {
 	result   *milvuspb.BoolResponse
 }
 
-func (t *hasPartitionTask) TraceCtx() context.Context {
+func (t *HasPartitionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *hasPartitionTask) ID() UniqueID {
+func (t *HasPartitionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *hasPartitionTask) SetID(uid UniqueID) {
+func (t *HasPartitionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *hasPartitionTask) Name() string {
+func (t *HasPartitionTask) Name() string {
 	return HasPartitionTaskName
 }
 
-func (t *hasPartitionTask) Type() commonpb.MsgType {
+func (t *HasPartitionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *hasPartitionTask) BeginTs() Timestamp {
+func (t *HasPartitionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *hasPartitionTask) EndTs() Timestamp {
+func (t *HasPartitionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *hasPartitionTask) SetTs(ts Timestamp) {
+func (t *HasPartitionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *hasPartitionTask) OnEnqueue() error {
+func (t *HasPartitionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -2870,7 +2882,7 @@ func (t *hasPartitionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *hasPartitionTask) PreExecute(ctx context.Context) error {
+func (t *HasPartitionTask) PreExecute(ctx context.Context) error {
 	collName, partitionTag := t.CollectionName, t.PartitionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -2883,16 +2895,16 @@ func (t *hasPartitionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *hasPartitionTask) Execute(ctx context.Context) (err error) {
+func (t *HasPartitionTask) Execute(ctx context.Context) (err error) {
 	t.result, err = t.mixCoord.HasPartition(ctx, t.HasPartitionRequest)
 	return merr.CheckRPCCall(t.result, err)
 }
 
-func (t *hasPartitionTask) PostExecute(ctx context.Context) error {
+func (t *HasPartitionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type showPartitionsTask struct {
+type ShowPartitionsTask struct {
 	baseTask
 	Condition
 	*milvuspb.ShowPartitionsRequest
@@ -2901,39 +2913,39 @@ type showPartitionsTask struct {
 	result   *milvuspb.ShowPartitionsResponse
 }
 
-func (t *showPartitionsTask) TraceCtx() context.Context {
+func (t *ShowPartitionsTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *showPartitionsTask) ID() UniqueID {
+func (t *ShowPartitionsTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *showPartitionsTask) SetID(uid UniqueID) {
+func (t *ShowPartitionsTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *showPartitionsTask) Name() string {
+func (t *ShowPartitionsTask) Name() string {
 	return ShowPartitionTaskName
 }
 
-func (t *showPartitionsTask) Type() commonpb.MsgType {
+func (t *ShowPartitionsTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *showPartitionsTask) BeginTs() Timestamp {
+func (t *ShowPartitionsTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *showPartitionsTask) EndTs() Timestamp {
+func (t *ShowPartitionsTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *showPartitionsTask) SetTs(ts Timestamp) {
+func (t *ShowPartitionsTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *showPartitionsTask) OnEnqueue() error {
+func (t *ShowPartitionsTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -2942,7 +2954,7 @@ func (t *showPartitionsTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *showPartitionsTask) PreExecute(ctx context.Context) error {
+func (t *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(t.CollectionName); err != nil {
 		return err
 	}
@@ -2958,7 +2970,7 @@ func (t *showPartitionsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *showPartitionsTask) Execute(ctx context.Context) error {
+func (t *ShowPartitionsTask) Execute(ctx context.Context) error {
 	respFromRootCoord, err := t.mixCoord.ShowPartitions(ctx, t.ShowPartitionsRequest)
 	if err = merr.CheckRPCCall(respFromRootCoord, err); err != nil {
 		return err
@@ -3035,13 +3047,13 @@ func (t *showPartitionsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *showPartitionsTask) PostExecute(ctx context.Context) error {
+func (t *ShowPartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
 const LoadPriorityName = "load_priority"
 
-type loadCollectionTask struct {
+type LoadCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.LoadCollectionRequest
@@ -3052,39 +3064,39 @@ type loadCollectionTask struct {
 	collectionID UniqueID
 }
 
-func (t *loadCollectionTask) TraceCtx() context.Context {
+func (t *LoadCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *loadCollectionTask) ID() UniqueID {
+func (t *LoadCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *loadCollectionTask) SetID(uid UniqueID) {
+func (t *LoadCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *loadCollectionTask) Name() string {
+func (t *LoadCollectionTask) Name() string {
 	return LoadCollectionTaskName
 }
 
-func (t *loadCollectionTask) Type() commonpb.MsgType {
+func (t *LoadCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *loadCollectionTask) BeginTs() Timestamp {
+func (t *LoadCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *loadCollectionTask) EndTs() Timestamp {
+func (t *LoadCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *loadCollectionTask) SetTs(ts Timestamp) {
+func (t *LoadCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *loadCollectionTask) OnEnqueue() error {
+func (t *LoadCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -3093,8 +3105,8 @@ func (t *loadCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
-	mlog.Debug(ctx, "loadCollectionTask PreExecute",
+func (t *LoadCollectionTask) PreExecute(ctx context.Context) error {
+	mlog.Debug(ctx, "LoadCollectionTask PreExecute",
 		mlog.String("role", typeutil.ProxyRole))
 
 	collName := t.CollectionName
@@ -3106,7 +3118,7 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *loadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
+func (t *LoadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
 	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
@@ -3115,14 +3127,14 @@ func (t *loadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
 	return loadPriority
 }
 
-func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
+func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 
 	log := mlog.With(
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.Int64("collectionID", collID))
 
-	log.Debug(ctx, "loadCollectionTask Execute")
+	log.Debug(ctx, "LoadCollectionTask Execute")
 	if err != nil {
 		return err
 	}
@@ -3206,13 +3218,13 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
+func (t *LoadCollectionTask) PostExecute(ctx context.Context) error {
 	if t.result != nil && !merr.Ok(t.result) {
 		return nil
 	}
 
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
-	mlog.Debug(ctx, "loadCollectionTask PostExecute",
+	mlog.Debug(ctx, "LoadCollectionTask PostExecute",
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.Int64("collectionID", collID))
 	if err != nil {
@@ -3221,7 +3233,7 @@ func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type releaseCollectionTask struct {
+type ReleaseCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.ReleaseCollectionRequest
@@ -3232,39 +3244,39 @@ type releaseCollectionTask struct {
 	collectionID UniqueID
 }
 
-func (t *releaseCollectionTask) TraceCtx() context.Context {
+func (t *ReleaseCollectionTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *releaseCollectionTask) ID() UniqueID {
+func (t *ReleaseCollectionTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *releaseCollectionTask) SetID(uid UniqueID) {
+func (t *ReleaseCollectionTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *releaseCollectionTask) Name() string {
+func (t *ReleaseCollectionTask) Name() string {
 	return ReleaseCollectionTaskName
 }
 
-func (t *releaseCollectionTask) Type() commonpb.MsgType {
+func (t *ReleaseCollectionTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *releaseCollectionTask) BeginTs() Timestamp {
+func (t *ReleaseCollectionTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *releaseCollectionTask) EndTs() Timestamp {
+func (t *ReleaseCollectionTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *releaseCollectionTask) SetTs(ts Timestamp) {
+func (t *ReleaseCollectionTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *releaseCollectionTask) OnEnqueue() error {
+func (t *ReleaseCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -3273,7 +3285,7 @@ func (t *releaseCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *releaseCollectionTask) PreExecute(ctx context.Context) error {
+func (t *ReleaseCollectionTask) PreExecute(ctx context.Context) error {
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -3283,7 +3295,7 @@ func (t *releaseCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
+func (t *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
@@ -3306,11 +3318,11 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *releaseCollectionTask) PostExecute(ctx context.Context) error {
+func (t *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type loadPartitionsTask struct {
+type LoadPartitionsTask struct {
 	baseTask
 	Condition
 	*milvuspb.LoadPartitionsRequest
@@ -3321,39 +3333,39 @@ type loadPartitionsTask struct {
 	collectionID UniqueID
 }
 
-func (t *loadPartitionsTask) TraceCtx() context.Context {
+func (t *LoadPartitionsTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *loadPartitionsTask) ID() UniqueID {
+func (t *LoadPartitionsTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *loadPartitionsTask) SetID(uid UniqueID) {
+func (t *LoadPartitionsTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *loadPartitionsTask) Name() string {
+func (t *LoadPartitionsTask) Name() string {
 	return LoadPartitionTaskName
 }
 
-func (t *loadPartitionsTask) Type() commonpb.MsgType {
+func (t *LoadPartitionsTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *loadPartitionsTask) BeginTs() Timestamp {
+func (t *LoadPartitionsTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *loadPartitionsTask) EndTs() Timestamp {
+func (t *LoadPartitionsTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *loadPartitionsTask) SetTs(ts Timestamp) {
+func (t *LoadPartitionsTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *loadPartitionsTask) OnEnqueue() error {
+func (t *LoadPartitionsTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -3362,7 +3374,7 @@ func (t *loadPartitionsTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
+func (t *LoadPartitionsTask) PreExecute(ctx context.Context) error {
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -3380,7 +3392,7 @@ func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *loadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
+func (t *LoadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
 	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
@@ -3389,7 +3401,7 @@ func (t *loadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
 	return loadPriority
 }
 
-func (t *loadPartitionsTask) Execute(ctx context.Context) error {
+func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	var partitionIDs []int64
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -3486,11 +3498,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (t *loadPartitionsTask) PostExecute(ctx context.Context) error {
+func (t *LoadPartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-type releasePartitionsTask struct {
+type ReleasePartitionsTask struct {
 	baseTask
 	Condition
 	*milvuspb.ReleasePartitionsRequest
@@ -3501,39 +3513,39 @@ type releasePartitionsTask struct {
 	collectionID UniqueID
 }
 
-func (t *releasePartitionsTask) TraceCtx() context.Context {
+func (t *ReleasePartitionsTask) TraceCtx() context.Context {
 	return t.ctx
 }
 
-func (t *releasePartitionsTask) ID() UniqueID {
+func (t *ReleasePartitionsTask) ID() UniqueID {
 	return t.Base.MsgID
 }
 
-func (t *releasePartitionsTask) SetID(uid UniqueID) {
+func (t *ReleasePartitionsTask) SetID(uid UniqueID) {
 	t.Base.MsgID = uid
 }
 
-func (t *releasePartitionsTask) Type() commonpb.MsgType {
+func (t *ReleasePartitionsTask) Type() commonpb.MsgType {
 	return t.Base.MsgType
 }
 
-func (t *releasePartitionsTask) Name() string {
+func (t *ReleasePartitionsTask) Name() string {
 	return ReleasePartitionTaskName
 }
 
-func (t *releasePartitionsTask) BeginTs() Timestamp {
+func (t *ReleasePartitionsTask) BeginTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *releasePartitionsTask) EndTs() Timestamp {
+func (t *ReleasePartitionsTask) EndTs() Timestamp {
 	return t.Base.Timestamp
 }
 
-func (t *releasePartitionsTask) SetTs(ts Timestamp) {
+func (t *ReleasePartitionsTask) SetTs(ts Timestamp) {
 	t.Base.Timestamp = ts
 }
 
-func (t *releasePartitionsTask) OnEnqueue() error {
+func (t *ReleasePartitionsTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
@@ -3542,7 +3554,7 @@ func (t *releasePartitionsTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *releasePartitionsTask) PreExecute(ctx context.Context) error {
+func (t *ReleasePartitionsTask) PreExecute(ctx context.Context) error {
 	collName := t.CollectionName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -3560,7 +3572,7 @@ func (t *releasePartitionsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
+func (t *ReleasePartitionsTask) Execute(ctx context.Context) (err error) {
 	var partitionIDs []int64
 	collID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -3590,7 +3602,7 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-func (t *releasePartitionsTask) PostExecute(ctx context.Context) error {
+func (t *ReleasePartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

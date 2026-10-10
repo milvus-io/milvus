@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package ddl
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (t *flushAllTask) Execute(ctx context.Context) error {
+func (t *FlushAllTask) Execute(ctx context.Context) error {
 	resp, err := t.mixCoord.FlushAll(ctx, &datapb.FlushAllRequest{
 		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Flush)),
 	})
