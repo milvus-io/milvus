@@ -16,17 +16,20 @@
 
 #include "storage/IndexEntryTarget.h"
 
-#include <unistd.h>
 #include <limits>
+#include <unistd.h>
 
 namespace milvus::storage {
 
-IndexFileTarget::IndexFileTarget(std::string path,
-                                 size_t file_size,
-                                 bool retain_on_success)
+IndexFileTarget::IndexFileTarget(
+    std::string path,
+    size_t file_size,
+    bool retain_on_success,
+    std::optional<FileWriter::WriteMode> write_mode)
     : path(std::move(path)),
       file_size(file_size),
-      retain_on_success(retain_on_success) {
+      retain_on_success(retain_on_success),
+      write_mode(write_mode) {
 }
 
 IndexFileTarget::~IndexFileTarget() {
@@ -43,7 +46,8 @@ IndexFileTarget::Prepare(io::Priority priority) {
         "Staging file '{}' size {} exceeds off_t range",
         path,
         file_size);
-    writer_ = std::make_unique<PositionedFileWriter>(path, file_size, priority);
+    writer_ = std::make_unique<PositionedFileWriter>(
+        path, file_size, priority, write_mode);
 }
 
 void
