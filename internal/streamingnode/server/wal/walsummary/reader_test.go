@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -43,13 +44,17 @@ func TestBoundedReadAcrossStorageStates(t *testing.T) {
 	b, err := m.ReadTransform(ctx, "v1", 0, 400, ReadLimits{})
 	require.NoError(t, err)
 	require.Len(t, b.Entries, 3)
-	// Results are caller-owned even when sourced from the hot tail.
-	b.Entries[2].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0] = -1
+	// Results are caller-owned across durable, sealed and pending storage.
+	for _, entry := range b.Entries {
+		entry.GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0] = -1
+	}
 	require.NoError(t, m.writeChunk(ctx, sc))
 	b, err = m.ReadTransform(ctx, "v1", 0, 400, ReadLimits{})
 	require.NoError(t, err)
 	require.Len(t, b.Entries, 3)
-	require.Equal(t, int64(300), b.Entries[2].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0])
+	for i, want := range []int64{100, 200, 300} {
+		require.Equal(t, want, b.Entries[i].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0])
+	}
 	// No record for this VChannel is still a proven interval, including barriers.
 	b, err = m.ReadTransform(ctx, "v2", 0, 900, ReadLimits{})
 	require.NoError(t, err)
@@ -65,6 +70,30 @@ func TestBoundedReadAcrossStorageStates(t *testing.T) {
 	case <-b.Changed:
 	default:
 		t.Fatal("barrier must notify readers")
+	}
+}
+
+func TestReadTransformCachedResultsAreCallerOwned(t *testing.T) {
+	ctx := context.Background()
+	m, _ := newTransformTestManagerWithStore(t)
+	m.chunkIndex.cache.capacity = 1 << 20
+	var released bool
+	flushTransform(t, m, "v1", 100, &released)
+	chunk := m.chunkIndex.chunks[0]
+	require.NotNil(t, chunk.payload, "writes populate the cache")
+	for _, cold := range []bool{false, true, false} {
+		if cold {
+			m.chunkIndex.cache.mu.Lock()
+			m.chunkIndex.cache.evictLocked(chunk)
+			m.chunkIndex.cache.mu.Unlock()
+		}
+		batch, err := m.ReadTransform(ctx, "v1", 0, 100, ReadLimits{})
+		require.NoError(t, err)
+		require.Len(t, batch.Entries, 1)
+		ids := batch.Entries[0].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data
+		require.Equal(t, []int64{100}, ids)
+		ids[0] = -1
+		require.NotNil(t, chunk.payload, "reads populate the cache")
 	}
 }
 
@@ -130,14 +159,16 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 	// While the reader holds a captured durable/hot snapshot, move the hot
 	// section to disk and release the older manifest entry. Physical GC needs
 	// the exclusive read lock and must wait for this read to return.
-	var origin func(*Store, context.Context, uint64, int64, string, *streamingpb.VChannelSummaryChunkIndex) ([]*streamingpb.VChannelSummaryTransformRecord, error)
-	patch := mockey.Mock((*Store).ReadTransformSection).Origin(&origin).To(func(store *Store, ctx context.Context, gen uint64, term int64, vc string, index *streamingpb.VChannelSummaryChunkIndex) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	var origin func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&origin).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+		// Copy the mock pointer argument before calling back into the manager.
+		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		require.NoError(t, m.writeChunk(ctx, sc))
 		m.AdvanceGCTimeTick("v1", 100)
 		m.cfg.RetentionMaxBytes = 1
 		require.NoError(t, m.GCOnce(ctx))
 		require.False(t, m.readMu.TryLock(), "physical GC cannot acquire its lock during a read")
-		return origin(store, ctx, gen, term, vc, index)
+		return origin(store, ctx, copied)
 	}).Build()
 	defer patch.UnPatch()
 	b, err := m.ReadTransform(ctx, "v1", 0, 200, ReadLimits{})

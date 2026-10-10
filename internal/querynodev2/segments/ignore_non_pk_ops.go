@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -189,9 +188,8 @@ func NewMergeByPKWithOffsetsOperator(
 // IgnoreNonPk pipeline: after PK merge + dedup + topK, fetch actual field data
 // only for the selected rows.
 //
-// When ArrowRetrieveEnabled is true, uses the Arrow code path which performs
-// a single CGO call returning an Arrow RecordBatch. Otherwise, falls back to
-// the per-segment proto serialization path.
+// When zero-copy is enabled, a single CGO call returns an Arrow RecordBatch.
+// Otherwise, this uses the per-segment proto serialization path.
 //
 // Input[0]: *MergedResultWithOffsets
 // Output[0]: *segcorepb.RetrieveResults (with IDs and full FieldsData)
@@ -356,30 +354,28 @@ func fetchFieldsAsRecord(
 	retrievePlan *segcore.RetrievePlan,
 	merged *MergedResultWithOffsets,
 ) (arrow.Record, error) {
-	type pinned struct {
-		ls *LocalSegment
-		cs segcore.CSegment
-	}
-	segs := make([]pinned, len(validSegments))
-	for i, seg := range validSegments {
-		ls := seg.(*LocalSegment)
-		if !ls.ptrLock.PinIf(state.IsNotReleased) {
-			for j := 0; j < i; j++ {
-				segs[j].ls.ptrLock.Unpin()
-			}
-			return nil, merr.WrapErrSegmentNotLoaded(ls.ID(), "segment released")
-		}
-		segs[i] = pinned{ls, ls.csegment}
-	}
+	var pinned []*LocalSegment
 	defer func() {
-		for _, s := range segs {
-			s.ls.ptrLock.Unpin()
+		for _, segment := range pinned {
+			segment.Unpin()
 		}
 	}()
-
-	cSegments := make([]segcore.CSegment, len(segs))
-	for i, s := range segs {
-		cSegments[i] = s.cs
+	cSegments := make([]segcore.CSegment, len(validSegments))
+	for i, segment := range validSegments {
+		switch segment := segment.(type) {
+		case *LocalSegment:
+			if err := segment.PinIfNotReleased(); err != nil {
+				return nil, err
+			}
+			pinned = append(pinned, segment)
+			cSegments[i] = segment.csegment
+		case *viewQueryGrowingSegment:
+			// QueryOnView holds the growing handles through execution and
+			// Arrow conversion. This adapter only borrows their C segments.
+			cSegments[i] = segment.csegment
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("unsupported segment %T for Arrow field retrieval", segment)
+		}
 	}
 
 	segIndices := make([]int32, len(merged.Selections))

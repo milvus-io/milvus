@@ -16,8 +16,9 @@ The agreed design separates shared storage, L0 materialization, and subscription
 - [WAL L0 Materializer](l0_materializer.md): current VChannel-owned consumer
   retaining WAL Delete handles through L0 output. The
   [Summary consumer](summary_l0_materializer.md) is retained for future wiring.
-- [TransformLog Subscription Adaptor](transform_log.md): future read-only
-  wrapper over Summary, outside this PR; no observation or materialization.
+- [TransformLog Subscription Adaptor](transform_log.md): implemented read-only
+  Summary wrapper for local SN bounded Delete replay; no observation or
+  materialization. Remote/QN consumer integration remains planned.
 
 ```text
 RecoveryStorage -> WALSummary
@@ -25,12 +26,12 @@ RecoveryStorage -> WALSummary
                      -> VChannelRecoveryModule
                           -> WALMaterializer -> retained WAL Delete batches
 
-Future TransformLog adaptor -> the same Summary reads
+GrowingRuntime bootstrap -> local TransformLog adaptor -> WALSummary reads
 ```
 
 The materializer's durable cursor is carried by VChannelMeta; it has no separate
 catalog. The current WAL consumer retains Delete and explicit Flush handles.
-Future subscriptions do not participate in message completion.
+TransformLog subscriptions do not participate in message completion.
 RecoveryStorage combines Tracker completion with `WALSummary.LastAcked()` before
 publishing the global checkpoint.
 
