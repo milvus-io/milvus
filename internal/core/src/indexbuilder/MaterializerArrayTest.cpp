@@ -15,8 +15,20 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+#include "index/Families.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "indexbuilder/BuildInputMaterializer.h"
 #include "indexbuilder/VectorBuildMaterializer.h"
 #include "indexbuilder/VectorDiskBuildMaterializer.h"
@@ -92,6 +104,126 @@ TEST(MaterializerArrayTest, ScalarPreservesParentAndElementValidity) {
         {{"array_element_type", static_cast<int>(DataType::INT32)}});
     materializer->Add(data);
     std::move(*materializer).Build();
+}
+
+FieldDataPtr
+NestedIntArrayRows(const std::vector<ScalarFieldProto>& rows,
+                   const uint8_t* parent_validity) {
+    std::vector<Array> values;
+    values.reserve(rows.size());
+    for (const auto& row : rows) {
+        values.emplace_back(row);
+    }
+    const bool nullable = parent_validity != nullptr;
+    auto field_data = std::make_shared<FieldData<Array>>(DataType::ARRAY, nullable);
+    if (nullable) {
+        field_data->FillFieldData(
+            values.data(), parent_validity, values.size(), 0);
+    } else {
+        field_data->FillFieldData(values.data(), values.size());
+    }
+    return field_data;
+}
+
+template <typename T>
+index::IIndexReaderBasePtr
+BuildNestedReader(const std::vector<ScalarFieldProto>& rows,
+                  const uint8_t* parent_validity,
+                  std::string_view backend_name,
+                  int64_t element_count) {
+    const auto& backend =
+        index::test::ScalarReaderBackends().Get<T>(backend_name);
+    auto materializer = MakeScalarBuildInputMaterializer(
+        DataType::ARRAY,
+        index::test::detail::ScalarTestType<T>(),
+        rows.size(),
+        backend.Family(),
+        backend.BuildParams());
+    materializer->Add(NestedIntArrayRows(rows, parent_validity));
+    auto artifact = std::move(*materializer).Build();
+    EXPECT_NE(artifact, nullptr);
+    if (!artifact) {
+        return nullptr;
+    }
+    const auto persisted = index::test::SerializeV3(*artifact);
+    return index::test::OpenV3(
+        backend, persisted, {.row_count = element_count});
+}
+
+template <typename T>
+void
+ExpectNestedHits(const index::IIndexReaderBase& reader,
+                 T key,
+                 std::initializer_list<size_t> offsets) {
+    const auto* predicate =
+        dynamic_cast<const index::IScalarPredicateReader<T>*>(&reader);
+    ASSERT_NE(predicate, nullptr);
+    const auto result = predicate->In(1, &key);
+    std::vector<bool> expected(reader.Count(), false);
+    for (const auto offset : offsets) {
+        ASSERT_LT(offset, expected.size());
+        expected[offset] = true;
+    }
+    ASSERT_EQ(result.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(static_cast<bool>(result[i]), expected[i]) << i;
+    }
+}
+
+TEST(MaterializerArrayTest, NullParentsBeforeValidNestedElementsSurviveRoundTrip) {
+    std::vector<ScalarFieldProto> rows(6);
+    rows[1].mutable_int_data()->add_data(10);
+    rows[1].mutable_int_data()->add_data(20);
+    rows[3].mutable_int_data();  // valid empty INT32 array
+    rows[4].mutable_int_data()->add_data(20);
+    rows[4].mutable_int_data()->add_data(30);
+    rows[5].mutable_int_data()->add_data(30);
+    const uint8_t parent_validity = 0b00111010;
+
+    for (const auto name : {"BitmapInt32Nested", "SortedInt32Nested"}) {
+        SCOPED_TRACE(name);
+        auto reader = BuildNestedReader<int32_t>(
+            rows, &parent_validity, name, 5);
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
+        EXPECT_EQ(reader->Count(), 5);
+        EXPECT_GT(reader->MemoryUsage(), 0);
+        ExpectNestedHits<int32_t>(*reader, 10, {0});
+        ExpectNestedHits<int32_t>(*reader, 20, {1, 2});
+        ExpectNestedHits<int32_t>(*reader, 30, {3, 4});
+        const auto* predicate =
+            dynamic_cast<const index::IScalarPredicateReader<int32_t>*>(
+                reader.get());
+        ASSERT_NE(predicate, nullptr);
+        const auto range =
+            predicate->Range(15, index::CompareOp::GreaterThan);
+        ASSERT_EQ(range.size(), 5);
+        EXPECT_FALSE(range[0]);
+        for (size_t i = 1; i < 5; ++i) {
+            EXPECT_TRUE(range[i]);
+        }
+    }
+}
+
+template <typename T>
+void
+CheckNarrowNestedStride(std::string_view backend_name, int32_t large_value) {
+    std::vector<ScalarFieldProto> rows(3);
+    rows[0].mutable_int_data()->add_data(5);
+    rows[0].mutable_int_data()->add_data(-3);
+    rows[1].mutable_int_data()->add_data(-3);
+    rows[1].mutable_int_data()->add_data(large_value);
+    rows[2].mutable_int_data()->add_data(large_value);
+    auto reader = BuildNestedReader<T>(rows, nullptr, backend_name, 5);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Count(), 5);
+    ExpectNestedHits<T>(*reader, static_cast<T>(-3), {1, 2});
+    ExpectNestedHits<T>(*reader, static_cast<T>(large_value), {3, 4});
+}
+
+TEST(MaterializerArrayTest, NarrowIntNestedElementsUseInt32StorageStride) {
+    CheckNarrowNestedStride<int8_t>("BitmapInt8Nested", 100);
+    CheckNarrowNestedStride<int16_t>("BitmapInt16Nested", 300);
 }
 
 FieldDataPtr

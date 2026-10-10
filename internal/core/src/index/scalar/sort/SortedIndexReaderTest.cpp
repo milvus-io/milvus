@@ -20,11 +20,15 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
+#include "index/test_utils/ArtifactTestUtils.h"
+#include "index/test_utils/ScalarTestData.h"
 
 namespace milvus::index::test {
 namespace {
@@ -95,6 +99,28 @@ TEST(SortedIndexReaderTest, ProvidesVarcharQueries) {
                   reader.get()),
               nullptr);
     EXPECT_NE(dynamic_cast<const IPatternMatchReader*>(reader.get()), nullptr);
+}
+
+TEST(SortedIndexReaderTest, MmapAccountsValidityWordOnce) {
+    constexpr size_t rows = 65;
+    const auto& backend =
+        ScalarReaderBackends().Get<int64_t>("SortedInt64Mmap");
+    std::vector<int64_t> values(rows);
+    for (size_t row = 0; row < rows; ++row)
+        values[row] = static_cast<int64_t>(row);
+    ScalarTestData<int64_t> data(std::move(values));
+    data.validity.reset(0);
+    const ScalarTestInput<int64_t> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = rows});
+    auto reader = OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
+    ASSERT_NE(reader, nullptr);
+    const auto usage = reader->CellByteSize();
+    EXPECT_EQ(usage.memory_bytes,
+              static_cast<int64_t>(TargetBitmap(rows).size_in_bytes()));
+    EXPECT_GT(usage.file_bytes, 0);
+    const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+    ASSERT_NE(nulls, nullptr);
+    ExpectHits(nulls->IsNull(), rows, {0});
 }
 
 }  // namespace

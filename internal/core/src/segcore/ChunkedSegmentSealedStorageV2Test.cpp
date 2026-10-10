@@ -56,10 +56,8 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -85,6 +83,7 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
+using namespace milvus::test::consumer;
 using namespace milvus::segcore::storagev1translator;
 
 namespace {
@@ -436,78 +435,27 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     void
     LoadInt64ScalarIndex(const std::string& index_type) {
         auto fid = fields.at("int64");
-        auto file_manager_ctx = storage::FileManagerContext();
-        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-            milvus::proto::schema::Int64);
-        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-        file_manager_ctx.fieldDataMeta.field_id = fid.get();
-        milvus::storage::IndexMeta index_meta;
-        index_meta.field_id = fid.get();
-        index_meta.build_id = 1000 + fid.get();
-        index_meta.index_version = 2000 + fid.get();
-        file_manager_ctx.indexMeta = index_meta;
-
-        index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = milvus::DataType::INT64;
-        create_index_info.index_type = index_type;
-        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-            create_index_info, file_manager_ctx);
-
         std::vector<int64_t> data(RowCount());
         std::iota(data.begin(), data.end(), 0);
-        index->BuildWithRawDataForUT(data.size(), data.data());
-
-        segcore::LoadIndexInfo load_index_info;
-        load_index_info.index_params = GenIndexParams(index.get());
-        load_index_info.cache_index =
-            CreateTestCacheIndex("int64_scalar_index", std::move(index));
-        load_index_info.field_id = fid.get();
+        auto opened = BuildScalarReader<int64_t>(
+            fid, DataType::INT64, index_type, data.size(), data.data());
+        auto load_index_info = MakeLoadIndexInfo(
+            std::move(opened), DataType::INT64, fid.get());
         segment->LoadIndex(load_index_info);
     }
 
     void
     LoadString1ScalarIndex(const std::string& index_type) {
         auto fid = fields.at("string1");
-        auto file_manager_ctx = storage::FileManagerContext();
-        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-            milvus::proto::schema::VarChar);
-        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-        file_manager_ctx.fieldDataMeta.field_id = fid.get();
-        milvus::storage::IndexMeta index_meta;
-        index_meta.field_id = fid.get();
-        index_meta.build_id = 1000 + fid.get();
-        index_meta.index_version = 2000 + fid.get();
-        file_manager_ctx.indexMeta = index_meta;
-
-        index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = milvus::DataType::VARCHAR;
-        create_index_info.index_type = index_type;
-        auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-            create_index_info, file_manager_ctx);
-
         std::vector<std::string> data;
         data.reserve(RowCount());
         for (int64_t i = 0; i < RowCount(); ++i) {
             data.push_back("test" + std::to_string(i));
         }
-        if (index_type == index::MARISA_TRIE) {
-            // MARISA inherits the protobuf-based string UT builder; the
-            // inverted index overload accepts std::string objects directly.
-            proto::schema::StringArray values;
-            for (const auto& value : data) {
-                values.add_data(value);
-            }
-            const auto serialized = values.SerializeAsString();
-            index->BuildWithRawDataForUT(serialized.size(), serialized.data());
-        } else {
-            index->BuildWithRawDataForUT(data.size(), data.data());
-        }
-
-        segcore::LoadIndexInfo load_index_info;
-        load_index_info.index_params = GenIndexParams(index.get());
-        load_index_info.cache_index =
-            CreateTestCacheIndex("string1_scalar_index", std::move(index));
-        load_index_info.field_id = fid.get();
+        auto opened = BuildScalarReader<std::string>(
+            fid, DataType::VARCHAR, index_type, data.size(), data.data());
+        auto load_index_info = MakeLoadIndexInfo(
+            std::move(opened), DataType::VARCHAR, fid.get());
         segment->LoadIndex(load_index_info);
     }
 
@@ -765,33 +713,16 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
 
     // test with inverted index
     auto fid = fields.at("int64");
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::Int64);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = fid.get();
-    milvus::storage::IndexMeta index_meta;
-    index_meta.field_id = fid.get();
-    index_meta.build_id = rand();
-    index_meta.index_version = rand();
-    file_manager_ctx.indexMeta = index_meta;
-    index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = milvus::DataType::INT64;
-    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
-    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-        create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     auto pw = segment->chunk_data<int64_t>(nullptr, fid, 0);
     auto d = pw.get();
     std::copy(
         d.data(), d.data() + test_data_count, data.begin() + test_data_count);
 
-    index->BuildWithRawDataForUT(data.size(), data.data());
-    segcore::LoadIndexInfo load_index_info;
-    load_index_info.index_params = GenIndexParams(index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test_index", std::move(index));
-    load_index_info.field_id = fid.get();
+    auto opened = BuildScalarReader<int64_t>(
+        fid, DataType::INT64, index::INVERTED_INDEX_TYPE, data.size(), data.data());
+    auto load_index_info = MakeLoadIndexInfo(
+        std::move(opened), DataType::INT64, fid.get());
     segment->LoadIndex(load_index_info);
 
     expr = std::make_shared<expr::CompareExpr>(
@@ -933,9 +864,17 @@ TEST(TestChunkSegmentStorageV2Regression,
     ASSERT_TRUE(fs->DeleteDir(root).ok());
 }
 
-TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
+TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexValueLookup) {
     LoadInt64ScalarIndex(index::ASCENDING_SORT);
-    ASSERT_TRUE(segment->HasRawData(fields.at("int64").get()));
+    const auto field_id = fields.at("int64");
+    const auto capabilities = segment->IndexCapability(field_id);
+    ASSERT_EQ(capabilities.entries().size(), 1);
+    ASSERT_TRUE(capabilities.entries().front().caps.value_lookup);
+    // Scalar values use the value-reader contract, independently of
+    // HasRawData. Remove the column so the assertions exercise index lookup.
+    segment->DropFieldData(field_id);
+    ASSERT_FALSE(segment->HasFieldData(field_id));
+    ASSERT_EQ(segment->num_chunk_data(field_id), 0);
 
     auto query_config = std::make_shared<exec::QueryConfig>(
         std::unordered_map<std::string, std::string>{
@@ -1826,7 +1765,7 @@ TEST(SkipIndexPr51441, StorageV2SkipQueryResultsCorrect) {
     StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_query_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_query_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 4 * 1024 * 1024);
 
@@ -1867,7 +1806,7 @@ TEST(SkipIndexPr51441, StorageV2CellPruneByFlag) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_prune_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_prune_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;  // 30000; only the top batch matches
@@ -1903,7 +1842,7 @@ TEST(SkipIndexPr51441, StorageV2PackingFollowsFlagRegardlessOfFooterMetrics) {
     StorageV2CellTargetGuard cell_target_guard(256 * 1024 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid, true);
-    const std::string root = "skip_pr51441_packing_metrics_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_packing_metrics_v2";
     for (bool all_null : {false, true}) {
         SCOPED_TRACE(all_null);
         ::parquet::WriterProperties::Builder properties;
@@ -1968,7 +1907,7 @@ TEST(SkipIndexPr51441, StorageV2VarcharInPrunesOnExecutedPath) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_varchar_in_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_varchar_in_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -2052,7 +1991,7 @@ TEST(SkipIndexPr51441, StorageV2OneSidedVarcharFooterStatsFailOpen) {
     ParquetStatsSkipIndexGuard skip_index_guard(true);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_one_sided_varchar_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_one_sided_varchar_v2";
     const int64_t N = WriteOneSidedVarcharStatsV2Parquet(schema, pk_fid, root);
 
     // Exercise the real Arrow writer/reader boundary.  Arrow's default 4 KiB
@@ -2101,7 +2040,7 @@ TEST(SkipIndexPr51441, PrunedCellsAreNotPrefetchedOrPinned) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_no_touch_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_no_touch_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -2171,7 +2110,7 @@ TEST(SkipIndexPr51441, OutOfRangeBinaryRangePrefetchMatchesScan) {
                                         /*payload_fid=*/nullptr,
                                         /*nullable_val=*/false,
                                         DataType::INT32);
-    const std::string root = "skip_pr51441_out_of_range_range_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_out_of_range_range_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -2224,7 +2163,7 @@ TEST(SkipIndexPr51441, ArithmeticPredicatesDoNotUseSkipIndex) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid);
-    const std::string root = "skip_pr51441_arithmetic_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_arithmetic_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
 
@@ -2268,7 +2207,7 @@ TEST(SkipIndexPr51441, NullableSkippedCellsPreserveNotSemantics) {
     FieldId val_fid, pk_fid;
     auto schema = MakeSkipMeasureSchema(
         val_fid, pk_fid, /*payload_fid=*/nullptr, /*nullable_val=*/true);
-    const std::string root = "skip_pr51441_nullable_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_nullable_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;
@@ -2340,7 +2279,7 @@ TEST(SkipIndexPr51441, ConjunctBitmapInputStaysAlignedAcrossPrunedCells) {
     StorageV2CellTargetGuard cell_target_guard(64 * 1024);
     FieldId val_fid, pk_fid, payload_fid;
     auto schema = MakeSkipMeasureSchema(val_fid, pk_fid, &payload_fid);
-    const std::string root = "skip_pr51441_conjunct_cursor_v2";
+    const std::string root = TestLocalPath + "skip_pr51441_conjunct_cursor_v2";
     const int64_t N =
         WriteSkipMeasureV2Parquet(schema, pk_fid, root, 16 * 1024 * 1024);
     const int64_t threshold = N - 10000;

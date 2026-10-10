@@ -53,11 +53,11 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
-#include "index/IndexStats.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/Registry.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "indexbuilder/BuildSession.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
@@ -75,14 +75,19 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/artifact/ArtifactStats.h"
+#include "storage/artifact/LoadOptions.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::storage;
+
+namespace {
+constexpr int64_t DIM = 4;
+}
 
 SchemaPtr
 GenVectorArrayTestSchema() {
@@ -297,6 +302,86 @@ class TestVectorArrayStorageV2 : public testing::Test {
     }
 
  protected:
+    struct PublishedIndex {
+        index::IndexFamily family;
+        Config params;
+        storage::FileManagerContext context;
+        storage::ArtifactStats stats;
+    };
+
+    PublishedIndex
+    PublishIndex(const std::vector<std::string>& paths,
+                 FieldId field_id,
+                 int64_t segment_id,
+                 int64_t build_id,
+                 int64_t index_version,
+                 IndexVersion engine_version,
+                 Config params) {
+        auto field_meta = gen_field_meta(1,
+                                        2,
+                                        segment_id,
+                                        field_id.get(),
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        false);
+        auto index_meta =
+            gen_index_meta(segment_id, field_id.get(), build_id, index_version);
+        index_meta.dim = DIM;
+        auto cm = CreateChunkManager(gen_local_storage_config(TestLocalPath));
+        storage::FileManagerContext context(
+            field_meta, index_meta, cm, GetDefaultArrowFileSystem());
+        auto adapted = index::AdaptIndexType(
+            {.index_type = knowhere::IndexEnum::INDEX_HNSW,
+             .field_type = DataType::VECTOR_ARRAY,
+             .element_type = DataType::VECTOR_FLOAT,
+             .index_engine_version = engine_version,
+             .params = std::move(params)});
+        adapted.params[DIM_KEY] = DIM;
+        adapted.params["nullable"] = false;
+        adapted.params["num_rows"] = test_data_count_ * chunk_num_;
+        indexbuilder::BuildRequest request{
+            .family = adapted.family,
+            .params = adapted.params,
+            .value_type = adapted.value_type,
+            .field_id = field_id,
+            .source = indexbuilder::StorageV2BuildSource{{paths}},
+            .expected_rows = test_data_count_ * chunk_num_,
+            .staging_parent = TestLocalPath};
+        // Retain the actual parquet materialization/publication boundary.
+        // No resident synthetic tensor replaces the StorageV2 source.
+        indexbuilder::BuildSession session(std::move(request), context);
+        session.BuildFromSource();
+        auto stats = session.Publish();
+        return {std::move(adapted.family),
+                std::move(adapted.params),
+                std::move(context),
+                std::move(stats)};
+    }
+
+    index::IIndexReaderBasePtr
+    OpenIndex(const PublishedIndex& published,
+              bool mmap = false,
+              const std::string& mmap_name = "") {
+        std::vector<std::string> paths;
+        for (const auto& file : published.stats.Files()) {
+            paths.push_back(file.file_name);
+        }
+        storage::LoadOptions options;
+        options.params = published.params;
+        options.enable_mmap = mmap;
+        options.mmap_dir_path = TestLocalPath + "mmap/" + mmap_name;
+        auto context = published.context;
+        context.set_for_loading_index(true);
+        return index::LoaderRegistry::Instance()
+            .Lookup(published.family)
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       std::move(paths),
+                       index::LegacyIndexStorageConfig{
+                           storage::V1SourceLayout::MemoryEntries}},
+                   std::move(options)});
+    }
+
     SchemaPtr schema_;
     segcore::SegmentSealedUPtr segment_;
     int chunk_num_ = 2;
@@ -315,71 +400,25 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     std::vector<std::string> paths = {TestLocalPath +
                                       "test_data/101/10001.parquet"};
 
-    // Use the existing Arrow file system from SetUp
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-
-    // Prepare for index building
-    int64_t collection_id = 1;
-    int64_t partition_id = 2;
-    int64_t segment_id = 3;
-    int64_t index_build_id = 4000;
-    int64_t index_version = 4000;
-
-    auto field_meta =
-        milvus::segcore::gen_field_meta(collection_id,
-                                        partition_id,
-                                        segment_id,
-                                        vector_array_field_id.get(),
-                                        DataType::VECTOR_ARRAY,
-                                        DataType::VECTOR_FLOAT,
-                                        false);
-
-    auto index_meta = gen_index_meta(
-        segment_id, vector_array_field_id.get(), index_build_id, index_version);
-
-    // Create storage config pointing to the test data location
-    auto storage_config = gen_local_storage_config(TestLocalPath);
-    auto cm = CreateChunkManager(storage_config);
-
-    // Create index using storage v2 config
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
-
-    // Build index with storage v2 configuration
     Config config;
-    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
-    config[DIM_KEY] = DIM;
-    config[INDEX_NUM_ROWS_KEY] =
-        test_data_count_ * chunk_num_;  // Important: set row count
-    config[STORAGE_VERSION_KEY] = 2;    // Use storage v2
-    config[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
-    config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
-
-    // For storage v2, we need to provide segment insert files instead of individual binlog files
-    milvus::SegmentInsertFiles segment_insert_files;
-    segment_insert_files.emplace_back(
-        paths);  // Column group with vector array field
-    config[SEGMENT_INSERT_FILES_KEY] = segment_insert_files;
-    emb_list_hnsw_index->Build(config);
-
-    auto vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+    auto published = PublishIndex(
+        paths,
+        vector_array_field_id,
+        3,
+        4000,
+        4000,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        std::move(config));
+    auto owner = OpenIndex(published);
+    auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
+    ASSERT_NE(vec_index, nullptr);
 
     // Each row has 3 vectors, so total count should be rows * 3
-    EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 3);
-    EXPECT_EQ(vec_index->GetDim(), DIM);
+    EXPECT_EQ(owner->Count(), test_data_count_ * chunk_num_ * 3);
+    EXPECT_EQ(vec_index->Dim(), DIM);
 
     {
         auto vec_num = 10;
@@ -394,15 +433,17 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
                            const_cast<const size_t*>(query_vec_offsets.data()));
         query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
                            static_cast<int64_t>(query_vec_offsets.size() - 1));
+        query_dataset->Set(knowhere::meta::NQ,
+                           static_cast<int64_t>(query_vec_offsets.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
-        milvus::SearchInfo searchInfo;
+        index::VectorSearchParams searchInfo;
         searchInfo.topk_ = 5;
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         milvus::OpContext op_context;
-        vec_index->Query(
+        vec_index->Search(
             query_dataset, searchInfo, nullptr, &op_context, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
@@ -431,100 +472,34 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     std::vector<std::string> paths = {TestLocalPath +
                                       "test_data/101/10001.parquet"};
 
-    // Use the existing Arrow file system from SetUp
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-
-    // Prepare for index building
-    int64_t collection_id = 1;
-    int64_t partition_id = 2;
-    int64_t segment_id = 3;
-    int64_t index_build_id = 4000;
-    int64_t index_version = 4000;
-
-    auto field_meta =
-        milvus::segcore::gen_field_meta(collection_id,
-                                        partition_id,
-                                        segment_id,
-                                        vector_array_field_id.get(),
-                                        DataType::VECTOR_ARRAY,
-                                        DataType::VECTOR_FLOAT,
-                                        false);
-
-    auto index_meta = gen_index_meta(
-        segment_id, vector_array_field_id.get(), index_build_id, index_version);
-
-    // Create storage config pointing to the test data location
-    auto storage_config = gen_local_storage_config(TestLocalPath);
-    auto cm = CreateChunkManager(storage_config);
-
-    // Create index using storage v2 config
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_ARRAY;
-    create_index_info.metric_type = knowhere::metric::MAX_SIM_IP;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
-    auto emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
-
-    // Build index with storage v2 configuration
     Config config;
-    config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
-    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM_IP;
     config[knowhere::indexparam::M] = "16";
     config[knowhere::indexparam::EF] = "10";
-    config[DIM_KEY] = DIM;
-    config[INDEX_NUM_ROWS_KEY] =
-        test_data_count_ * chunk_num_;  // Important: set row count
-    config[STORAGE_VERSION_KEY] = 2;    // Use storage v2
-    config[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
-    config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    auto published = PublishIndex(
+        paths,
+        vector_array_field_id,
+        3,
+        4000,
+        4000,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        std::move(config));
+    ASSERT_GT(published.stats.MemSize(), 0);
+    const auto serialized_size = std::accumulate(
+        published.stats.Files().begin(),
+        published.stats.Files().end(),
+        int64_t{0},
+        [](int64_t size, const auto& file) { return size + file.file_size; });
+    ASSERT_GT(serialized_size, 0);
 
-    // For storage v2, we need to provide segment insert files instead of individual binlog files
-    milvus::SegmentInsertFiles segment_insert_files;
-    segment_insert_files.emplace_back(
-        paths);  // Column group with vector array field
-    config[SEGMENT_INSERT_FILES_KEY] = segment_insert_files;
-    emb_list_hnsw_index->Build(config);
-
-    auto create_index_result = emb_list_hnsw_index->Upload();
-    emb_list_hnsw_index.reset();
-    auto index_files = create_index_result->GetIndexFiles();
-    auto memSize = create_index_result->GetMemSize();
-    auto serializedSize = create_index_result->GetSerializedSize();
-    ASSERT_GT(memSize, 0);
-    ASSERT_GT(serializedSize, 0);
-
-    auto new_emb_list_hnsw_index =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info,
-            storage::FileManagerContext(field_meta, index_meta, cm, fs));
-    milvus::index::VectorIndex* vec_index =
-        dynamic_cast<milvus::index::VectorIndex*>(
-            new_emb_list_hnsw_index.get());
-    // mmap load
-    {
-        auto load_conf = generate_load_conf(
-            knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::MAX_SIM_IP, 0);
-        load_conf["index_files"] = index_files;
-        load_conf[milvus::index::MMAP_FILE_PATH] =
-            TestLocalPath + "mmap/test_emb_list_index";
-        load_conf[milvus::index::EMB_LIST_META_PATH] =
-            TestLocalPath + "mmap/test_index_meta";
-        load_conf[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
-            TestLocalPath + "mmap/test_raw_index";
-        load_conf[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
-        vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
-    }
+    auto owner = OpenIndex(published, true, "test_emb_list");
+    auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
+    ASSERT_NE(vec_index, nullptr);
     // search
     {
         // Each row has 3 vectors, so total count should be rows * 3
-        EXPECT_EQ(vec_index->Count(), test_data_count_ * chunk_num_ * 3);
-        EXPECT_EQ(vec_index->GetDim(), DIM);
+        EXPECT_EQ(owner->Count(), test_data_count_ * chunk_num_ * 3);
+        EXPECT_EQ(vec_index->Dim(), DIM);
         auto vec_num = 10;
         std::vector<float> query_vec = generate_float_vector(vec_num, DIM);
         auto query_dataset =
@@ -537,15 +512,17 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
                            const_cast<const size_t*>(query_vec_lims.data()));
         query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
                            static_cast<int64_t>(query_vec_lims.size() - 1));
+        query_dataset->Set(knowhere::meta::NQ,
+                           static_cast<int64_t>(query_vec_lims.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
-        milvus::SearchInfo searchInfo;
+        index::VectorSearchParams searchInfo;
         searchInfo.topk_ = 5;
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         milvus::OpContext op_context;
-        vec_index->Query(
+        vec_index->Search(
             query_dataset, searchInfo, nullptr, &op_context, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
@@ -569,9 +546,6 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
 
     std::vector<std::string> paths = {TestLocalPath +
                                       "test_data/101/10001.parquet"};
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto storage_config = gen_local_storage_config(TestLocalPath);
-    auto cm = CreateChunkManager(storage_config);
 
     const std::vector<std::string> strategies = {
         knowhere::meta::EMB_LIST_STRATEGY_MUVERA,
@@ -582,49 +556,12 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         const auto& strategy = strategies[i];
         SCOPED_TRACE(strategy);
 
-        int64_t collection_id = 1;
-        int64_t partition_id = 2;
-        int64_t segment_id = 30 + i;
-        int64_t index_build_id = 5000 + i;
-        int64_t index_version = 5000 + i;
-
-        auto field_meta =
-            milvus::segcore::gen_field_meta(collection_id,
-                                            partition_id,
-                                            segment_id,
-                                            vector_array_field_id.get(),
-                                            DataType::VECTOR_ARRAY,
-                                            DataType::VECTOR_FLOAT,
-                                            false);
-        auto index_meta = gen_index_meta(segment_id,
-                                         vector_array_field_id.get(),
-                                         index_build_id,
-                                         index_version);
-
-        milvus::index::CreateIndexInfo create_index_info;
-        create_index_info.field_type = DataType::VECTOR_ARRAY;
-        create_index_info.metric_type = knowhere::metric::MAX_SIM_COSINE;
-        create_index_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
-        create_index_info.index_engine_version =
-            knowhere::kEmbListMetaV2MinVersion;
-
-        auto emb_list_hnsw_index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(
-                create_index_info,
-                storage::FileManagerContext(field_meta, index_meta, cm, fs));
-
         Config config;
-        config[milvus::index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
-        config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+        config[knowhere::meta::METRIC_TYPE] = knowhere::metric::MAX_SIM_COSINE;
         config[knowhere::meta::ROWS] = test_data_count_ * chunk_num_ * 3;
         config[knowhere::indexparam::HNSW_M] = "16";
         config[knowhere::indexparam::EFCONSTRUCTION] = "96";
         config[knowhere::indexparam::EF] = "64";
-        config[DIM_KEY] = DIM;
-        config[INDEX_NUM_ROWS_KEY] = test_data_count_ * chunk_num_;
-        config[STORAGE_VERSION_KEY] = 2;
-        config[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
-        config[ELEMENT_TYPE_KEY] = DataType::VECTOR_FLOAT;
         config["emb_list_strategy"] = strategy;
         if (strategy == knowhere::meta::EMB_LIST_STRATEGY_MUVERA) {
             config["muvera_num_projections"] = "3";
@@ -640,40 +577,50 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
             config["lemur_num_layers"] = "1";
         }
 
-        milvus::SegmentInsertFiles segment_insert_files;
-        segment_insert_files.emplace_back(paths);
-        config[SEGMENT_INSERT_FILES_KEY] = segment_insert_files;
-        emb_list_hnsw_index->Build(config);
+        auto published = PublishIndex(paths,
+                                      vector_array_field_id,
+                                      30 + i,
+                                      5000 + i,
+                                      5000 + i,
+                                      knowhere::kEmbListMetaV2MinVersion,
+                                      std::move(config));
+        ASSERT_GT(published.stats.MemSize(), 0);
+        const auto serialized_size = std::accumulate(
+            published.stats.Files().begin(),
+            published.stats.Files().end(),
+            int64_t{0},
+            [](int64_t size, const auto& file) {
+                return size + file.file_size;
+            });
+        ASSERT_GT(serialized_size, 0);
 
-        auto create_index_result = emb_list_hnsw_index->Upload();
-        emb_list_hnsw_index.reset();
-        auto index_files = create_index_result->GetIndexFiles();
-        ASSERT_GT(create_index_result->GetMemSize(), 0);
-        ASSERT_GT(create_index_result->GetSerializedSize(), 0);
+        auto materialized_owner = OpenIndex(published);
+        auto materialized_index =
+            dynamic_cast<const index::IVectorReader*>(materialized_owner.get());
+        ASSERT_NE(materialized_index, nullptr);
+        EXPECT_EQ(materialized_index->Dim(), DIM);
 
-        auto new_emb_list_hnsw_index =
-            milvus::index::IndexFactory::GetInstance().CreateIndex(
-                create_index_info,
-                storage::FileManagerContext(field_meta, index_meta, cm, fs));
-        auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(
-            new_emb_list_hnsw_index.get());
+        auto mismatched = published;
+        mismatched.params[DIM_KEY] = DIM + 1;
+        for (const bool mmap : {false, true}) {
+            EXPECT_THROW(OpenIndex(mismatched,
+                                   mmap,
+                                   "test_emb_list_bad_dim_" + strategy),
+                         SegcoreError);
+        }
+
+        auto owner = OpenIndex(published, true, "test_emb_list_" + strategy);
+        auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
         ASSERT_NE(vec_index, nullptr);
+        EXPECT_GT(owner->Count(), 0);
+        EXPECT_EQ(vec_index->Dim(), DIM);
 
-        auto load_conf = generate_load_conf(knowhere::IndexEnum::INDEX_HNSW,
-                                            knowhere::metric::MAX_SIM_COSINE,
-                                            0);
-        load_conf["index_files"] = index_files;
-        load_conf[milvus::index::MMAP_FILE_PATH] =
-            TestLocalPath + "mmap/test_emb_list_" + strategy + "_index";
-        load_conf[milvus::index::EMB_LIST_META_PATH] =
-            TestLocalPath + "mmap/test_emb_list_" + strategy + "_meta";
-        load_conf[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
-            TestLocalPath + "mmap/test_emb_list_" + strategy + "_raw";
-        load_conf[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
-
-        vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
-        EXPECT_GT(vec_index->Count(), 0);
+        const std::vector<int64_t> ids = {0, 1};
+        const auto [raw_vectors, offsets] = vec_index->GetEmbListByIds(
+            knowhere::GenIdsDataSet(ids.size(), ids.data()),
+            knowhere::metric::MAX_SIM_COSINE);
+        EXPECT_EQ(offsets, (std::vector<size_t>{0, 3, 6}));
+        EXPECT_EQ(raw_vectors.size(), 6 * DIM * sizeof(float));
 
         auto vec_num = 10;
         std::vector<float> query_vec = generate_float_vector(vec_num, DIM);
@@ -684,19 +631,21 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
                            const_cast<const size_t*>(query_vec_lims.data()));
         query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
                            static_cast<int64_t>(query_vec_lims.size() - 1));
+        query_dataset->Set(knowhere::meta::NQ,
+                           static_cast<int64_t>(query_vec_lims.size() - 1));
 
         auto search_conf = knowhere::Json{
             {knowhere::indexparam::EF, 64},
             {knowhere::indexparam::RETRIEVAL_ANN_RATIO, 3.0},
             {"emb_list_rerank", true},
         };
-        milvus::SearchInfo searchInfo;
+        index::VectorSearchParams searchInfo;
         searchInfo.topk_ = 5;
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_COSINE;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
         milvus::OpContext op_context;
-        vec_index->Query(
+        vec_index->Search(
             query_dataset, searchInfo, nullptr, &op_context, result);
 
         EXPECT_EQ(result.total_nq_, 2);

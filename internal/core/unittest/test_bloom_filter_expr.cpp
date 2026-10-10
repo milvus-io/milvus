@@ -54,8 +54,6 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "expr/ITypeExpr.h"
-#include "index/BitmapIndex.h"
-#include "index/ScalarIndexSort.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
@@ -63,6 +61,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
+#include "test_utils/CountingScalarReader.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -646,15 +646,6 @@ TEST(BloomFilterExprTest, ProtoParserDispatchAndTypeCheck) {
 // ---------------------------------------------------------------------------
 std::atomic<int64_t> g_bloom_reverse_lookup_calls{0};
 
-class CountingBloomInt64Index : public index::ScalarIndexSort<int64_t> {
- public:
-    std::optional<int64_t>
-    Reverse_Lookup(size_t offset) const override {
-        ++g_bloom_reverse_lookup_calls;
-        return index::ScalarIndexSort<int64_t>::Reverse_Lookup(offset);
-    }
-};
-
 class BloomFilterExprEvalTest : public ::testing::Test {
  protected:
     void
@@ -715,7 +706,7 @@ class BloomFilterExprEvalTest : public ::testing::Test {
                     N,
                     dataset_->row_ids_.data(),
                     dataset_->timestamps_.data(),
-                    dataset_->raw_);
+                    dataset_->SharedRaw());
         return seg;
     }
 
@@ -730,12 +721,15 @@ class BloomFilterExprEvalTest : public ::testing::Test {
             schema_, *dataset_, false, {i64_fid_.get()});
         EXPECT_FALSE(segment->HasFieldData(i64_fid_));
 
-        LoadIndexInfo index_info;
+        LoadIndexInfo index_info{};
         index_info.field_id = i64_fid_.get();
         index_info.field_type = DataType::INT64;
-        auto scalar_index = std::make_unique<CountingBloomInt64Index>();
-        scalar_index->Build(N, i64_col_.data(), i64_valid_.data());
-        index_info.index_params = GenIndexParams(scalar_index.get());
+        auto scalar_index = std::make_unique<CountingScalarReader<int64_t>>(
+            BuildTestScalarIndex<int64_t>(
+                "sort", N, i64_col_.data(), i64_valid_.data()),
+            g_bloom_reverse_lookup_calls);
+        index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(index_info, *scalar_index, "sort");
         index_info.cache_index = CreateTestCacheIndex("bloom-counting-index",
                                                       std::move(scalar_index));
         segment->LoadIndex(index_info);
@@ -1639,16 +1633,17 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedScalarIndexOnly) {
     // the index, and stays that way after.
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
     idx.index_params["index_type"] = "STL_SORT";
     // Build the index WITH the field's real nullability, so the index's
     // Reverse_Lookup returns nullopt exactly for the segment's NULL rows.
     // (GenScalarIndexing's raw-pointer Build would mark every row valid.)
-    auto index = index::CreateScalarIndexSort<int64_t>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, i64_col_.data(), i64_valid_.data());
+    idx.index_params = GenIndexParams(index.get(), "sort");
+    SetTestIndexMetadata(idx, *index, "sort");
     idx.cache_index = CreateTestCacheIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
@@ -1747,12 +1742,13 @@ TEST_F(BloomFilterExprEvalTest,
         schema_, *dataset_, false, GetExcludedFieldIds(schema_, load_fields));
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
-    auto index = index::CreateScalarIndexSort<int64_t>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, i64_col_.data(), i64_valid_.data());
+    idx.index_params = GenIndexParams(index.get(), "sort");
+    SetTestIndexMetadata(idx, *index, "sort");
     idx.cache_index = CreateTestCacheIndex("snapshot-race", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
@@ -1897,17 +1893,18 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedBitmapIndexOnlyRejected) {
     // the index, and stays that way after.
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
     // A bare BITMAP index: the default in-memory Build does NOT enable the
     // offset cache (use_offset_cache_ stays false), so its per-row
     // Reverse_Lookup is O(cardinality) and SupportFastReverseLookup() == false.
     idx.index_params["index_type"] = "BITMAP";
-    auto index = std::make_unique<index::BitmapIndex<int64_t>>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    // GenIndexParams reads index->Type(), which BitmapIndex sets to "BITMAP".
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "bitmap", N, i64_col_.data(), i64_valid_.data());
+    // Retain bitmap family metadata and its disabled offset cache.
+    idx.index_params = GenIndexParams(index.get(), "bitmap");
+    SetTestIndexMetadata(idx, *index, "bitmap");
     idx.cache_index = CreateTestCacheIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));

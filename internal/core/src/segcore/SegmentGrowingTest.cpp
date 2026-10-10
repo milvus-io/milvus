@@ -117,7 +117,7 @@ TEST(Growing, DeleteCount) {
                     c,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     Timestamp begin_ts = 100;
     auto tss = GenTss(c, begin_ts);
@@ -143,7 +143,7 @@ TEST(Growing, RealCount) {
                     c,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // no delete.
     ASSERT_EQ(c, segment->get_real_count());
@@ -227,7 +227,7 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     std::vector<std::string> texts = {"text after recovery checkpoint"};
     std::vector<float> vectors(dim, 1.0F);
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(1);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, 1, (*schema)[pk]).release());
@@ -241,7 +241,7 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto offset = segment->PreInsert(1);
     ASSERT_EQ(offset, checkpoint_rows);
     ASSERT_NO_THROW(segment->Insert(
-        offset, 1, row_ids.data(), timestamps.data(), insert_data.get()));
+        offset, 1, row_ids.data(), timestamps.data(), insert_data));
     EXPECT_EQ(segment->get_row_count(), checkpoint_rows + 1);
 
     std::filesystem::remove_all(base_path);
@@ -310,8 +310,50 @@ TEST(Growing, InsertSkipsMissingFunctionOutputField) {
                                     row_count,
                                     dataset.row_ids_.data(),
                                     dataset.timestamps_.data(),
-                                    dataset.raw_));
+                                    std::make_shared<InsertRecordProto>(*dataset.raw_)));
+    EXPECT_EQ(segment->get_row_count(), row_count);
+    EXPECT_TRUE(segment->FieldAccessible(pk));
+    EXPECT_FALSE(segment->HasFieldData(sparse));
     EXPECT_FALSE(segment->FieldAccessible(sparse));
+}
+
+TEST(Growing, AllNullVectorFieldIsAccessibleWithoutRawChunks) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2, true);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(
+        schema, row_count, 42, 0, 1, 10, 1, false, true, false, 100);
+    EXPECT_FALSE(segment->FieldAccessible(vec));
+    auto offset = segment->PreInsert(row_count);
+    segment->Insert(offset,
+                    row_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
+
+    EXPECT_EQ(segment->get_row_count(), row_count);
+    EXPECT_EQ(segment_impl->get_insert_record().get_data_base(vec)->num_chunk(),
+              0);
+    EXPECT_FALSE(segment->HasIndex(vec));
+    EXPECT_TRUE(segment->HasFieldData(vec));
+    EXPECT_TRUE(segment->FieldAccessible(vec));
+
+    const std::array<int64_t, row_count> offsets = {0, 1, 2, 3, 4};
+    auto actual =
+        segment->bulk_subscript(nullptr, vec, offsets.data(), row_count);
+    const auto& valid_data = GetFieldDataRowValidData(*actual);
+    ASSERT_EQ(valid_data.size(), row_count);
+    for (bool valid : valid_data) {
+        EXPECT_FALSE(valid);
+    }
+    EXPECT_TRUE(actual->vectors().float_vector().data().empty());
 }
 
 TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
@@ -333,7 +375,7 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
     GEOS_finish_r(geos_ctx);
 
     auto make_record = [&]() {
-        auto record = std::make_unique<InsertRecordProto>();
+        auto record = std::make_shared<InsertRecordProto>();
         record->set_num_rows(row_count);
         record->mutable_fields_data()->AddAllocated(
             CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
@@ -356,7 +398,7 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
                             row_count,
                             row_ids.data(),
                             timestamps.data(),
-                            record.get());
+                            record);
             FAIL() << "expected malformed geometry insert to be rejected";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
@@ -388,7 +430,7 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                     row_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     auto new_schema = std::make_shared<Schema>();
     new_schema->set_schema_version(2);
@@ -552,7 +594,7 @@ TEST_P(GrowingTest, FillData) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto bool_result = segment->bulk_subscript(
@@ -847,7 +889,7 @@ TEST(Growing, FillNullableData) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto bool_result = segment->bulk_subscript(
@@ -1185,7 +1227,7 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
                         batch_size,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
 
         auto& insert_record = segment->get_insert_record();
         ASSERT_TRUE(insert_record.is_valid_data_exist(vec));
@@ -1300,7 +1342,7 @@ TEST_P(GrowingTest, FillVectorArrayData) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto int64_result = segment->bulk_subscript(
@@ -1385,7 +1427,7 @@ TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
     ASSERT_NE(segment, nullptr);
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(2);
 
     auto pk_data = insert_record_proto->add_fields_data();
@@ -1416,7 +1458,7 @@ TEST(GrowingTest, QueryNullableVectorArrayUsesPhysicalOffsets) {
                     2,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     std::array<int64_t, 2> offsets = {0, 1};
     std::unique_ptr<DataArray> result;
@@ -1457,7 +1499,7 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
     ASSERT_NE(segment, nullptr);
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(2);
 
     auto pk_data = insert_record_proto->add_fields_data();
@@ -1491,7 +1533,7 @@ TEST(GrowingTest, QueryNullableVectorArrayStoresRowDenseInputByValidData) {
                     2,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     std::array<int64_t, 2> offsets = {0, 1};
     std::unique_ptr<DataArray> result;
@@ -1613,7 +1655,7 @@ TEST(GrowingTest, SearchVectorArray) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // Prepare search query
     int vec_num = 10;  // Total number of query vectors
@@ -1686,7 +1728,7 @@ TEST(Growing, TestMaskWithTTLField) {
         }
     }
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(test_data_count);
 
     {
@@ -1716,7 +1758,7 @@ TEST(Growing, TestMaskWithTTLField) {
                     test_data_count,
                     row_ids.data(),
                     ts_data.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     // Test TTL field filtering using CompileExpressions pathway
     Timestamp query_ts = base_ts + test_data_count;
@@ -1810,7 +1852,7 @@ TEST(Growing, TestMaskWithNullableTTLField) {
     }
 
     // Create insert record proto
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(test_data_count);
 
     // Add PK field data
@@ -1852,7 +1894,7 @@ TEST(Growing, TestMaskWithNullableTTLField) {
                     test_data_count,
                     row_ids.data(),
                     ts_data.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     // Test TTL field filtering using CompileExpressions pathway
     Timestamp query_ts = base_ts + test_data_count;
@@ -1945,7 +1987,7 @@ TEST(Growing, FilterOnlySearchUsesEntityTTLPhysicalTime) {
                     test_data_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     Timestamp query_ts = test_data_count + 10;
     int64_t active_count = segment->get_active_count(query_ts);
@@ -2034,7 +2076,7 @@ TEST(Growing, ResourceEstimationAfterInsert) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // After insert, resource usage should be positive
     auto resource = segment_impl->EstimateSegmentResourceUsage();
@@ -2072,7 +2114,7 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
                     N1,
                     dataset1.row_ids_.data(),
                     dataset1.timestamps_.data(),
-                    dataset1.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset1.raw_));
     auto resource1 = segment_impl->EstimateSegmentResourceUsage();
 
     // Second insert
@@ -2083,7 +2125,7 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
                     N2,
                     dataset2.row_ids_.data(),
                     dataset2.timestamps_.data(),
-                    dataset2.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset2.raw_));
     auto resource2 = segment_impl->EstimateSegmentResourceUsage();
 
     // Resource should increase after second insert
@@ -2110,7 +2152,7 @@ TEST(Growing, ResourceTrackingAfterDelete) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     auto resource_before_delete = segment_impl->EstimateSegmentResourceUsage();
     EXPECT_GT(resource_before_delete.memory_bytes, 0);
@@ -2156,7 +2198,7 @@ TEST(Growing, ConcurrentInsertResourceTracking) {
                             rows_per_thread,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
         });
     }
 
@@ -2242,14 +2284,17 @@ TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
                     rows_per_batch,
                     first.row_ids_.data(),
                     first.timestamps_.data(),
-                    first.raw_);
+                    std::make_shared<InsertRecordProto>(*first.raw_));
     segment->Insert(rows_per_batch,
                     rows_per_batch,
                     second.row_ids_.data(),
                     second.timestamps_.data(),
-                    second.raw_);
+                    std::make_shared<InsertRecordProto>(*second.raw_));
     EXPECT_EQ(segment->get_row_count(), total_rows);
-    EXPECT_TRUE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    ASSERT_TRUE(index_pin);
+    EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
+    EXPECT_EQ(index_pin.Reader().Count(), valid_per_batch * 2);
 
     const auto& insert_record = segment_impl->get_insert_record();
     auto* vector_data = insert_record.get_data_base(vec);
@@ -2328,12 +2373,11 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
                     first_batch,
                     first.row_ids_.data(),
                     first.timestamps_.data(),
-                    first.raw_);
+                    std::make_shared<InsertRecordProto>(*first.raw_));
 
-    const auto& indexing_record = segment_impl->get_indexing_record();
     // Fixture guard: the first batch must stay below the build threshold so
     // the raw chunks still exist when the reference is taken.
-    ASSERT_FALSE(indexing_record.SyncDataWithIndex(vec));
+    ASSERT_FALSE(segment_impl->PinGrowingIndex(vec));
     auto* vec_base = segment_impl->get_insert_record().get_data_base(vec);
     ASSERT_GT(vec_base->num_chunk(), 0);
 
@@ -2356,9 +2400,12 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
                     second_batch,
                     second.row_ids_.data(),
                     second.timestamps_.data(),
-                    second.raw_);
-    ASSERT_TRUE(indexing_record.SyncDataWithIndex(vec));
-    ASSERT_TRUE(indexing_record.HasRawData(vec));
+                    std::make_shared<InsertRecordProto>(*second.raw_));
+    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    ASSERT_TRUE(index_pin);
+    EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
+    EXPECT_EQ(index_pin.Reader().Count(), total_rows);
+    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec));
     EXPECT_EQ(vec_base->num_chunk(), 0)
         << "reclamation must proceed even while storage references are live";
 
@@ -2425,7 +2472,7 @@ TEST(Growing, ReopenRetryAfterTextIndexFailureBackfillsOnce) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     // Attempt 1: analyzer params are not valid JSON, so the text-index build
     // throws AFTER the nullable-vector column was backfilled. The EXPECT also
@@ -2480,7 +2527,7 @@ TEST(Growing, ReopenRetryAfterTextIndexFailureBackfillsOnce) {
     auto more = DataGen(v3, N, 43, N);
     ASSERT_EQ(segment->PreInsert(N), N);
     segment->Insert(
-        N, N, more.row_ids_.data(), more.timestamps_.data(), more.raw_);
+        N, N, more.row_ids_.data(), more.timestamps_.data(), std::make_shared<InsertRecordProto>(*more.raw_));
     EXPECT_EQ(segment->get_row_count(), 2 * N);
     EXPECT_EQ(segment_impl->get_insert_record()
                   .get_data_base(nvec_fid)
@@ -2512,7 +2559,7 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
     auto resource = segment_impl->EstimateSegmentResourceUsage();
 
@@ -2617,7 +2664,7 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
     std::array<bool, row_count> valid = {true, true};
     std::array<std::string, row_count> texts = {"a", "b"};
 
-    auto record = std::make_unique<InsertRecordProto>();
+    auto record = std::make_shared<InsertRecordProto>();
     record->set_num_rows(row_count);
     record->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk])
@@ -2633,7 +2680,7 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
     auto offset = segment->PreInsert(row_count);
     try {
         segment->Insert(
-            offset, row_count, row_ids.data(), timestamps.data(), record.get());
+            offset, row_count, row_ids.data(), timestamps.data(), record);
         FAIL() << "expected short valid_data to be rejected";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);

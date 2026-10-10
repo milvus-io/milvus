@@ -14,12 +14,16 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <memory>
+#include <cmath>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 #include "common/QueryResult.h"
 #include "common/Types.h"
-#include "index/ScalarIndex.h"
-
-using milvus::index::ScalarIndex;
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 namespace {
 
 bool
@@ -66,56 +70,90 @@ assert_order(const milvus::SearchResult& result,
 }
 
 template <typename T>
+using AssertQueryValue =
+    std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+
+template <typename T>
+inline auto
+assert_query_values(const std::vector<T>& arr) {
+    auto values = std::make_unique<AssertQueryValue<T>[]>(arr.size());
+    for (size_t i = 0; i < arr.size(); ++i) {
+        values[i] = arr[i];
+    }
+    return values;
+}
+
+template <typename T>
 inline void
-assert_in(ScalarIndex<T>* index, const std::vector<T>& arr) {
-    // hard to compare floating point value.
-    if (std::is_floating_point_v<T>) {
+assert_in(const milvus::index::IIndexReaderBase* base,
+          const std::vector<T>& arr) {
+    if constexpr (std::is_floating_point_v<T>) {
         return;
     }
-
-    auto bitset1 = index->In(arr.size(), arr.data());
+    const auto* index = dynamic_cast<
+        const milvus::index::IScalarPredicateReader<AssertQueryValue<T>>*>(
+        base);
+    ASSERT_NE(index, nullptr);
+    auto values = assert_query_values(arr);
+    auto bitset1 = index->In(arr.size(), values.get());
     ASSERT_EQ(arr.size(), bitset1.size());
     ASSERT_TRUE(bitset1.any());
-    auto test = std::make_unique<T>(arr[arr.size() - 1] + 1);
-    auto bitset2 = index->In(1, test.get());
-    ASSERT_EQ(arr.size(), bitset2.size());
-    ASSERT_TRUE(bitset2.none());
+    if constexpr (!std::is_same_v<T, std::string> &&
+                  !std::is_same_v<T, std::string_view>) {
+        const T absent = arr.back() + 1;
+        auto bitset2 = index->In(1, &absent);
+        ASSERT_EQ(arr.size(), bitset2.size());
+        ASSERT_TRUE(bitset2.none());
+    }
 }
 
 template <typename T>
 inline void
-assert_not_in(ScalarIndex<T>* index, const std::vector<T>& arr) {
-    auto bitset1 = index->NotIn(arr.size(), arr.data());
+assert_not_in(const milvus::index::IIndexReaderBase* base,
+              const std::vector<T>& arr) {
+    const auto* index = dynamic_cast<
+        const milvus::index::IScalarPredicateReader<AssertQueryValue<T>>*>(
+        base);
+    ASSERT_NE(index, nullptr);
+    auto values = assert_query_values(arr);
+    auto bitset1 = index->NotIn(arr.size(), values.get());
     ASSERT_EQ(arr.size(), bitset1.size());
     ASSERT_TRUE(bitset1.none());
-    auto test = std::make_unique<T>(arr[arr.size() - 1] + 1);
-    auto bitset2 = index->NotIn(1, test.get());
-    ASSERT_EQ(arr.size(), bitset2.size());
-    ASSERT_TRUE(bitset2.any());
+    if constexpr (!std::is_same_v<T, std::string> &&
+                  !std::is_same_v<T, std::string_view>) {
+        const T absent = arr.back() + 1;
+        auto bitset2 = index->NotIn(1, &absent);
+        ASSERT_EQ(arr.size(), bitset2.size());
+        ASSERT_TRUE(bitset2.any());
+    }
 }
 
 template <typename T>
 inline void
-assert_range(ScalarIndex<T>* index, const std::vector<T>& arr) {
-    auto test_min = arr[0];
-    auto test_max = arr[arr.size() - 1];
-
-    auto bitset1 = index->Range(test_min - 1, milvus::OpType::GreaterThan);
-    ASSERT_EQ(arr.size(), bitset1.size());
-    ASSERT_TRUE(bitset1.any());
-
-    auto bitset2 = index->Range(test_min, milvus::OpType::GreaterEqual);
+assert_range(const milvus::index::IIndexReaderBase* base,
+             const std::vector<T>& arr) {
+    using Op = milvus::index::CompareOp;
+    const auto* index = dynamic_cast<
+        const milvus::index::IScalarPredicateReader<AssertQueryValue<T>>*>(
+        base);
+    ASSERT_NE(index, nullptr);
+    const AssertQueryValue<T> test_min = arr.front();
+    const AssertQueryValue<T> test_max = arr.back();
+    if constexpr (!std::is_same_v<T, std::string> &&
+                  !std::is_same_v<T, std::string_view>) {
+        auto bitset1 = index->Range(test_min - 1, Op::GreaterThan);
+        ASSERT_EQ(arr.size(), bitset1.size());
+        ASSERT_TRUE(bitset1.any());
+        auto bitset3 = index->Range(test_max + 1, Op::LessThan);
+        ASSERT_EQ(arr.size(), bitset3.size());
+        ASSERT_TRUE(bitset3.any());
+    }
+    auto bitset2 = index->Range(test_min, Op::GreaterEqual);
     ASSERT_EQ(arr.size(), bitset2.size());
     ASSERT_TRUE(bitset2.any());
-
-    auto bitset3 = index->Range(test_max + 1, milvus::OpType::LessThan);
-    ASSERT_EQ(arr.size(), bitset3.size());
-    ASSERT_TRUE(bitset3.any());
-
-    auto bitset4 = index->Range(test_max, milvus::OpType::LessEqual);
+    auto bitset4 = index->Range(test_max, Op::LessEqual);
     ASSERT_EQ(arr.size(), bitset4.size());
     ASSERT_TRUE(bitset4.any());
-
     auto bitset5 = index->Range(test_min, true, test_max, true);
     ASSERT_EQ(arr.size(), bitset5.size());
     ASSERT_TRUE(bitset5.any());
@@ -123,80 +161,22 @@ assert_range(ScalarIndex<T>* index, const std::vector<T>& arr) {
 
 template <typename T>
 inline void
-assert_reverse(ScalarIndex<T>* index, const std::vector<T>& arr) {
+assert_reverse(const milvus::index::IIndexReaderBase* base,
+               const std::vector<T>& arr) {
+    const auto* index = dynamic_cast<
+        const milvus::index::IScalarValueReader<AssertQueryValue<T>>*>(base);
+    ASSERT_NE(index, nullptr);
     for (size_t offset = 0; offset < arr.size(); ++offset) {
-        auto raw = index->Reverse_Lookup(offset);
+        auto raw = index->Lookup(offset);
         ASSERT_TRUE(raw.has_value());
-        ASSERT_EQ(raw.value(), arr[offset]);
+        if constexpr (std::is_same_v<T, float>) {
+            ASSERT_TRUE(compare_float(raw.value(), arr[offset]));
+        } else if constexpr (std::is_same_v<T, double>) {
+            ASSERT_TRUE(compare_double(raw.value(), arr[offset]));
+        } else {
+            ASSERT_EQ(raw.value(), arr[offset]);
+        }
     }
 }
 
-template <>
-inline void
-assert_reverse(ScalarIndex<float>* index, const std::vector<float>& arr) {
-    for (size_t offset = 0; offset < arr.size(); ++offset) {
-        auto raw = index->Reverse_Lookup(offset);
-        ASSERT_TRUE(raw.has_value());
-        ASSERT_TRUE(compare_float(raw.value(), arr[offset]));
-    }
-}
-
-template <>
-inline void
-assert_reverse(ScalarIndex<double>* index, const std::vector<double>& arr) {
-    for (size_t offset = 0; offset < arr.size(); ++offset) {
-        auto raw = index->Reverse_Lookup(offset);
-        ASSERT_TRUE(raw.has_value());
-        ASSERT_TRUE(compare_double(raw.value(), arr[offset]));
-    }
-}
-
-template <>
-inline void
-assert_reverse(ScalarIndex<std::string>* index,
-               const std::vector<std::string>& arr) {
-    for (size_t offset = 0; offset < arr.size(); ++offset) {
-        auto raw = index->Reverse_Lookup(offset);
-        ASSERT_TRUE(raw.has_value());
-        ASSERT_TRUE(arr[offset].compare(raw.value()) == 0);
-    }
-}
-
-template <>
-inline void
-assert_in(ScalarIndex<std::string>* index,
-          const std::vector<std::string>& arr) {
-    auto bitset1 = index->In(arr.size(), arr.data());
-    ASSERT_EQ(arr.size(), bitset1.size());
-    ASSERT_TRUE(bitset1.any());
-}
-
-template <>
-inline void
-assert_not_in(ScalarIndex<std::string>* index,
-              const std::vector<std::string>& arr) {
-    auto bitset1 = index->NotIn(arr.size(), arr.data());
-    ASSERT_EQ(arr.size(), bitset1.size());
-    ASSERT_TRUE(bitset1.none());
-}
-
-template <>
-inline void
-assert_range(ScalarIndex<std::string>* index,
-             const std::vector<std::string>& arr) {
-    auto test_min = arr[0];
-    auto test_max = arr[arr.size() - 1];
-
-    auto bitset2 = index->Range(test_min, milvus::OpType::GreaterEqual);
-    ASSERT_EQ(arr.size(), bitset2.size());
-    ASSERT_TRUE(bitset2.any());
-
-    auto bitset4 = index->Range(test_max, milvus::OpType::LessEqual);
-    ASSERT_EQ(arr.size(), bitset4.size());
-    ASSERT_TRUE(bitset4.any());
-
-    auto bitset5 = index->Range(test_min, true, test_max, true);
-    ASSERT_EQ(arr.size(), bitset5.size());
-    ASSERT_TRUE(bitset5.any());
-}
 }  // namespace

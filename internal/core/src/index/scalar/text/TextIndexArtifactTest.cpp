@@ -29,9 +29,17 @@
 #include "index/contracts/query/ITextMatchReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
+#include "tantivy-wrapper.h"
 
 namespace milvus::index::test {
 namespace {
+
+TEST(TextIndexArtifactTest, WriterBudgetConstantsMatchBuildAndGrowingModes) {
+    EXPECT_EQ(tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
 
 storage::ArtifactPtr
 BuildText(const ReaderBackend& backend, bool nullable) {

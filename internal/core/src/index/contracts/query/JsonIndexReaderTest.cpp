@@ -446,6 +446,60 @@ AddJsonFlatRoutingCases(IndexTestCases& cases) {
                                     {0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13});
     AddExistsCase<std::string_view>(
         cases, "SupportedPathWithNoValues", "JsonAllMissing", shape, "/a", {});
+    AddJsonCase<std::string_view>(
+        cases,
+        "AbsentValuesDoNotMakeSupportedPathUnresolvable",
+        "JsonAllMissing",
+        shape,
+        [](const auto&, const auto& data, auto& reader) {
+            const auto* json = JsonReader(reader);
+            ASSERT_NE(json, nullptr);
+            const auto casts = json->CastTypesOf("/a");
+            ASSERT_FALSE(casts.empty());
+            for (const auto cast : casts) {
+                auto resolved = json->Resolve("/a", cast);
+                ASSERT_TRUE(resolved);
+                EXPECT_EQ(resolved->Count(), data.values.size());
+            }
+            ExpectHits(json->Exists("/a"), data.values.size(), {});
+        });
+    AddJsonCase<std::string_view>(
+        cases,
+        "RepeatedResolutionKeepsEarlierHandleUsable",
+        "JsonEmployees",
+        shape,
+        [](const auto&, const auto& data, auto& reader) {
+            const auto* json = JsonReader(reader);
+            ASSERT_NE(json, nullptr);
+            const auto cast = Cast("VARCHAR");
+            JsonResolvedReader first;
+            const auto* first_predicate =
+                ResolvedPredicate<std::string_view>(
+                    *json, "/profile/name/first", cast, data.values.size(), first);
+            ASSERT_NE(first_predicate, nullptr);
+            JsonResolvedReader second;
+            const auto* second_predicate =
+                ResolvedPredicate<std::string_view>(
+                    *json, "/profile/name/first", cast, data.values.size(), second);
+            ASSERT_NE(second_predicate, nullptr);
+
+            ExpectHits(Membership(*first_predicate, {"Alice"}, false),
+                       data.values.size(),
+                       {0});
+            ExpectHits(Membership(*second_predicate, {"Bob"}, false),
+                       data.values.size(),
+                       {1});
+            first = std::move(second);
+            EXPECT_FALSE(second);
+            ASSERT_TRUE(first);
+            const auto* moved_predicate =
+                dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+                    first.get());
+            ASSERT_NE(moved_predicate, nullptr);
+            ExpectHits(Membership(*moved_predicate, {"Alice"}, false),
+                       data.values.size(),
+                       {0});
+        });
 
     AddJsonCase<std::string_view>(
         cases,
@@ -1573,6 +1627,8 @@ TEST(JsonResolvedReaderTest, EmptyBorrowedOwnedAndMovePreserveOwnership) {
     JsonResolvedReader empty;
     EXPECT_FALSE(empty);
     EXPECT_EQ(empty.get(), nullptr);
+    EXPECT_FALSE(JsonResolvedReader::Owned({}));
+    EXPECT_FALSE(JsonResolvedReader::Borrowed(nullptr));
 
     size_t borrowed_destroyed = 0;
     {
@@ -1583,6 +1639,10 @@ TEST(JsonResolvedReaderTest, EmptyBorrowedOwnedAndMovePreserveOwnership) {
         auto moved = std::move(borrowed);
         EXPECT_FALSE(borrowed);
         EXPECT_EQ(moved.get(), &borrowed_reader);
+        auto reassigned = JsonResolvedReader::Borrowed(&borrowed_reader);
+        reassigned = std::move(moved);
+        EXPECT_FALSE(moved);
+        EXPECT_EQ(reassigned.get(), &borrowed_reader);
         EXPECT_EQ(borrowed_destroyed, 0);
     }
     EXPECT_EQ(borrowed_destroyed, 1);

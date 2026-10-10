@@ -28,7 +28,6 @@
 #include "filemanager/InputStream.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
-#include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "query/PlanProto.h"
@@ -36,6 +35,7 @@
 #include "rescores/Scorer.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -744,12 +744,13 @@ TEST(BoostScoreRunnerTest, NativeFilterExprSetReuseOnScalarIndexPath) {
     // DataGen fills the non-pk int64 column with the row index, so
     // `age >= 5000` matches exactly the rows past the midpoint.
     auto age_col = raw_data.get_col<int64_t>(age_fid);
-    auto age_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age_index->Build(N, age_col.data());
-    segcore::LoadIndexInfo load_index_info;
+    auto age_index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, age_col.data());
+    segcore::LoadIndexInfo load_index_info{};
     load_index_info.field_id = age_fid.get();
     load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age_index.get());
+    load_index_info.index_params = GenIndexParams(age_index.get(), "sort");
+    SetTestIndexMetadata(load_index_info, *age_index, "sort");
     load_index_info.cache_index =
         CreateTestCacheIndex("test_age_index", std::move(age_index));
     segment->LoadIndex(load_index_info);

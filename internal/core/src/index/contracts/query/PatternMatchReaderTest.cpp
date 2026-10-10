@@ -1120,6 +1120,63 @@ AddFmRoutingCases(IndexTestCases& cases) {
         });
     }
 
+    for (const auto& [name, pattern, needle, should_use] : {
+             std::tuple{"FmRareGeneralMatch", "%ZEBRA%", "ZEBRA", true},
+             std::tuple{"FmAbsentGeneralMatch", "%QQQQ%", "QQQQ", true},
+             std::tuple{"FmCommonGeneralMatch", "%COMMON%", "COMMON", false},
+             std::tuple{"FmFrequentByteGeneralMatch", "%x%", "x", false},
+         }) {
+        cases.Add(IndexTestCase<std::string_view>{
+            .name = name,
+            .dataset = dataset,
+            .families = {"fmindex"},
+            .body = Query<PatternQuery>{
+                .args = {.op = PatternOp::Match, .pattern = pattern},
+                .expected_should_use = should_use,
+                .expected = [needle = std::string(needle)](
+                                const ScalarTestData<std::string_view>& data,
+                                const PatternQuery::Args&) {
+                    TargetBitmap expected(data.values.size(), false);
+                    for (size_t i = 0; i < data.values.size(); ++i) {
+                        if (data.validity[i] &&
+                            data.values[i].find(needle) !=
+                                std::string_view::npos) {
+                            expected.set(i);
+                        }
+                    }
+                    return expected;
+                },
+            },
+        });
+    }
+    cases.Add(IndexTestCase<std::string_view>{
+        .name = "FmNoLiteralGeneralMatchDeclines",
+        .dataset = dataset,
+        .families = {"fmindex"},
+        .body = Observe<std::string_view>{
+            .capability = &ReaderCaps::pattern_match,
+            .run = [](const auto&, const auto&, const auto& reader) {
+                const auto* patterns =
+                    dynamic_cast<const IPatternMatchReader*>(reader.get());
+                ASSERT_NE(patterns, nullptr);
+                EXPECT_FALSE(patterns->ShouldUseForOp(PatternOp::Match, "%"));
+                EXPECT_FALSE(
+                    patterns->ShouldUseForOp(PatternOp::Match, "%_%"));
+            },
+        },
+    });
+
+    cases.Add(IndexTestCase<std::string_view>{
+        .name = "FmRareGeneralMatchOnShortRows",
+        .dataset = "PatternShortSelective",
+        .families = {"fmindex"},
+        .body = Query<PatternQuery>{
+            .args = {.op = PatternOp::Match, .pattern = "%RARE%"},
+            .expected_should_use = true,
+            .expected = ManualHits({0}),
+        },
+    });
+
     cases.Add(IndexTestCase<std::string_view>{
         .name = "FmZeroTokenAbsentInner",
         .dataset = "PatternAllNull",
@@ -1139,6 +1196,39 @@ AddFmRoutingCases(IndexTestCases& cases) {
                 .args = {.op = PatternOp::InnerMatch, .pattern = ""},
                 .expected_should_use = true,
             },
+    });
+    for (const auto& op : {PatternOp::PrefixMatch, PatternOp::PostfixMatch,
+                           PatternOp::InnerMatch}) {
+        cases.Add(IndexTestCase<std::string_view>{
+            .name = "FmValidEmptyZeroToken" + std::to_string(static_cast<int>(op)),
+            .dataset = "PatternAllEmptyValid",
+            .families = {"fmindex"},
+            .body = Query<PatternQuery>{
+                .args = {.op = op, .pattern = ""},
+                .expected_should_use = true,
+                .expected = ManualHits({0, 1, 2, 3}),
+            },
+        });
+        cases.Add(IndexTestCase<std::string_view>{
+            .name = "FmValidEmptyAbsent" + std::to_string(static_cast<int>(op)),
+            .dataset = "PatternAllEmptyValid",
+            .families = {"fmindex"},
+            .body = Query<PatternQuery>{
+                .args = {.op = op, .pattern = "abc"},
+                .expected_should_use = true,
+                .expected = ManualHits({}),
+            },
+        });
+    }
+    cases.Add(IndexTestCase<std::string_view>{
+        .name = "FmValidEmptyAbsentGeneralMatch",
+        .dataset = "PatternAllEmptyValid",
+        .families = {"fmindex"},
+        .body = Query<PatternQuery>{
+            .args = {.op = PatternOp::Match, .pattern = "%abc%"},
+            .expected_should_use = true,
+            .expected = ManualHits({}),
+        },
     });
 }
 
@@ -1202,6 +1292,95 @@ AddAllValidProfileCases(IndexTestCases& cases) {
         cases, "AllValidRegex", dataset, PatternOp::RegexMatch, "^ab$", {2});
 }
 
+void
+AddExactnessCase(IndexTestCases& cases) {
+    cases.Add(IndexTestCase<std::string_view>{
+        .name = "ExactnessIsDeclaredPerOperation",
+        .dataset = "PatternStringsNullable",
+        .input_lifetime = InputLifetime::ReleaseBeforeBody,
+        .body =
+            Observe<std::string_view>{
+                .capability = &ReaderCaps::pattern_match,
+                .run =
+                    [](const auto& backend, const auto&, const auto& reader) {
+                        const auto* patterns =
+                            dynamic_cast<const IPatternMatchReader*>(
+                                reader.get());
+                        ASSERT_NE(patterns, nullptr);
+                        for (const auto op : {PatternOp::Match,
+                                              PatternOp::PrefixMatch,
+                                              PatternOp::PostfixMatch,
+                                              PatternOp::InnerMatch,
+                                              PatternOp::RegexMatch}) {
+                            SCOPED_TRACE(static_cast<int>(op));
+                            const auto policy = backend.PatternPolicy(op);
+                            if (policy == PatternQueryPolicy::Unsupported) {
+                                continue;
+                            }
+                            const bool expected =
+                                policy != PatternQueryPolicy::CandidatesAndRun;
+                            EXPECT_EQ(patterns->PatternMatchIsExact(op),
+                                      expected);
+                            static_cast<void>(
+                                patterns->ShouldUseForOp(op, "app%"));
+                            static_cast<void>(
+                                patterns->ShouldUseForOp(op, "missing%"));
+                            EXPECT_EQ(patterns->PatternMatchIsExact(op),
+                                      expected);
+                        }
+                    },
+            },
+    });
+}
+
+void
+AddResultOwnershipCase(IndexTestCases& cases) {
+    cases.Add(IndexTestCase<std::string_view>{
+        .name = "PatternResultsRemainIndependentAcrossQueries",
+        .dataset = "PatternStringsNullable",
+        .input_lifetime = InputLifetime::ReleaseBeforeBody,
+        .body =
+            Observe<std::string_view>{
+                .capability = &ReaderCaps::pattern_match,
+                .run =
+                    [](const auto&, const auto& data, const auto& reader) {
+                        const auto* patterns =
+                            dynamic_cast<const IPatternMatchReader*>(
+                                reader.get());
+                        ASSERT_NE(patterns, nullptr);
+                        const PatternQuery::Args first_args{
+                            .op = PatternOp::PrefixMatch, .pattern = "app"};
+                        const PatternQuery::Args second_args{
+                            .op = PatternOp::PrefixMatch,
+                            .pattern = "missing"};
+                        const auto expected_first =
+                            PatternQuery::Oracle(data, first_args);
+                        const auto expected_second =
+                            PatternQuery::Oracle(data, second_args);
+                        auto first = patterns->PatternMatch(
+                            first_args.pattern, first_args.op);
+                        auto second = patterns->PatternMatch(
+                            second_args.pattern, second_args.op);
+                        ExpectBitmap(first, expected_first);
+                        ExpectBitmap(second, expected_second);
+
+                        const auto expect_fresh = [&] {
+                            auto repeated_first = patterns->PatternMatch(
+                                first_args.pattern, first_args.op);
+                            auto repeated_second = patterns->PatternMatch(
+                                second_args.pattern, second_args.op);
+                            ExpectBitmap(repeated_first, expected_first);
+                            ExpectBitmap(repeated_second, expected_second);
+                        };
+                        first.flip();
+                        expect_fresh();
+                        second.flip();
+                        expect_fresh();
+                    },
+            },
+    });
+}
+
 const IndexTestCases&
 PatternCases() {
     static const auto cases = [] {
@@ -1237,6 +1416,8 @@ PatternCases() {
         AddRandomByteCases(cases);
         AddBackendLayoutCases(cases);
         AddAllValidProfileCases(cases);
+        AddExactnessCase(cases);
+        AddResultOwnershipCase(cases);
 
         return cases;
     }();

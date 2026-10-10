@@ -33,7 +33,7 @@ template <typename T>
 void
 ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
     auto nulls = reader.IsNull();
-    const auto not_nulls = reader.IsNotNull();
+    auto not_nulls = reader.IsNotNull();
     ASSERT_EQ(nulls.size(), data.values.size());
     ASSERT_EQ(not_nulls.size(), data.values.size());
 
@@ -45,14 +45,27 @@ ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
     }
     ExpectBitmap(nulls, expected_nulls);
 
-    // Returned bitmaps own their state. Mutating one result cannot alter the
-    // reader or a later result.
+    // Both results own their state. Mutating either result cannot alter the
+    // reader or a later result from either method.
     if (nulls.size() != 0) {
         nulls.flip();
     }
     auto repeated_nulls = reader.IsNull();
+    auto repeated_not_nulls = reader.IsNotNull();
     ASSERT_EQ(repeated_nulls.size(), nulls.size());
+    ASSERT_EQ(repeated_not_nulls.size(), not_nulls.size());
     ExpectBitmap(repeated_nulls, expected_nulls);
+    auto expected_not_nulls = ExpectedNulls(data);
+    expected_not_nulls.flip();
+    ExpectBitmap(repeated_not_nulls, expected_not_nulls);
+
+    if (not_nulls.size() != 0) {
+        not_nulls.flip();
+    }
+    auto after_not_null_mutation = reader.IsNotNull();
+    auto nulls_after_not_null_mutation = reader.IsNull();
+    ExpectBitmap(after_not_null_mutation, expected_not_nulls);
+    ExpectBitmap(nulls_after_not_null_mutation, expected_nulls);
 }
 
 template <typename T>
@@ -112,21 +125,8 @@ NullCases() {
             result, "AcrossBatches", "PredicateEdgesMultiBatch");
         AddNullCase<int64_t>(
             result, "AcrossEmptyBatches", "PredicateEdgesWithEmptyBatches");
-        result.Add(IndexTestCase<int64_t>{
-            .name = "AcrossPackedBitBoundary",
-            .dataset = "BitBoundaryNullable",
-            .input_lifetime = InputLifetime::ReleaseBeforeBody,
-            .body =
-                Observe<int64_t>{
-                    .run =
-                        [](const auto&, const auto& data, const auto& reader) {
-                            const auto* nulls =
-                                dynamic_cast<const INullReader*>(reader.get());
-                            ASSERT_NE(nulls, nullptr);
-                            ExpectNullMasks(data, *nulls);
-                        },
-                },
-        });
+        AddNullCase<int64_t>(
+            result, "AcrossPackedBitBoundary", "BitBoundaryNullable");
         AddNullCase<std::string_view>(
             result, "NullIsDistinctFromEmptyString", "NullVsEmptyString");
         return result;

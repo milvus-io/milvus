@@ -17,10 +17,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <roaring/roaring.hh>
 
+#include "common/Consts.h"
 #include "index/Meta.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
@@ -171,6 +174,54 @@ TEST(BitmapIndexArtifactTest, TruncatedPostingPayloadIsRejected) {
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken,
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
+}
+
+TEST(BitmapIndexArtifactTest, MalformedPostingsWithValidPackedCrcAreRejected) {
+    const int32_t key = 7;
+    roaring::Roaring posting;
+    posting.add(0);
+    std::vector<uint8_t> valid(sizeof(key) + posting.getSizeInBytes());
+    std::memcpy(valid.data(), &key, sizeof(key));
+    posting.write(reinterpret_cast<char*>(valid.data() + sizeof(key)));
+    std::vector<std::vector<uint8_t>> invalid;
+    invalid.emplace_back(valid.begin(), valid.begin() + sizeof(key) - 1);
+    invalid.emplace_back(valid.begin(), valid.end() - 1);
+    invalid.push_back(valid);
+    invalid.back().push_back(0);
+    posting = roaring::Roaring();
+    posting.add(100);
+    invalid.emplace_back(sizeof(key) + posting.getSizeInBytes());
+    std::memcpy(invalid.back().data(), &key, sizeof(key));
+    posting.write(reinterpret_cast<char*>(invalid.back().data() +
+                                          sizeof(key)));
+    const uint32_t malformed_header[] = {
+        static_cast<uint32_t>(key),
+        roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER,
+        UINT32_MAX};
+    const auto* header = reinterpret_cast<const uint8_t*>(malformed_header);
+    invalid.emplace_back(header, header + sizeof(malformed_header));
+
+    for (bool mmap : {false, true}) {
+        const auto& backend = ScalarReaderBackends().Get<int32_t>(
+            mmap ? "BitmapInt32NonNullMmap" : "BitmapInt32NonNull");
+        ScalarTestData<int32_t> data({key});
+        data.validity_present = false;
+        auto artifact = BuildBitmap(backend, std::move(data));
+        const auto baseline = SerializeV3(*artifact);
+        for (size_t shape = 0; shape < invalid.size(); ++shape) {
+            SCOPED_TRACE(mmap);
+            SCOPED_TRACE(shape);
+            auto corrupted = baseline;
+            corrupted.entries[BITMAP_INDEX_DATA] = invalid[shape];
+            corrupted.metadata[BITMAP_INDEX_LENGTH] =
+                mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 1 : 1;
+            // OpenV3 packs every mutated entry with a fresh CRC. Failures
+            // therefore come from posting validation, not the envelope.
+            ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                static_cast<void>(OpenV3(backend, corrupted));
+            });
+        }
+    }
 }
 
 }  // namespace

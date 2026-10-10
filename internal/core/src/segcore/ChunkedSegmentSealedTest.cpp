@@ -55,8 +55,7 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/IndexFactory.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -1488,21 +1487,6 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
 
     // test with inverted index
     auto fid = fields.at("int64");
-    auto file_manager_ctx = storage::FileManagerContext();
-    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
-        milvus::proto::schema::Int64);
-    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(fid.get());
-    file_manager_ctx.fieldDataMeta.field_id = fid.get();
-    milvus::storage::IndexMeta index_meta;
-    index_meta.field_id = fid.get();
-    index_meta.build_id = rand();
-    index_meta.index_version = rand();
-    file_manager_ctx.indexMeta = index_meta;
-    index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::INT64;
-    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
-    auto index = index::IndexFactory::GetInstance().CreateScalarIndex(
-        create_index_info, file_manager_ctx);
     std::vector<int64_t> data(test_data_count * chunk_num);
     for (int i = 0; i < chunk_num; i++) {
         auto pw = segment->chunk_data<int64_t>(nullptr, fid, i);
@@ -1512,12 +1496,10 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
                   data.begin() + i * test_data_count);
     }
 
-    index->BuildWithRawDataForUT(data.size(), data.data());
-    segcore::LoadIndexInfo load_index_info;
-    load_index_info.index_params = GenIndexParams(index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(index));
-    load_index_info.field_id = fid.get();
+    auto opened = test::consumer::BuildScalarReader<int64_t>(
+        fid, DataType::INT64, index::INVERTED_INDEX_TYPE, data.size(), data.data());
+    auto load_index_info = test::consumer::MakeLoadIndexInfo(
+        std::move(opened), DataType::INT64, fid.get());
     segment->LoadIndex(load_index_info);
 
     expr = std::make_shared<expr::CompareExpr>(
@@ -1534,6 +1516,7 @@ TEST_P(TestChunkSegment, TestCompareExpr) {
 
 TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
+using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
     auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
@@ -1590,6 +1573,7 @@ TEST_P(TestChunkSegment, TestPkRange) {
 
 TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
     using namespace milvus::segcore;
+using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
@@ -1713,6 +1697,7 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
 
 TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     using namespace milvus::segcore;
+using namespace milvus::test::consumer;
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);

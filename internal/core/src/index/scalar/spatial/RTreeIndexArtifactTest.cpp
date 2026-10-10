@@ -17,19 +17,99 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "common/Geometry.h"
 #include "index/Meta.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/scalar/spatial/RTreeEngine.h"
+#include "index/scalar/spatial/RTreeIndexArtifact.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
+#include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index::test {
 namespace {
+
+class FailingArchiveSource final : public storage::FileSource {
+ public:
+    FailingArchiveSource(const TestArtifactData& data, std::string archive)
+        : source_(data), archive_(std::move(archive)) {
+    }
+
+    storage::Generation Gen() const override { return source_.Gen(); }
+    std::vector<std::string> EntryNames() const override {
+        return source_.EntryNames();
+    }
+    bool HasEntry(std::string_view name) const override {
+        return source_.HasEntry(name);
+    }
+    int64_t EntrySize(std::string_view name) const override {
+        return source_.EntrySize(name);
+    }
+    std::vector<uint8_t> ReadEntry(std::string_view name) override {
+        if (name == archive_) {
+            ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
+        }
+        return source_.ReadEntry(name);
+    }
+    void ReadEntryToLocalFile(std::string_view name,
+                              const std::string& path) override {
+        if (name == archive_) {
+            ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
+        }
+        source_.ReadEntryToLocalFile(name, path);
+    }
+    void ReadEntriesToLocalFile(const std::vector<std::string>& names,
+                                const std::string& path) override {
+        if (std::find(names.begin(), names.end(), archive_) != names.end()) {
+            ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
+        }
+        source_.ReadEntriesToLocalFile(names, path);
+    }
+    std::vector<std::string> ReadEntriesToLocalDir(
+        const std::vector<std::string>& names,
+        const std::string& dir) override {
+        if (std::find(names.begin(), names.end(), archive_) != names.end()) {
+            ThrowInfo(FileReadFailed, "injected R-Tree archive read failure");
+        }
+        return source_.ReadEntriesToLocalDir(names, dir);
+    }
+
+ private:
+    TestArtifactSource source_;
+    std::string archive_;
+};
+
+TEST(RTreeIndexArtifactTest, EngineReportsArchiveOpenFailure) {
+    auto directory = CreateRTreeIndexDirectory("", "open-failure");
+    const auto stem = std::filesystem::path(directory->Path()) / "index_file";
+    ASSERT_TRUE(std::filesystem::create_directory(stem.string() + ".bgi"));
+    RTreeBuildEngine engine(stem.string());
+    ExpectSegcoreError(ErrorCode::FileOpenFailed, [&] { engine.Finish(); });
+}
+
+TEST(RTreeIndexArtifactTest, EngineReportsArchiveFlushFailure) {
+#if defined(__linux__)
+    if (!std::filesystem::exists("/dev/full")) {
+        GTEST_SKIP() << "/dev/full is unavailable";
+    }
+    auto directory = CreateRTreeIndexDirectory("", "flush-failure");
+    const auto stem = std::filesystem::path(directory->Path()) / "index_file";
+    std::error_code error;
+    std::filesystem::create_symlink("/dev/full", stem.string() + ".bgi", error);
+    ASSERT_FALSE(error) << error.message();
+    RTreeBuildEngine engine(stem.string());
+    ExpectSegcoreError(ErrorCode::FileWriteFailed, [&] { engine.Finish(); });
+#else
+    GTEST_SKIP() << "requires Linux /dev/full";
+#endif
+}
 
 std::string
 Wkb(std::string_view wkt) {
@@ -106,6 +186,24 @@ TEST(RTreeIndexArtifactTest, MissingDeclaredArchiveIsRejected) {
 
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(OpenV3(backend, persisted, {.row_count = 3}));
+    });
+}
+
+TEST(RTreeIndexArtifactTest, ArchiveTransportFailureKeepsReadErrorCode) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("SpatialRTreeHeapNonNull");
+    auto artifact = BuildRTree(backend, false);
+    auto persisted = SerializeV3(*artifact);
+    const auto files =
+        persisted.metadata.at(FILE_NAMES).get<std::vector<std::string>>();
+    const auto archive =
+        std::find_if(files.begin(), files.end(), [](const auto& file) {
+            return std::string_view(file).ends_with(".bgi");
+        });
+    ASSERT_NE(archive, files.end());
+    FailingArchiveSource source(persisted, *archive);
+    ExpectSegcoreError(ErrorCode::FileReadFailed, [&] {
+        static_cast<void>(OpenFromSource(backend, source, {.row_count = 3}));
     });
 }
 

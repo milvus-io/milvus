@@ -15,10 +15,17 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <array>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 #include "monitor/Monitor.h"
 #include "exec/operator/Utils.h"
-#include "index/VectorMemIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "common/Consts.h"
 
 #include <unordered_map>
@@ -26,9 +33,13 @@
 #include "common/PrometheusClient.h"
 #include "exec/operator/search-groupby/GroupMembership.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
-#include "index/ScalarIndexSort.h"
+#include "index/Meta.h"
+#include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "query/Utils.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -37,24 +48,147 @@ namespace milvus::exec {
 
 namespace {
 
-class CountingScalarIndex : public index::ScalarIndexSort<int64_t> {
+class CountingScalarReader final : public index::IIndexReaderBase,
+                                  public index::IScalarPredicateReader<int64_t>,
+                                  public index::INullReader,
+                                  public index::IScalarValueReader<int64_t> {
  public:
-    size_t in_calls = 0;
-    size_t in_values = 0;
-    size_t null_calls = 0;
+    explicit CountingScalarReader(index::IIndexReaderBasePtr reader)
+        : reader_(std::move(reader)),
+          predicates_(dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(reader_.get())),
+          nulls_(dynamic_cast<const index::INullReader*>(reader_.get())),
+          values_(dynamic_cast<const index::IScalarValueReader<int64_t>*>(reader_.get())) {
+        AssertInfo(predicates_ != nullptr && nulls_ != nullptr && values_ != nullptr,
+                   "group membership fixture needs scalar predicate, null and value readers");
+    }
 
-    const TargetBitmap
-    In(size_t n, const int64_t* values) override {
+    mutable size_t in_calls = 0;
+    mutable size_t in_values = 0;
+    mutable size_t null_calls = 0;
+    mutable size_t gather_calls = 0;
+    mutable size_t gather_values = 0;
+    mutable size_t gather_nulls = 0;
+
+    index::ReaderCaps Caps() const override { return reader_->Caps(); }
+    index::Domain CoordDomain() const override { return reader_->CoordDomain(); }
+    int64_t Count() const override { return reader_->Count(); }
+    DataType ValueType() const override { return reader_->ValueType(); }
+    int64_t MemoryUsage() const override { return reader_->MemoryUsage(); }
+    cachinglayer::ResourceUsage CellByteSize() const override {
+        return reader_->CellByteSize();
+    }
+
+    TargetBitmap
+    In(size_t n, const int64_t* values) const override {
         ++in_calls;
         in_values += n;
-        return index::ScalarIndexSort<int64_t>::In(n, values);
+        return predicates_->In(n, values);
     }
 
-    const TargetBitmap
-    IsNull() override {
-        ++null_calls;
-        return index::ScalarIndexSort<int64_t>::IsNull();
+    TargetBitmap
+    NotIn(size_t n, const int64_t* values) const override {
+        return predicates_->NotIn(n, values);
     }
+
+    TargetBitmap
+    Range(const int64_t& value, index::CompareOp op) const override {
+        return predicates_->Range(value, op);
+    }
+
+    TargetBitmap
+    Range(const int64_t& lo, bool lo_inc, const int64_t& hi,
+          bool hi_inc) const override {
+        return predicates_->Range(lo, lo_inc, hi, hi_inc);
+    }
+
+    TargetBitmap
+    IsNull() const override {
+        ++null_calls;
+        return nulls_->IsNull();
+    }
+
+    TargetBitmap IsNotNull() const override { return nulls_->IsNotNull(); }
+
+    std::optional<int64_t>
+    Lookup(int64_t offset) const override { return values_->Lookup(offset); }
+
+    void
+    Gather(const int64_t* offsets, int64_t count,
+           const std::function<void(int64_t, const int64_t*, bool)>& out) const override {
+        ++gather_calls;
+        gather_values += count;
+        values_->Gather(offsets, count,
+                        [&](int64_t i, const int64_t* value, bool valid) {
+                            gather_nulls += !valid;
+                            out(i, value, valid);
+                        });
+    }
+
+ private:
+    index::IIndexReaderBasePtr reader_;
+    const index::IScalarPredicateReader<int64_t>* predicates_;
+    const index::INullReader* nulls_;
+    const index::IScalarValueReader<int64_t>* values_;
+};
+
+class FailingIteratorReader final : public index::IVectorReader {
+ public:
+    explicit FailingIteratorReader(index::IIndexReaderBasePtr owner)
+        : owner_(std::move(owner)),
+          reader_(dynamic_cast<const index::IVectorReader*>(owner_.get())) {
+        AssertInfo(reader_ != nullptr, "iterator failure fixture needs a vector reader");
+    }
+
+    ErrorCode error = ErrorCode::FollyCancel;
+
+    void
+    Search(const DatasetPtr& dataset, const index::VectorSearchParams& params,
+           const BitsetView& filter, milvus::OpContext* ctx,
+           SearchResult& result) const override {
+        reader_->Search(dataset, params, filter, ctx, result);
+    }
+
+    knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+    Iterators(const DatasetPtr&, const knowhere::Json&, const BitsetView&,
+              milvus::OpContext*) const override {
+        throw SegcoreError(error, "injected backend preparation failure");
+    }
+
+    bool RefineEnabled() const override { return reader_->RefineEnabled(); }
+    bool HasRawData() const override { return reader_->HasRawData(); }
+    std::vector<uint8_t>
+    GetVector(const DatasetPtr& dataset) const override {
+        return reader_->GetVector(dataset);
+    }
+    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
+    GetSparseVector(const DatasetPtr& dataset) const override {
+        return reader_->GetSparseVector(dataset);
+    }
+    MetricType Metric() const override { return reader_->Metric(); }
+    IndexType KnowhereIndexType() const override { return reader_->KnowhereIndexType(); }
+    int64_t Dim() const override { return reader_->Dim(); }
+    knowhere::Json
+    PrepareSearchParams(const index::VectorSearchParams& params) const override {
+        return reader_->PrepareSearchParams(params);
+    }
+    bool HasValidData() const override { return reader_->HasValidData(); }
+    int64_t ValidCount() const override { return reader_->ValidCount(); }
+    bool IsRowValid(int64_t offset) const override { return reader_->IsRowValid(offset); }
+    knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr& dataset, const BitsetView& filter,
+                  const int64_t* labels, size_t count, bool cosine,
+                  milvus::OpContext* ctx) const override {
+        return reader_->CalcDistByIDs(dataset, filter, labels, count, cosine, ctx);
+    }
+    std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr& dataset,
+                    const std::string& metric) const override {
+        return reader_->GetEmbListByIds(dataset, metric);
+    }
+
+ private:
+    index::IIndexReaderBasePtr owner_;
+    const index::IVectorReader* reader_;
 };
 
 class SequenceIterator final : public knowhere::IndexNode::iterator {
@@ -701,8 +835,11 @@ TEST(GroupMembershipTest, RawScansHonorCancellation) {
     auto sealed = CreateSealedWithFieldDataLoaded(schema, data);
     auto growing = segcore::CreateGrowingSegment(schema, empty_index_meta);
     auto offset = growing->PreInsert(rows);
-    growing->Insert(
-        offset, rows, data.row_ids_.data(), data.timestamps_.data(), data.raw_);
+    growing->Insert(offset,
+                    rows,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*data.raw_));
     folly::CancellationSource source;
     milvus::OpContext ctx(source.getToken());
     source.requestCancellation();
@@ -816,24 +953,15 @@ TEST(StrictGroupPhase2ExecutorTest, SharedBaseFilterIsLazyAndReleased) {
 }
 
 TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
-    class FailingIndex : public index::VectorMemIndex<float> {
-     public:
-        FailingIndex()
-            : VectorMemIndex(
-                  DataType::NONE,
-                  "FLAT",
-                  knowhere::metric::L2,
-                  knowhere::Version::GetCurrentVersion().VersionNumber()) {
-        }
-        ErrorCode error = ErrorCode::FollyCancel;
-        knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-        VectorIterators(const DatasetPtr,
-                        const knowhere::Json&,
-                        const BitsetView&,
-                        milvus::OpContext*) const override {
-            throw SegcoreError(error, "injected backend preparation failure");
-        }
-    } index;
+    const std::array<float, 4> values{};
+    auto opened = test::consumer::BuildVectorReader<float>(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        values.size(),
+        1,
+        values.data());
+    FailingIteratorReader reader(std::move(opened.reader));
     SearchInfo info;
     info.group_by_field_ids_ = {FieldId(100)};
     info.topk_ = 1;
@@ -845,10 +973,10 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
                           ErrorCode::FollyOtherException,
                           ErrorCode::DataFormatBroken,
                           ErrorCode::Unsupported}) {
-            index.error = code;
+            reader.error = code;
             try {
                 PrepareVectorIteratorsFromIndex(
-                    info, 1, nullptr, result, BitsetView{}, index);
+                    info, 1, nullptr, result, BitsetView{}, reader);
                 FAIL() << "backend must throw";
             } catch (const SegcoreError& error) {
                 // Master already preserves typed failures for both original
@@ -878,8 +1006,11 @@ TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
     auto data = segcore::DataGen(schema, 100, 42, 0, 4);
     auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
     auto offset = segment->PreInsert(100);
-    segment->Insert(
-        offset, 100, data.row_ids_.data(), data.timestamps_.data(), data.raw_);
+    segment->Insert(offset,
+                    100,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*data.raw_));
     auto values = data.get_col<std::string>(field);
     auto* growing = dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
@@ -917,15 +1048,16 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
 
     auto values = data.get_col<int64_t>(group_field);
     auto valid = data.get_col_valid(group_field);
-    auto scalar_index = std::make_unique<CountingScalarIndex>();
-    auto* counters = scalar_index.get();
-    scalar_index->Build(kRowCount, values.data(), valid.data());
-    segcore::LoadIndexInfo load_info;
-    load_info.field_id = group_field.get();
-    load_info.field_type = DataType::INT64;
-    load_info.index_params = GenIndexParams(scalar_index.get());
-    load_info.cache_index =
-        CreateTestCacheIndex("group-membership", std::move(scalar_index));
+    auto opened = test::consumer::BuildScalarReader<int64_t>(
+        group_field, DataType::INT64, index::ASCENDING_SORT,
+        kRowCount, values.data(), valid.data());
+    auto scalar_reader =
+        std::make_unique<CountingScalarReader>(std::move(opened.reader));
+    auto* counters = scalar_reader.get();
+    opened.reader = std::move(scalar_reader);
+    opened.caps = opened.reader->Caps();
+    auto load_info = test::consumer::MakeLoadIndexInfo(
+        std::move(opened), DataType::INT64, group_field.get());
     index_segment->LoadIndex(load_info);
 
     TargetBitmap base_filter(kRowCount, false);
@@ -941,9 +1073,19 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
         nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
     ASSERT_TRUE(raw.has_value());
     ASSERT_TRUE(indexed.has_value());
-    EXPECT_EQ(counters->in_calls, 1);
-    EXPECT_EQ(counters->in_values, 3);
-    EXPECT_EQ(counters->null_calls, 1);
+    // Phase two reads the same group values as phase one, in one Gather over
+    // eligible offsets. NULL is reported by Gather's validity, not IsNull().
+    size_t eligible_nulls = 0;
+    for (size_t row = 0; row < kRowCount; ++row) {
+        eligible_nulls += !base_filter[row] && !valid[row];
+    }
+    ASSERT_GT(eligible_nulls, 0);
+    EXPECT_EQ(counters->gather_calls, 1);
+    EXPECT_EQ(counters->gather_values, kRowCount - base_filter.count());
+    EXPECT_EQ(counters->gather_nulls, eligible_nulls);
+    EXPECT_EQ(counters->in_calls, 0);
+    EXPECT_EQ(counters->in_values, 0);
+    EXPECT_EQ(counters->null_calls, 0);
     // Both sources present: phase two must use raw data, like phase one.
     LoadGeneratedDataIntoSegment(
         data,
@@ -954,8 +1096,11 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
     auto both = BuildGroupMembership<int64_t>(
         nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
     ASSERT_TRUE(both.has_value());
-    EXPECT_EQ(counters->in_calls, 1);
-    EXPECT_EQ(counters->null_calls, 1);
+    EXPECT_EQ(counters->gather_calls, 1);
+    EXPECT_EQ(counters->gather_values, kRowCount - base_filter.count());
+    EXPECT_EQ(counters->gather_nulls, eligible_nulls);
+    EXPECT_EQ(counters->in_calls, 0);
+    EXPECT_EQ(counters->null_calls, 0);
     // The union bitmap owns its bits and no longer needs the source column.
     raw_segment->DropFieldData(group_field);
     auto raw_bitmap = std::move(raw);
@@ -964,6 +1109,12 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
     ASSERT_TRUE(index_bitmap.has_value());
     ASSERT_EQ(raw_bitmap->size(), index_bitmap->size());
     for (size_t i = 0; i < raw_bitmap->size(); ++i) {
+        const auto group = valid[i] ? std::optional<int64_t>(values[i])
+                                    : std::nullopt;
+        const bool expected =
+            !base_filter[i] &&
+            std::find(groups.begin(), groups.end(), group) != groups.end();
+        EXPECT_EQ((*raw_bitmap)[i], expected) << "offset " << i;
         EXPECT_EQ((*raw_bitmap)[i], (*index_bitmap)[i]) << "offset " << i;
         EXPECT_EQ((*raw_bitmap)[i], (*both)[i]) << "offset " << i;
         if (base_filter[i]) {

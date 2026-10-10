@@ -38,10 +38,10 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
+#include "index/Families.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
 #include "pb/common.pb.h"
@@ -56,6 +56,7 @@
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "common/Common.h"
@@ -182,7 +183,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    milvus::index::IIndexReaderBasePtr indexing;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -262,8 +263,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -406,7 +409,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    milvus::index::IIndexReaderBasePtr indexing;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -486,8 +489,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -656,7 +661,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
@@ -748,19 +753,19 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     auto batch2 = gen_batch(10, 10);
     segment->PreInsert(10);
     segment->Insert(
-        10, 10, batch2.row_ids_.data(), batch2.timestamps_.data(), batch2.raw_);
+        10, 10, batch2.row_ids_.data(), batch2.timestamps_.data(), batch2.SharedRaw());
 
     // Insert batch 1 (docs 0-9) - should trigger drain of batch 2
     auto batch1 = gen_batch(0, 10);
     segment->PreInsert(10);
     segment->Insert(
-        0, 10, batch1.row_ids_.data(), batch1.timestamps_.data(), batch1.raw_);
+        0, 10, batch1.row_ids_.data(), batch1.timestamps_.data(), batch1.SharedRaw());
 
     // Insert batch 3 (docs 25-34) - should be cached (gap at 20-24)
     auto batch3 = gen_batch(25, 10);
     segment->PreInsert(10);
     segment->Insert(
-        25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
+        25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.SharedRaw());
 
     // Verify ArrayOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -850,8 +855,10 @@ TEST(ElementFilter, MultiQueryCollectResults) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -927,8 +934,7 @@ TEST(ElementFilter, MultiQueryCollectResults) {
 
 TEST(ElementFilter, CollectResultsWithCosineMetric) {
     // Test CollectResults with large_is_better=true (COSINE metric)
-    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    milvus::test::ExprBatchSizeGuard batch_size_guard(100);
 
     int dim = 4;
     auto schema = std::make_shared<Schema>();
@@ -980,17 +986,22 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
             vector_data[i * array_len * dim + j] = float_vec[j];
         }
     }
-    auto indexing = GenVecIndexing(N * array_len,
-                                   dim,
-                                   vector_data.data(),
-                                   knowhere::IndexEnum::INDEX_HNSW,
-                                   knowhere::metric::COSINE);
-    LoadIndexInfo load_index_info;
+    auto indexing = BuildTestVectorIndex<float>(N * array_len,
+                                                dim,
+                                                vector_data.data(),
+                                                knowhere::IndexEnum::INDEX_HNSW,
+                                                knowhere::metric::COSINE);
+    const auto* vector_reader =
+        dynamic_cast<const index::IVectorReader*>(indexing.get());
+    ASSERT_NE(vector_reader, nullptr);
+    ASSERT_EQ(vector_reader->Metric(), knowhere::metric::COSINE);
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::COSINE;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -1041,8 +1052,6 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
         ASSERT_GT(element_value, 100);
         ASSERT_LT(element_value, 400);
     }
-
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
 // Test parameter for Growing: <use_hints, element_type, metric_type, dim>
@@ -1157,7 +1166,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     // Verify ArrayOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -1384,7 +1393,7 @@ TEST_P(ElementFilterRetrieve, RangeExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1589,7 +1598,7 @@ TEST_P(ElementFilterRetrieve, UnaryExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1831,7 +1840,7 @@ RunElementStrideDiscriminatorCase(DataType elem_type,
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2444,7 +2453,7 @@ TEST_P(ElementFilterEmptyDocHit, ZeroHitPredicateWithAnd) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2545,7 +2554,7 @@ TEST_P(ElementFilterZeroElementBatch, ActiveDocsWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2654,7 +2663,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
                         kRowCount,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
     auto* internal_segment =
@@ -2959,17 +2968,22 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
 
     if (with_sealed) {
         std::vector<int32_t> indexed_elements = {7, 9};
-        auto nested_index =
-            std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                storage::FileManagerContext(), true /* is_nested */);
-        nested_index->Build(
-            indexed_elements.size(), indexed_elements.data(), nullptr);
+        auto nested_index = BuildTestScalarIndex<int32_t>(
+            milvus::index::families::kSort,
+            indexed_elements.size(),
+            indexed_elements.data(),
+            nullptr,
+            {{"nested", true},
+             {"field_type", DataType::ARRAY},
+             {"element_type", DataType::INT32}});
 
-        LoadIndexInfo load_info;
+        LoadIndexInfo load_info{};
         load_info.field_id = int_array_fid.get();
         load_info.field_type = DataType::ARRAY;
         load_info.element_type = DataType::INT32;
         load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+        SetTestIndexMetadata(
+            load_info, *nested_index, milvus::index::families::kSort);
         load_info.cache_index = CreateTestCacheIndex("zero_element_nested",
                                                      std::move(nested_index));
         auto* sealed_segment = dynamic_cast<SegmentSealed*>(segment.get());
@@ -3002,7 +3016,7 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     config.set_chunk_rows(1024);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(3);
 
     auto pk_data = insert_record_proto->add_fields_data();
@@ -3036,7 +3050,7 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
                     3,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     proto::plan::PlanNode plan_node;
     auto* query = plan_node.mutable_query();
@@ -3114,7 +3128,7 @@ TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -3251,8 +3265,10 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3272,26 +3288,20 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             }
         }
 
-        milvus::index::IndexBasePtr nested_index;
-        if (index_type == NestedIndexType::STL_SORT) {
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        } else {
-            // INVERTED index - use BuildWithRawDataForUT is not available for int32
-            // So we use ScalarIndexSort for now as a workaround
-            // In real scenario, inverted index would be loaded from disk
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        }
+        const auto family = index_type == NestedIndexType::STL_SORT
+                                ? milvus::index::families::kSort
+                                : milvus::index::families::kInverted;
+        auto nested_index = BuildTestScalarIndex<int32_t>(
+            family,
+            all_elements.size(),
+            all_elements.data(),
+            nullptr,
+            {{"nested", true},
+             {"field_type", DataType::ARRAY},
+             {"element_type", DataType::INT32}});
 
         // Load nested index to segment
-        LoadIndexInfo nested_load_info;
+        LoadIndexInfo nested_load_info{};
         nested_load_info.field_id = int_array_fid.get();
         nested_load_info.field_type = DataType::ARRAY;
         nested_load_info.element_type = DataType::INT32;
@@ -3299,6 +3309,7 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             index_type == NestedIndexType::STL_SORT
                 ? milvus::index::ASCENDING_SORT
                 : milvus::index::INVERTED_INDEX_TYPE;
+        SetTestIndexMetadata(nested_load_info, *nested_index, family);
         nested_load_info.cache_index =
             CreateTestCacheIndex("nested_test", std::move(nested_index));
         segment->LoadIndex(nested_load_info);
@@ -3483,8 +3494,10 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3617,7 +3630,7 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     int topK = 5;
     int group_size = 4;
@@ -3713,8 +3726,10 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     auto indexing = GenVecIndexing(
         N, dim, vec_values.data(), knowhere::IndexEnum::INDEX_HNSW);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3862,8 +3877,10 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4004,8 +4021,10 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4014,8 +4033,7 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
 
-    // Build nested scalar index with is_nested=true (the correct behavior
-    // after the fix sets field_name so IndexFactory routes to CreateNestedIndex).
+    // Build an element-domain scalar reader for the flattened array values.
     std::vector<int32_t> all_elements;
     all_elements.reserve(N * array_len);
     for (size_t row = 0; row < N; row++) {
@@ -4024,16 +4042,22 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
         }
     }
 
-    auto stl_index = std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-        storage::FileManagerContext(),
-        true /* is_nested=true: correct after fix */);
-    stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+    auto stl_index = BuildTestScalarIndex<int32_t>(
+        milvus::index::families::kSort,
+        all_elements.size(),
+        all_elements.data(),
+        nullptr,
+        {{"nested", true},
+         {"field_type", DataType::ARRAY},
+         {"element_type", DataType::INT32}});
 
-    LoadIndexInfo nested_load_info;
+    LoadIndexInfo nested_load_info{};
     nested_load_info.field_id = int_array_fid.get();
     nested_load_info.field_type = DataType::ARRAY;
     nested_load_info.element_type = DataType::INT32;
     nested_load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+    SetTestIndexMetadata(
+        nested_load_info, *stl_index, milvus::index::families::kSort);
     nested_load_info.cache_index =
         CreateTestCacheIndex("nested_test", std::move(stl_index));
     segment->LoadIndex(nested_load_info);
@@ -4123,7 +4147,7 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     // Verify ArrayOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -4470,8 +4494,10 @@ LoadElementHnswIndex(SegmentSealed* segment,
                                    kElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4527,8 +4553,10 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4548,8 +4576,10 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4737,7 +4767,7 @@ TEST(ElementVectorSearch, NullableGrowingBruteForce_ElementBitset) {
                     kNullableElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);
@@ -4752,7 +4782,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_RangeSearch) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     const float radius = 1e6f;
@@ -4781,7 +4811,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_IteratorV2) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     auto plan_bytes =
@@ -4932,7 +4962,7 @@ CreateMultiChunkGrowingSegment(const ElementSearchFixture& f) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
     static_assert(kElemN > kElemChunkRows,
                   "N must exceed chunk_rows to exercise multi-chunk paths");
     return segment;
@@ -5215,7 +5245,7 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);

@@ -22,6 +22,7 @@
 #include <future>
 #include <fstream>
 #include <map>
+#include <numeric>
 #include "arrow/filesystem/localfs.h"
 #include "common/Geometry.h"
 #include "common/OpContext.h"
@@ -43,6 +44,8 @@
 #include "index/contracts/query/IScalarValueReader.h"
 #include "index/contracts/query/ISpatialReader.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/ITextMatchReader.h"
+#include "index/scalar/json/JsonProjectedIndexLoad.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarReaderFactory.h"
@@ -572,6 +575,237 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
     }
 }
 
+TEST_F(LegacyIndexLoadTest, InvertedSlicedNullOffsetsPreserveRows) {
+    FILE_SLICE_SIZE.store(64);
+    constexpr size_t rows = 10000;
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("InvertedInt64");
+    std::vector<int64_t> values(rows);
+    std::iota(values.begin(), values.end(), 0);
+    ScalarTestData<int64_t> data(std::move(values));
+    for (size_t row = 0; row < rows; row += 5)
+        data.validity.reset(row);
+    const ScalarTestInput<int64_t> input(data);
+    Persist(*backend.Build(input.View(), {.row_count = rows}));
+    ASSERT_NE(Object(INDEX_FILE_SLICE_META), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_0"), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_1"), nullptr);
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        auto reader = LoaderRegistry::Instance()
+                          .Lookup(backend.Family())
+                          .Load({IndexFiles{context_,
+                                            paths_,
+                                            LegacyIndexStorageConfig{
+                                                storage::V1SourceLayout::DiskFiles}},
+                                 Options(backend.LoadParams({.row_count = rows}),
+                                         mmap)});
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+        const auto* predicate =
+            dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get());
+        ASSERT_NE(nulls, nullptr);
+        ASSERT_NE(predicate, nullptr);
+        EXPECT_EQ(nulls->IsNull().count(), rows / 5);
+        const int64_t valid_key = 9999;
+        const int64_t null_key = 9995;
+        ExpectHits(predicate->In(1, &valid_key), rows, {9999});
+        ExpectHits(predicate->In(1, &null_key), rows, {});
+        ExpectNativeReads();
+        reader.reset();
+        EXPECT_TRUE(std::filesystem::is_empty(staging_));
+    }
+}
+
+TEST_F(LegacyIndexLoadTest, TextSlicedNullOffsetsPreserveAllNullRows) {
+    FILE_SLICE_SIZE.store(4 * 1024);
+    constexpr size_t rows = 4 * 1024 / sizeof(size_t) + 1;
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("TextVarcharV5Heap");
+    ScalarTestData<std::string_view> data(
+        std::vector<std::string>(rows, "no indexed token"));
+    for (size_t row = 0; row < rows; ++row)
+        data.validity.reset(row);
+    const ScalarTestInput<std::string_view> input(data);
+    Persist(*backend.Build(input.View(), {.row_count = rows}));
+    ASSERT_NE(Object(INDEX_FILE_SLICE_META), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_0"), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_1"), nullptr);
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        auto reader = LoaderRegistry::Instance()
+                          .Lookup(backend.Family())
+                          .Load({IndexFiles{context_,
+                                            paths_,
+                                            LegacyIndexStorageConfig{
+                                                storage::V1SourceLayout::DiskFiles}},
+                                 Options(backend.LoadParams({.row_count = rows}),
+                                         mmap)});
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+        const auto* text = dynamic_cast<const ITextMatchReader*>(reader.get());
+        ASSERT_NE(nulls, nullptr);
+        ASSERT_NE(text, nullptr);
+        EXPECT_EQ(nulls->IsNull().count(), rows);
+        EXPECT_EQ(nulls->IsNotNull().count(), 0);
+        EXPECT_EQ(text->MatchQuery("token", 1).count(), 0);
+        ExpectNativeReads();
+        reader.reset();
+        EXPECT_TRUE(std::filesystem::is_empty(staging_));
+    }
+}
+
+TEST_F(LegacyIndexLoadTest, RTreeSlicedNullOffsetsPreserveCandidates) {
+    FILE_SLICE_SIZE.store(64);
+    constexpr size_t rows = 24;
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("SpatialRTreeHeap");
+    std::vector<std::string> values;
+    values.reserve(rows);
+    for (size_t row = 0; row < rows; ++row) {
+        const auto wkt = "POINT(" + std::to_string(row) + " " +
+                         std::to_string(row) + ")";
+        values.push_back(Geometry(GetThreadLocalGEOSContext(), wkt.c_str())
+                             .to_wkb_string());
+    }
+    ScalarTestData<std::string_view> data(std::move(values));
+    for (size_t row = 0; row < rows; row += 2)
+        data.validity.reset(row);
+    const ScalarTestInput<std::string_view> input(data);
+    Persist(*backend.Build(input.View(), {.row_count = rows}));
+    ASSERT_NE(Object(INDEX_FILE_SLICE_META), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_0"), nullptr);
+    ASSERT_NE(Object(std::string(INDEX_NULL_OFFSET) + "_1"), nullptr);
+    for (bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap);
+        auto reader = LoaderRegistry::Instance()
+                          .Lookup(backend.Family())
+                          .Load({IndexFiles{context_,
+                                            paths_,
+                                            LegacyIndexStorageConfig{
+                                                storage::V1SourceLayout::DiskFiles}},
+                                 Options(backend.LoadParams({.row_count = rows}),
+                                         mmap)});
+        ASSERT_NE(reader, nullptr);
+        const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+        const auto* spatial =
+            dynamic_cast<const ISpatialReader*>(reader.get());
+        ASSERT_NE(nulls, nullptr);
+        ASSERT_NE(spatial, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        EXPECT_EQ(nulls->IsNull().count(), rows / 2);
+        Geometry point(GetThreadLocalGEOSContext(), "POINT(23 23)");
+        ExpectHits(spatial->Candidates(SpatialOp::Intersects, point),
+                   rows,
+                   {23});
+        ExpectNativeReads();
+        reader.reset();
+        EXPECT_TRUE(std::filesystem::is_empty(staging_));
+    }
+}
+
+TEST_F(LegacyIndexLoadTest, JsonProjectedSlicedOffsetsRemainDistinct) {
+    FILE_SLICE_SIZE.store(64);
+    constexpr size_t rows = 30;
+    const auto& backend =
+        ScalarReaderBackends().Get<double>("JsonProjectedInvertedDouble");
+    enum class OffsetProfile {
+        MissingPathOnly,
+        PresentInvalidOnly,
+        NullParent,
+    };
+    // A NULL parent is both non-existent at /a and null in the typed index.
+    // An existing path with an invalid typed value has only a null offset.
+    for (const auto profile : {OffsetProfile::MissingPathOnly,
+                               OffsetProfile::PresentInvalidOnly,
+                               OffsetProfile::NullParent}) {
+        SCOPED_TRACE(static_cast<int>(profile));
+        const bool has_non_exist = profile != OffsetProfile::PresentInvalidOnly;
+        const bool has_nulls = profile != OffsetProfile::MissingPathOnly;
+        ScalarTestData<double> data(std::vector<double>(rows, 1.0));
+        std::vector<size_t> missing;
+        for (size_t row = 0; row < 20; ++row) {
+            if (has_non_exist) {
+                missing.push_back(row);
+            }
+            if (has_nulls) {
+                data.validity.reset(row);
+            }
+        }
+        BackendCaseMetadata metadata{.row_count = rows,
+                                     .values = {{"non_exist_offsets", missing}}};
+        const ScalarTestInput<double> input(data);
+        Persist(*backend.Build(input.View(), metadata));
+        ASSERT_NE(Object(INDEX_FILE_SLICE_META), nullptr);
+        std::vector<const char*> sliced_sidecars;
+        if (has_non_exist) {
+            sliced_sidecars.push_back(INDEX_NON_EXIST_OFFSET_FILE_NAME);
+        }
+        if (has_nulls) {
+            sliced_sidecars.push_back(INDEX_NULL_OFFSET);
+        }
+        for (const auto* sidecar : sliced_sidecars) {
+            ASSERT_NE(Object(std::string(sidecar) + "_0"), nullptr);
+            ASSERT_NE(Object(std::string(sidecar) + "_1"), nullptr);
+        }
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(mmap);
+            auto options = Options(backend.LoadParams(metadata), mmap);
+            auto source = std::shared_ptr<storage::V1RemoteSource>(Run(
+                storage::V1RemoteSource::OpenAsync(
+                    context_,
+                    paths_,
+                    options,
+                    storage::ArtifactStorageNamespace::Index,
+                    storage::V1SourceLayout::DiskFiles)));
+            options.params = AnnotateJsonProjectionCompleteness(
+                std::move(options.params), *source);
+            auto reader = LoaderRegistry::Instance()
+                              .Lookup(ResolveLoadFamily(backend.Family(),
+                                                        *source))
+                              .Load({OpenedIndexSource{LegacyIndexSource{
+                                         source, true}},
+                                     options});
+            ASSERT_NE(reader, nullptr);
+            EXPECT_EQ(reader->Count(), rows);
+            const auto* json =
+                dynamic_cast<const IJsonIndexReader*>(reader.get());
+            ASSERT_NE(json, nullptr);
+            const auto exists = json->Exists("/a");
+            ASSERT_EQ(exists.size(), rows);
+            for (size_t row = 0; row < rows; ++row) {
+                EXPECT_EQ(exists[row], !has_non_exist || row >= 20)
+                    << "Exists row=" << row;
+            }
+            {
+                auto resolved =
+                    json->Resolve("/a", JsonCastType::FromString("DOUBLE"));
+                ASSERT_TRUE(resolved);
+                const auto* nulls =
+                    dynamic_cast<const INullReader*>(resolved.get());
+                ASSERT_NE(nulls, nullptr);
+                const auto is_null = nulls->IsNull();
+                ASSERT_EQ(is_null.size(), rows);
+                for (size_t row = 0; row < rows; ++row) {
+                    EXPECT_EQ(is_null[row], has_nulls && row < 20)
+                        << "IsNull row=" << row;
+                }
+            }
+            for (const auto* sidecar : sliced_sidecars) {
+                EXPECT_FALSE(Object(std::string(sidecar) + "_0")
+                                 ->DirectReadCalls()
+                                 .empty());
+                EXPECT_FALSE(Object(std::string(sidecar) + "_1")
+                                 ->DirectReadCalls()
+                                 .empty());
+            }
+            reader.reset();
+            EXPECT_TRUE(std::filesystem::is_empty(staging_));
+        }
+    }
+}
+
 TEST_F(LegacyIndexLoadTest, ReversedSliceCompletionPreservesEveryRow) {
     for (bool mmap : {false, true}) {
         SCOPED_TRACE(mmap);
@@ -961,7 +1195,9 @@ TEST_F(LegacyIndexLoadTest,
                                                   context_)
                           .request;
     // Two resident value bitsets plus validity and per-value bookkeeping.
-    EXPECT_GE(mmap.final_memory_cost, 3 * sizeof(uint64_t) + 2 * 128);
+    EXPECT_GE(mmap.final_memory_cost,
+              3 * sizeof(uint64_t) + 2 * 128 +
+                  kScalarIndexFixedResidentBytes);
     EXPECT_EQ(mmap.final_memory_cost, heap.final_memory_cost);
     EXPECT_EQ(mmap.final_disk_cost, 0);
     EXPECT_EQ(mmap.max_memory_cost, heap.max_memory_cost);
@@ -998,7 +1234,8 @@ TEST_F(LegacyIndexLoadTest, NullableTantivyMmapEstimateRetainsNullSidecar) {
             EXPECT_EQ(Object("ngram_avg_row_size"), nullptr);
         }
         EXPECT_EQ(estimate.final_memory_cost,
-                  sizeof(uint64_t) + sizeof(size_t));
+                  sizeof(uint64_t) + sizeof(size_t) +
+                      kScalarIndexFixedResidentBytes);
         EXPECT_GT(estimate.max_memory_cost, estimate.final_memory_cost);
     }
 }

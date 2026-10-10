@@ -19,6 +19,7 @@
 #include <cstring>
 #include <filesystem>
 #include <arrow/filesystem/localfs.h>
+#include <roaring/roaring.hh>
 #include "folly/ScopeGuard.h"
 #include "index/LoadResource.h"
 #include "index/Families.h"
@@ -36,6 +37,7 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/Types.h"
 #include "test_utils/PlannerCipherPlugin.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index {
@@ -144,7 +146,7 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
           std::pair{ScalarIndexType::MARISA, MARISA_TRIE}}) {
         // Use the same standalone binlog encoding as legacy HYBRID uploads.
         BinarySet binary_set;
-        auto data = std::make_shared<uint8_t[]>(1);
+        std::shared_ptr<uint8_t[]> data(new uint8_t[1]());
         data[0] = static_cast<uint8_t>(type);
         binary_set.Append(INDEX_TYPE, data, 1);
         // Async estimation inspects real legacy envelopes. Bitmap also reads
@@ -153,10 +155,11 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
             {BITMAP_INDEX_LENGTH, 2},
             {BITMAP_INDEX_NUM_ROWS,
              rows}}.dump();
-        auto meta_bytes = std::make_shared<uint8_t[]>(bitmap_meta.size());
+        std::shared_ptr<uint8_t[]> meta_bytes(
+            new uint8_t[bitmap_meta.size()]());
         std::memcpy(meta_bytes.get(), bitmap_meta.data(), bitmap_meta.size());
         binary_set.Append(BITMAP_INDEX_META, meta_bytes, bitmap_meta.size());
-        auto payload = std::make_shared<uint8_t[]>(17);
+        std::shared_ptr<uint8_t[]> payload(new uint8_t[17]());
         std::fill_n(payload.get(), 17, uint8_t{42});
         binary_set.Append("index_data", payload, 17);
         ASSERT_TRUE(manager.AddFile(binary_set));
@@ -248,9 +251,11 @@ TEST(LegacyHybridResourceEstimate, FallsBackWhenChildTypeIsUnavailable) {
                               const storage::FileManagerContext& context) {
         const auto resources = ScalarIndexFileLoadResource(
             DataType::INT64, index_size, params, false, 10001, files, context);
-        EXPECT_EQ(resources.request.final_memory_cost, index_size);
+        EXPECT_EQ(resources.request.final_memory_cost,
+                  index_size + kScalarIndexFixedResidentBytes);
         EXPECT_EQ(resources.request.final_disk_cost, index_size);
-        EXPECT_EQ(resources.request.max_memory_cost, 2 * index_size);
+        EXPECT_EQ(resources.request.max_memory_cost,
+                  2 * index_size + kScalarIndexFixedResidentBytes);
         EXPECT_EQ(resources.request.max_disk_cost, index_size);
         EXPECT_FALSE(resources.request.has_raw_data);
         EXPECT_FALSE(resources.overhead.has_value());
@@ -261,7 +266,7 @@ TEST(LegacyHybridResourceEstimate, FallsBackWhenChildTypeIsUnavailable) {
     // Unknown type and invalid payload length must not be decoded as a child.
     for (const size_t size : {1, 2}) {
         BinarySet binary_set;
-        auto data = std::make_shared<uint8_t[]>(size);
+        std::shared_ptr<uint8_t[]> data(new uint8_t[size]());
         data[0] =
             size == 1 ? 255 : static_cast<uint8_t>(ScalarIndexType::BITMAP);
         binary_set.Append(INDEX_TYPE, data, size);
@@ -420,6 +425,17 @@ TEST(ScalarIndexV3ResourceTest, RTreeReservesHeapInsteadOfResidentFiles) {
                                                 fixture.context);
                 EXPECT_GE(resources.request.final_memory_cost,
                           state->MemoryUsage());
+                if (rows == 0) {
+                    const auto direct = ScalarIndexLoadResource(
+                        DataType::GEOMETRY,
+                        0,
+                        size,
+                        V3Params(RTREE_INDEX_TYPE),
+                        mmap,
+                        rows);
+                    EXPECT_EQ(resources.request.final_memory_cost,
+                              direct.final_memory_cost);
+                }
                 EXPECT_EQ(resources.request.final_disk_cost, 0);
                 EXPECT_GE(resources.request.max_disk_cost, size);
                 EXPECT_GT(resources.request.max_memory_cost,
@@ -471,7 +487,8 @@ TEST(ScalarIndexV3ResourceTest, BitmapFallbackReservesDenseState) {
                                             rows,
                                             {path},
                                             fixture.context);
-            EXPECT_EQ(resources.request.final_memory_cost, size + dense_bytes);
+            EXPECT_EQ(resources.request.final_memory_cost,
+                      size + dense_bytes + kScalarIndexFixedResidentBytes);
             EXPECT_GE(resources.request.max_memory_cost,
                       resources.request.final_memory_cost + 128);
             EXPECT_EQ(resources.request.final_disk_cost, 0);
@@ -479,6 +496,78 @@ TEST(ScalarIndexV3ResourceTest, BitmapFallbackReservesDenseState) {
             EXPECT_FALSE(resources.overhead.has_value());
         }
     }
+}
+
+TEST(ScalarIndexV3ResourceTest, TantivyValidityCrossesWordBoundaryOnce) {
+    constexpr int64_t rows = 65;
+    constexpr uint64_t index_bytes = 1024;
+    const auto validity_bytes = TargetBitmap(rows).size_in_bytes();
+    const auto previous_word_bytes = TargetBitmap(rows - 1).size_in_bytes();
+    ASSERT_EQ(validity_bytes - previous_word_bytes, sizeof(uint64_t));
+    for (bool mmap : {false, true}) {
+        for (const auto* family : {INVERTED_INDEX_TYPE, NGRAM_INDEX_TYPE}) {
+            SCOPED_TRACE(family);
+            SCOPED_TRACE(mmap);
+            const auto previous = ScalarIndexLoadResource(
+                DataType::VARCHAR,
+                0,
+                index_bytes,
+                V3Params(family),
+                mmap,
+                rows - 1);
+            const auto actual = ScalarIndexLoadResource(
+                DataType::VARCHAR,
+                0,
+                index_bytes,
+                V3Params(family),
+                mmap,
+                rows);
+            EXPECT_EQ(actual.final_memory_cost,
+                      (mmap ? validity_bytes
+                            : index_bytes + validity_bytes) +
+                          kScalarIndexFixedResidentBytes);
+            EXPECT_EQ(actual.final_disk_cost, mmap ? index_bytes : 0);
+            EXPECT_EQ(actual.final_memory_cost - previous.final_memory_cost,
+                      sizeof(uint64_t));
+            EXPECT_EQ(actual.max_memory_cost,
+                      mmap ? previous.max_memory_cost + sizeof(uint64_t)
+                           : std::max(actual.final_memory_cost,
+                                      previous.max_memory_cost));
+        }
+    }
+}
+
+TEST(ScalarIndexV3ResourceTest, BitmapFrozenScratchIsBoundedForRunPayloads) {
+    milvus::test::ScopedLoadTransientBudget budget(1);
+    constexpr uint64_t mib = 1024 * 1024;
+    auto estimate = [](uint64_t bytes, int64_t rows) {
+        return ScalarIndexLoadResource(DataType::INT32,
+                                       0,
+                                       bytes,
+                                       V3Params(BITMAP_INDEX_TYPE),
+                                       true,
+                                       rows);
+    };
+    const auto small = estimate(64 * mib, 1000000);
+    const auto large = estimate(256 * mib, 1000000);
+    EXPECT_EQ(small.max_memory_cost, large.max_memory_cost);
+    EXPECT_LT(large.max_memory_cost, 64 * mib);
+    EXPECT_EQ(large.final_disk_cost, 256 * mib);
+
+    constexpr uint32_t rows = 1 << 16;
+    roaring::Roaring posting;
+    posting.addRange(0, rows);
+    posting.runOptimize();
+    for (uint32_t row = 0; row < rows; row += 2)
+        posting.remove(row);
+    const auto frozen_bytes = posting.getFrozenSizeInBytes();
+    ASSERT_GT(frozen_bytes, rows / 8);
+    constexpr uint64_t index_bytes = 64 * mib;
+    const auto request = estimate(index_bytes, rows);
+    const auto read_bytes = storage::EntryStreamMaxTransientBytes(
+        index_bytes, storage::MaxEntryStreamTaskBytes());
+    EXPECT_GE(request.max_memory_cost - request.final_memory_cost - read_bytes,
+              2 * kBitmapFrozenBatchBytes + 3 * frozen_bytes);
 }
 
 TEST(ScalarIndexV3ResourceTest, EncryptedEstimatesRetainFullScratch) {

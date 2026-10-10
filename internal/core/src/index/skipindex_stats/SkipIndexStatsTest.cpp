@@ -37,10 +37,8 @@
 #include "common/ChunkWriter.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
-#include "common/TracerBase.h"
 #include "common/Types.h"
 #include "gtest/gtest.h"
-#include "index/SkipIndex.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
 #include "storage/Event.h"
 #include "storage/PayloadReader.h"
@@ -981,48 +979,4 @@ TEST_F(SkipIndexStatsBuilderTest,
     ASSERT_NE(metrics, nullptr);
     EXPECT_EQ(metrics->GetMetricsType(), FieldChunkMetricsType::NONE);
     EXPECT_FALSE(metrics->CanSkipUnaryRange(OpType::Equal, int32_t(15)));
-}
-
-// A minimal FieldChunkMetricsProvider standing in for one immutable column
-// generation: it answers chunk 0 with its own bounds and fails open elsewhere.
-namespace {
-class SingleCellMetricsProvider : public milvus::FieldChunkMetricsProvider {
- public:
-    SingleCellMetricsProvider(int64_t lower, int64_t upper)
-        : metrics_(lower, upper, nullptr) {
-    }
-
-    const FieldChunkMetrics*
-    GetSkipMetrics(int64_t chunk_id) const override {
-        return chunk_id == 0 ? &metrics_ : nullptr;
-    }
-
- private:
-    IntFieldChunkMetrics<int64_t> metrics_;
-};
-}  // namespace
-
-TEST_F(SkipIndexStatsBuilderTest,
-       ColumnMetricsViewsKeepGenerationsIsolatedAndFailOpen) {
-    const FieldId field_id(101);
-    auto make_view = [&](int64_t lower, int64_t upper) {
-        auto skip_index = std::make_shared<SkipIndex>();
-        skip_index->LoadSkipSource(
-            field_id,
-            std::make_shared<SingleCellMetricsProvider>(lower, upper));
-        return skip_index;
-    };
-
-    auto old_generation = make_view(0, 10);
-    auto new_generation = make_view(100, 110);
-
-    // Each read view owns its resolver generation. Replacing the column cannot
-    // mutate a previously captured view, and a missing cell remains readable.
-    EXPECT_TRUE(old_generation->CanSkipUnaryRange<int64_t>(
-        field_id, 0, OpType::Equal, int64_t(105)));
-    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
-        field_id, 0, OpType::Equal, int64_t(105)));
-    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
-        field_id, 1, OpType::Equal, int64_t(105)))
-        << "out-of-range chunk ids must conservatively remain readable";
 }

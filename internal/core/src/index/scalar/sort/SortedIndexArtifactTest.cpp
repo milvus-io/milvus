@@ -197,6 +197,48 @@ TEST(SortedIndexArtifactTest, InvalidStringReverseOffsetIsRejected) {
                        [&] { static_cast<void>(OpenV3(backend, persisted)); });
 }
 
+TEST(SortedIndexArtifactTest, StringPostingRowBeyondCountIsRejected) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("SortedVarcharNonNull");
+    ScalarTestData<std::string_view> data({"a", "b", "c"});
+    data.validity_present = false;
+    auto artifact = BuildSorted(backend, std::move(data));
+    auto persisted = SerializeV3(*artifact);
+    auto& payload =
+        persisted.entries.at(std::string(sort_format::kIndexData));
+    auto read_u32 = [&](size_t offset) {
+        EXPECT_LE(offset + sizeof(uint32_t), payload.size());
+        uint32_t value = 0;
+        if (offset + sizeof(uint32_t) <= payload.size())
+            std::memcpy(&value, payload.data() + offset, sizeof(value));
+        return value;
+    };
+    const auto unique = read_u32(0);
+    ASSERT_GT(unique, 0);
+    const size_t offsets_start = sizeof(uint32_t);
+    const size_t strings_start = offsets_start + unique * sizeof(uint32_t);
+    ASSERT_LE(strings_start, payload.size());
+    const auto last_string = read_u32(offsets_start +
+                                      (unique - 1) * sizeof(uint32_t));
+    const size_t last_length_at = strings_start + last_string;
+    const size_t postings_offsets_start =
+        last_length_at + sizeof(uint32_t) + read_u32(last_length_at);
+    ASSERT_LE(postings_offsets_start + unique * sizeof(uint32_t),
+              payload.size());
+    const size_t first_posting = postings_offsets_start +
+                                 unique * sizeof(uint32_t) +
+                                 read_u32(postings_offsets_start);
+    ASSERT_LE(first_posting + 2 * sizeof(uint32_t), payload.size());
+    ASSERT_GT(read_u32(first_posting), 0);
+    const uint32_t out_of_range_row = 3;
+    std::memcpy(payload.data() + first_posting + sizeof(uint32_t),
+                &out_of_range_row,
+                sizeof(out_of_range_row));
+
+    ExpectSegcoreError(ErrorCode::DataFormatBroken,
+                       [&] { static_cast<void>(OpenV3(backend, persisted)); });
+}
+
 TEST(SortedIndexArtifactTest, TruncatedStringPayloadIsRejected) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("SortedVarcharNonNull");

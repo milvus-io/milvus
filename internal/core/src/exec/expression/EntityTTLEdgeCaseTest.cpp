@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <memory>
 #include <gtest/gtest.h>
 #include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
@@ -123,7 +124,7 @@ TEST(PhysicalTimeEdgeCase, SearchWithoutFilterTTLFiltering) {
         }
     }
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(test_data_count);
 
     {
@@ -153,7 +154,7 @@ TEST(PhysicalTimeEdgeCase, SearchWithoutFilterTTLFiltering) {
                     test_data_count,
                     row_ids.data(),
                     ts_data.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     uint64_t query_ts = base_ts + test_data_count;
     int64_t active_count = segment->get_active_count(query_ts);

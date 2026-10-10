@@ -30,11 +30,94 @@
 #include "common/Chunk.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
 
 namespace milvus {
 
 namespace {
+
+class SkipMetricsGroupTranslator final
+    : public cachinglayer::Translator<GroupChunk> {
+ public:
+    explicit SkipMetricsGroupTranslator(
+        segcore::storagev2translator::SkipMetricsByField metrics)
+        : meta_(1,
+                cachinglayer::StorageType::MEMORY,
+                cachinglayer::CellIdMappingMode::IDENTICAL,
+                cachinglayer::CellDataType::OTHER,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                true) {
+        meta_.num_rows_until_chunk_ = {0, 1};
+        meta_.InstallSkipMetrics(std::move(metrics), 1, key_);
+    }
+    size_t num_cells() const override { return 1; }
+    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t uid) const override {
+        return uid;
+    }
+    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
+    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+        return {{0, 0}, {0, 0}};
+    }
+    int64_t cells_storage_bytes(
+        const std::vector<cachinglayer::cid_t>&) const override {
+        return 0;
+    }
+    const std::string& key() const override { return key_; }
+    cachinglayer::Meta* meta() override { return &meta_; }
+    std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>>
+    get_cells(OpContext*, const std::vector<cachinglayer::cid_t>&) override {
+        ThrowInfo(UnexpectedError, "skip metrics must not load group payloads");
+    }
+
+ private:
+    std::string key_{"skip_index_test"};
+    segcore::storagev2translator::GroupCTMeta meta_;
+};
+
+class SkipMetricsChunkTranslator final
+    : public cachinglayer::Translator<Chunk> {
+ public:
+    SkipMetricsChunkTranslator(int64_t rows, std::unique_ptr<Chunk> chunk)
+        : chunk_(std::move(chunk)),
+          meta_(cachinglayer::StorageType::MEMORY,
+                cachinglayer::CellIdMappingMode::IDENTICAL,
+                cachinglayer::CellDataType::SCALAR_FIELD,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                true) {
+        meta_.num_rows_until_chunk_ = {0, rows};
+        segcore::storagev1translator::virtual_chunk_config(
+            rows, 1, meta_.num_rows_until_chunk_, meta_.virt_chunk_order_,
+            meta_.vcid_to_cid_arr_);
+    }
+    size_t num_cells() const override { return 1; }
+    cachinglayer::cid_t cell_id_of(cachinglayer::uid_t uid) const override {
+        return uid;
+    }
+    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
+    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+        return {{0, 0}, {0, 0}};
+    }
+    int64_t cells_storage_bytes(
+        const std::vector<cachinglayer::cid_t>&) const override {
+        return 0;
+    }
+    const std::string& key() const override { return key_; }
+    cachinglayer::Meta* meta() override { return &meta_; }
+    std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Chunk>>>
+    get_cells(OpContext*, const std::vector<cachinglayer::cid_t>& cids) override {
+        AssertInfo(cids.size() == 1 && cids.front() == 0 && chunk_ != nullptr,
+                   "skip column fixture can transfer its chunk once");
+        std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Chunk>>> cells;
+        cells.emplace_back(0, std::move(chunk_));
+        return cells;
+    }
+
+ private:
+    std::string key_{"skip_index_v1_column"};
+    std::unique_ptr<Chunk> chunk_;
+    segcore::storagev1translator::CTMeta meta_;
+};
 
 // Build a ProxyChunkColumn whose skip metrics are owned by the group meta, and
 // whose single cell (chunk 0) carries the given FieldChunkMetrics.
@@ -44,13 +127,8 @@ MakeColumnWithMetrics(FieldId field_id,
     segcore::storagev2translator::SkipMetricsByField metrics_by_field;
     metrics_by_field[field_id.get()].push_back(std::move(metrics));
 
-    std::vector<std::unique_ptr<GroupChunk>> group_chunks(1);
     auto translator =
-        std::make_unique<TestGroupChunkTranslator>(1,
-                                                   std::vector<int64_t>{1},
-                                                   "skip_index_test",
-                                                   std::move(group_chunks),
-                                                   std::move(metrics_by_field));
+        std::make_unique<SkipMetricsGroupTranslator>(std::move(metrics_by_field));
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
     FieldMeta field_meta(
@@ -424,8 +502,8 @@ TEST(FieldSkipMetricsViewTest, StorageV1ColumnDeclaresNoListAndFailsOpen) {
         sizeof(int64_t),
         /*nullable=*/false,
         std::make_shared<ChunkMmapGuard>(nullptr, 0, "")));
-    auto translator = std::make_unique<TestChunkTranslator>(
-        std::vector<int64_t>{kRows}, "skip_index_v1_column", std::move(chunks));
+    auto translator = std::make_unique<SkipMetricsChunkTranslator>(
+        kRows, std::move(chunks.front()));
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
     auto column = std::make_shared<ChunkedColumn>(std::move(slot), field_meta);
@@ -498,6 +576,48 @@ TEST(FieldSkipMetricsViewTest, RetainsResolvedGenerationAcrossRebindAndErase) {
     skip_index->Erase(fid);
     skip_index.reset();
     EXPECT_TRUE(view.CanSkipUnaryRange<int64_t>(0, OpType::GreaterThan, 100));
+}
+namespace {
+// One immutable column generation; unknown chunks have no metrics.
+class SingleCellMetricsProvider : public milvus::FieldChunkMetricsProvider {
+ public:
+    SingleCellMetricsProvider(int64_t lower, int64_t upper)
+        : metrics_(lower, upper, nullptr) {
+    }
+
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t chunk_id) const override {
+        return chunk_id == 0 ? &metrics_ : nullptr;
+    }
+
+ private:
+    index::IntFieldChunkMetrics<int64_t> metrics_;
+};
+}  // namespace
+
+TEST_F(SkipIndexTest,
+       ColumnMetricsViewsKeepGenerationsIsolatedAndFailOpen) {
+    const FieldId field_id(101);
+    auto make_view = [&](int64_t lower, int64_t upper) {
+        auto skip_index = std::make_shared<SkipIndex>();
+        skip_index->LoadSkipSource(
+            field_id,
+            std::make_shared<SingleCellMetricsProvider>(lower, upper));
+        return skip_index;
+    };
+
+    auto old_generation = make_view(0, 10);
+    auto new_generation = make_view(100, 110);
+
+    // Each read view owns its resolver generation. Replacing the column cannot
+    // mutate a previously captured view, and a missing cell remains readable.
+    EXPECT_TRUE(old_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 0, OpType::Equal, int64_t(105)));
+    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 0, OpType::Equal, int64_t(105)));
+    EXPECT_FALSE(new_generation->CanSkipUnaryRange<int64_t>(
+        field_id, 1, OpType::Equal, int64_t(105)))
+        << "out-of-range chunk ids must conservatively remain readable";
 }
 
 }  // namespace milvus

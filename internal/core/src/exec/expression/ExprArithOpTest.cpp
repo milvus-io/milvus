@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include "ExprTestBase.h"
+#include "ConsumerExprTestBase.h"
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
 #include "common/Consts.h"
@@ -42,8 +42,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/ScalarIndexSort.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -58,6 +57,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -295,7 +295,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -814,7 +814,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1295,7 +1295,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1741,7 +1741,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1828,7 +1828,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -2091,7 +2091,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloatNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -2371,79 +2371,72 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
-    segcore::LoadIndexInfo load_index_info;
 
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);
     age8_col[0] = 4;
-    auto age8_index = milvus::index::CreateScalarIndexSort<int8_t>();
-    age8_index->Build(N, age8_col.data(), nullptr);
-    load_index_info.field_id = i8_fid.get();
-    load_index_info.field_type = DataType::INT8;
-    load_index_info.index_params = GenIndexParams(age8_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age8_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i8_fid,
+        DataType::INT8,
+        test::consumer::BuildScalarReader<int8_t>(
+            i8_fid, DataType::INT8, index::ASCENDING_SORT, N,
+            age8_col.data(), nullptr));
 
     // load index for int16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_fid);
     age16_col[0] = 2000;
-    auto age16_index = milvus::index::CreateScalarIndexSort<int16_t>();
-    age16_index->Build(N, age16_col.data(), nullptr);
-    load_index_info.field_id = i16_fid.get();
-    load_index_info.field_type = DataType::INT16;
-    load_index_info.index_params = GenIndexParams(age16_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age16_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i16_fid,
+        DataType::INT16,
+        test::consumer::BuildScalarReader<int16_t>(
+            i16_fid, DataType::INT16, index::ASCENDING_SORT, N,
+            age16_col.data(), nullptr));
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
     age32_col[0] = 2000;
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_col.data(), nullptr);
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i32_fid,
+        DataType::INT32,
+        test::consumer::BuildScalarReader<int32_t>(
+            i32_fid, DataType::INT32, index::ASCENDING_SORT, N,
+            age32_col.data(), nullptr));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
     age64_col[0] = 2000;
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data(), nullptr);
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i64_fid,
+        DataType::INT64,
+        test::consumer::BuildScalarReader<int64_t>(
+            i64_fid, DataType::INT64, index::ASCENDING_SORT, N,
+            age64_col.data(), nullptr));
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
     age_float_col[0] = 2000;
-    auto age_float_index = milvus::index::CreateScalarIndexSort<float>();
-    age_float_index->Build(N, age_float_col.data(), nullptr);
-    load_index_info.field_id = float_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_float_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_float_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        float_fid,
+        DataType::FLOAT,
+        test::consumer::BuildScalarReader<float>(
+            float_fid, DataType::FLOAT, index::ASCENDING_SORT, N,
+            age_float_col.data(), nullptr));
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_fid);
     age_double_col[0] = 2000;
-    auto age_double_index = milvus::index::CreateScalarIndexSort<double>();
-    age_double_index->Build(N, age_double_col.data(), nullptr);
-    load_index_info.field_id = double_fid.get();
-    load_index_info.field_type = DataType::DOUBLE;
-    load_index_info.index_params = GenIndexParams(age_double_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_double_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        double_fid,
+        DataType::DOUBLE,
+        test::consumer::BuildScalarReader<double>(
+            double_fid, DataType::DOUBLE, index::ASCENDING_SORT, N,
+            age_double_col.data(), nullptr));
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
@@ -2614,7 +2607,6 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     int N = 1000;
     auto raw_data = DataGen(schema, N);
     LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
-    segcore::LoadIndexInfo load_index_info;
 
     auto i8_valid_data = raw_data.get_col_valid(i8_nullable_fid);
     auto i16_valid_data = raw_data.get_col_valid(i16_nullable_fid);
@@ -2626,74 +2618,68 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_nullable_fid);
     age8_col[0] = 4;
-    auto age8_index = milvus::index::CreateScalarIndexSort<int8_t>();
-    age8_index->Build(N, age8_col.data(), i8_valid_data.data());
-    load_index_info.field_id = i8_nullable_fid.get();
-    load_index_info.field_type = DataType::INT8;
-    load_index_info.index_params = GenIndexParams(age8_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age8_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i8_nullable_fid,
+        DataType::INT8,
+        test::consumer::BuildScalarReader<int8_t>(
+            i8_nullable_fid, DataType::INT8, index::ASCENDING_SORT, N,
+            age8_col.data(), i8_valid_data.data()));
 
     // load index for int16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_nullable_fid);
     age16_col[0] = 2000;
-    auto age16_index = milvus::index::CreateScalarIndexSort<int16_t>();
-    age16_index->Build(N, age16_col.data(), i16_valid_data.data());
-    load_index_info.field_id = i16_nullable_fid.get();
-    load_index_info.field_type = DataType::INT16;
-    load_index_info.index_params = GenIndexParams(age16_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age16_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i16_nullable_fid,
+        DataType::INT16,
+        test::consumer::BuildScalarReader<int16_t>(
+            i16_nullable_fid, DataType::INT16, index::ASCENDING_SORT, N,
+            age16_col.data(), i16_valid_data.data()));
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_nullable_fid);
     age32_col[0] = 2000;
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_col.data(), i32_valid_data.data());
-    load_index_info.field_id = i32_nullable_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i32_nullable_fid,
+        DataType::INT32,
+        test::consumer::BuildScalarReader<int32_t>(
+            i32_nullable_fid, DataType::INT32, index::ASCENDING_SORT, N,
+            age32_col.data(), i32_valid_data.data()));
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_nullable_fid);
     age64_col[0] = 2000;
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data(), i64_valid_data.data());
-    load_index_info.field_id = i64_nullable_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        i64_nullable_fid,
+        DataType::INT64,
+        test::consumer::BuildScalarReader<int64_t>(
+            i64_nullable_fid, DataType::INT64, index::ASCENDING_SORT, N,
+            age64_col.data(), i64_valid_data.data()));
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_nullable_fid);
     age_float_col[0] = 2000;
-    auto age_float_index = milvus::index::CreateScalarIndexSort<float>();
-    age_float_index->Build(N, age_float_col.data(), float_valid_data.data());
-    load_index_info.field_id = float_nullable_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_float_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_float_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        float_nullable_fid,
+        DataType::FLOAT,
+        test::consumer::BuildScalarReader<float>(
+            float_nullable_fid, DataType::FLOAT, index::ASCENDING_SORT, N,
+            age_float_col.data(), float_valid_data.data()));
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_nullable_fid);
     age_double_col[0] = 2000;
-    auto age_double_index = milvus::index::CreateScalarIndexSort<double>();
-    age_double_index->Build(N, age_double_col.data(), double_valid_data.data());
-    load_index_info.field_id = double_nullable_fid.get();
-    load_index_info.field_type = DataType::DOUBLE;
-    load_index_info.index_params = GenIndexParams(age_double_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_double_index));
-    seg->LoadIndex(load_index_info);
+    test::expr_index::InstallIndex(
+        *seg,
+        double_nullable_fid,
+        DataType::DOUBLE,
+        test::consumer::BuildScalarReader<double>(
+            double_nullable_fid, DataType::DOUBLE, index::ASCENDING_SORT, N,
+            age_double_col.data(), double_valid_data.data()));
 
     auto seg_promote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
     query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);

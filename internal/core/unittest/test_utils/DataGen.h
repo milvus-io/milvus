@@ -29,8 +29,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorMemIndex.h"
+#include "index_test_utils.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 
@@ -66,13 +65,27 @@ struct GeneratedData {
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
 
+    explicit GeneratedData(std::unique_ptr<InsertRecordProto> raw)
+        : raw_(raw.get()), raw_owner_(std::move(raw)) {
+    }
+
+    std::shared_ptr<InsertRecordProto>
+    SharedRaw() const {
+        return raw_owner_;
+    }
+
     void
     DeepCopy(const GeneratedData& data) {
+        std::shared_ptr<InsertRecordProto> copied_raw(clone_msg(data.raw_));
         row_ids_ = data.row_ids_;
         timestamps_ = data.timestamps_;
-        raw_ = clone_msg(data.raw_).release();
         field_ids = data.field_ids;
         schema_ = data.schema_;
+        if (raw_ != raw_owner_.get()) {
+            delete raw_;
+        }
+        raw_owner_ = std::move(copied_raw);
+        raw_ = raw_owner_.get();
     }
 
     GeneratedData(const GeneratedData& data) {
@@ -82,7 +95,6 @@ struct GeneratedData {
     GeneratedData&
     operator=(const GeneratedData& data) {
         if (this != &data) {
-            delete raw_;
             DeepCopy(data);
         }
         return *this;
@@ -93,12 +105,17 @@ struct GeneratedData {
           timestamps_(std::move(data.timestamps_)),
           raw_(data.raw_),
           field_ids(std::move(data.field_ids)),
-          schema_(std::move(data.schema_)) {
+          schema_(std::move(data.schema_)),
+          raw_owner_(std::move(data.raw_owner_)) {
         data.raw_ = nullptr;
     }
 
     ~GeneratedData() {
-        delete raw_;
+        // Hand-built datasets may still assign an exclusively owned record to
+        // raw_. Generated records use raw_ as a view of the shared owner.
+        if (raw_ != raw_owner_.get()) {
+            delete raw_;
+        }
     }
 
     template <typename T>
@@ -312,6 +329,10 @@ struct GeneratedData {
     GeneratedData() = default;
 
  private:
+    // Insert may retain the record after this fixture leaves scope. Copies of
+    // GeneratedData still clone the record; moves transfer this owner and view.
+    std::shared_ptr<InsertRecordProto> raw_owner_;
+
     friend GeneratedData
     DataGen(SchemaPtr schema,
             int64_t N,
@@ -1132,9 +1153,8 @@ DataGen(SchemaPtr schema,
         ++offset;
     }
 
-    GeneratedData res;
+    GeneratedData res(std::move(insert_data));
     res.schema_ = schema;
-    res.raw_ = insert_data.release();
     res.raw_->set_num_rows(N);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
@@ -1228,9 +1248,8 @@ DataGenForJsonArray(SchemaPtr schema,
         }
     }
 
-    milvus::segcore::GeneratedData res;
+    milvus::segcore::GeneratedData res(std::move(insert_data));
     res.schema_ = schema;
-    res.raw_ = insert_data.release();
     res.raw_->set_num_rows(N);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
@@ -1693,205 +1712,97 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     return field_data;
 }
 
-inline std::unique_ptr<milvus::index::VectorIndex>
+inline index::IIndexReaderBasePtr
 GenVecIndexing(int64_t N,
                int64_t dim,
                const float* vec,
                const char* index_type,
                bool use_knowhere_build_pool = true) {
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "1024"},
-                       {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataSet(N, dim, vec);
-    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestRemotePath;
-    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-    milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager, fs);
-    auto indexing = std::make_unique<index::VectorMemIndex<float>>(
-        DataType::NONE,
-        index_type,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        use_knowhere_build_pool,
-        file_manager_context);
-    indexing->BuildWithDataset(database, conf);
-    auto create_index_result = indexing->Upload();
-    auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
-    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    // we need a load stage to use index as the producation does
-    // knowhere would do some data preparation in this stage
-    indexing->Load(milvus::tracer::TraceContext{}, conf);
-    return indexing;
+    auto conf = knowhere::Json{{knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    return BuildTestVectorIndex<float>(N,
+                                       dim,
+                                       vec,
+                                       index_type,
+                                       knowhere::metric::L2,
+                                       std::move(conf),
+                                       use_knowhere_build_pool);
 }
 
-// GenVecIndexing for Float16Vector
-inline std::unique_ptr<milvus::index::VectorIndex>
+inline index::IIndexReaderBasePtr
 GenVecIndexingFloat16(int64_t N,
                       int64_t dim,
                       const knowhere::fp16* vec,
                       const char* index_type,
                       bool use_knowhere_build_pool = true) {
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "1024"},
-                       {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataSet(N, dim, vec);
-    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestRemotePath;
-    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-    milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager, fs);
-    auto indexing = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
-        DataType::NONE,
-        index_type,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        use_knowhere_build_pool,
-        file_manager_context);
-    indexing->BuildWithDataset(database, conf);
-    auto create_index_result = indexing->Upload();
-    auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
-    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    indexing->Load(milvus::tracer::TraceContext{}, conf);
-    return indexing;
+    auto conf = knowhere::Json{{knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    return BuildTestVectorIndex<knowhere::fp16>(N,
+                                                dim,
+                                                vec,
+                                                index_type,
+                                                knowhere::metric::L2,
+                                                std::move(conf),
+                                                use_knowhere_build_pool);
 }
 
-// GenVecIndexing for BFloat16Vector
-inline std::unique_ptr<milvus::index::VectorIndex>
+inline index::IIndexReaderBasePtr
 GenVecIndexingBFloat16(int64_t N,
                        int64_t dim,
                        const knowhere::bf16* vec,
                        const char* index_type,
                        bool use_knowhere_build_pool = true) {
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "1024"},
-                       {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataSet(N, dim, vec);
-    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestRemotePath;
-    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-    milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager, fs);
-    auto indexing = std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
-        DataType::NONE,
-        index_type,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        use_knowhere_build_pool,
-        file_manager_context);
-    indexing->BuildWithDataset(database, conf);
-    auto create_index_result = indexing->Upload();
-    auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
-    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    indexing->Load(milvus::tracer::TraceContext{}, conf);
-    return indexing;
+    auto conf = knowhere::Json{{knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    return BuildTestVectorIndex<knowhere::bf16>(N,
+                                                dim,
+                                                vec,
+                                                index_type,
+                                                knowhere::metric::L2,
+                                                std::move(conf),
+                                                use_knowhere_build_pool);
 }
 
-// GenVecIndexing for Int8Vector
-inline std::unique_ptr<milvus::index::VectorIndex>
+inline index::IIndexReaderBasePtr
 GenVecIndexingInt8(int64_t N,
                    int64_t dim,
                    const int8_t* vec,
                    const char* index_type,
                    bool use_knowhere_build_pool = true) {
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "1024"},
-                       {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataSet(N, dim, vec);
-    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestRemotePath;
-    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-    milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager, fs);
-    auto indexing = std::make_unique<index::VectorMemIndex<int8_t>>(
-        DataType::NONE,
-        index_type,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        use_knowhere_build_pool,
-        file_manager_context);
-    indexing->BuildWithDataset(database, conf);
-    auto create_index_result = indexing->Upload();
-    auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
-    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    indexing->Load(milvus::tracer::TraceContext{}, conf);
-    return indexing;
+    auto conf = knowhere::Json{{knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    return BuildTestVectorIndex<int8_t>(N,
+                                        dim,
+                                        vec,
+                                        index_type,
+                                        knowhere::metric::L2,
+                                        std::move(conf),
+                                        use_knowhere_build_pool);
 }
 
-// GenVecIndexing for BinaryVector
-inline std::unique_ptr<milvus::index::VectorIndex>
+inline index::IIndexReaderBasePtr
 GenVecIndexingBinary(int64_t N,
                      int64_t dim,
                      const uint8_t* vec,
                      const char* index_type,
                      bool use_knowhere_build_pool = true) {
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::HAMMING},
-                       {knowhere::meta::DIM, std::to_string(dim)},
-                       {knowhere::indexparam::NLIST, "1024"},
-                       {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataSet(N, dim, vec);
-    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
-    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-    milvus::storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestRemotePath;
-    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-    milvus::storage::FileManagerContext file_manager_context(
-        field_data_meta, index_meta, chunk_manager, fs);
-    auto indexing = std::make_unique<index::VectorMemIndex<uint8_t>>(
-        DataType::NONE,
-        index_type,
-        knowhere::metric::HAMMING,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        use_knowhere_build_pool,
-        file_manager_context);
-    indexing->BuildWithDataset(database, conf);
-    auto create_index_result = indexing->Upload();
-    auto index_files = create_index_result->GetIndexFiles();
-    conf["index_files"] = index_files;
-    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
-    indexing->Load(milvus::tracer::TraceContext{}, conf);
-    return indexing;
+    auto conf = knowhere::Json{{knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    return BuildTestVectorIndex<uint8_t>(N,
+                                         dim,
+                                         vec,
+                                         index_type,
+                                         knowhere::metric::HAMMING,
+                                         std::move(conf),
+                                         use_knowhere_build_pool);
 }
 
 template <typename T>
-inline index::IndexBasePtr
+inline index::IIndexReaderBasePtr
 GenScalarIndexing(int64_t N, const T* data) {
     static_assert(std::is_arithmetic_v<T>,
-                  "ScalarIndexSort only supports arithmetic types");
-    auto indexing = index::CreateScalarIndexSort<T>();
-    indexing->Build(N, data);
-    return indexing;
+                  "sorted scalar fixtures support arithmetic types");
+    return BuildTestScalarIndex<T>(index::families::kSort, N, data);
 }
 
 inline std::vector<char>

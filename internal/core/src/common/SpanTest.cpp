@@ -156,7 +156,7 @@ TEST(Span, Naive) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
     auto vec_ptr = dataset.get_col<uint8_t>(bin_vec_fid);
     auto age_ptr = dataset.get_col<float>(float_fid);
     auto float_ptr = dataset.get_col<float>(float_vec_fid);
