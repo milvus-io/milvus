@@ -130,12 +130,12 @@ func TestQueuedLoadRetainsReplayRangeAfterOriginatingViewDrops(t *testing.T) {
 				}
 				return &lifetimeRegistration{}, nil
 			}).Build())
-			patchLifetime(t, mockey.Mock((*lifetimeRegistration).WaitCatchup).Return(nil).Build())
+			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Catchup).To(func(_ *lifetimeRegistration, _ context.Context, done func(error)) { done(nil) }).Build())
 			patchLifetime(t, mockey.Mock((*lifetimeRegistration).Unregister).Return().Build())
 			scheduler := nodescheduler.New(3)
 			t.Cleanup(scheduler.Close)
 			physical := newTestSegmentPreparerWithStream(scheduler, &plannedTestLoader{}, &fakeSegmentLoadInfoStream{})
-			manager := newTestManagerWithPreparation(t, scheduler, physical, &fakeTransformLogBuffer{}, 1, &fakeQueryViewCollectionRuntimeManager{})
+			manager := newTestManagerWithPreparation(t, scheduler, physical, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{})
 			view := &viewpb.QueryViewOfQueryNode{Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
 			finished := make(chan bool, 2)
 			acquire := func(version int64, frontier uint64) qviews.QueryViewKey {

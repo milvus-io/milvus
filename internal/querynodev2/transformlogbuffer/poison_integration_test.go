@@ -69,7 +69,7 @@ func testLocalPoison(t *testing.T, stage string) {
 	defer streamPatch.UnPatch()
 	sched := nodescheduler.New(2)
 	defer sched.Close()
-	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: sched, Loader: &poisonPhysicalLoader{}, LoadInfoStream: &poisonLoadInfoStream{}, Buffer: buffer, CatchupConcurrency: 1})
+	manager := qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{Scheduler: sched, Loader: &poisonPhysicalLoader{}, LoadInfoStream: &poisonLoadInfoStream{}, Buffer: buffer})
 	h := qnview.NewQNQueryViewHandler(manager)
 	meta := &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 1, Vchannel: "p_1v0", State: viewpb.QueryViewState_QueryViewStatePreparing, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 0}, QueryVersion: 1}}
 	assignment := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}

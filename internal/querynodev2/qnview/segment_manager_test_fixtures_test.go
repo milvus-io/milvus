@@ -90,13 +90,15 @@ func newFakeTransformRegistration() *fakeTransformRegistration {
 	return &fakeTransformRegistration{waitCh: make(chan struct{})}
 }
 
-func (r *fakeTransformRegistration) WaitCatchup(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-r.waitCh:
-		return r.waitErr
-	}
+func (r *fakeTransformRegistration) Catchup(ctx context.Context, onComplete func(error)) {
+	go func() {
+		select {
+		case <-ctx.Done():
+			onComplete(ctx.Err())
+		case <-r.waitCh:
+			onComplete(r.waitErr)
+		}
+	}()
 }
 
 func (r *fakeTransformRegistration) Unregister() {
@@ -240,8 +242,8 @@ func (m preparationStub) Acquire(req segmentPreparationRequest) {
 
 type instantTransformRegistration struct{}
 
-func (instantTransformRegistration) WaitCatchup(context.Context) error {
-	return nil
+func (instantTransformRegistration) Catchup(_ context.Context, onComplete func(error)) {
+	onComplete(nil)
 }
 
 func (instantTransformRegistration) Unregister() {}
@@ -431,7 +433,7 @@ func newTestSegmentPreparer(scheduler nodescheduler.Scheduler, loader PhysicalSe
 }
 
 func newTestSegmentPreparerWithStream(scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, stream SegmentLoadInfoStream, estimators ...SegmentResourceEstimator) *testSegmentPreparer {
-	cfg := QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: loader, LoadInfoStream: stream, CatchupConcurrency: 1}
+	cfg := QueryViewSegmentManagerConfig{Scheduler: scheduler, Loader: loader, LoadInfoStream: stream}
 	if len(estimators) > 0 {
 		cfg.Estimator = estimators[0]
 	}
@@ -451,14 +453,14 @@ func (m *testSegmentPreparer) Acquire(req segmentPreparationRequest) {
 	m.preparePhysical(req)
 }
 
-func newTestManagerWithPreparation(t *testing.T, scheduler nodescheduler.Scheduler, preparation any, buffer TransformLogBuffer, concurrency int, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentManager {
+func newTestManagerWithPreparation(t *testing.T, scheduler nodescheduler.Scheduler, preparation any, buffer TransformLogBuffer, collections ...QueryViewCollectionRuntimeManager) *QueryViewSegmentManager {
 	t.Helper()
 	var m *QueryViewSegmentManager
 	if stage, ok := preparation.(*testSegmentPreparer); ok {
 		m = stage.QueryViewSegmentManager
 		m.buffer = buffer
 	} else {
-		m = NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: buffer, CatchupConcurrency: concurrency})
+		m = NewQueryViewSegmentManager(QueryViewSegmentManagerConfig{Scheduler: scheduler, Buffer: buffer})
 		stub := preparation.(preparationStub)
 		patchLifetime(t, mockey.Mock((*QueryViewSegmentManager).preparePhysical).When(func(target *QueryViewSegmentManager, _ segmentPreparationRequest) bool { return target == m }).To(func(_ *QueryViewSegmentManager, req segmentPreparationRequest) { stub.Acquire(req) }).Build())
 	}
@@ -472,7 +474,7 @@ func newTestQueryViewSegmentManager(t *testing.T, physical any, buffer Transform
 	t.Helper()
 	scheduler := nodescheduler.New(4)
 	t.Cleanup(scheduler.Close)
-	return newTestManagerWithPreparation(t, scheduler, physical, buffer, 4, collections...)
+	return newTestManagerWithPreparation(t, scheduler, physical, buffer, collections...)
 }
 
 func newTestPreparation(t *testing.T, scheduler nodescheduler.Scheduler, streams ...SegmentLoadInfoStream) *testSegmentPreparer {

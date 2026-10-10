@@ -17,7 +17,7 @@ func TestBufferRetentionFollowsMinimumStartAfter(t *testing.T) {
 			owner := &Buffer{
 				channels:          make(map[string]*vchannelBuffer),
 				streamsByPChannel: make(map[string]*streamState),
-				drainTasks:        make(chan *registration, 1),
+				drainTasks:        make(chan catchupTask, 1),
 			}
 			buf := newVChannelBuffer(owner, "p1", "v1", 50)
 			owner.channels["v1"] = buf
@@ -32,6 +32,7 @@ func TestBufferRetentionFollowsMinimumStartAfter(t *testing.T) {
 			registered, err := buf.registerSegment(context.Background(), segment)
 			require.NoError(t, err)
 			defer registered.Unregister()
+			caughtUp := startCatchup(registered)
 			// A second queued segment must keep its own older replay range even
 			// after the first segment stops pinning history.
 			pending := newRegistration(buf, &fakeSegment{id: 11, vchannel: "v1", startAfter: 70})
@@ -61,13 +62,13 @@ func TestBufferRetentionFollowsMinimumStartAfter(t *testing.T) {
 			owner.drainWorker()
 			switch outcome {
 			case "caught up":
-				require.NoError(t, registered.WaitCatchup(context.Background()))
+				require.NoError(t, awaitCatchup(t, caughtUp))
 				require.Equal(t, []uint64{60, 70, 80, 90, 120}, applied)
 			case "canceled":
-				require.ErrorIs(t, registered.WaitCatchup(context.Background()), context.Canceled)
+				require.ErrorIs(t, awaitCatchup(t, caughtUp), context.Canceled)
 				require.Empty(t, applied)
 			case "failed":
-				require.ErrorIs(t, registered.WaitCatchup(context.Background()), failure)
+				require.ErrorIs(t, awaitCatchup(t, caughtUp), failure)
 				require.Equal(t, []uint64{60}, applied)
 			}
 			requireRetention(t, buf, 70, []uint64{80, 90, 120})

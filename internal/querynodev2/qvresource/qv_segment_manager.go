@@ -45,13 +45,12 @@ func NewQueryViewSegmentManager(ctx context.Context, budget *segments.LoadResour
 	physicalLoader := NewQueryViewPhysicalSegmentLoader(cm)
 	nodeScheduler := nodescheduler.Get()
 	return qnview.NewQueryViewSegmentManager(qnview.QueryViewSegmentManagerConfig{
-		Scheduler:          nodeScheduler,
-		Loader:             physicalLoader,
-		Estimator:          newQueryViewSegmentResourceEstimator(budget),
-		LoadInfoStream:     segmentLoadInfoStream,
-		Collections:        newQueryViewCollectionRuntimeManager(meta),
-		Buffer:             qvtransformlogbuffer.New(streams, paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt()),
-		CatchupConcurrency: paramtable.Get().QueryNodeCfg.QueryViewSegmentCatchupConcurrency.GetAsInt(),
+		Scheduler:      nodeScheduler,
+		Loader:         physicalLoader,
+		Estimator:      newQueryViewSegmentResourceEstimator(budget),
+		LoadInfoStream: segmentLoadInfoStream,
+		Collections:    newQueryViewCollectionRuntimeManager(meta),
+		Buffer:         qvtransformlogbuffer.New(streams, paramtable.Get().QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt()),
 	}), nil
 }
 

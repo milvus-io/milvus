@@ -243,7 +243,14 @@ func TestQueryNodeBufferConsumesCatchupAndLiveDeletes(t *testing.T) {
 	reg, err := buffer.RegisterSegment(ctx, &segment{})
 	require.NoError(t, err)
 	defer reg.Unregister()
-	require.NoError(t, reg.WaitCatchup(ctx))
+	caughtUp := make(chan error, 1)
+	reg.Catchup(ctx, func(err error) { caughtUp <- err })
+	select {
+	case err := <-caughtUp:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("catchup did not complete")
+	}
 	select {
 	case tt := <-applied:
 		require.Equal(t, uint64(10), tt)

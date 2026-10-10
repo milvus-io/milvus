@@ -104,7 +104,7 @@ Incoming QueryView(Preparing)
                            -> otherwise prepare the union and Reopen through resource admission
                       -> physical OnLoaded callback
                  -> TransformLogBuffer.RegisterSegment
-                 -> TransformRegistration.WaitCatchup
+                 -> TransformRegistration.Catchup completion callback
                  -> OnReady(partitionID -> segmentIDs)
        -> QNQueryViewStateMachine.OnSegmentsReady
        -> OnReport(QueryView Ready or incremental Preparing progress)
@@ -330,10 +330,17 @@ For each physically loaded segment:
 1. mark the segment as physically loaded if it is still referenced;
 2. register it with `TransformLogBuffer`;
 3. store the registration and catch-up cancellation function;
-4. wait for `TransformRegistration.WaitCatchup`;
-5. validate that the catch-up task still belongs to the same readiness state,
+4. submit `TransformRegistration.Catchup` with a completion callback;
+5. in that callback, validate that the catch-up task still belongs to the same readiness state,
    then mark the segment transform-loaded;
 6. notify all waiting QueryViews through `OnReady`.
+
+Registration pins replay history without starting a task. The manager stores
+the registration before submitting catch-up, so even an inline completion
+finds the owned registration. The actual replay worker invokes completion once
+after replay ends, outside buffer and Apply locks. Cancellation or failure cannot
+complete while native Apply is still running. There is no separate pool or
+per-Segment goroutine waiting for replay completion.
 
 Catch-up tasks retain their readiness-state identity and cancellation context
 from scheduling through registration and completion. Late registration failures,
@@ -420,21 +427,18 @@ correctness fix in this PR. Waiting among VChannels on the same PChannel is
 acceptable: they share that PChannel's availability boundary. The optimization
 target is isolation between PChannels with different availability.
 
-Currently, each `QueryViewSegmentManager` has one shared `catchupTasks` queue
-and worker pool; its `TransformLogBuffer` has one shared `drainTasks` queue and
-worker pool. Neither pool is partitioned by PChannel. The configured worker
-counts (`queryNode.queryView.segmentCatchupConcurrency` and
-`queryNode.queryView.transformLogDrainConcurrency`, both defaulting to 4) bound
-tasks including their waits: catch-up workers wait in `WaitCatchup`, and drain
-workers wait for progress when buffered entries are exhausted before the first
-SyncUp.
-
+Currently, `TransformLogBuffer` has one shared `drainTasks` queue and worker
+pool, not partitioned by PChannel. The configured worker count
+(`queryNode.queryView.transformLogDrainConcurrency`, defaulting to 4) bounds
+replay tasks including waits for progress when buffered entries are exhausted
+before the first SyncUp. Replay workers notify `QueryViewSegmentManager`
+directly on completion.
 Consequently, PChannel A can establish subscriptions, start enough Segment
 catch-up tasks, then stall before its first SyncUp or lose its connection while
 resumption is pending. A's tasks can occupy the shared workers and delay
-Preparing views on a healthy PChannel B. Either pool can be the bottleneck. A
+Preparing views on a healthy PChannel B. A
 PChannel that is unreachable before subscription establishment does not occupy
-these pools: initial subscription acquisition runs asynchronously before Segment
+this pool: initial subscription acquisition runs asynchronously before Segment
 loading. Terminal subscription errors end catch-up rather than waiting for
 recovery indefinitely.
 

@@ -23,7 +23,6 @@ type QueryViewSegmentManager struct {
 	nextLoadGeneration uint64
 	buffer             TransformLogBuffer
 	collections        QueryViewCollectionRuntimeManager
-	catchupTasks       chan segmentCatchupTask
 
 	mu         sync.Mutex
 	generation uint64
@@ -33,32 +32,24 @@ type QueryViewSegmentManager struct {
 
 // QueryViewSegmentManagerConfig supplies execution dependencies, not resource owners.
 type QueryViewSegmentManagerConfig struct {
-	Scheduler          nodescheduler.Scheduler
-	Loader             PhysicalSegmentLoader
-	Estimator          SegmentResourceEstimator
-	LoadInfoStream     SegmentLoadInfoStream
-	Buffer             TransformLogBuffer
-	Collections        QueryViewCollectionRuntimeManager
-	CatchupConcurrency int
+	Scheduler      nodescheduler.Scheduler
+	Loader         PhysicalSegmentLoader
+	Estimator      SegmentResourceEstimator
+	LoadInfoStream SegmentLoadInfoStream
+	Buffer         TransformLogBuffer
+	Collections    QueryViewCollectionRuntimeManager
 }
 
 func NewQueryViewSegmentManager(cfg QueryViewSegmentManagerConfig) *QueryViewSegmentManager {
-	if cfg.CatchupConcurrency <= 0 {
-		panic("query view segment catch-up concurrency must be positive")
-	}
 	m := &QueryViewSegmentManager{
-		scheduler:    cfg.Scheduler,
-		loader:       cfg.Loader,
-		estimator:    cfg.Estimator,
-		stream:       cfg.LoadInfoStream,
-		buffer:       cfg.Buffer,
-		collections:  cfg.Collections,
-		catchupTasks: make(chan segmentCatchupTask, 1024),
-		views:        make(map[qviews.QueryViewKey]*queryViewRef),
-		segments:     make(map[int64]*segmentState),
-	}
-	for i := 0; i < cfg.CatchupConcurrency; i++ {
-		go m.catchupWorker()
+		scheduler:   cfg.Scheduler,
+		loader:      cfg.Loader,
+		estimator:   cfg.Estimator,
+		stream:      cfg.LoadInfoStream,
+		buffer:      cfg.Buffer,
+		collections: cfg.Collections,
+		views:       make(map[qviews.QueryViewKey]*queryViewRef),
+		segments:    make(map[int64]*segmentState),
 	}
 	return m
 }
@@ -443,18 +434,8 @@ func (m *QueryViewSegmentManager) onPhysicalLoaded(segments []TransformSegment, 
 			states = append(states, expected[0][segment.ID()])
 		}
 		if _, task := m.markPhysicalLoaded(segment, states...); task.state != nil {
-			m.scheduleCatchup(task)
+			m.registerAndCatchup(task)
 		}
-	}
-}
-
-func (m *QueryViewSegmentManager) scheduleCatchup(task segmentCatchupTask) {
-	m.catchupTasks <- task
-}
-
-func (m *QueryViewSegmentManager) catchupWorker() {
-	for task := range m.catchupTasks {
-		m.registerAndCatchup(task)
 	}
 }
 
@@ -480,21 +461,31 @@ func (m *QueryViewSegmentManager) markPhysicalLoaded(segment TransformSegment, e
 }
 
 func (m *QueryViewSegmentManager) registerAndCatchup(task segmentCatchupTask) {
-	defer func() { m.mu.Lock(); task.state.taskRefs--; m.mu.Unlock(); m.releaseSegmentState(task.state) }()
-	if task.ctx.Err() != nil {
+	if err := task.ctx.Err(); err != nil {
+		m.completeCatchup(task, err)
 		return
 	}
 	reg, err := m.buffer.RegisterSegment(task.ctx, &observedTransformSegment{TransformSegment: task.segment, manager: m, state: task.state})
 	if err != nil {
-		m.failSegment(task.segment.ID(), task.state, err)
+		m.completeCatchup(task, err)
 		return
 	}
 	if !m.storeRegistration(task, reg) {
 		reg.Unregister()
+		m.completeCatchup(task, context.Canceled)
 		return
 	}
-	if err := reg.WaitCatchup(task.ctx); err != nil {
-		reg.Unregister()
+	reg.Catchup(task.ctx, func(err error) { m.completeCatchup(task, err) })
+}
+
+func (m *QueryViewSegmentManager) completeCatchup(task segmentCatchupTask, err error) {
+	defer func() {
+		m.mu.Lock()
+		task.state.taskRefs--
+		m.mu.Unlock()
+		m.releaseSegmentState(task.state)
+	}()
+	if err != nil {
 		m.failSegment(task.segment.ID(), task.state, err)
 		return
 	}
