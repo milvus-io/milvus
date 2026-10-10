@@ -1,0 +1,103 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <string_view>
+#include <utility>
+
+#include "index/Families.h"
+#include "index/IndexLoader.h"
+#include "index/IndexLoadInput.h"
+#include "index/IndexLoadPlan.h"
+#include "storage/IndexEntryFormat.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "storage/artifact/FileSource.h"
+#include "storage/artifact/LoadOptions.h"
+
+namespace milvus::index {
+
+/**
+ * @brief Loads flat JSON readers from legacy or packed V3 artifacts.
+ * @pre Legacy sources use V1SourceLayout::DiskFiles for Tantivy directory
+ * slices. Packed sources use the file_names/has_null metadata instead.
+ *
+ * Owns the opened source and fixed load options; each Load creates a new reader.
+ */
+class JsonFlatIndexLoader final : public IndexLoader {
+ public:
+    static constexpr std::string_view kFamily = families::kJsonFlat;
+
+    /** @brief Derive capabilities from runtime parameters without I/O. */
+    static ReaderCaps
+    DeriveCaps(const Config& index_meta);
+
+    /**
+     * @brief Validate runtime parameters and legacy inventory; packed targets
+     * await Load.
+     * @param source Opened storage source owned by the resulting loader.
+     * @param options Fixed load options without a retained operation context.
+     * @return A ready loader with reusable family metadata.
+     */
+    static folly::coro::Task<std::unique_ptr<IndexLoader>>
+    Create(OpenedIndexSource source, storage::LoadOptions options);
+
+    /** @copydoc IndexLoader::Load */
+    folly::coro::Task<IIndexReaderBasePtr>
+    Load(milvus::OpContext* context = nullptr) override;
+
+ private:
+    friend struct LoaderTestAccess;
+
+    OpenedIndexSource source_;
+    // Retained options never keep the Create caller's op_ctx.
+    storage::LoadOptions options_;
+
+    JsonFlatIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
+        : source_(std::move(source)), options_(std::move(options)) {
+    }
+
+    /**
+     * @brief Materialize flat-JSON Tantivy files and construct the JSON reader.
+     * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
+     */
+    static folly::coro::Task<IIndexReaderBasePtr>
+    LoadLegacy(storage::FileSource& source,
+               const storage::LoadOptions& opts,
+               bool use_async);
+
+    /**
+     * @brief Allocate payload destinations and state for one packed Load.
+     * @note Does not read payloads. RunPackedIndexLoad owns cleanup until commit.
+     */
+    static IndexLoadPlan
+    PlanPacked(const storage::IndexEntryDirectory& directory,
+               const nlohmann::json& metadata,
+               const storage::LoadOptions& opts);
+
+    /**
+     * @brief Initialize a reader from populated targets without committing them.
+     * @pre All planned reads and local writes have finished successfully.
+     * @note Async offloads blocking file operations and resumes CPU work on
+     * the loading executor. Sync executes inline on the caller thread.
+     */
+    static folly::coro::Task<IIndexReaderBasePtr>
+    FinishPacked(IndexLoadPlan& plan,
+                 const storage::LoadOptions& opts,
+                 bool use_async);
+};
+
+}  // namespace milvus::index

@@ -20,7 +20,7 @@
 #include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
 #include "folly/FBVector.h"
-#include "index/JsonIndexBuilder.h"
+#include "index/scalar/json/JsonValueProjection.h"
 #include "pb/schema.pb.h"
 #include "simdjson/dom/array.h"
 #include "simdjson/dom/element.h"

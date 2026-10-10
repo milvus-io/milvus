@@ -9,6 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+// Stateless conversion from raw JSON documents to typed values at a path.
+// This feeds ordinary inverted, bitmap, or sorted builders; it neither seals a
+// build nor produces an Artifact. The resulting per-path index is registered
+// under a field/path key and exposes an ordinary IScalarPredicateReader<T>.
+
 #pragma once
 #include <stdint.h>
 #include <functional>
