@@ -772,7 +772,7 @@ Insert(CSegmentInterface c_segment,
                    data_info_len);
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         auto insert_record_proto =
-            std::make_unique<milvus::InsertRecordProto>();
+            std::make_shared<milvus::InsertRecordProto>();
         auto suc =
             insert_record_proto->ParseFromArray(data_info, data_info_len);
         AssertInfo(suc, "failed to parse insert data from records");
@@ -781,7 +781,7 @@ Insert(CSegmentInterface c_segment,
                         size,
                         row_ids,
                         timestamps,
-                        insert_record_proto.get());
+                        std::move(insert_record_proto));
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

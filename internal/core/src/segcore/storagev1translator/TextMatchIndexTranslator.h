@@ -16,11 +16,10 @@
 #include <string>
 #include <vector>
 
-#include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
+#include "segcore/storagev1translator/IndexReaderTranslator.h"
 #include "common/resource_c.h"
-#include "index/TextMatchIndex.h"
 #include "storage/FileManager.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -37,11 +36,9 @@ struct TextMatchIndexLoadInfo {
     std::string shard;
 };
 
-// Translator for TextMatchIndex (non-knowhere index). It loads a single-cell
-// TextMatchIndex instance for a sealed segment field and exposes it to the cache
-// layer with a stable key and resource usage.
-class TextMatchIndexTranslator
-    : public milvus::cachinglayer::Translator<milvus::index::TextMatchIndex> {
+// Loads one persisted text reader for a sealed segment field and exposes it to
+// the cache layer with a stable key and resource usage.
+class TextMatchIndexTranslator : public IndexReaderTranslator {
  public:
     TextMatchIndexTranslator(
         TextMatchIndexLoadInfo load_info,
@@ -68,7 +65,7 @@ class TextMatchIndexTranslator
     key() const override;
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::TextMatchIndex>>>
+                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 

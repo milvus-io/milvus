@@ -21,12 +21,12 @@ package segments
 
 #include <stdlib.h>
 #include "segcore/load_index_c.h"
-#include "common/binary_set_c.h"
 */
 import "C"
 
 import (
 	"context"
+	"runtime"
 	"unsafe"
 )
 
@@ -40,27 +40,42 @@ func newLoadIndexInfo(ctx context.Context) (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 
 	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
+	loadIndexInfo := &LoadIndexInfo{cLoadIndexInfo: cLoadIndexInfo}
 	if err := HandleCStatus(ctx, &status, "NewLoadIndexInfo failed"); err != nil {
+		deleteLoadIndexInfo(loadIndexInfo)
 		return nil, err
 	}
-	return &LoadIndexInfo{cLoadIndexInfo: cLoadIndexInfo}, nil
+	return loadIndexInfo, nil
 }
 
 // deleteLoadIndexInfo deletes a CLoadIndexInfo on the current DynamicPool worker.
+// It is nil-safe and idempotent, so a deferred call after a failed creation is harmless.
 func deleteLoadIndexInfo(info *LoadIndexInfo) {
-	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
+	if info == nil || info.cLoadIndexInfo == nil {
+		return
+	}
+	handle := info.cLoadIndexInfo
+	info.cLoadIndexInfo = nil
+	C.DeleteLoadIndexInfo(handle)
 }
 
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, marshaled []byte) error {
-	status := C.FinishLoadIndexInfo(li.cLoadIndexInfo, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+	var data *C.uint8_t
+	if len(marshaled) > 0 {
+		data = (*C.uint8_t)(unsafe.Pointer(&marshaled[0]))
+	}
+	length := C.uint64_t(len(marshaled))
+	status := C.FinishLoadIndexInfo(li.cLoadIndexInfo, data, length)
+	runtime.KeepAlive(marshaled)
 	return HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed")
 }
 
-func (li *LoadIndexInfo) setShard(shard string) {
+func (li *LoadIndexInfo) setShard(ctx context.Context, shard string) error {
 	if shard == "" {
-		return
+		return nil
 	}
 	cShard := C.CString(shard)
 	defer C.free(unsafe.Pointer(cShard))
-	C.SetLoadIndexInfoShard(li.cLoadIndexInfo, cShard)
+	status := C.SetLoadIndexInfoShard(li.cLoadIndexInfo, cShard)
+	return HandleCStatus(ctx, &status, "SetLoadIndexInfoShard failed")
 }

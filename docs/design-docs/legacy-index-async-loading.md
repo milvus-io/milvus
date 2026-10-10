@@ -22,7 +22,8 @@ sorted metadata are parsed once during Create; payload allocation and file
 staging remain in Load.
 There is no intermediate V3 file or preload-all adapter.
 
-`LegacyIndexLoader` validates each immutable physical object's envelope. Raw
+`storage/LegacyIndexFileIO` provides functions to validate each immutable
+physical object's envelope. Raw
 payloads stream in bounded ranges. Parquet and encrypted envelopes retain one
 complete decoding unit because their existing decoders require it. Each issued
 range/unit acquires global admission asynchronously and holds the lease through
@@ -47,7 +48,7 @@ FileSource and a transport choice. Vector loaders retain only a legacy source,
 and FM loaders retain only a packed source. Other families retain the explicit
 source variant they support.
 
-`IndexLoad.cpp` implements the complete load operation: open the storage,
+`LoaderEntry.cpp` implements the complete load operation: open the storage,
 construct the concrete family's metadata state, detach the source context on
 both success and failure, then materialize the reader. `OpenIndexSource`,
 `CreateIndexLoader` and `LoadIndexAsync` are private implementation steps.

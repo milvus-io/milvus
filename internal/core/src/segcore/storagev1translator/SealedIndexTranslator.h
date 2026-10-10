@@ -9,21 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <cstdint>
-#include <optional>
+#pragma once
 
-#include "cachinglayer/Translator.h"
+#include <algorithm>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "common/Tracer.h"
 #include "common/resource_c.h"
-#include "index/Index.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "knowhere/index/index_factory.h"
+#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "storage/FileManager.h"
+#include "storage/IndexEntryReader.h"
+
+namespace milvus::segcore {
+struct LoadIndexInfo;
+}
 
 namespace milvus::segcore::storagev1translator {
 
-class SealedIndexTranslator
-    : public milvus::cachinglayer::Translator<milvus::index::IndexBase> {
+class SealedIndexTranslator : public IndexReaderTranslator {
  public:
     SealedIndexTranslator(
-        milvus::index::CreateIndexInfo index_info,
         const milvus::segcore::LoadIndexInfo* load_index_info,
         milvus::tracer::TraceContext ctx,
         milvus::storage::FileManagerContext file_manager_context,
@@ -39,10 +50,10 @@ class SealedIndexTranslator
     const std::string&
     key() const override;
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IndexBase>>>
+                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
-    Meta*
+    milvus::cachinglayer::Meta*
     meta() override;
 
     int64_t
@@ -50,9 +61,7 @@ class SealedIndexTranslator
         const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
         // if index data supports lazy load internally, cell storage size becomes 0
         // currently only vector index is possible to support lazy load
-        if (IsVectorDataType(index_load_info_.field_type) &&
-            knowhere::IndexFactory::Instance().FeatureCheck(
-                index_info_.index_type, knowhere::feature::LAZY_LOAD)) {
+        if (IsVectorDataType(index_load_info_.field_type) && lazy_load_) {
             return 0;
         }
         constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
@@ -79,13 +88,15 @@ class SealedIndexTranslator
         std::optional<LoadResourceRequest> load_resource_request;
     };
 
-    milvus::index::CreateIndexInfo index_info_;
+    IndexType index_type_;
     milvus::tracer::TraceContext ctx_;
     milvus::storage::FileManagerContext file_manager_context_;
     Config config_;
+    milvus::index::IndexFamily source_family_;
     std::string index_key_;
     IndexLoadInfo index_load_info_;
     LoadResourceRequest load_resource_request_{};
+    bool lazy_load_{false};
     milvus::cachinglayer::Meta meta_;
 };
 }  // namespace milvus::segcore::storagev1translator
