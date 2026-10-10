@@ -1282,7 +1282,9 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}, nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Timestamptz:
+		// Partial upsert merges query-result strings before insert validation
+		// converts Timestamptz values to their internal int64 representation.
 		return &schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -1331,24 +1333,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
 							ElementType: field.GetElementType(),
-						},
-					},
-				},
-			},
-		}, nil
-
-	case schemapb.DataType_Timestamptz:
-		return &schemapb.FieldData{
-			FieldId:   field.FieldID,
-			FieldName: field.Name,
-			Type:      field.DataType,
-			IsDynamic: field.IsDynamic,
-			ValidData: make([]bool, upsertIDSize),
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_TimestamptzData{
-						TimestamptzData: &schemapb.TimestamptzArray{
-							Data: make([]int64, upsertIDSize),
 						},
 					},
 				},
