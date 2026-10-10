@@ -35,6 +35,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -71,6 +72,7 @@
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 
+class JsonStatsGroupByTestAccessor;
 class CollectSingleJsonStatsInfoAccessor;
 class CollectKeyInfoAccessor;
 class BuildKeyStatsAccessor;
@@ -98,6 +100,8 @@ CreateJsonStatsRowRanges(const std::vector<FieldDataPtr>& field_datas,
                          int64_t max_rows_per_range);
 
 class JsonKeyStats : public ScalarIndex<std::string> {
+    friend class ::JsonStatsGroupByTestAccessor;
+
  public:
     static constexpr int64_t kDefaultWriteBatchSize = 81920;
 
@@ -233,6 +237,35 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
  public:
+    // A query-local reader for one exact scalar path. A missing value means
+    // "read raw JSON", not JSON null: typed validity also excludes other
+    // types, absent paths and legacy empty strings. Returned keys own data.
+    class ShreddingReader {
+     public:
+        using Value = std::variant<bool, int64_t, std::string>;
+
+        std::optional<Value>
+        Get(milvus::OpContext* op_ctx, int64_t row_id);
+
+     private:
+        friend class JsonKeyStats;
+        ShreddingReader(std::shared_ptr<ChunkedColumnInterface> column,
+                        JSONType type)
+            : column_(std::move(column)), type_(type) {
+        }
+
+        std::shared_ptr<ChunkedColumnInterface> column_;
+        JSONType type_;
+        std::unordered_map<int64_t, PinWrapper<Chunk*>> pins_;
+    };
+
+    // Returns nullptr for unsupported paths/types or a path without a typed
+    // column. Storage failures and inconsistent row counts propagate.
+    std::unique_ptr<ShreddingReader>
+    CreateShreddingReader(const std::string& pointer,
+                          JSONType type,
+                          int64_t segment_rows) const;
+
     PinWrapper<BsonInvertedIndex*>
     GetBsonIndex(milvus::OpContext* op_ctx) const {
         if (bson_index_cache_slot_ == nullptr) {
