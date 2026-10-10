@@ -205,7 +205,8 @@ type DataCoordCatalog interface {
 	MarkChannelAdded(ctx context.Context, channel string) error
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool
-	ChannelExists(ctx context.Context, channel string) bool
+	// ChannelExists returns lookup errors separately from an absent channel.
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	DropChannel(ctx context.Context, channel string) error
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
