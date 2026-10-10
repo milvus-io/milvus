@@ -2645,22 +2645,24 @@ OpenTextFieldSegmentReader(
     return std::move(reader_result.ValueOrDie());
 }
 
-std::vector<FieldDataPtr>
-GetTextFieldDatasFromManifest(
+VisitOutcome
+VisitTextFieldDataFromManifest(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
-    const FieldDataMeta& field_meta) {
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor) {
     AssertInfo(loon_ffi_properties != nullptr,
                "loon ffi properties is null when read text field data from "
                "manifest");
+    AssertInfo(static_cast<bool>(visitor),
+               "manifest TEXT field-data visitor is empty");
 
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
 
     std::string column_name = std::to_string(field_meta.field_id);
 
     if (!ManifestContainsColumn(loon_manifest, column_name)) {
-        LOG_INFO("TEXT field {} not found in manifest", field_meta.field_id);
-        return {};
+        return VisitOutcome::FieldMissing;
     }
 
     auto reader = OpenTextFieldSegmentReader(manifest_path,
@@ -2669,8 +2671,8 @@ GetTextFieldDatasFromManifest(
                                              field_meta,
                                              column_name);
 
-    std::vector<FieldDataPtr> field_datas;
-    while (true) {
+    bool stopped = false;
+    while (!stopped) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
         if (!status.ok()) {
@@ -2704,7 +2706,7 @@ GetTextFieldDatasFromManifest(
                                           1,
                                           num_rows);
         field_data->FillFieldData(chunked_array);
-        field_datas.push_back(field_data);
+        stopped = visitor(std::move(field_data)) == VisitControl::Stop;
     }
 
     auto status = reader->Close();
@@ -2716,6 +2718,34 @@ GetTextFieldDatasFromManifest(
                   error.what());
     }
 
+    return stopped ? VisitOutcome::Stopped : VisitOutcome::Exhausted;
+}
+
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta) {
+    std::vector<FieldDataPtr> field_datas;
+    const auto outcome = VisitTextFieldDataFromManifest(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        [&](FieldDataPtr field_data) {
+            field_datas.push_back(std::move(field_data));
+            return VisitControl::Continue;
+        });
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+            break;
+        case VisitOutcome::FieldMissing:
+            LOG_INFO("TEXT field {} not found in manifest",
+                     field_meta.field_id);
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue manifest TEXT visitor stopped early");
+    }
     return field_datas;
 }
 

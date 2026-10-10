@@ -29,14 +29,6 @@ struct OpContext;
 // parameters; the storage boundary does not persist or reinterpret them.
 namespace milvus::storage {
 
-// Native warmup policy. Segment loading translates cache configuration or
-// strings to this enum without exposing cache policy types in the interface.
-enum class WarmupPolicy {
-    Disable,
-    Sync,
-    Async,
-};
-
 struct LoadOptions {
     // Open with file-backed bulk ownership. A family may stream format
     // conversion or build heap auxiliary metadata within its declared load
@@ -44,10 +36,11 @@ struct LoadOptions {
     // have known full-materialization gaps.
     bool enable_mmap{false};
 
-    // Where mmap-able / streamed entries are materialized locally.
+    // Parent directory for files a loader stages locally, with or without
+    // mmap; each load creates its own child entry. Index translators always
+    // set it under localStorage.path. If it is empty, loaders use the system
+    // temporary directory, or fail where they require a parent.
     std::string mmap_dir_path;
-
-    WarmupPolicy warmup{WarmupPolicy::Sync};
 
     // Remote artifact payload bytes supplied by load metadata. This is a
     // pre-load admission estimate only; opened readers report owned heap and

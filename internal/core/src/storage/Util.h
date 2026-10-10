@@ -410,6 +410,20 @@ VisitFieldDataFromManifest(
     const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes = kStreamingInflightBytes);
 
+// Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
+// Such a column stores LOB-encoded cells: a value below the inline threshold
+// (64 KiB by default) is kept inline behind a marker byte, and a larger value
+// is a reference into the partition's LOB files. Reading the column with the
+// plain manifest reader yields those encoded cells; this reader resolves both
+// forms. External TEXT columns are plain UTF-8 and use the plain reader. Stop
+// prevents further ReadNext calls and callbacks.
+VisitOutcome
+VisitTextFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor);
+
 void
 IterateFieldDataFromManifest(
     const std::string& manifest_path,
