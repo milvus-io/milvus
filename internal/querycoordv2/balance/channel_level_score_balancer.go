@@ -81,7 +81,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 		}
 	}()
 
-	streamingEnabled := streamingutil.IsStreamingServiceEnabled()
+	streamingEnabled := streamingutil.UseStreamingQueryNodeAsDelegator()
 	if streamingEnabled {
 		// Make a plan to rebalance the channel first.
 		// The Streaming QueryNode doesn't make the channel level score, so just fallback to the ScoreBasedBalancer.
