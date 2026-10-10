@@ -590,7 +590,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
@@ -2382,19 +2381,20 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         return nullptr;
     }
 
-    std::unordered_set<GetType> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueWithCastNumber<GetType>(element));
-    }
-    boost::container::vector<GetType> elems(elements.begin(), elements.end());
-
     // Get array offsets for nested index (needed for element-to-row conversion)
     auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
 
+    // Convert terms only on an index-result cache miss. Later batches and
+    // ExprResCache hits reuse the bitmap without rebuilding the term list.
     auto execute_sub_batch =
-        [this, &array_offsets](
-            Index* index_ptr,
-            const boost::container::vector<GetType>& vals) -> TargetBitmap {
+        [this, &array_offsets](Index* index_ptr) -> TargetBitmap {
+        std::unordered_set<GetType> elements;
+        for (auto const& element : expr_->vals_) {
+            elements.insert(GetValueWithCastNumber<GetType>(element));
+        }
+        boost::container::vector<GetType> vals(elements.begin(),
+                                               elements.end());
+
         // Query helper: for nested index, convert element-level to row-level
         auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
             auto element_bitset = index_ptr->In(n, data);
@@ -2442,8 +2442,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     auto validity_mode = field_type_ == DataType::JSON
                              ? IndexValidityMode::JsonExactPath
                              : IndexValidityMode::Default;
-    auto res = ProcessIndexChunksWithRowLevel<GetType>(
-        execute_sub_batch, validity_mode, elems);
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch,
+                                                       validity_mode);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
