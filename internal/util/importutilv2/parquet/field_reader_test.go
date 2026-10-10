@@ -1594,3 +1594,165 @@ func TestBuildVectorArrayFieldRejectsInvalidFloat(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestNonFiniteParquetScalarAndArray(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		for _, nullable := range []bool{false, true} {
+			for _, isArray := range []bool{false, true} {
+				field := &schemapb.FieldSchema{FieldID: fixedSizeListDataFieldID, Name: "values", DataType: dtype, Nullable: nullable}
+				if isArray {
+					field.DataType = schemapb.DataType_Array
+					field.ElementType = dtype
+					field.TypeParams = []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}}
+				}
+				arrowType := arrow.PrimitiveTypes.Float64
+				if dtype == schemapb.DataType_Float {
+					arrowType = arrow.PrimitiveTypes.Float32
+				}
+				var builder array.Builder
+				var leaf array.Builder
+				if isArray {
+					list := array.NewListBuilder(memory.NewGoAllocator(), arrowType)
+					builder, leaf = list, list.ValueBuilder()
+					list.Append(true)
+				} else {
+					builder = array.NewBuilder(memory.NewGoAllocator(), arrowType)
+					leaf = builder
+				}
+				if dtype == schemapb.DataType_Float {
+					leaf.(*array.Float32Builder).AppendValues([]float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))}, nil)
+				} else {
+					leaf.(*array.Float64Builder).AppendValues([]float64{math.NaN(), math.Inf(1), math.Inf(-1)}, nil)
+				}
+				if nullable {
+					builder.AppendNull()
+				}
+				source := builder.NewArray()
+				builder.Release()
+				data, err := tryReadFixedSizeListParquet(t, fixedSizeListSchema(field), source)
+				require.NoError(t, err)
+				column := data.Data[fixedSizeListDataFieldID]
+				var values []float64
+				if isArray {
+					scalar := column.GetRow(0).(*schemapb.ScalarField)
+					if dtype == schemapb.DataType_Float {
+						for _, value := range scalar.GetFloatData().GetData() {
+							values = append(values, float64(value))
+						}
+					} else {
+						values = scalar.GetDoubleData().GetData()
+					}
+				} else {
+					for row := 0; row < 3; row++ {
+						if dtype == schemapb.DataType_Float {
+							values = append(values, float64(column.GetRow(row).(float32)))
+						} else {
+							values = append(values, column.GetRow(row).(float64))
+						}
+					}
+				}
+				assert.True(t, math.IsNaN(values[0]))
+				assert.True(t, math.IsInf(values[1], 1))
+				assert.True(t, math.IsInf(values[2], -1))
+				if nullable {
+					assert.Nil(t, column.GetRow(column.RowNum()-1))
+				}
+			}
+		}
+	}
+}
+
+func TestNonFiniteParquetStructMembers(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		arrowType := arrow.PrimitiveTypes.Float64
+		if dtype == schemapb.DataType_Float {
+			arrowType = arrow.PrimitiveTypes.Float32
+		}
+		list := array.NewListBuilder(memory.NewGoAllocator(), arrow.StructOf(arrow.Field{Name: "value", Type: arrowType}))
+		structBuilder := list.ValueBuilder().(*array.StructBuilder)
+		list.Append(true)
+		for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			structBuilder.Append(true)
+			if dtype == schemapb.DataType_Float {
+				structBuilder.FieldBuilder(0).(*array.Float32Builder).Append(float32(value))
+			} else {
+				structBuilder.FieldBuilder(0).(*array.Float64Builder).Append(value)
+			}
+		}
+		list.AppendNull()
+		source := list.NewArray()
+		list.Release()
+		field := &schemapb.FieldSchema{
+			FieldID: fixedSizeListDataFieldID, Name: "objects[value]", DataType: schemapb.DataType_Array, ElementType: dtype, Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}},
+		}
+		schema := &schemapb.CollectionSchema{
+			Fields:            []*schemapb.FieldSchema{{FieldID: fixedSizeListPKFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Name: "objects", Nullable: true, Fields: []*schemapb.FieldSchema{field}}},
+		}
+		data, err := tryReadFixedSizeListParquet(t, schema, source)
+		require.NoError(t, err)
+		column := data.Data[fixedSizeListDataFieldID]
+		assert.Nil(t, column.GetRow(1))
+		scalar := column.GetRow(0).(*schemapb.ScalarField)
+		values := scalar.GetDoubleData().GetData()
+		if dtype == schemapb.DataType_Float {
+			for _, value := range scalar.GetFloatData().GetData() {
+				values = append(values, float64(value))
+			}
+		}
+		require.Len(t, values, 3)
+		assert.True(t, math.IsNaN(values[0]))
+		assert.True(t, math.IsInf(values[1], 1))
+		assert.True(t, math.IsInf(values[2], -1))
+	}
+}
+
+func TestParquetDoubleToFloatNonFiniteAndFiniteOverflow(t *testing.T) {
+	for _, mode := range []string{"required", "nullable", "default", "array", "nullable_array"} {
+		for _, values := range [][]float64{{math.NaN(), math.Inf(1), math.Inf(-1)}, {1e39}, {-1e39}} {
+			field := &schemapb.FieldSchema{FieldID: fixedSizeListDataFieldID, Name: "narrow", DataType: schemapb.DataType_Float}
+			if mode == "nullable" || mode == "nullable_array" {
+				field.Nullable = true
+			}
+			if mode == "default" {
+				field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_FloatData{FloatData: 0}}
+			}
+			var source arrow.Array
+			if mode == "array" || mode == "nullable_array" {
+				field.DataType, field.ElementType = schemapb.DataType_Array, schemapb.DataType_Float
+				field.TypeParams = []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}}
+				builder := array.NewListBuilder(memory.NewGoAllocator(), arrow.PrimitiveTypes.Float64)
+				builder.Append(true)
+				builder.ValueBuilder().(*array.Float64Builder).AppendValues(values, nil)
+				source = builder.NewArray()
+				builder.Release()
+			} else {
+				builder := array.NewFloat64Builder(memory.NewGoAllocator())
+				builder.AppendValues(values, nil)
+				source = builder.NewArray()
+				builder.Release()
+			}
+			data, err := tryReadFixedSizeListParquet(t, fixedSizeListSchema(field), source)
+			if len(values) == 1 {
+				require.Error(t, err, "mode %s", mode)
+				require.Contains(t, err.Error(), "float32 range")
+				continue
+			}
+			require.NoError(t, err, "mode %s", mode)
+			column := data.Data[fixedSizeListDataFieldID]
+			var actual []float32
+			if field.DataType == schemapb.DataType_Array {
+				actual = column.GetRow(0).(*schemapb.ScalarField).GetFloatData().GetData()
+			} else {
+				for row := 0; row < 3; row++ {
+					actual = append(actual, column.GetRow(row).(float32))
+				}
+			}
+			require.Len(t, actual, 3)
+			assert.True(t, math.IsNaN(float64(actual[0])))
+			assert.True(t, math.IsInf(float64(actual[1]), 1))
+			assert.True(t, math.IsInf(float64(actual[2]), -1))
+		}
+	}
+}

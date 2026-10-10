@@ -16,6 +16,8 @@
 #include <folly/ScopeGuard.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -189,6 +191,147 @@ TEST(JsonPathIndexTest, ConvertDouble_PathExistsButCastFails) {
 
     // Key: non_exist_offsets should be EMPTY because path exists in all rows
     EXPECT_TRUE(result.non_exist_offsets.empty());
+}
+
+namespace {
+CreateIndexInfo
+NaNProjectionIndexInfo(const std::string& index_type = ASCENDING_SORT) {
+    CreateIndexInfo info;
+    info.index_type = index_type;
+    info.field_type = DataType::JSON;
+    info.json_cast_type = JsonCastType::FromString("DOUBLE");
+    info.json_path = "/a";
+    info.json_cast_function = "STRING_TO_DOUBLE";
+    info.scalar_index_engine_version = 6;
+    return info;
+}
+}  // namespace
+
+TEST(JsonPathIndexTest, StringToDoubleNaNIsValidNumericProjection) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a":"NaN"})",
+        R"({"a":"-nan"})",
+        R"json({"a":"nan(payload)"})json",
+        R"({"a":"1"})",
+        R"({"a":2})",
+        R"({"a":"Inf"})",
+        R"({"a":"-Inf"})",
+        R"({"a":"-0"})",
+        R"({"b":0})",
+        R"({"a":"invalid-number"})",
+        R"({"a":null})",
+    });
+    const auto schema = MakeJsonSchema();
+    const auto cast_type = JsonCastType::FromString("DOUBLE");
+    const auto cast_function = JsonCastFunction::FromString("STRING_TO_DOUBLE");
+    auto converted = ConvertJsonToTypedFieldData<double>(
+        {json_fd}, schema, "/a", cast_type, cast_function);
+    ASSERT_EQ(converted.field_data->get_num_rows(), 11);
+    for (int row : {8, 9, 10}) {
+        EXPECT_FALSE(converted.field_data->is_valid(row));
+    }
+    for (int row : {0, 1, 2, 3, 4, 5, 6, 7}) {
+        EXPECT_TRUE(converted.field_data->is_valid(row));
+    }
+    EXPECT_EQ(converted.non_exist_offsets, (std::vector<size_t>{8, 10}));
+    EXPECT_TRUE(std::isinf(
+        *static_cast<const double*>(converted.field_data->RawValue(5))));
+    EXPECT_TRUE(std::signbit(
+        *static_cast<const double*>(converted.field_data->RawValue(7))));
+
+    auto info = NaNProjectionIndexInfo();
+    auto index =
+        IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
+    auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
+    ASSERT_NE(scalar, nullptr);
+    ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
+    EXPECT_EQ(scalar->Count(), 11);
+    EXPECT_EQ(scalar->Size(), 8);
+    for (int row : {8, 9, 10}) {
+        EXPECT_FALSE(scalar->Reverse_Lookup(row).has_value());
+    }
+    for (int row : {3, 4, 5, 6, 7}) {
+        const auto value = scalar->Reverse_Lookup(row);
+        ASSERT_TRUE(value.has_value());
+        const auto expected =
+            *static_cast<const double*>(converted.field_data->RawValue(row));
+        EXPECT_EQ(*value, expected);
+        EXPECT_EQ(std::signbit(*value), std::signbit(expected));
+    }
+    auto exists = scalar->Exists();
+    EXPECT_EQ(exists.count(), 9);
+    for (int row : {0, 1, 2}) {
+        EXPECT_TRUE(exists[row]);
+        const auto* source = static_cast<const Json*>(json_fd->RawValue(row));
+        EXPECT_TRUE(source->exist("/a"));
+    }
+    EXPECT_FALSE(exists[8]);
+    EXPECT_TRUE(
+        exists[9]);  // The non-empty source string exists despite cast failure.
+    EXPECT_FALSE(exists[10]);
+    EXPECT_EQ(scalar->IsNull().count(), 3);
+    EXPECT_EQ(scalar->IsNotNull().count(), 8);
+    for (int row : {0, 1, 2}) {
+        ASSERT_TRUE(scalar->Reverse_Lookup(row).has_value());
+        EXPECT_TRUE(std::isnan(*scalar->Reverse_Lookup(row)));
+    }
+
+    const double query = 2;
+    auto in = scalar->In(1, &query);
+    auto not_in = scalar->NotIn(1, &query);
+    EXPECT_EQ(in.count(), 1);
+    EXPECT_TRUE(in[4]);
+    EXPECT_EQ(not_in.count(), 7);
+    for (int row : {4, 8, 9, 10}) {
+        EXPECT_FALSE(not_in[row]);
+    }
+    for (int row : {0, 1, 2}) {
+        EXPECT_TRUE(not_in[row]);
+    }
+    auto binary = scalar->Serialize({});
+    EXPECT_FALSE(binary.Contains("nan_rows"));
+}
+
+TEST(JsonPathIndexTest, StringToDoubleAllNaNStillBuilds) {
+    auto json_fd = MakeJsonFieldData({R"({"a":"NaN"})",
+                                      R"({"a":"-nan"})",
+                                      R"json({"a":"nan(payload)"})json"});
+    auto info = NaNProjectionIndexInfo();
+    auto index =
+        IndexFactory::GetInstance().CreateJsonIndex(info, MakeTestContext());
+    auto* scalar = dynamic_cast<ScalarIndex<double>*>(index.get());
+    ASSERT_NE(scalar, nullptr);
+    ASSERT_NO_THROW(scalar->BuildWithFieldData({json_fd}));
+    EXPECT_EQ(scalar->Count(), 3);
+    EXPECT_EQ(scalar->Size(), 3);
+    EXPECT_EQ(scalar->Exists().count(), 3);
+    for (size_t row = 0; row < 3; ++row) {
+        ASSERT_TRUE(scalar->Reverse_Lookup(row).has_value());
+        EXPECT_TRUE(std::isnan(*scalar->Reverse_Lookup(row)));
+        const auto* source = static_cast<const Json*>(json_fd->RawValue(row));
+        EXPECT_TRUE(source->exist("/a"));
+    }
+    const double query = 2;
+    EXPECT_EQ(scalar->In(1, &query).count(), 0);
+    EXPECT_EQ(scalar->NotIn(1, &query).count(), 3);
+    EXPECT_EQ(scalar->IsNull().count(), 0);
+    EXPECT_EQ(scalar->IsNotNull().count(), 3);
+}
+
+TEST(JsonPathIndexTest, StringToDoubleNumericNaNRemainsValid) {
+    const auto cast = JsonCastFunction::FromString("STRING_TO_DOUBLE");
+    const auto nan =
+        cast.cast<double>(std::numeric_limits<double>::quiet_NaN());
+    ASSERT_TRUE(nan.has_value());
+    EXPECT_TRUE(std::isnan(*nan));
+    const auto positive_inf =
+        cast.cast<double>(std::numeric_limits<double>::infinity());
+    const auto negative_inf =
+        cast.cast<double>(-std::numeric_limits<double>::infinity());
+    ASSERT_TRUE(positive_inf.has_value());
+    ASSERT_TRUE(negative_inf.has_value());
+    EXPECT_EQ(*positive_inf, std::numeric_limits<double>::infinity());
+    EXPECT_EQ(*negative_inf, -std::numeric_limits<double>::infinity());
 }
 
 TEST(JsonPathIndexTest, ConvertDouble_MixedRows) {
@@ -787,4 +930,109 @@ TEST(JsonPathIndexTest, Factory_SortBool_Rejected) {
 
     EXPECT_THROW(IndexFactory::GetInstance().CreateJsonIndex(info, ctx),
                  std::exception);
+}
+
+namespace {
+void
+CheckValidNaNJsonProjection(ScalarIndex<double>& index) {
+    ASSERT_EQ(index.Count(), 7);
+    EXPECT_EQ(index.IsNotNull().count(), 4);
+    EXPECT_EQ(index.IsNull().count(), 3);
+    auto exists = index.Exists();
+    EXPECT_EQ(exists.count(), 5);
+    for (size_t row : {0, 1, 2, 3, 5}) {
+        EXPECT_TRUE(exists[row]);
+    }
+    const double one = 1.0;
+    auto hit = index.In(1, &one);
+    EXPECT_EQ(hit.count(), 1);
+    EXPECT_TRUE(hit[2]);
+    EXPECT_EQ(index.NotIn(1, &one).count(), 3);
+    const double two = 2.0;
+    auto not_two = index.NotIn(1, &two);
+    EXPECT_TRUE(not_two[0]);
+    EXPECT_TRUE(not_two[1]);
+    EXPECT_TRUE(not_two[2]);
+    EXPECT_FALSE(not_two[3]);
+    for (size_t row : {4, 5, 6}) {
+        EXPECT_FALSE(not_two[row]);
+    }
+    const double inf = std::numeric_limits<double>::infinity();
+    EXPECT_EQ(index.Range(-inf, true, inf, true).count(), 2);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    auto nan_hit = index.In(1, &nan);
+    EXPECT_EQ(nan_hit.count(), 2);
+    EXPECT_TRUE(nan_hit[0]);
+    EXPECT_TRUE(nan_hit[1]);
+    EXPECT_EQ(index.NotIn(1, &nan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 4);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
+    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 4);
+    EXPECT_EQ(index.Range(-inf, true, nan, false).count(), 2);
+}
+}  // namespace
+
+TEST(JsonPathIndexTest,
+     CastNaNValidityMatchesSortHybridAndInvertedAfterReload) {
+    for (const auto& type :
+         {ASCENDING_SORT, HYBRID_INDEX_TYPE, INVERTED_INDEX_TYPE}) {
+        SCOPED_TRACE(type);
+        JsonV3LoadFixture fixture(std::string("json_valid_nan_projection_") +
+                                  type);
+        auto json = MakeJsonFieldData({R"({"a":"NaN"})",
+                                       R"({"a":"-nan"})",
+                                       R"({"a":"1"})",
+                                       R"({"a":2})",
+                                       R"({"a":null})",
+                                       R"({"a":"invalid-number"})",
+                                       R"({"b":0})"});
+        auto info = NaNProjectionIndexInfo(type);
+        info.tantivy_index_version = 7;
+        auto built =
+            IndexFactory::GetInstance().CreateJsonIndex(info, fixture.ctx);
+        auto* built_scalar = dynamic_cast<ScalarIndex<double>*>(built.get());
+        ASSERT_NE(built_scalar, nullptr);
+        built_scalar->BuildWithFieldData({json});
+        if (type == INVERTED_INDEX_TYPE) {
+            auto* inverted = dynamic_cast<
+                JsonScalarIndexWrapper<double, InvertedIndexTantivy<double>>*>(
+                built.get());
+            ASSERT_NE(inverted, nullptr);
+            inverted->finish();
+            inverted->create_reader(milvus::index::SetBitsetSealed);
+        }
+        CheckValidNaNJsonProjection(*built_scalar);
+        if (type == ASCENDING_SORT) {
+            EXPECT_EQ(built_scalar->Size(), 4);
+            EXPECT_FALSE(built_scalar->Serialize({}).Contains("nan_rows"));
+        }
+        auto stats = built->UploadUnified({});
+        for (bool mmap : {false, true}) {
+            for (bool async : {false, true}) {
+                auto ctx = fixture.ctx;
+                ctx.set_for_loading_index(true);
+                ctx.use_async_load = async;
+                auto loaded =
+                    IndexFactory::GetInstance().CreateJsonIndex(info, ctx);
+                Config config;
+                config[INDEX_FILES] = stats->GetIndexFiles();
+                config[ENABLE_MMAP] = mmap;
+                if (mmap) {
+                    config[MMAP_FILE_PATH] = fixture.root_path + "/mapped";
+                }
+                auto* scalar = dynamic_cast<ScalarIndex<double>*>(loaded.get());
+                ASSERT_NE(scalar, nullptr);
+                scalar->LoadUnified(config);
+                CheckValidNaNJsonProjection(*scalar);
+            }
+        }
+        const auto* source = static_cast<const Json*>(json->RawValue(0));
+        ASSERT_NE(source, nullptr);
+        EXPECT_EQ(source->at<std::string_view>("/a").value(), "NaN");
+        EXPECT_TRUE(source->at<double>("/a").error());
+    }
 }

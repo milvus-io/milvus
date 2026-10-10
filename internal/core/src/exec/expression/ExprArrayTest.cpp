@@ -20,12 +20,15 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -40,10 +43,14 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/JsonContainsExpr.h"
+#include "index/json_stats/bson_builder.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/StringIndexSort.h"
+#include "index/ScalarIndexSort.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -3759,6 +3766,956 @@ TEST(Expr, TestArrayContainsForStruct) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
                 << "Distances should be sorted in ascending order (with index)";
+        }
+    }
+}
+
+namespace {
+// Build the same source field twice so physical scans and sorted-index dispatch
+// can share data while their query oracles remain local to each test.
+template <typename Index>
+std::pair<SegmentSealedUPtr, SegmentSealedUPtr>
+MakeSortedScanSegments(const SchemaPtr& schema,
+                       FieldId fid,
+                       const FieldDataPtr& field,
+                       int64_t index_id,
+                       const std::string& cache_key,
+                       bool nested = false) {
+    const auto field_schema = (*schema)[fid].ToProto();
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw = CreateSealedSegment(schema);
+    auto indexed = CreateSealedSegment(schema);
+    auto field_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), {field}, cm);
+    raw->LoadFieldData(field_info);
+    indexed->LoadFieldData(field_info);
+    storage::FileManagerContext ctx(cm);
+    ctx.fieldDataMeta = storage::FieldDataMeta{
+        kCollectionID, kPartitionID, kSegmentID, fid.get(), field_schema};
+    ctx.indexMeta =
+        storage::IndexMeta{kSegmentID, fid.get(), index_id, index_id};
+    auto sorted = std::make_unique<Index>(ctx, nested);
+    if (!nested && field_schema.data_type() == proto::schema::DataType::Array) {
+        EXPECT_FALSE(sorted->HasRawData());
+    } else if (field_schema.data_type() != proto::schema::DataType::Array) {
+        EXPECT_TRUE(sorted->HasRawData());
+    }
+    sorted->BuildWithFieldData({field});
+    LoadIndexInfo info;
+    info.field_id = fid.get();
+    info.field_type = static_cast<DataType>(field_schema.data_type());
+    info.element_type = static_cast<DataType>(field_schema.element_type());
+    info.num_rows = field->get_num_rows();
+    info.index_params = GenIndexParams(sorted.get());
+    info.cache_index = CreateTestCacheIndex(cache_key, std::move(sorted));
+    indexed->LoadIndex(info);
+    return {std::move(raw), std::move(indexed)};
+}
+}  // namespace
+
+TEST(Expr, OrdinaryArraySortedIndexContainsMatchesRaw) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid =
+        schema->AddDebugField("tags", DataType::ARRAY, DataType::VARCHAR, true);
+    schema->set_primary_field_id(pk);
+    const std::vector<std::vector<std::string>> rows{
+        {"ignored"},
+        {},
+        {"apple", "banana", "apple"},
+        {"banana", "cherry"},
+        {"apple"},
+        {},
+        {"other"}};
+    const int64_t n = rows.size();
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto scalar;
+        auto* strings = scalar.mutable_string_data();
+        for (const auto& value : row) {
+            strings->add_data(value);
+        }
+        arrays.emplace_back(scalar);
+    }
+    const uint8_t valid_bitmap = 0x7e;
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::VARCHAR, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::StringIndexSort>(
+            schema, fid, field_data, 4010, "array_sorted_contains", false);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& targets :
+             std::vector<std::vector<std::string>>{{},
+                                                   {"apple"},
+                                                   {"apple", "banana", "apple"},
+                                                   {"apple", "missing"}}) {
+            std::vector<proto::plan::GenericValue> values;
+            for (const auto& target : targets) {
+                proto::plan::GenericValue value;
+                value.set_string_val(target);
+                values.push_back(std::move(value));
+            }
+            auto expr = std::make_shared<expr::JsonContainsExpr>(
+                expr::ColumnInfo(
+                    fid, DataType::ARRAY, DataType::VARCHAR, {}, true),
+                op,
+                true,
+                values);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expr);
+            auto raw = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), n, MAX_TIMESTAMP);
+            auto indexed = milvus::test::gen_filter_res(
+                plan.get(), index_segment.get(), n, MAX_TIMESTAMP);
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+            BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                       indexed->size());
+            ASSERT_EQ(raw->size(), n);
+            ASSERT_EQ(indexed->size(), n);
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_EQ(index_bits[i], raw_bits[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], raw_valid[i]) << "row " << i;
+                EXPECT_EQ(index_valid[i], i != 0) << "row " << i;
+            }
+        }
+    }
+}
+
+namespace {
+
+// Independent SQL oracle: NaNs form the last equivalence class.
+template <typename T>
+int
+SqlFloatComparison(T left, T right) {
+    if (std::isnan(left)) {
+        return std::isnan(right) ? 0 : 1;
+    }
+    if (std::isnan(right)) {
+        return -1;
+    }
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+
+template <typename T>
+bool
+SqlFloatMatches(T source, T target, proto::plan::OpType op) {
+    const int order = SqlFloatComparison(source, target);
+    switch (op) {
+        case proto::plan::Equal:
+            return order == 0;
+        case proto::plan::NotEqual:
+            return order != 0;
+        case proto::plan::LessThan:
+            return order < 0;
+        case proto::plan::LessEqual:
+            return order <= 0;
+        case proto::plan::GreaterThan:
+            return order > 0;
+        case proto::plan::GreaterEqual:
+            return order >= 0;
+        default:
+            return false;
+    }
+}
+
+template <typename T>
+bool
+SqlFloatContains(const std::vector<T>& values, T value) {
+    return std::any_of(values.begin(), values.end(), [&](T candidate) {
+        return SqlFloatComparison(candidate, value) == 0;
+    });
+}
+
+template <typename T>
+void
+CheckOrdinaryArraySortedNaNContainsMatchesRaw() {
+    const DataType type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    SCOPED_TRACE(std::to_string(static_cast<int>(type)));
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid =
+        schema->AddDebugField("tags", DataType::ARRAY, type, true, false);
+    schema->set_primary_field_id(pk);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    std::vector<std::vector<T>> rows{
+        {nan}, {3}, {nan, 3}, {3}, {}, {9}, {3}, {}};
+    for (size_t i = 0; i < 70; ++i) {
+        rows.back().push_back(static_cast<T>(i));
+    }
+    const int64_t n = rows.size();
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto scalar;
+        if constexpr (std::is_same_v<T, float>) {
+            auto* data = scalar.mutable_float_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        } else {
+            auto* data = scalar.mutable_double_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        }
+        arrays.emplace_back(scalar);
+    }
+    const uint8_t valid_bitmap = 0xbf;
+    auto field_data = storage::CreateFieldData(DataType::ARRAY, type, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, n, 0);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4010,
+            "array_sorted_nan_contains_" + std::to_string(sizeof(T)),
+            false);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+
+    const expr::ColumnInfo column(fid, DataType::ARRAY, type, {}, true);
+    const expr::ColumnInfo first_element(
+        fid, DataType::ARRAY, type, {"0"}, true);
+    auto check = [&](const expr::TypedExprPtr& expression,
+                     auto predicate,
+                     bool element_access = false,
+                     bool null_operator = false) {
+        SCOPED_TRACE(expression->ToString());
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        for (const auto* segment : {raw_segment.get(), index_segment.get()}) {
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment, n, MAX_TIMESTAMP);
+            ASSERT_EQ(result->size(), n);
+            BitsetTypeView bits(result->GetRawData(), result->size());
+            BitsetTypeView valid(result->GetValidRawData(), result->size());
+            for (size_t row = 0; row < rows.size(); ++row) {
+                const bool source_valid = (valid_bitmap >> row) & 1;
+                const bool expected_valid =
+                    null_operator ||
+                    (source_valid && (!element_access || !rows[row].empty()));
+                EXPECT_EQ(valid[row], expected_valid) << "row " << row;
+                EXPECT_EQ(bits[row],
+                          expected_valid && predicate(rows[row], source_valid))
+                    << "row " << row;
+            }
+        }
+    };
+
+    std::vector<std::vector<T>> target_sets{
+        {}, {3}, {9}, {3, 9}, {nan}, {3, nan}};
+    std::vector<T> large_targets;
+    for (size_t i = 0; i < 64; ++i) {
+        large_targets.push_back(static_cast<T>(i));
+    }
+    target_sets.push_back(large_targets);
+    large_targets.push_back(64);
+    target_sets.push_back(large_targets);
+    for (auto op : {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                    proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+        for (const auto& targets : target_sets) {
+            std::vector<proto::plan::GenericValue> values;
+            for (const auto& target : targets) {
+                proto::plan::GenericValue value;
+                value.set_float_val(target);
+                values.push_back(std::move(value));
+            }
+            auto contains_expr = std::make_shared<expr::JsonContainsExpr>(
+                column, op, true, values);
+            auto matches = [&](const std::vector<T>& row, bool) {
+                auto contains = [&](T target) {
+                    return SqlFloatContains(row, target);
+                };
+                return op == proto::plan::JSONContainsExpr_JSONOp_ContainsAll
+                           ? std::all_of(
+                                 targets.begin(), targets.end(), contains)
+                           : std::any_of(
+                                 targets.begin(), targets.end(), contains);
+            };
+            check(contains_expr, matches);
+            check(
+                std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, contains_expr),
+                [&](const std::vector<T>& row, bool valid) {
+                    return !matches(row, valid);
+                });
+        }
+    }
+
+    proto::plan::GenericValue three, nine, two;
+    three.set_float_val(3);
+    nine.set_float_val(9);
+    two.set_float_val(2);
+
+    for (T query_target : {T(3), nan}) {
+        proto::plan::GenericValue literal;
+        literal.set_float_val(query_target);
+        for (auto op : {proto::plan::Equal,
+                        proto::plan::NotEqual,
+                        proto::plan::LessThan,
+                        proto::plan::LessEqual,
+                        proto::plan::GreaterThan,
+                        proto::plan::GreaterEqual}) {
+            check(
+                std::make_shared<expr::UnaryRangeFilterExpr>(
+                    first_element, op, literal),
+                [=](const std::vector<T>& row, bool) {
+                    return SqlFloatMatches(row[0], query_target, op);
+                },
+                true);
+        }
+    }
+    auto terms = std::make_shared<expr::TermFilterExpr>(
+        first_element, std::vector<proto::plan::GenericValue>{three, nine});
+    auto member = [](const std::vector<T>& row, bool) {
+        return SqlFloatContains(std::vector<T>{T(3), T(9)}, row[0]);
+    };
+    check(terms, member, true);
+    check(
+        std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, terms),
+        [&](const std::vector<T>& row, bool valid) {
+            return !member(row, valid);
+        },
+        true);
+    check(
+        std::make_shared<expr::BinaryRangeFilterExpr>(
+            first_element, three, nine, true, false),
+        [](const std::vector<T>& row, bool) {
+            return SqlFloatComparison(row[0], T(3)) >= 0 &&
+                   SqlFloatComparison(row[0], T(9)) < 0;
+        },
+        true);
+    for (auto op : {proto::plan::Equal, proto::plan::NotEqual}) {
+        check(
+            std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                first_element, op, proto::plan::Add, three, two),
+            [=](const std::vector<T>& row, bool) {
+                return SqlFloatMatches(row[0] + T(2), T(3), op);
+            },
+            true);
+    }
+
+    proto::plan::GenericValue nan_value;
+    nan_value.set_float_val(nan);
+    check(std::make_shared<expr::TermFilterExpr>(
+              column, std::vector<proto::plan::GenericValue>{nan_value}, true),
+          [](const std::vector<T>& row, bool) {
+              return std::any_of(row.begin(), row.end(), [](T value) {
+                  return std::isnan(value);
+              });
+          });
+    proto::plan::GenericValue array_three, array_nine;
+    for (auto* value : {&array_three, &array_nine}) {
+        value->mutable_array_val()->set_same_type(true);
+        value->mutable_array_val()->add_array()->set_float_val(
+            value == &array_three ? 3 : 9);
+    }
+    auto equals_three = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column, proto::plan::Equal, array_three);
+    auto same_array = [](const std::vector<T>& row, bool) {
+        return row.size() == 1 && row[0] == T(3);
+    };
+    check(equals_three, same_array);
+    check(std::make_shared<expr::UnaryRangeFilterExpr>(
+              column, proto::plan::NotEqual, array_three),
+          [&](const std::vector<T>& row, bool valid) {
+              return !same_array(row, valid);
+          });
+    // Whole-array IN is normalized by the Go rewriter to equality OR branches.
+    auto array_in = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::Or,
+        equals_three,
+        std::make_shared<expr::UnaryRangeFilterExpr>(
+            column, proto::plan::Equal, array_nine));
+    auto array_member = [](const std::vector<T>& row, bool) {
+        return row.size() == 1 && (row[0] == T(3) || row[0] == T(9));
+    };
+    check(array_in, array_member);
+    check(std::make_shared<expr::LogicalUnaryExpr>(
+              expr::LogicalUnaryExpr::OpType::LogicalNot, array_in),
+          [&](const std::vector<T>& row, bool valid) {
+              return !array_member(row, valid);
+          });
+    proto::plan::GenericValue array_nan;
+    array_nan.mutable_array_val()->set_same_type(true);
+    array_nan.mutable_array_val()->add_array()->set_float_val(nan);
+    check(std::make_shared<expr::UnaryRangeFilterExpr>(
+              column, proto::plan::Equal, array_nan),
+          [](const std::vector<T>& row, bool) {
+              return row.size() == 1 && std::isnan(row[0]);
+          });
+    proto::plan::GenericValue length;
+    length.set_int64_val(2);
+    check(std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+              column,
+              proto::plan::Equal,
+              proto::plan::ArrayLength,
+              length,
+              length),
+          [](const std::vector<T>& row, bool) { return row.size() == 2; });
+    check(
+        std::make_shared<expr::NullExpr>(column,
+                                         proto::plan::NullExpr_NullOp_IsNull),
+        [](const std::vector<T>&, bool valid) { return !valid; },
+        false,
+        true);
+    check(
+        std::make_shared<expr::NullExpr>(
+            column, proto::plan::NullExpr_NullOp_IsNotNull),
+        [](const std::vector<T>&, bool valid) { return valid; },
+        false,
+        true);
+}
+
+}  // namespace
+
+TEST(Expr, OrdinaryArraySortedNaNContainsMatchesRaw) {
+    CheckOrdinaryArraySortedNaNContainsMatchesRaw<float>();
+    CheckOrdinaryArraySortedNaNContainsMatchesRaw<double>();
+}
+
+namespace {
+
+template <typename T>
+void
+CheckScalarSortedNaNOperatorsMatchRawSQL() {
+    const DataType type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    SCOPED_TRACE(std::to_string(static_cast<int>(type)));
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugField("value", type, true);
+    schema->set_primary_field_id(pk);
+    constexpr size_t n = 96;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    std::vector<T> rows(n);
+    std::vector<uint8_t> validity((n + 7) / 8, 0);
+    for (size_t row = 0; row < n; ++row) {
+        const T pattern[] = {nan,
+                             T(3),
+                             T(9),
+                             -std::numeric_limits<T>::infinity(),
+                             std::numeric_limits<T>::infinity(),
+                             -T(0),
+                             T(0),
+                             -nan};
+        rows[row] = pattern[row % 8];
+        if (row % 3 != 2) {
+            validity[row / 8] |= uint8_t(1) << (row % 8);
+        }
+    }
+    auto field_data = storage::CreateFieldData(type, DataType::NONE, true);
+    field_data->FillFieldData(rows.data(), validity.data(), n, 0);
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4011,
+            "scalar_sorted_nan_syntax_" + std::to_string(sizeof(T)),
+            false);
+    const expr::ColumnInfo column(fid, type, {}, true);
+    auto check = [&](const expr::TypedExprPtr& expression,
+                     auto predicate,
+                     bool null_operator = false,
+                     bool raw_only = false) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           expression);
+        // Use real physical expression dispatch: contiguous SIMD batches,
+        // out-of-order offsets, and a prefilter bitmap containing both NaN
+        // and finite rows. Do not inspect unselected bitmap entries.
+        FixedVector<int32_t> offsets(n);
+        for (size_t i = 0; i < n; ++i) {
+            offsets[i] = static_cast<int32_t>(n - 1 - i);
+        }
+        for (int mode = 0; mode < 3; ++mode) {
+            SCOPED_TRACE(expression->ToString() + " mode " +
+                         std::to_string(mode));
+            auto evaluate = [&](const SegmentInternalInterface* segment) {
+                if (mode != 2) {
+                    return milvus::test::gen_filter_res(
+                        plan.get(),
+                        segment,
+                        n,
+                        MAX_TIMESTAMP,
+                        mode == 1 ? &offsets : nullptr);
+                }
+                auto query_context = std::make_shared<exec::QueryContext>(
+                    DEAFULT_QUERY_ID, segment, n, MAX_TIMESTAMP);
+                exec::ExecContext exec_context(query_context.get());
+                exec::ExprSet expressions({expression}, &exec_context);
+                exec::EvalCtx eval_context(&exec_context);
+                TargetBitmap mask(n, false);
+                for (size_t i = 0; i < n; ++i) {
+                    mask[i] = i % 2 == 0;
+                }
+                eval_context.set_bitmap_input(std::move(mask));
+                std::vector<VectorPtr> results;
+                expressions.Eval(0, 1, true, eval_context, results);
+                return GetColumnVectorForTest(results.at(0));
+            };
+            auto raw = evaluate(raw_segment.get());
+            auto indexed = raw_only ? nullptr : evaluate(index_segment.get());
+            ASSERT_EQ(raw->size(), n);
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            for (size_t i = 0; i < n; ++i) {
+                if (mode == 2 && i % 2 != 0) {
+                    continue;
+                }
+                const size_t row = mode == 1 ? offsets[i] : i;
+                const bool valid = row % 3 != 2;
+                const bool expected_valid = null_operator || valid;
+                const bool expected =
+                    expected_valid && predicate(rows[row], valid);
+                EXPECT_EQ(raw_bits[i], expected) << "raw row " << row;
+                EXPECT_EQ(raw_valid[i], expected_valid)
+                    << "raw validity row " << row;
+                if (indexed) {
+                    BitsetTypeView index_bits(indexed->GetRawData(),
+                                              indexed->size());
+                    BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                               indexed->size());
+                    EXPECT_EQ(index_bits[i], expected) << "index row " << row;
+                    EXPECT_EQ(index_valid[i], expected_valid)
+                        << "index validity row " << row;
+                }
+            }
+        }
+    };
+
+    for (T target : {T(3),
+                     T(9),
+                     nan,
+                     std::numeric_limits<T>::infinity(),
+                     -std::numeric_limits<T>::infinity(),
+                     T(0)}) {
+        proto::plan::GenericValue value;
+        value.set_float_val(target);
+        for (auto op : {proto::plan::Equal,
+                        proto::plan::NotEqual,
+                        proto::plan::LessThan,
+                        proto::plan::LessEqual,
+                        proto::plan::GreaterThan,
+                        proto::plan::GreaterEqual}) {
+            auto unary =
+                std::make_shared<expr::UnaryRangeFilterExpr>(column, op, value);
+            check(unary, [op, target](T source, bool) {
+                return SqlFloatMatches(source, target, op);
+            });
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                      expr::LogicalUnaryExpr::OpType::LogicalNot, unary),
+                  [op, target](T source, bool) {
+                      return !SqlFloatMatches(source, target, op);
+                  });
+        }
+        auto terms = std::make_shared<expr::TermFilterExpr>(
+            column, std::vector<proto::plan::GenericValue>{value});
+        check(terms, [target](T source, bool) {
+            return SqlFloatComparison(source, target) == 0;
+        });
+        check(std::make_shared<expr::LogicalUnaryExpr>(
+                  expr::LogicalUnaryExpr::OpType::LogicalNot, terms),
+              [target](T source, bool) {
+                  return !(SqlFloatComparison(source, target) == 0);
+              });
+    }
+    proto::plan::GenericValue lower, upper, operand, target;
+    lower.set_float_val(3);
+    upper.set_float_val(9);
+    operand.set_float_val(2);
+    target.set_float_val(nan);
+    for (bool lower_inclusive : {false, true}) {
+        for (bool upper_inclusive : {false, true}) {
+            check(std::make_shared<expr::BinaryRangeFilterExpr>(
+                      column, lower, upper, lower_inclusive, upper_inclusive),
+                  [=](T source, bool) {
+                      return (lower_inclusive
+                                  ? SqlFloatComparison(source, T(3)) >= 0
+                                  : SqlFloatComparison(source, T(3)) > 0) &&
+                             (upper_inclusive
+                                  ? SqlFloatComparison(source, T(9)) <= 0
+                                  : SqlFloatComparison(source, T(9)) < 0);
+                  });
+        }
+    }
+    for (auto op : {proto::plan::Equal,
+                    proto::plan::NotEqual,
+                    proto::plan::LessThan,
+                    proto::plan::LessEqual,
+                    proto::plan::GreaterThan,
+                    proto::plan::GreaterEqual}) {
+        for (T right_value : {T(2), T(-2)}) {
+            for (T query_value : {T(3),
+                                  nan,
+                                  std::numeric_limits<T>::max(),
+                                  std::numeric_limits<T>::infinity()}) {
+                operand.set_float_val(right_value);
+                target.set_float_val(query_value);
+                for (auto arithmetic : {proto::plan::Add,
+                                        proto::plan::Sub,
+                                        proto::plan::Mul,
+                                        proto::plan::Div}) {
+                    check(std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                              column, op, arithmetic, target, operand),
+                          [=](T source, bool) {
+                              T result = source;
+                              switch (arithmetic) {
+                                  case proto::plan::Add:
+                                      result += right_value;
+                                      break;
+                                  case proto::plan::Sub:
+                                      result -= right_value;
+                                      break;
+                                  case proto::plan::Mul:
+                                      result *= right_value;
+                                      break;
+                                  case proto::plan::Div:
+                                      result /= right_value;
+                                      break;
+                                  default:
+                                      break;
+                              }
+                              return SqlFloatMatches(result, query_value, op);
+                          });
+                }
+            }
+        }
+        // A physical field-to-field comparison deliberately bypasses parser
+        // simplification and exercises NaN on both operands.
+        check(
+            std::make_shared<expr::CompareExpr>(fid, fid, type, type, op),
+            [=](T source, bool) { return SqlFloatMatches(source, source, op); },
+            false,
+            true);
+    }
+    check(
+        std::make_shared<expr::NullExpr>(column,
+                                         proto::plan::NullExpr_NullOp_IsNull),
+        [](T, bool valid) { return !valid; },
+        true);
+    check(
+        std::make_shared<expr::NullExpr>(
+            column, proto::plan::NullExpr_NullOp_IsNotNull),
+        [](T, bool valid) { return valid; },
+        true);
+}
+
+}  // namespace
+
+TEST(Expr, ScalarSortedNaNOperatorsMatchRawSQL) {
+    CheckScalarSortedNaNOperatorsMatchRawSQL<float>();
+    CheckScalarSortedNaNOperatorsMatchRawSQL<double>();
+}
+
+namespace {
+
+template <typename T>
+void
+CheckStructSortedSourceNaNIn() {
+    const DataType type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    auto fid = schema->AddDebugArrayField("objects[score]", type, false);
+    schema->set_primary_field_id(pk);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<std::vector<T>> rows{
+        {nan, T(3)}, {}, {T(7), nan, T(3)}, {T(0), T(9), T(3)}, {nan}};
+    std::vector<Array> arrays;
+    std::vector<T> elements;
+    for (const auto& row : rows) {
+        ScalarFieldProto values;
+        if constexpr (std::is_same_v<T, float>) {
+            auto* data = values.mutable_float_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        } else {
+            auto* data = values.mutable_double_data();
+            for (const auto value : row) {
+                data->add_data(value);
+            }
+        }
+        arrays.emplace_back(values);
+        elements.insert(elements.end(), row.begin(), row.end());
+    }
+    auto field_data = storage::CreateFieldData(DataType::ARRAY, type, false);
+    field_data->FillFieldData(arrays.data(), rows.size());
+    auto [raw_segment, index_segment] =
+        MakeSortedScanSegments<index::ScalarIndexSort<T>>(
+            schema,
+            fid,
+            field_data,
+            4012,
+            "struct_sorted_nan_in_" + std::to_string(sizeof(T)),
+            true);
+    ASSERT_TRUE(index_segment->HasIndex(fid));
+    ASSERT_FALSE(raw_segment->HasIndex(fid));
+    ASSERT_NE(raw_segment->GetArrayOffsets(fid), nullptr);
+    EXPECT_EQ(raw_segment->GetArrayOffsets(fid)->GetTotalElementCount(),
+              elements.size());
+    expr::ColumnInfo column(fid, DataType::ARRAY, type);
+    column.element_level_ = true;
+    std::vector<std::vector<T>> target_sets{
+        {}, {T(3)}, {T(0), T(3), T(7)}, {nan}, {T(3), nan}};
+    std::vector<T> large_targets;
+    for (int i = 0; i < 129; ++i) {
+        large_targets.push_back(T(i));
+    }
+    target_sets.push_back(std::move(large_targets));
+    for (const auto& targets : target_sets) {
+        std::vector<proto::plan::GenericValue> values;
+        for (const auto value : targets) {
+            proto::plan::GenericValue literal;
+            literal.set_float_val(value);
+            values.push_back(std::move(literal));
+        }
+        auto terms = std::make_shared<expr::TermFilterExpr>(column, values);
+        for (const bool negated : {false, true}) {
+            SCOPED_TRACE("type " + std::to_string(static_cast<int>(type)) +
+                         " targets " + std::to_string(targets.size()) +
+                         " negated " + std::to_string(negated));
+            expr::TypedExprPtr expression = terms;
+            if (negated) {
+                expression = std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, terms);
+            }
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto raw = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), rows.size(), MAX_TIMESTAMP);
+            auto indexed = milvus::test::gen_filter_res(
+                plan.get(), index_segment.get(), rows.size(), MAX_TIMESTAMP);
+            ASSERT_EQ(raw->size(), elements.size());
+            ASSERT_EQ(indexed->size(), elements.size());
+            BitsetTypeView raw_bits(raw->GetRawData(), raw->size());
+            BitsetTypeView raw_valid(raw->GetValidRawData(), raw->size());
+            BitsetTypeView index_bits(indexed->GetRawData(), indexed->size());
+            BitsetTypeView index_valid(indexed->GetValidRawData(),
+                                       indexed->size());
+            for (size_t i = 0; i < elements.size(); ++i) {
+                const bool hit = SqlFloatContains(targets, elements[i]);
+                const bool expected = negated ? !hit : hit;
+                EXPECT_EQ(raw_bits[i], expected) << "raw element " << i;
+                EXPECT_EQ(index_bits[i], expected) << "index element " << i;
+                EXPECT_TRUE(raw_valid[i]) << "raw element " << i;
+                EXPECT_TRUE(index_valid[i]) << "index element " << i;
+            }
+            if (targets.size() == 1) {
+                for (auto match_type :
+                     {expr::MatchType::MatchAny, expr::MatchType::MatchAll}) {
+                    auto match = std::make_shared<expr::MatchExpr>(
+                        "objects", match_type, 0, expression);
+                    auto match_plan = std::make_shared<plan::FilterBitsNode>(
+                        DEFAULT_PLANNODE_ID, match);
+                    for (const auto* segment :
+                         {raw_segment.get(), index_segment.get()}) {
+                        auto result =
+                            milvus::test::gen_filter_res(match_plan.get(),
+                                                         segment,
+                                                         rows.size(),
+                                                         MAX_TIMESTAMP);
+                        ASSERT_EQ(result->size(), rows.size());
+                        BitsetTypeView bits(result->GetRawData(),
+                                            result->size());
+                        BitsetTypeView valid(result->GetValidRawData(),
+                                             result->size());
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            auto predicate = [&](T value) {
+                                const bool hit =
+                                    SqlFloatContains(targets, value);
+                                return negated ? !hit : hit;
+                            };
+                            const bool expected =
+                                match_type == expr::MatchType::MatchAny
+                                    ? std::any_of(rows[row].begin(),
+                                                  rows[row].end(),
+                                                  predicate)
+                                    : std::all_of(rows[row].begin(),
+                                                  rows[row].end(),
+                                                  predicate);
+                            EXPECT_EQ(bits[row], expected)
+                                << "MATCH row " << row;
+                            EXPECT_TRUE(valid[row]) << "MATCH row " << row;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+}  // namespace
+
+TEST(Expr, StructSortedSourceNaNInMatchesRaw) {
+    CheckStructSortedSourceNaNIn<float>();
+    CheckStructSortedSourceNaNIn<double>();
+}
+
+TEST(Expr, BsonNumericNaNContainsAllUsesScalarEquality) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::array<index::BsonDocument, 3> arrays;
+    BSON_APPEND_DOUBLE(arrays[0].get(), "0", nan);
+    BSON_APPEND_INT64(arrays[0].get(), "1", 3);
+    BSON_APPEND_INT64(arrays[1].get(), "0", 3);
+    BSON_APPEND_DOUBLE(arrays[2].get(), "0", -nan);
+    BSON_APPEND_INT64(arrays[2].get(), "1", 3);
+    std::array<std::string_view, 3> values;
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        values[i] =
+            std::string_view(reinterpret_cast<const char*>(arrays[i].data()),
+                             arrays[i].length());
+    }
+    const std::set<double, ScalarLessThan<double>> targets{3, nan};
+    exec::ShreddingArrayBsonContainsAllExecutor<double> executor(targets);
+    TargetBitmap result(values.size(), false);
+    TargetBitmap valid(values.size(), true);
+    executor(values.data(),
+             {},
+             values.size(),
+             TargetBitmapView(result),
+             TargetBitmapView(valid));
+    EXPECT_TRUE(result[0]);
+    EXPECT_FALSE(result[1]);
+    EXPECT_TRUE(result[2]);
+    for (size_t i = 0; i < values.size(); ++i) {
+        EXPECT_TRUE(valid[i]);
+    }
+}
+
+TEST(Expr, LiteralNaNInArrayIgnoresInvalidMemberPayload) {
+    for (auto type : {DataType::FLOAT, DataType::DOUBLE}) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("id", DataType::INT64);
+        auto fid =
+            schema->AddDebugField("values", DataType::ARRAY, type, true, true);
+        schema->set_primary_field_id(pk);
+        std::vector<Array> arrays;
+        for (bool member_valid : {false, true, true}) {
+            ScalarFieldProto member;
+            if (type == DataType::FLOAT) {
+                member.mutable_float_data()->add_data(
+                    std::numeric_limits<float>::quiet_NaN());
+            } else {
+                member.mutable_double_data()->add_data(
+                    std::numeric_limits<double>::quiet_NaN());
+            }
+            member.add_valid_data(member_valid);
+            arrays.emplace_back(member, true);
+        }
+        // The legacy binlog decoder does not preserve nullable ARRAY
+        // members. Populate the growing column directly to test the scan
+        // operators with their actual Array/ArrayView validity representation.
+        auto generated = DataGen(schema, arrays.size(), 42, 0, 1, 1);
+        for (auto& field : *generated.raw_->mutable_fields_data()) {
+            if (field.field_id() == fid.get()) {
+                auto* input_arrays =
+                    field.mutable_scalars()->mutable_array_data();
+                input_arrays->clear_data();
+                for (const auto& array : arrays) {
+                    auto* value = input_arrays->add_data();
+                    *value = array.output_data();
+                    value->clear_valid_data();
+                }
+                auto* row_validity = MutableFieldDataRowValidData(&field);
+                row_validity->Clear();
+                for (bool valid : {true, true, false}) {
+                    row_validity->Add(valid);
+                }
+            }
+        }
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        auto offset = segment->PreInsert(arrays.size());
+        segment->Insert(offset,
+                        arrays.size(),
+                        generated.row_ids_.data(),
+                        generated.timestamps_.data(),
+                        generated.raw_);
+        auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(growing, nullptr);
+        auto* column_data = dynamic_cast<ConcurrentVector<Array>*>(
+            growing->get_insert_record().get_data_base(fid));
+        ASSERT_NE(column_data, nullptr);
+        column_data->set_data_raw(0, arrays.data(), arrays.size());
+        proto::plan::GenericValue nan;
+        nan.set_float_val(std::numeric_limits<double>::quiet_NaN());
+        const expr::ColumnInfo column(fid, DataType::ARRAY, type, {}, true);
+        const expr::ColumnInfo member(fid, DataType::ARRAY, type, {"0"}, true);
+        proto::plan::GenericValue two;
+        two.set_float_val(2);
+        std::vector<std::pair<expr::TypedExprPtr, bool>> expressions{
+            {std::make_shared<expr::TermFilterExpr>(
+                 column, std::vector<proto::plan::GenericValue>{nan}, true),
+             false},
+            {std::make_shared<expr::TermFilterExpr>(
+                 member, std::vector<proto::plan::GenericValue>{nan}),
+             true},
+            {std::make_shared<expr::UnaryRangeFilterExpr>(
+                 member, proto::plan::Equal, nan),
+             true},
+            {std::make_shared<expr::BinaryRangeFilterExpr>(
+                 member, nan, nan, true, true),
+             true},
+            {std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                 member, proto::plan::Equal, proto::plan::Add, nan, two),
+             true},
+            {std::make_shared<expr::JsonContainsExpr>(
+                 column,
+                 proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                 true,
+                 std::vector<proto::plan::GenericValue>{nan}),
+             false},
+            {std::make_shared<expr::JsonContainsExpr>(
+                 column,
+                 proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
+                 true,
+                 std::vector<proto::plan::GenericValue>{nan}),
+             false},
+        };
+        proto::plan::GenericValue array_nan;
+        array_nan.mutable_array_val()->set_same_type(true);
+        *array_nan.mutable_array_val()->add_array() = nan;
+        for (auto op : {proto::plan::Equal, proto::plan::NotEqual}) {
+            auto expression = std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, op, array_nan);
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), arrays.size(), MAX_TIMESTAMP);
+            BitsetTypeView bits(result->GetRawData(), result->size());
+            BitsetTypeView valid(result->GetValidRawData(), result->size());
+            EXPECT_EQ(bits[0], op == proto::plan::NotEqual);
+            EXPECT_EQ(bits[1], op == proto::plan::Equal);
+            EXPECT_FALSE(bits[2]);
+            EXPECT_TRUE(valid[0]);
+            EXPECT_TRUE(valid[1]);
+            EXPECT_FALSE(valid[2]);
+        }
+        for (const auto& [expression, element_access] : expressions) {
+            SCOPED_TRACE(expression->ToString());
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, expression);
+            auto result = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), arrays.size(), MAX_TIMESTAMP);
+            BitsetTypeView bits(result->GetRawData(), result->size());
+            BitsetTypeView valid(result->GetValidRawData(), result->size());
+            EXPECT_FALSE(bits[0]);
+            EXPECT_TRUE(bits[1]);
+            EXPECT_FALSE(bits[2]);
+            EXPECT_EQ(valid[0], !element_access);
+            EXPECT_TRUE(valid[1]);
+            EXPECT_FALSE(valid[2]);
         }
     }
 }

@@ -7911,7 +7911,7 @@ func Test_ValidateUtil_checkFloatFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
-	assert.Error(t, v.checkFloatFieldData(&schemapb.FieldData{
+	assert.NoError(t, v.checkFloatFieldData(&schemapb.FieldData{
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_FloatData{
@@ -7981,7 +7981,7 @@ func Test_ValidateUtil_checkDoubleFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
-	assert.Error(t, v.checkDoubleFieldData(&schemapb.FieldData{
+	assert.NoError(t, v.checkDoubleFieldData(&schemapb.FieldData{
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{

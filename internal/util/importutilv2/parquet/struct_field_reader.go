@@ -385,18 +385,12 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 							return nil, nil, WrapNullElementErr(r.field)
 						}
 						value := field.Value(int(structIdx))
-						if err := typeutil.VerifyFloat(float64(value)); err != nil {
-							return nil, nil, merr.Wrap(err, "float32 verification failed")
-						}
 						combinedData = append(combinedData, value)
 					case *array.Float64:
 						if field.IsNull(int(structIdx)) {
 							return nil, nil, WrapNullElementErr(r.field)
 						}
 						value := field.Value(int(structIdx))
-						if err := typeutil.VerifyFloat(value); err != nil {
-							return nil, nil, merr.Wrap(err, "float64 verification failed")
-						}
 						combinedData = append(combinedData, value)
 					case *array.String:
 						if field.IsNull(int(structIdx)) {

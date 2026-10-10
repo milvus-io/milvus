@@ -1797,13 +1797,11 @@ func TestQuotedArrayElementsMatchPlainColumns(t *testing.T) {
 		{schemapb.DataType_Int16, `["-16", "32767"]`, []int32{-16, 32767}, []string{`["32768"]`, `["abc"]`}},
 		{schemapb.DataType_Int32, `["-32", "2147483647"]`, []int32{-32, 2147483647}, []string{`["2147483648"]`, `["abc"]`}},
 		{schemapb.DataType_Int64, `["9007199254740993", "010"]`, []int64{9007199254740993, 10}, []string{`["9223372036854775808"]`, `["abc"]`, `[""]`}},
-		// strconv reads NaN/Inf/Infinity without an error, case-insensitively,
-		// and an array element has no later check that would catch them.
 		{schemapb.DataType_Float, `["1.5", "-2"]`, []float32{1.5, -2}, []string{
-			`["3.5e38"]`, `["abc"]`, `["NaN"]`, `["nan"]`, `["Inf"]`, `["+Inf"]`, `["-inf"]`, `["Infinity"]`,
+			`["3.5e38"]`, `["abc"]`,
 		}},
 		{schemapb.DataType_Double, `["1.5", "-2"]`, []float64{1.5, -2}, []string{
-			`["abc"]`, `["1e400"]`, `[1e400]`, `["NaN"]`, `["Inf"]`, `["-Infinity"]`,
+			`["abc"]`, `["1e400"]`, `[1e400]`,
 		}},
 	} {
 		t.Run(tc.elementType.String(), func(t *testing.T) {
@@ -9089,4 +9087,70 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"data": {"%s": 1, "fv": "null"}}`, FieldBookID)), floatSchema, false)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestNonFiniteTypedArrayIngress(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		coll := generateCollectionSchema(schemapb.DataType_Int64, false, true)
+		coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
+			Name: "arr", DataType: schemapb.DataType_Array, ElementType: dtype,
+		})
+		raw := `[1,"NaN","Infinity","-Infinity",3.4028235e38,-3.4028235e38]`
+		rows, _, err := checkAndSetData([]byte(`{"data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"arr":`+raw+`}]}`), coll, false)
+		require.NoError(t, err)
+		column := rows[0]["arr"].(*schemapb.ScalarField)
+		sub := &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: dtype}
+		member, err := buildStructSubArrayScalar(sub, gjson.Parse(raw).Array(), false)
+		require.NoError(t, err)
+		for _, scalar := range []*schemapb.ScalarField{column, member} {
+			values := scalar.GetDoubleData().GetData()
+			if dtype == schemapb.DataType_Float {
+				for _, value := range scalar.GetFloatData().GetData() {
+					values = append(values, float64(value))
+				}
+			}
+			require.Len(t, values, 6)
+			assert.Equal(t, 1.0, values[0])
+			assert.True(t, math.IsNaN(values[1]))
+			assert.True(t, math.IsInf(values[2], 1))
+			assert.True(t, math.IsInf(values[3], -1))
+			if dtype == schemapb.DataType_Float {
+				assert.Equal(t, float64(math.MaxFloat32), values[4])
+				assert.Equal(t, -float64(math.MaxFloat32), values[5])
+			}
+		}
+	}
+}
+
+func TestNonFiniteNullableStructArrayIngress(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		schema := buildStructArrayTestSchema()
+		schema.GetStructArrayFields()[0].Nullable = true
+		schema.GetStructArrayFields()[0].Fields[0].ElementType = dtype
+		body := []byte(`{"data":[{"id":1,"vec":[1,2,3,4],"my_struct":[{"sub_int":"NaN","sub_vec":[1,2,3,4]},{"sub_int":"Infinity","sub_vec":[1,2,3,4]},{"sub_int":"-Infinity","sub_vec":[1,2,3,4]}]},{"id":2,"vec":[1,2,3,4],"my_struct":null}]}`)
+		rows, validity, err := checkAndSetData(body, schema, false)
+		require.NoError(t, err)
+		assert.Equal(t, []bool{true, false}, validity["my_struct"])
+		columns, err := anyToColumns(rows, validity, schema, true, false)
+		require.NoError(t, err)
+		var member *schemapb.FieldData
+		for _, column := range columns {
+			if column.GetType() == schemapb.DataType_ArrayOfStruct {
+				member = column.GetStructArrays().GetFields()[0]
+			}
+		}
+		require.NotNil(t, member)
+		assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(member))
+		array := member.GetScalars().GetArrayData().GetData()[0]
+		values := array.GetDoubleData().GetData()
+		if dtype == schemapb.DataType_Float {
+			for _, value := range array.GetFloatData().GetData() {
+				values = append(values, float64(value))
+			}
+		}
+		require.Len(t, values, 3)
+		assert.True(t, math.IsNaN(values[0]))
+		assert.True(t, math.IsInf(values[1], 1))
+		assert.True(t, math.IsInf(values[2], -1))
+	}
 }

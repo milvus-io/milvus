@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"math"
 	"strings"
 	"testing"
 
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 
@@ -733,5 +735,45 @@ func TestNumpyValidateHeaderError(t *testing.T) {
 			assert.Error(t, err)
 			assert.Nil(t, fieldReader)
 		})
+	}
+}
+
+func TestNonFiniteScalarNumpyAndVectorRejection(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		var fieldData storage.FieldData = &storage.FloatFieldData{Data: []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))}}
+		if dtype == schemapb.DataType_Double {
+			fieldData = &storage.DoubleFieldData{Data: []float64{math.NaN(), math.Inf(1), math.Inf(-1)}}
+		}
+		source, err := createReader(fieldData, dtype)
+		require.NoError(t, err)
+		reader, err := NewFieldReader(source, &schemapb.FieldSchema{FieldID: 100, Name: "scalar", DataType: dtype, Nullable: true}, common.DefaultTimezone)
+		require.NoError(t, err)
+		data, validity, err := reader.Next(3)
+		require.NoError(t, err)
+		assert.Equal(t, []bool{true, true, true}, validity)
+		var values []float64
+		if dtype == schemapb.DataType_Float {
+			for _, value := range data.([]float32) {
+				values = append(values, float64(value))
+			}
+		} else {
+			values = data.([]float64)
+		}
+		assert.True(t, math.IsNaN(values[0]))
+		assert.True(t, math.IsInf(values[1], 1))
+		assert.True(t, math.IsInf(values[2], -1))
+	}
+	for _, value := range []float32{float32(math.NaN()), float32(math.Inf(1)), float32(math.Inf(-1))} {
+		source, err := createReader(&storage.FloatVectorFieldData{Data: []float32{value, 1, 2, 3, 4, 5, 6, 7}, Dim: 8}, schemapb.DataType_FloatVector)
+		require.NoError(t, err)
+		field := &schemapb.FieldSchema{
+			FieldID: 100, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+		}
+		reader, err := NewFieldReader(source, field, common.DefaultTimezone)
+		require.NoError(t, err)
+		_, _, err = reader.Next(1)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not a number or infinity")
 	}
 }

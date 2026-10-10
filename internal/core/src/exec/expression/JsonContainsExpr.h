@@ -20,6 +20,7 @@
 
 #include <fmt/core.h>
 
+#include <cmath>
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -192,7 +193,7 @@ template <typename GetType>
 class ShreddingArrayBsonContainsAllExecutor {
  public:
     explicit ShreddingArrayBsonContainsAllExecutor(
-        const std::set<GetType>& elements)
+        const std::set<GetType, ScalarLessThan<GetType>>& elements)
         : elements_(elements) {
     }
 
@@ -214,7 +215,7 @@ class ShreddingArrayBsonContainsAllExecutor {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            std::set<GetType> tmp_elements(elements_);
+            std::set<GetType, ScalarLessThan<GetType>> tmp_elements(elements_);
             for (const auto& element : array_view.value()) {
                 auto value = [&]() -> std::optional<GetType> {
                     if constexpr (std::is_same_v<GetType, int64_t> ||
@@ -238,7 +239,7 @@ class ShreddingArrayBsonContainsAllExecutor {
     }
 
  private:
-    std::set<GetType> elements_;
+    std::set<GetType, ScalarLessThan<GetType>> elements_;
 };
 
 class ShreddingArrayBsonContainsAllWithDiffTypeExecutor {

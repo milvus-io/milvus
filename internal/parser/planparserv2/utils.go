@@ -822,6 +822,9 @@ func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_J
 			elements = elementValue.GetArrayVal().GetArray()
 		}
 		arrayElementType := columnExpr.expr.GetColumnExpr().GetInfo().GetElementType()
+		if err := validateIntegerArrayQueryValues(columnExpr.expr.GetColumnExpr().GetInfo(), elements); err != nil {
+			return err
+		}
 		for _, value := range elements {
 			valExpr := toValueExpr(value)
 			if !canBeComparedDataType(arrayElementType, valExpr.dataType) {

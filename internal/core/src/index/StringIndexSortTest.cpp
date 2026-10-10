@@ -1399,3 +1399,142 @@ TEST(StringIndexSortPatternMatchTest, InnerMatchMmap) {
     ASSERT_TRUE(bitset[1]);   // category
     ASSERT_FALSE(bitset[2]);  // dog
 }
+
+namespace milvus::index {
+namespace {
+
+std::vector<FieldDataPtr>
+StringArraySortRows(bool all_empty = false) {
+    std::vector<std::vector<std::string>> rows{{"ignored"},
+                                               {},
+                                               {"apple", "banana", "apple"},
+                                               {"banana", "cherry"},
+                                               {"apple"},
+                                               {},
+                                               {std::string("a\0b", 3)}};
+    if (all_empty) {
+        for (auto& row : rows) {
+            row.clear();
+        }
+    }
+    std::vector<FieldDataPtr> fields;
+    for (size_t begin : {0, 3}) {
+        const size_t end = begin == 0 ? 3 : rows.size();
+        std::vector<Array> arrays;
+        std::vector<uint8_t> valid((end - begin + 7) / 8, 0);
+        for (size_t i = begin; i < end; ++i) {
+            ScalarFieldProto scalar;
+            for (const auto& value : rows[i]) {
+                scalar.mutable_string_data()->add_data(value);
+            }
+            // Set the element type even for an empty array.
+            scalar.mutable_string_data();
+            arrays.emplace_back(scalar);
+            if (i != 0) {
+                const size_t row = i - begin;
+                valid[row / 8] |= 1 << (row % 8);
+            }
+        }
+        auto field =
+            storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+        field->FillFieldData(arrays.data(), valid.data(), arrays.size(), 0);
+        fields.push_back(std::move(field));
+    }
+    return fields;
+}
+
+void
+CheckStringArraySort(StringIndexSort& index, bool all_empty) {
+    ASSERT_EQ(index.Count(), 7);
+    EXPECT_FALSE(index.HasRawData());
+    EXPECT_FALSE(index.IsNestedIndex());
+    EXPECT_FALSE(index.Reverse_Lookup(2).has_value());
+    auto nulls = index.IsNull();
+    ASSERT_EQ(nulls.size(), 7);
+    EXPECT_EQ(nulls.count(), 1);
+    EXPECT_TRUE(nulls[0]);
+    EXPECT_EQ(index.IsNotNull().count(), 6);
+    for (const auto& query :
+         std::vector<std::vector<std::string>>{{},
+                                               {"absent"},
+                                               {"apple"},
+                                               {"apple", "banana", "apple"},
+                                               {std::string("a\0b", 3)}}) {
+        auto in = index.In(query.size(), query.data());
+        auto not_in = index.NotIn(query.size(), query.data());
+        const std::vector<std::vector<std::string>> rows{
+            {},
+            {},
+            {"apple", "banana", "apple"},
+            {"banana", "cherry"},
+            {"apple"},
+            {},
+            {std::string("a\0b", 3)}};
+        for (size_t i = 0; i < rows.size(); ++i) {
+            bool hit = false;
+            if (!all_empty) {
+                for (const auto& value : rows[i]) {
+                    hit |= std::find(query.begin(), query.end(), value) !=
+                           query.end();
+                }
+            }
+            EXPECT_EQ(in[i], hit) << i;
+            EXPECT_EQ(not_in[i], i != 0 && !hit) << i;
+        }
+    }
+    // ARRAY_CONTAINS_ALL is evaluated by intersecting per-element matches.
+    std::string apple = "apple", banana = "banana";
+    auto both = index.In(1, &apple);
+    both &= index.In(1, &banana);
+    EXPECT_EQ(both.count(), all_empty ? 0 : 1);
+    if (!all_empty) {
+        EXPECT_TRUE(both[2]);
+    }
+    auto range = index.Range("apple", true, "cherry", true);
+    EXPECT_EQ(range.count(), all_empty ? 0 : 3);
+    auto prefix = index.PrefixMatch("app");
+    EXPECT_EQ(prefix.count(), all_empty ? 0 : 2);
+}
+
+}  // namespace
+
+TEST(StringIndexSortArrayTest, ParentRowsAndReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_ordinary_array");
+    fixture.field_schema.set_data_type(proto::schema::DataType::Array);
+    fixture.field_schema.set_element_type(proto::schema::DataType::VarChar);
+    fixture.field_schema.set_nullable(true);
+    fixture.field_meta.field_schema = fixture.field_schema;
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+    for (bool all_empty : {false, true}) {
+        SCOPED_TRACE(all_empty);
+        StringIndexSort built(fixture.ctx);
+        built.BuildWithFieldData(StringArraySortRows(all_empty));
+        CheckStringArraySort(built, all_empty);
+        auto legacy = built.Serialize({});
+        auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            Config legacy_config;
+            legacy_config[ENABLE_MMAP] = mmap;
+            StringIndexSort legacy_loaded(fixture.ctx);
+            legacy_loaded.Load(legacy, legacy_config);
+            CheckStringArraySort(legacy_loaded, all_empty);
+            for (bool async : {false, true}) {
+                Config config;
+                config[INDEX_FILES] = stats->GetIndexFiles();
+                if (mmap) {
+                    config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/array";
+                }
+                auto ctx = fixture.ctx;
+                ctx.use_async_load = async;
+                StringIndexSort loaded(ctx);
+                loaded.LoadUnified(config);
+                CheckStringArraySort(loaded, all_empty);
+            }
+        }
+    }
+}
+}  // namespace milvus::index

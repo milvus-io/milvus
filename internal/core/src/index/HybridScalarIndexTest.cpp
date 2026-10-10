@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <map>
@@ -33,6 +34,7 @@
 #include <vector>
 
 #include "common/Consts.h"
+#include "common/Array.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
@@ -40,6 +42,8 @@
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
+#include "index/BitmapIndex.h"
+#include "index/ScalarIndexSort.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -1508,3 +1512,92 @@ INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackNullBinlog,
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackDefaultValueBinlog,
                                HybridIndexTestV4,
                                BitmapType);
+
+namespace {
+template <typename T>
+class ExposedHybridNaNSelection : public HybridScalarIndex<T> {
+ public:
+    using HybridScalarIndex<T>::HybridScalarIndex;
+    ScalarIndexType
+    SelectPublic(const std::vector<FieldDataPtr>& fields) {
+        return this->SelectIndexBuildType(fields);
+    }
+};
+
+template <typename T>
+FieldDataPtr
+HybridNaNArrayData(bool valid_nan) {
+    ScalarFieldProto values;
+    const auto nan = std::numeric_limits<T>::quiet_NaN();
+    if constexpr (std::is_same_v<T, float>) {
+        values.mutable_float_data()->add_data(nan);
+        values.mutable_float_data()->add_data(T(3));
+    } else {
+        values.mutable_double_data()->add_data(nan);
+        values.mutable_double_data()->add_data(T(3));
+    }
+    values.add_valid_data(valid_nan);
+    values.add_valid_data(true);
+    std::vector<Array> arrays{Array(values, true)};
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    field->FillFieldData(arrays.data(), arrays.size());
+    return field;
+}
+}  // namespace
+
+using HybridNaNTypes = testing::Types<float, double>;
+template <typename T>
+class HybridNaNVersionGuardTest : public testing::Test {};
+TYPED_TEST_SUITE(HybridNaNVersionGuardTest, HybridNaNTypes);
+
+TYPED_TEST(HybridNaNVersionGuardTest,
+           NaNUsesCardinalityAndRespectsWriterVersion) {
+    using T = TypeParam;
+    const T values[] = {std::numeric_limits<T>::quiet_NaN(), T(3)};
+    ExposedHybridNaNSelection<T> legacy(2);
+    legacy.scalar_index_version_ = 5;
+    ASSERT_NO_THROW(legacy.Build(2, values));
+    EXPECT_EQ(legacy.internal_index_type_, ScalarIndexType::BITMAP);
+    EXPECT_EQ(legacy.Count(), 2);
+    EXPECT_EQ(legacy.IsNotNull().count(), 2);
+    std::map<T, size_t> expected_legacy;
+    for (T value : values) {
+        ++expected_legacy[value];
+    }
+    auto* legacy_bitmap =
+        dynamic_cast<BitmapIndex<T>*>(legacy.internal_index_.get());
+    ASSERT_NE(legacy_bitmap, nullptr);
+    EXPECT_EQ(legacy_bitmap->Cardinality(), expected_legacy.size());
+    ExposedHybridNaNSelection<T> current(2);
+    current.scalar_index_version_ = kMinScalarIndexVersionForNaNTotalOrder;
+    ASSERT_NO_THROW(current.Build(2, values));
+    EXPECT_EQ(current.internal_index_type_, ScalarIndexType::BITMAP);
+    EXPECT_EQ(current.Count(), 2);
+    EXPECT_EQ(current.IsNotNull().count(), 2);
+    const T nan = values[0];
+    EXPECT_EQ(current.In(1, &nan).count(), 1);
+    EXPECT_EQ(current.Range(T(3), OpType::GreaterThan).count(), 1);
+    const bool valid[] = {false, true};
+    ExposedHybridNaNSelection<T> hidden(2);
+    hidden.scalar_index_version_ = 5;
+    ASSERT_NO_THROW(hidden.Build(2, values, valid));
+    EXPECT_EQ(hidden.internal_index_type_, ScalarIndexType::BITMAP);
+    EXPECT_EQ(hidden.IsNotNull().count(), 1);
+}
+
+TYPED_TEST(HybridNaNVersionGuardTest,
+           OrdinaryAndNestedArrayCountNaNAsOneDistinctValue) {
+    using T = TypeParam;
+    for (bool nested : {false, true}) {
+        for (bool valid_nan : {false, true}) {
+            ExposedHybridNaNSelection<T> index(2, {}, nested);
+            index.scalar_index_version_ =
+                kMinScalarIndexVersionForNaNTotalOrder;
+            index.field_type_ = proto::schema::DataType::Array;
+            index.bitmap_index_cardinality_limit_ = 2;
+            EXPECT_EQ(
+                index.SelectPublic({HybridNaNArrayData<T>(valid_nan)}),
+                valid_nan ? ScalarIndexType::STLSORT : ScalarIndexType::BITMAP);
+        }
+    }
+}

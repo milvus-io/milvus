@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -214,8 +215,21 @@ func (r *Row) Equal(other *Row, keyCount int) bool {
 			return false
 		}
 		// Both are not null, compare values
-		if r.fieldValues[i].val != other.fieldValues[i].val {
-			return false
+		switch value := r.fieldValues[i].val.(type) {
+		case float32:
+			rhs, ok := other.fieldValues[i].val.(float32)
+			if !ok || typeutil.Float32ToSortableUint32(value) != typeutil.Float32ToSortableUint32(rhs) {
+				return false
+			}
+		case float64:
+			rhs, ok := other.fieldValues[i].val.(float64)
+			if !ok || typeutil.Float64ToSortableUint64(value) != typeutil.Float64ToSortableUint64(rhs) {
+				return false
+			}
+		default:
+			if value != other.fieldValues[i].val {
+				return false
+			}
 		}
 	}
 	return true

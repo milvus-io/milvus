@@ -19,6 +19,9 @@
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::index {
+// Version 6 indexes NaNs as equal values ordered above positive infinity.
+inline constexpr int32_t kMinScalarIndexVersionForNaNTotalOrder = 6;
+
 constexpr const char* OPERATOR_TYPE = "operator_type";
 constexpr const char* RANGE_VALUE = "range_value";
 constexpr const char* LOWER_BOUND_VALUE = "lower_bound_value";

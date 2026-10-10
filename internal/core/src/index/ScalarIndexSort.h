@@ -99,6 +99,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
     void
+    SetSupportsNaNTotalOrder(bool enabled) {
+        supports_nan_total_order_ = enabled;
+    }
+
+    void
     Build(const Config& config = {}) override;
 
     const TargetBitmap
@@ -181,6 +186,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
+    void
+    BuildWithArrayData(const std::vector<FieldDataPtr>& datas);
+
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
@@ -244,21 +252,25 @@ class ScalarIndexSort : public ScalarIndex<T> {
         if (is_mmap_) {
             data_ptr_ = reinterpret_cast<IndexStructure<T>*>(mmap_data_);
             size_ = data_size_ / sizeof(IndexStructure<T>);
-            end_ptr_ = data_ptr_ + size_;
+            end_ptr_ = size_ == 0 ? data_ptr_ : data_ptr_ + size_;
         } else {
             data_ptr_ = data_.data();
-            end_ptr_ = data_ptr_ + data_.size();
+            end_ptr_ = data_.empty() ? data_ptr_ : data_ptr_ + data_.size();
             size_ = data_.size();
         }
     }
+
+    void
+    SortData();
 
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
     bool is_array_field_ = false;
+    bool supports_nan_total_order_ = true;
     bool is_built_ = false;
     Config config_;
-    // idx_to_offsets: maps row_id → sorted offset.
+    // idx_to_offsets: maps row_id to sorted offset, or -1 when unindexed.
     // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
     std::vector<int32_t> idx_to_offsets_;  // memory mode owner
     const int32_t* idx_to_offsets_ptr_ =

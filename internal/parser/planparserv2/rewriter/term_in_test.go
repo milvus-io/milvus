@@ -945,3 +945,26 @@ func TestGeometryAndText_BlockedAtParser(t *testing.T) {
 	_, err = parser.ParseExpr(helper, `txt != "hello"`, nil)
 	require.Error(t, err, "Text != should be rejected by parser")
 }
+
+func TestRewrite_NaNEqualityUsesScalarSemantics(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	values := map[string]*schemapb.TemplateValue{
+		"nan": {Val: &schemapb.TemplateValue_FloatVal{FloatVal: math.NaN()}},
+		"values": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_DoubleData{DoubleData: &schemapb.DoubleArray{
+				Data: []float64{math.Float64frombits(0xfff8000000000001)},
+			}},
+		}}},
+	}
+	expr, err := parser.ParseExpr(helper, "FloatField in {values} and FloatField == {nan}", values)
+	require.NoError(t, err)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr), "NaN intersection must retain matching NaN rows")
+	// Rewriting this union must either preserve the matching IN branch or
+	// simplify the complete non-nullable domain to TRUE.
+	expr, err = parser.ParseExpr(helper, "FloatField in {values} or FloatField != {nan}", values)
+	require.NoError(t, err)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr))
+	if !rewriter.IsAlwaysTrueExpr(expr) {
+		require.NotNil(t, expr.GetBinaryExpr(), "cannot discard the NaN-matching IN branch")
+	}
+}

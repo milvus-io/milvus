@@ -18,16 +18,35 @@ package common
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// FloatLiteral accepts JSON numbers and the non-finite strings used to
+// represent typed floating values in legal JSON. Finite numeric strings retain
+// the existing strict JSON import type check.
+func FloatLiteral(value any) (string, bool) {
+	switch value := value.(type) {
+	case json.Number:
+		return value.String(), true
+	case string:
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err == nil && (math.IsNaN(parsed) || math.IsInf(parsed, 0)) {
+			return value, true
+		}
+	}
+	return "", false
+}
 
 func CheckVarcharLength(str string, maxLength int64, field *schemapb.FieldSchema) error {
 	if (int64)(len(str)) > maxLength {

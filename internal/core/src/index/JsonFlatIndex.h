@@ -17,8 +17,10 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <vector>
 #include "common/EasyAssert.h"
 #include "common/JsonCastType.h"
+#include "common/ScalarComparison.h"
 #include "common/Types.h"
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
@@ -464,14 +466,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     static U64Range
     DoubleRangeForValue(double value, OpType op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
-
         switch (op) {
             case OpType::LessThan: {
                 auto upper = LastU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) < value;
+                    return ScalarLess(static_cast<double>(u), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -481,7 +479,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::LessEqual: {
                 auto upper = LastU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) <= value;
+                    return ScalarLessEqual(static_cast<double>(u), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -491,7 +489,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterThan: {
                 auto lower = FirstU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) > value;
+                    return ScalarGreater(static_cast<double>(u), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -501,7 +499,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterEqual: {
                 auto lower = FirstU64Where([value](uint64_t u) {
-                    return static_cast<double>(u) >= value;
+                    return ScalarGreaterEqual(static_cast<double>(u), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -520,15 +518,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                          bool lb_inclusive,
                          double upper_bound_value,
                          bool ub_inclusive) {
-        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
-            return std::nullopt;
-        }
-
         auto lower =
             FirstU64Where([lower_bound_value, lb_inclusive](uint64_t u) {
                 auto value = static_cast<double>(u);
-                return lb_inclusive ? value >= lower_bound_value
-                                    : value > lower_bound_value;
+                return lb_inclusive
+                           ? ScalarGreaterEqual(value, lower_bound_value)
+                           : ScalarGreater(value, lower_bound_value);
             });
         if (!lower.has_value()) {
             return std::nullopt;
@@ -537,8 +532,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         auto upper =
             LastU64Where([upper_bound_value, ub_inclusive](uint64_t u) {
                 auto value = static_cast<double>(u);
-                return ub_inclusive ? value <= upper_bound_value
-                                    : value < upper_bound_value;
+                return ub_inclusive ? ScalarLessEqual(value, upper_bound_value)
+                                    : ScalarLess(value, upper_bound_value);
             });
         if (!upper.has_value() || *lower > *upper) {
             return std::nullopt;
@@ -549,14 +544,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     static I64Range
     DoubleI64RangeForValue(double value, OpType op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
-
         switch (op) {
             case OpType::LessThan: {
                 auto upper = LastI64Where([value](int64_t i) {
-                    return static_cast<double>(i) < value;
+                    return ScalarLess(static_cast<double>(i), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -566,7 +557,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::LessEqual: {
                 auto upper = LastI64Where([value](int64_t i) {
-                    return static_cast<double>(i) <= value;
+                    return ScalarLessEqual(static_cast<double>(i), value);
                 });
                 if (!upper.has_value()) {
                     return std::nullopt;
@@ -576,7 +567,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterThan: {
                 auto lower = FirstI64Where([value](int64_t i) {
-                    return static_cast<double>(i) > value;
+                    return ScalarGreater(static_cast<double>(i), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -586,7 +577,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
             }
             case OpType::GreaterEqual: {
                 auto lower = FirstI64Where([value](int64_t i) {
-                    return static_cast<double>(i) >= value;
+                    return ScalarGreaterEqual(static_cast<double>(i), value);
                 });
                 if (!lower.has_value()) {
                     return std::nullopt;
@@ -605,15 +596,12 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                             bool lb_inclusive,
                             double upper_bound_value,
                             bool ub_inclusive) {
-        if (std::isnan(lower_bound_value) || std::isnan(upper_bound_value)) {
-            return std::nullopt;
-        }
-
         auto lower =
             FirstI64Where([lower_bound_value, lb_inclusive](int64_t i) {
                 auto value = static_cast<double>(i);
-                return lb_inclusive ? value >= lower_bound_value
-                                    : value > lower_bound_value;
+                return lb_inclusive
+                           ? ScalarGreaterEqual(value, lower_bound_value)
+                           : ScalarGreater(value, lower_bound_value);
             });
         if (!lower.has_value()) {
             return std::nullopt;
@@ -621,8 +609,8 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
         auto upper = LastI64Where([upper_bound_value, ub_inclusive](int64_t i) {
             auto value = static_cast<double>(i);
-            return ub_inclusive ? value <= upper_bound_value
-                                : value < upper_bound_value;
+            return ub_inclusive ? ScalarLessEqual(value, upper_bound_value)
+                                : ScalarLess(value, upper_bound_value);
         });
         if (!upper.has_value() || *lower > *upper) {
             return std::nullopt;

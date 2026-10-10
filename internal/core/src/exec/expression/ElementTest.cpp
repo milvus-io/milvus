@@ -16,7 +16,9 @@
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -97,6 +99,59 @@ TEST(SimdBatchElementTest, Double) {
         EXPECT_TRUE(sb.In(MakeVT(v)));
     }
     EXPECT_FALSE(sb.In(MakeVT(1.6)));
+}
+
+template <typename T>
+void
+VerifySourceNaNIn() {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<std::vector<T>> targets{
+        {}, {T(3)}, {T(0), T(3), T(7)}, {nan}, {T(3), nan}};
+    std::vector<T> data(41);
+    const std::vector<T> pattern{nan, T(3), T(9), T(0), T(7)};
+    for (size_t i = 0; i < data.size(); ++i) {
+        data[i] = pattern[i % pattern.size()];
+    }
+    for (const auto& values : targets) {
+        SimdBatchElement<T> elem(values);
+        FlatVectorElement<T> flat(values);
+        SetElement<T> hashed(values);
+        auto expected = [&](T value) {
+            return std::any_of(values.begin(), values.end(), [&](T target) {
+                return value == target ||
+                       (std::isnan(value) && std::isnan(target));
+            });
+        };
+        EXPECT_EQ(elem.In(MakeVT(nan)), expected(nan));
+        for (const auto value : data) {
+            EXPECT_EQ(flat.In(MakeVT(value)), expected(value));
+            EXPECT_EQ(hashed.In(MakeVT(value)), expected(value));
+            EXPECT_EQ(elem.In(MakeVT(value)), expected(value));
+        }
+        // Exercise scalar tails and unaligned heads as well as SIMD bulk.
+        for (const int offset : {0, 1, 7}) {
+            milvus::TargetBitmap bitmap(data.size() + offset + 1, false);
+            milvus::TargetBitmapView full(bitmap);
+            full[offset + data.size()] = true;
+            elem.FilterChunk(data.data(), data.size(), full + offset);
+            for (size_t i = 0; i < data.size(); ++i) {
+                EXPECT_EQ(full[offset + i], expected(data[i]))
+                    << "offset " << offset << " slot " << i;
+            }
+            EXPECT_TRUE(full[offset + data.size()]);
+            for (int i = 0; i < offset; ++i) {
+                EXPECT_FALSE(full[i]);
+            }
+        }
+    }
+}
+
+TEST(SimdBatchElementTest, FloatSourceNaN) {
+    VerifySourceNaNIn<float>();
+}
+
+TEST(SimdBatchElementTest, DoubleSourceNaN) {
+    VerifySourceNaNIn<double>();
 }
 
 TEST(SimdBatchElementTest, Empty) {
@@ -1766,4 +1821,77 @@ TEST(FilterChunkCrossTest, Int64VaryingSizes) {
 
 TEST(FilterChunkCrossTest, FloatVaryingSizes) {
     VerifyFilterChunkVaryingSizes<float>("float");
+}
+
+TEST(ScalarComparisonTest, CanonicalSortableKeyWidthAndBoundaries) {
+    using milvus::FloatToSortableKey;
+    using milvus::ScalarEqual;
+    using milvus::ScalarHash;
+    using milvus::ScalarLess;
+    static_assert(
+        std::is_same_v<decltype(FloatToSortableKey(float{})), uint32_t>);
+    static_assert(
+        std::is_same_v<decltype(FloatToSortableKey(double{})), uint64_t>);
+    const float f_inf = std::numeric_limits<float>::infinity();
+    const double d_inf = std::numeric_limits<double>::infinity();
+    EXPECT_EQ(FloatToSortableKey(-f_inf), uint32_t{0x007fffff});
+    EXPECT_EQ(FloatToSortableKey(f_inf), uint32_t{0xff800000});
+    EXPECT_EQ(FloatToSortableKey(-d_inf), uint64_t{0x000fffffffffffff});
+    EXPECT_EQ(FloatToSortableKey(d_inf), uint64_t{0xfff0000000000000});
+    EXPECT_EQ(FloatToSortableKey(-0.0f), uint32_t{0x80000000});
+    EXPECT_EQ(FloatToSortableKey(0.0f), uint32_t{0x80000000});
+    EXPECT_EQ(FloatToSortableKey(-0.0), uint64_t{0x8000000000000000});
+    EXPECT_EQ(FloatToSortableKey(0.0), uint64_t{0x8000000000000000});
+    EXPECT_EQ(FloatToSortableKey(std::numeric_limits<float>::max()) + 1,
+              FloatToSortableKey(f_inf));
+    EXPECT_EQ(FloatToSortableKey(std::numeric_limits<double>::max()) + 1,
+              FloatToSortableKey(d_inf));
+    for (uint32_t bits : {uint32_t{0x7fc00001},
+                          uint32_t{0xffc00005},
+                          uint32_t{0x7f800001},
+                          uint32_t{0xff800001}}) {
+        const float nan = std::bit_cast<float>(bits);
+        EXPECT_EQ(FloatToSortableKey(nan),
+                  std::numeric_limits<uint32_t>::max());
+        EXPECT_TRUE(ScalarLess(f_inf, nan));
+        EXPECT_TRUE(ScalarEqual(nan, std::numeric_limits<double>::quiet_NaN()));
+        EXPECT_EQ(ScalarHash<float>{}(nan),
+                  ScalarHash<float>{}(std::numeric_limits<float>::quiet_NaN()));
+    }
+    for (uint64_t bits : {uint64_t{0x7ff8000000000001},
+                          uint64_t{0xfff8000000000005},
+                          uint64_t{0x7ff0000000000001},
+                          uint64_t{0xfff0000000000001}}) {
+        const double nan = std::bit_cast<double>(bits);
+        EXPECT_EQ(FloatToSortableKey(nan),
+                  std::numeric_limits<uint64_t>::max());
+        EXPECT_TRUE(ScalarLess(d_inf, nan));
+        EXPECT_TRUE(ScalarEqual(nan, std::numeric_limits<float>::quiet_NaN()));
+        EXPECT_EQ(
+            ScalarHash<double>{}(nan),
+            ScalarHash<double>{}(std::numeric_limits<double>::quiet_NaN()));
+    }
+    EXPECT_EQ(ScalarHash<float>{}(-0.0f), ScalarHash<float>{}(0.0f));
+    EXPECT_EQ(ScalarHash<double>{}(-0.0), ScalarHash<double>{}(0.0));
+    EXPECT_TRUE(ScalarEqual(3.0f, 3.0));
+    EXPECT_TRUE(ScalarLess(std::numeric_limits<float>::max(), d_inf));
+    const std::vector<double> ordered{
+        -d_inf,
+        -std::numeric_limits<double>::max(),
+        -3.0,
+        -std::numeric_limits<double>::denorm_min(),
+        -0.0,
+        0.0,
+        std::numeric_limits<double>::denorm_min(),
+        3.0,
+        std::numeric_limits<double>::max(),
+        d_inf,
+        std::numeric_limits<double>::quiet_NaN()};
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        for (size_t j = 0; j < ordered.size(); ++j) {
+            const bool same = i == j || (ordered[i] == 0 && ordered[j] == 0);
+            EXPECT_EQ(ScalarEqual(ordered[i], ordered[j]), same);
+            EXPECT_EQ(ScalarLess(ordered[i], ordered[j]), i < j && !same);
+        }
+    }
 }

@@ -18,6 +18,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -99,6 +100,8 @@ class SegmentLoadInfoTest : public ::testing::Test {
         auto* index_info2 = proto_.add_index_infos();
         index_info2->set_fieldid(102);
         index_info2->set_indexid(1002);
+        index_info2->set_current_scalar_index_version(
+            milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
         index_info2->add_index_file_paths("/path/to/index3");
         // Add required index_type parameter for scalar field
         auto* index_param2 = index_info2->add_index_params();
@@ -301,7 +304,7 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     hybrid_param->set_value(milvus::index::HYBRID_INDEX_TYPE);
 
     auto* inverted_index = proto.add_index_infos();
-    inverted_index->set_fieldid(109);
+    inverted_index->set_fieldid(100);
     inverted_index->set_indexid(5002);
     inverted_index->set_current_scalar_index_version(3);
     inverted_index->add_index_file_paths("/path/to/inverted_index");
@@ -310,7 +313,7 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     inverted_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
 
     auto* legacy_inverted_index = proto.add_index_infos();
-    legacy_inverted_index->set_fieldid(110);
+    legacy_inverted_index->set_fieldid(104);
     legacy_inverted_index->set_indexid(5003);
     legacy_inverted_index->add_index_file_paths(
         "/path/to/legacy_inverted_index");
@@ -324,11 +327,11 @@ TEST_F(SegmentLoadInfoTest, BuildCacheDefersFileAwareScalarResourceEstimate) {
     ASSERT_EQ(hybrid_infos.size(), 1);
     EXPECT_FALSE(hybrid_infos[0].load_resource_request.has_value());
 
-    auto inverted_infos = segment_info.GetFieldIndexInfos(FieldId(109));
+    auto inverted_infos = segment_info.GetFieldIndexInfos(FieldId(100));
     ASSERT_EQ(inverted_infos.size(), 1);
     EXPECT_FALSE(inverted_infos[0].load_resource_request.has_value());
 
-    auto legacy_inverted_infos = segment_info.GetFieldIndexInfos(FieldId(110));
+    auto legacy_inverted_infos = segment_info.GetFieldIndexInfos(FieldId(104));
     ASSERT_EQ(legacy_inverted_infos.size(), 1);
     EXPECT_TRUE(legacy_inverted_infos[0].load_resource_request.has_value());
 }
@@ -661,6 +664,9 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesOnly) {
 
     auto* index2 = test_proto.add_index_infos();
     index2->set_fieldid(102);
+    index2->set_current_scalar_index_version(
+
+        milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
     index2->set_indexid(1002);
     index2->add_index_file_paths("/path/to/index2");
     auto* index_param2 = index2->add_index_params();
@@ -2224,6 +2230,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceMixed) {
 
     auto* cur_idx2 = current_proto.add_index_infos();
     cur_idx2->set_fieldid(102);
+    cur_idx2->set_current_scalar_index_version(
+
+        milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
     cur_idx2->set_indexid(1002);
     cur_idx2->add_index_file_paths("/path/to/idx2");
     auto* cur_param2 = cur_idx2->add_index_params();
@@ -2246,6 +2255,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceMixed) {
 
     auto* new_idx2 = new_proto.add_index_infos();
     new_idx2->set_fieldid(102);
+    new_idx2->set_current_scalar_index_version(
+
+        milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
     new_idx2->set_indexid(1002);
     new_idx2->add_index_file_paths("/path/to/idx2");
     auto* new_param2 = new_idx2->add_index_params();
@@ -2254,6 +2266,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceMixed) {
 
     auto* new_idx3 = new_proto.add_index_infos();
     new_idx3->set_fieldid(103);
+    new_idx3->set_current_scalar_index_version(
+
+        milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
     new_idx3->set_indexid(3001);
     new_idx3->add_index_file_paths("/path/to/idx3");
     auto* new_param3 = new_idx3->add_index_params();
@@ -2344,6 +2359,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDropsJsonIndexByNestedPath) {
                              const std::string& nested_path) {
         auto* index = proto.add_index_infos();
         index->set_fieldid(102);
+        index->set_current_scalar_index_version(
+
+            milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
         index->set_indexid(index_id);
         index->add_index_file_paths("/path/to/json_index_" +
                                     std::to_string(index_id));
@@ -3952,4 +3970,103 @@ TEST(IndexFactoryRawDataTest,
         DataType::INT64, false));
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, false));
+}
+
+TEST_F(SegmentLoadInfoTest, LegacyFloatingIndexesUseRawDataUntilRebuilt) {
+    for (auto index_type : {milvus::index::ASCENDING_SORT,
+                            milvus::index::BITMAP_INDEX_TYPE,
+                            milvus::index::INVERTED_INDEX_TYPE,
+                            milvus::index::HYBRID_INDEX_TYPE}) {
+        for (int32_t version :
+             {5, milvus::index::kMinScalarIndexVersionForNaNTotalOrder}) {
+            proto::segcore::SegmentLoadInfo load;
+            load.set_segmentid(12345);
+            load.set_num_of_rows(3);
+            auto* index = load.add_index_infos();
+            index->set_fieldid(105);
+            index->set_indexid(9001);
+            index->set_current_scalar_index_version(version);
+            index->add_index_file_paths("/path/to/float-index");
+            auto* param = index->add_index_params();
+            param->set_key(milvus::index::INDEX_TYPE);
+            param->set_value(index_type);
+            load.add_binlog_paths()->set_fieldid(105);
+            SegmentLoadInfo info(load, schema_);
+            EXPECT_EQ(info.HasIndexInfo(FieldId(105)), version >= 6);
+            EXPECT_EQ(info.GetIndexedFieldIds().count(FieldId(105)),
+                      version >= 6 ? 1 : 0);
+            EXPECT_EQ(info.GetBinlogPathCount(), 1);
+        }
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, LegacyArrayAndNumericJsonIndexesUseRawData) {
+    auto float_array =
+        schema_->AddDebugArrayField("float_array", DataType::FLOAT, true);
+    auto int_array =
+        schema_->AddDebugArrayField("int_array", DataType::INT64, true);
+    for (int32_t version :
+         {5, milvus::index::kMinScalarIndexVersionForNaNTotalOrder}) {
+        for (const auto& [field, cast, affected] :
+             std::vector<std::tuple<FieldId, std::string, bool>>{
+                 {float_array, "", true},
+                 {int_array, "", false},
+                 {FieldId(102), "DOUBLE", true},
+                 {FieldId(102), "ARRAY_DOUBLE", true},
+                 {FieldId(102), "JSON", true},
+                 {FieldId(102), "VARCHAR", false}}) {
+            proto::segcore::SegmentLoadInfo load;
+            load.set_segmentid(12345);
+            load.set_num_of_rows(3);
+            auto* index = load.add_index_infos();
+            index->set_fieldid(field.get());
+            index->set_indexid(9002);
+            index->set_current_scalar_index_version(version);
+            index->add_index_file_paths("/path/to/array-json-index");
+            auto* param = index->add_index_params();
+            param->set_key(milvus::index::INDEX_TYPE);
+            param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+            if (!cast.empty()) {
+                auto* json_cast = index->add_index_params();
+                json_cast->set_key(JSON_CAST_TYPE);
+                json_cast->set_value(cast);
+                auto* path = index->add_index_params();
+                path->set_key(JSON_PATH);
+                path->set_value("/value");
+            }
+            load.add_binlog_paths()->set_fieldid(field.get());
+            SegmentLoadInfo info(load, schema_);
+            EXPECT_EQ(info.HasIndexInfo(field), !affected || version >= 6)
+                << cast;
+            EXPECT_EQ(info.GetBinlogPathCount(), 1);
+        }
+    }
+}
+
+TEST_F(SegmentLoadInfoTest,
+       LegacyJsonCastIndexRequiresRebuildInsteadOfRawFallback) {
+    proto::segcore::SegmentLoadInfo load;
+    load.set_segmentid(12345);
+    load.set_num_of_rows(3);
+    auto* index = load.add_index_infos();
+    index->set_fieldid(102);
+    index->set_indexid(9003);
+    index->set_current_scalar_index_version(5);
+    index->add_index_file_paths("/path/to/cast-index");
+    for (const auto& [key, value] :
+         std::vector<std::pair<std::string, std::string>>{
+             {milvus::index::INDEX_TYPE, milvus::index::INVERTED_INDEX_TYPE},
+             {JSON_PATH, "/value"},
+             {JSON_CAST_TYPE, "DOUBLE"},
+             {JSON_CAST_FUNCTION, "STRING_TO_DOUBLE"}}) {
+        auto* param = index->add_index_params();
+        param->set_key(key);
+        param->set_value(value);
+    }
+    load.add_binlog_paths()->set_fieldid(102);
+    EXPECT_THROW(SegmentLoadInfo(load, schema_), SegcoreError);
+    index->set_current_scalar_index_version(
+        milvus::index::kMinScalarIndexVersionForNaNTotalOrder);
+    SegmentLoadInfo current(load, schema_);
+    EXPECT_TRUE(current.HasIndexInfo(FieldId(102)));
 }

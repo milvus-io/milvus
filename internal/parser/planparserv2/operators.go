@@ -557,13 +557,13 @@ func Less(a, b *planpb.GenericValue) *ExprWithType {
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 	if aFloat && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() < b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(a.GetFloatVal(), b.GetFloatVal()))
 		return ret
 	} else if aFloat && bInt {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() < float64(b.GetInt64Val()))
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(a.GetFloatVal(), float64(b.GetInt64Val())))
 		return ret
 	} else if aInt && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(float64(a.GetInt64Val()) < b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(float64(a.GetInt64Val()), b.GetFloatVal()))
 		return ret
 	} else if aInt && bInt {
 		// aInt && bInt
@@ -589,13 +589,13 @@ func LessEqual(a, b *planpb.GenericValue) *ExprWithType {
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 	if aFloat && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() <= b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(b.GetFloatVal(), a.GetFloatVal()))
 		return ret
 	} else if aFloat && bInt {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() <= float64(b.GetInt64Val()))
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(float64(b.GetInt64Val()), a.GetFloatVal()))
 		return ret
 	} else if aInt && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(float64(a.GetInt64Val()) <= b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(b.GetFloatVal(), float64(a.GetInt64Val())))
 		return ret
 	} else if aInt && bInt {
 		// aInt && bInt
@@ -621,13 +621,13 @@ func Greater(a, b *planpb.GenericValue) *ExprWithType {
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 	if aFloat && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() > b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(b.GetFloatVal(), a.GetFloatVal()))
 		return ret
 	} else if aFloat && bInt {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() > float64(b.GetInt64Val()))
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(float64(b.GetInt64Val()), a.GetFloatVal()))
 		return ret
 	} else if aInt && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(float64(a.GetInt64Val()) > b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(floatingLess(b.GetFloatVal(), float64(a.GetInt64Val())))
 		return ret
 	} else if aInt && bInt {
 		// aInt && bInt
@@ -653,13 +653,13 @@ func GreaterEqual(a, b *planpb.GenericValue) *ExprWithType {
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 	if aFloat && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() >= b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(a.GetFloatVal(), b.GetFloatVal()))
 		return ret
 	} else if aFloat && bInt {
-		ret.expr.GetValueExpr().Value = NewBool(a.GetFloatVal() >= float64(b.GetInt64Val()))
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(a.GetFloatVal(), float64(b.GetInt64Val())))
 		return ret
 	} else if aInt && bFloat {
-		ret.expr.GetValueExpr().Value = NewBool(float64(a.GetInt64Val()) >= b.GetFloatVal())
+		ret.expr.GetValueExpr().Value = NewBool(!floatingLess(float64(a.GetInt64Val()), b.GetFloatVal()))
 		return ret
 	} else if aInt && bInt {
 		// aInt && bInt

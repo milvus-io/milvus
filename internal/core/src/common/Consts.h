@@ -179,3 +179,6 @@ constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;
 // an older reader's ScalarIndexSort predates nested-index support and cannot
 // load a nested STL_SORT physical index.
 constexpr int32_t kNestedHybridStlSortMinVersion = 4;
+// Version 6 adds ordinary ARRAY support to ScalarIndexSort. Older readers
+// cannot interpret multiple element postings sharing a parent-row offset.
+constexpr int32_t kArrayHybridStlSortMinVersion = 6;

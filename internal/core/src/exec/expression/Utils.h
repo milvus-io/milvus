@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -115,7 +116,8 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
             }
             case proto::plan::GenericValue::kFloatVal: {
                 auto val = it.template get<double>();
-                if (val.error() || val.value() != arr2.array(i).float_val()) {
+                if (val.error() ||
+                    !ScalarEqual(val.value(), arr2.array(i).float_val())) {
                     return false;
                 }
                 break;
@@ -197,7 +199,7 @@ CompareTwoJsonArray<milvus::bson::array_view>(milvus::bson::array_view arr1,
                     default:
                         return false;
                 }
-                if (bson_val != proto_elem.float_val()) {
+                if (!ScalarEqual(bson_val, proto_elem.float_val())) {
                     return false;
                 }
                 break;

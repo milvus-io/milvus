@@ -546,7 +546,7 @@ func compareValues(a, b any) (int, error) {
 		if !ok {
 			return 0, merr.WrapErrServiceInternalMsg("type mismatch: %T vs %T", a, b)
 		}
-		return compareFloat64(float64(av), float64(bv)), nil
+		return compareOrdered(typeutil.Float32ToSortableUint32(av), typeutil.Float32ToSortableUint32(bv)), nil
 	case float64:
 		bv, ok := b.(float64)
 		if !ok {
@@ -582,14 +582,7 @@ func compareOrdered[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 |
 }
 
 func compareFloat64(a, b float64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
+	return compareOrdered(typeutil.Float64ToSortableUint64(a), typeutil.Float64ToSortableUint64(b))
 }
 
 func compareBool(a, b bool) int {

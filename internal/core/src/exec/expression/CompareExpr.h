@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <fmt/core.h>
 #include <algorithm>
 #include <cstddef>
@@ -59,17 +60,17 @@ template <typename T, typename U, proto::plan::OpType op>
 inline bool
 CompareColumnValues(const T& left, const U& right) {
     if constexpr (op == proto::plan::OpType::Equal) {
-        return left == right;
+        return ScalarEqual(left, right);
     } else if constexpr (op == proto::plan::OpType::NotEqual) {
-        return left != right;
+        return !ScalarEqual(left, right);
     } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-        return left > right;
+        return ScalarGreater(left, right);
     } else if constexpr (op == proto::plan::OpType::LessThan) {
-        return left < right;
+        return ScalarLess(left, right);
     } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-        return left >= right;
+        return ScalarGreaterEqual(left, right);
     } else if constexpr (op == proto::plan::OpType::LessEqual) {
-        return left <= right;
+        return ScalarLessEqual(left, right);
     } else if constexpr (op == proto::plan::OpType::PrefixMatch) {
         if constexpr (IsCompareStringViewType<T> &&
                       IsCompareStringViewType<U>) {

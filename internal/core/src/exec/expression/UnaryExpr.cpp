@@ -953,7 +953,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(value > val);
+                        UnaryRangeJSONCompare(ScalarGreater(value, val));
                     }
                 }
                 break;
@@ -975,7 +975,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(value >= val);
+                        UnaryRangeJSONCompare(ScalarGreaterEqual(value, val));
                     }
                 }
                 break;
@@ -997,7 +997,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(value < val);
+                        UnaryRangeJSONCompare(ScalarLess(value, val));
                     }
                 }
                 break;
@@ -1019,7 +1019,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;
                     } else {
-                        UnaryRangeJSONCompare(value <= val);
+                        UnaryRangeJSONCompare(ScalarLessEqual(value, val));
                     }
                 }
                 break;
@@ -1047,7 +1047,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(value == val);
+                        UnaryRangeJSONCompare(ScalarEqual(value, val));
                     }
                 }
                 break;
@@ -1075,7 +1075,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                         }
                         res[i] = !CompareTwoJsonArray(array, val);
                     } else {
-                        UnaryRangeJSONCompare(value != val);
+                        UnaryRangeJSONCompare(!ScalarEqual(value, val));
                     }
                 }
                 break;

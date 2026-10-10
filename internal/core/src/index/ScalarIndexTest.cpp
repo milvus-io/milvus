@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -116,6 +117,87 @@ GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+namespace {
+class ScalarSortResourceIndex : public milvus::index::ScalarIndexSort<double> {
+ public:
+    ScalarSortResourceIndex(const milvus::storage::FileManagerContext& ctx,
+                            bool persist_aux)
+        : ScalarIndexSort<double>(ctx, true), persist_aux_(persist_aux) {
+    }
+
+    void
+    WriteEntries(milvus::storage::IndexEntryWriter* writer) override {
+        if (persist_aux_) {
+            ScalarIndexSort<double>::WriteEntries(writer);
+            return;
+        }
+        writer->PutMeta("index_length", Size());
+        writer->PutMeta("num_rows", Count());
+        writer->PutMeta("is_nested", IsNestedIndex());
+        writer->WriteEntry("index_data", begin(), Size() * sizeof(*begin()));
+    }
+
+ private:
+    bool persist_aux_;
+};
+}  // namespace
+
+TEST(ScalarIndexResourceEstimate, ReservesNestedSortRowDomain) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Double);
+    ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+    ctx.fieldDataMeta.field_schema.set_element_type(proto::schema::Double);
+    constexpr size_t elements = 1025;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, ASCENDING_SORT}, {SCALAR_INDEX_ENGINE_VERSION, "6"}};
+    const auto validity_bytes = TargetBitmap(elements).size_in_bytes();
+    for (bool persist_aux : {false, true}) {
+        ctx.indexMeta.build_id = 5397206 + persist_aux;
+        const std::vector<double> values(
+            elements,
+            persist_aux ? std::numeric_limits<double>::quiet_NaN() : 1.0);
+        // One struct-array parent row, with a non-word-aligned element domain.
+        // Old packed files contain finite postings but no auxiliary entries.
+        ScalarSortResourceIndex index(ctx, persist_aux);
+        index.Build(values.size(), values.data());
+        const auto stats = index.UploadUnified({});
+        const auto files = stats->GetIndexFiles();
+        auto cleanup = folly::makeGuard([&] {
+            for (const auto& file : files) {
+                ctx.chunkManagerPtr->Remove(file);
+            }
+        });
+        for (bool async : {false, true}) {
+            ctx.use_async_load = async;
+            for (bool mmap : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "aux=" << persist_aux << " async=" << async
+                             << " mmap=" << mmap);
+                const auto resources =
+                    IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                        DataType::ARRAY,
+                        stats->GetSerializedSize(),
+                        params,
+                        mmap,
+                        1,
+                        files,
+                        ctx);
+                const auto resident_bytes =
+                    validity_bytes +
+                    (mmap && persist_aux ? 0 : elements * sizeof(int32_t)) +
+                    (mmap ? 0 : index.Size() * sizeof(*index.begin()));
+                EXPECT_GE(resources.request.final_memory_cost, resident_bytes);
+                if (!async && persist_aux) {
+                    EXPECT_GE(
+                        resources.request.max_memory_cost,
+                        resources.request.final_memory_cost + validity_bytes);
+                }
+            }
+        }
+    }
 }
 
 TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {

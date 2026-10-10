@@ -4837,11 +4837,9 @@ func removeArrayRow(
 }
 
 func containsFloat32(haystack []float32, needle float32) bool {
-	// NaN is intentionally treated as never equal to any value, matching
-	// IEEE-754 semantics — an ARRAY_REMOVE request targeting NaN cannot
-	// delete NaN elements from the base.
+	// All NaNs compare equal, matching scalar query membership.
 	for _, v := range haystack {
-		if v == needle {
+		if Float32ToSortableUint32(v) == Float32ToSortableUint32(needle) {
 			return true
 		}
 	}
@@ -4850,7 +4848,7 @@ func containsFloat32(haystack []float32, needle float32) bool {
 
 func containsFloat64(haystack []float64, needle float64) bool {
 	for _, v := range haystack {
-		if v == needle {
+		if Float64ToSortableUint64(v) == Float64ToSortableUint64(needle) {
 			return true
 		}
 	}

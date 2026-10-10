@@ -23,6 +23,7 @@
 #include <roaring/roaring.hh>
 
 #include "common/RegexQuery.h"
+#include "common/ScalarComparison.h"
 #include "index/ScalarIndex.h"
 #include "pb/common.pb.h"
 #include "storage/FileManager.h"
@@ -90,6 +91,11 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
+
+    void
+    SetSupportsNaNTotalOrder(bool enabled) {
+        supports_nan_total_order_ = enabled;
+    }
 
     void
     Build(const Config& config = {}) override;
@@ -442,7 +448,13 @@ class BitmapIndex : public ScalarIndex<T> {
     // Rebuilding validity from postings is lossy for ARRAY fields: empty
     // arrays have no element postings, so they cannot be distinguished from
     // null arrays during reconstruction.
-    using FrozenOffsets = std::map<T, std::pair<size_t, size_t>>;
+    void
+    CheckNaNCompatibility(T value) const;
+
+    bool supports_nan_total_order_ = true;
+
+    using FrozenOffsets =
+        std::map<T, std::pair<size_t, size_t>, ScalarLessThan<T>>;
 
     struct FrozenIndexData {
         std::span<const uint8_t> input;
@@ -484,21 +496,23 @@ class BitmapIndex : public ScalarIndex<T> {
  public:
     bool is_built_{false};
     BitmapIndexBuildMode build_mode_;
-    std::map<T, roaring::Roaring> data_;
-    std::map<T, TargetBitmap> bitsets_;
+    std::map<T, roaring::Roaring, ScalarLessThan<T>> data_;
+    std::map<T, TargetBitmap, ScalarLessThan<T>> bitsets_;
     bool is_mmap_{false};
     bool is_nested_index_{false};
     char* mmap_data_;
     int64_t mmap_size_;
-    std::map<T, roaring::Roaring> bitmap_info_map_;
+    std::map<T, roaring::Roaring, ScalarLessThan<T>> bitmap_info_map_;
     size_t total_num_rows_{0};
     proto::schema::FieldSchema schema_;
     bool use_offset_cache_{false};
-    std::vector<typename std::map<T, roaring::Roaring>::iterator>
+    std::vector<
+        typename std::map<T, roaring::Roaring, ScalarLessThan<T>>::iterator>
         data_offsets_cache_;
-    std::vector<typename std::map<T, TargetBitmap>::iterator>
+    std::vector<typename std::map<T, TargetBitmap, ScalarLessThan<T>>::iterator>
         bitsets_offsets_cache_;
-    std::vector<typename std::map<T, roaring::Roaring>::iterator>
+    std::vector<
+        typename std::map<T, roaring::Roaring, ScalarLessThan<T>>::iterator>
         mmap_offsets_cache_;
 
     // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate

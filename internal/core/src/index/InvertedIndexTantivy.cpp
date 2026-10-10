@@ -38,6 +38,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
+#include "common/ScalarComparison.h"
 #include "folly/SharedMutex.h"
 #include "glog/logging.h"
 #include "index/InvertedIndexTantivy.h"
@@ -106,6 +107,7 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                                               tantivy_index_version_,
                                               inverted_index_single_segment_,
                                               user_specified_doc_id_);
+    wrapper_->SetSupportsNaNTotalOrder(supports_nan_total_order_);
 }
 
 template <typename T>
@@ -603,6 +605,11 @@ InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
     tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
                           tracer::GetRootSpan());
     TargetBitmap bitset(Count());
+    if (ScalarGreater(lower_bound_value, upper_bound_value) ||
+        (ScalarEqual(lower_bound_value, upper_bound_value) &&
+         !(lb_inclusive && ub_inclusive))) {
+        return bitset;
+    }
     wrapper_->range_query(lower_bound_value,
                           upper_bound_value,
                           lb_inclusive,
@@ -704,6 +711,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
             tantivy_index_version_,
             inverted_index_single_segment_);
     }
+    wrapper_->SetSupportsNaNTotalOrder(supports_nan_total_order_);
     bool is_nested_index = config.find("is_nested_index") != config.end();
     if (!inverted_index_single_segment_) {
         if (config.find("is_array") != config.end()) {

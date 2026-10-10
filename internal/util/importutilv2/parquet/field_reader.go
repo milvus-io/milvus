@@ -19,6 +19,7 @@ package parquet
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -131,7 +132,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			if data == nil {
 				return nil, nil, nil
 			}
-			return data, validData, typeutil.VerifyFloats32(data.([]float32))
+			return data, validData, nil
 		}
 		data, err := ReadIntegerOrFloatData[float32](c, count)
 		if err != nil {
@@ -140,7 +141,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if data == nil {
 			return nil, nil, nil
 		}
-		return data, nil, typeutil.VerifyFloats32(data.([]float32))
+		return data, nil, nil
 	case schemapb.DataType_Double:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			data, validData, err := ReadNullableIntegerOrFloatData[float64](c, count)
@@ -150,7 +151,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			if data == nil {
 				return nil, nil, nil
 			}
-			return data, validData, typeutil.VerifyFloats64(data.([]float64))
+			return data, validData, nil
 		}
 		data, err := ReadIntegerOrFloatData[float64](c, count)
 		if err != nil {
@@ -159,7 +160,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if data == nil {
 			return nil, nil, nil
 		}
-		return data, nil, typeutil.VerifyFloats64(data.([]float64))
+		return data, nil, nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Text:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableStringData(c, count)
@@ -346,6 +347,16 @@ func ReadNullableBoolData(pcr *FieldReader, count int64) (any, []bool, error) {
 	return data, validData, nil
 }
 
+// Preserve finite overflow rejection when a DOUBLE source column is narrowed
+// to FLOAT, while retaining genuine source NaN and infinities.
+func convertFloat64Value[T constraints.Integer | constraints.Float](value float64, field *schemapb.FieldSchema) (T, error) {
+	converted := T(value)
+	if !math.IsInf(value, 0) && math.IsInf(float64(converted), 0) {
+		return 0, merr.WrapErrImportFailedMsg("finite value exceeds float32 range for field %s", field.GetName())
+	}
+	return converted, nil
+}
+
 func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -386,7 +397,11 @@ func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *Fiel
 		case arrow.FLOAT64:
 			float64Reader := chunk.(*array.Float64)
 			for i := 0; i < dataNums; i++ {
-				data = append(data, T(float64Reader.Value(i)))
+				value, err := convertFloat64Value[T](float64Reader.Value(i), pcr.field)
+				if err != nil {
+					return nil, err
+				}
+				data = append(data, value)
 			}
 		default:
 			return nil, WrapTypeErr(pcr.field, chunk.DataType().Name())
@@ -442,7 +457,14 @@ func ReadNullableIntegerOrFloatData[T constraints.Integer | constraints.Float](p
 			float64Reader := chunk.(*array.Float64)
 			validData = append(validData, bytesToValidData(dataNums, float64Reader.NullBitmapBytes())...)
 			for i := 0; i < dataNums; i++ {
-				data = append(data, T(float64Reader.Value(i)))
+				value := T(float64Reader.Value(i))
+				if !float64Reader.IsNull(i) {
+					value, err = convertFloat64Value[T](float64Reader.Value(i), pcr.field)
+					if err != nil {
+						return nil, nil, err
+					}
+				}
+				data = append(data, value)
 			}
 		case arrow.NULL:
 			// the chunk type may be *array.Null if the data in chunk is all null
@@ -1895,9 +1917,6 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float32Array.([][]float32) {
-			if err := typeutil.VerifyFloats32(elementArray); err != nil {
-				return nil, merr.Wrap(err, "float32 verification failed")
-			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}
@@ -1918,9 +1937,6 @@ func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
 			return nil, nil
 		}
 		for _, elementArray := range float64Array.([][]float64) {
-			if err := typeutil.VerifyFloats64(elementArray); err != nil {
-				return nil, merr.Wrap(err, "float64 verification failed")
-			}
 			if err = common.CheckArrayCapacity(len(elementArray), maxCapacity, pcr.field); err != nil {
 				return nil, err
 			}

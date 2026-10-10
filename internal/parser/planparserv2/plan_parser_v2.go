@@ -201,6 +201,9 @@ func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visit
 		}
 	}
 
+	if err := validateQueryValues(predicate.expr); err != nil {
+		return nil, err
+	}
 	return predicate.expr, nil
 }
 

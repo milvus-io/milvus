@@ -40,6 +40,117 @@ namespace avx512 {
 
 namespace {
 
+template <int Predicate>
+inline __mmask16
+total_mm512_cmp_ps_mask_target(__m512 a, __m512 b, bool target_nan) {
+    constexpr int finite_predicate = Predicate == _CMP_GT_OQ   ? _CMP_NLE_UQ
+                                     : Predicate == _CMP_GE_OQ ? _CMP_NLT_UQ
+                                                               : Predicate;
+    constexpr int nan_predicate =
+        Predicate == _CMP_EQ_OQ || Predicate == _CMP_GE_OQ    ? _CMP_UNORD_Q
+        : Predicate == _CMP_NEQ_UQ || Predicate == _CMP_LT_OQ ? _CMP_ORD_Q
+        : Predicate == _CMP_LE_OQ                             ? _CMP_TRUE_UQ
+                                                              : _CMP_FALSE_OQ;
+    return target_nan ? _mm512_cmp_ps_mask(a, a, nan_predicate)
+                      : _mm512_cmp_ps_mask(a, b, finite_predicate);
+}
+
+template <int Predicate>
+inline __mmask8
+total_mm512_cmp_pd_mask_target(__m512d a, __m512d b, bool target_nan) {
+    constexpr int finite_predicate = Predicate == _CMP_GT_OQ   ? _CMP_NLE_UQ
+                                     : Predicate == _CMP_GE_OQ ? _CMP_NLT_UQ
+                                                               : Predicate;
+    constexpr int nan_predicate =
+        Predicate == _CMP_EQ_OQ || Predicate == _CMP_GE_OQ    ? _CMP_UNORD_Q
+        : Predicate == _CMP_NEQ_UQ || Predicate == _CMP_LT_OQ ? _CMP_ORD_Q
+        : Predicate == _CMP_LE_OQ                             ? _CMP_TRUE_UQ
+                                                              : _CMP_FALSE_OQ;
+    return target_nan ? _mm512_cmp_pd_mask(a, a, nan_predicate)
+                      : _mm512_cmp_pd_mask(a, b, finite_predicate);
+}
+
+template <int Predicate>
+inline __mmask8
+total_mm256_cmp_ps_mask_target(__m256 a, __m256 b, bool target_nan) {
+    constexpr int finite_predicate = Predicate == _CMP_GT_OQ   ? _CMP_NLE_UQ
+                                     : Predicate == _CMP_GE_OQ ? _CMP_NLT_UQ
+                                                               : Predicate;
+    constexpr int nan_predicate =
+        Predicate == _CMP_EQ_OQ || Predicate == _CMP_GE_OQ    ? _CMP_UNORD_Q
+        : Predicate == _CMP_NEQ_UQ || Predicate == _CMP_LT_OQ ? _CMP_ORD_Q
+        : Predicate == _CMP_LE_OQ                             ? _CMP_TRUE_UQ
+                                                              : _CMP_FALSE_OQ;
+    return target_nan ? _mm256_cmp_ps_mask(a, a, nan_predicate)
+                      : _mm256_cmp_ps_mask(a, b, finite_predicate);
+}
+
+template <int Predicate>
+inline __mmask16
+total_mm512_cmp_ps_mask(__m512 a, __m512 b) {
+    const auto ordinary = _mm512_cmp_ps_mask(a, b, Predicate);
+    const auto nan_a = _mm512_cmp_ps_mask(a, a, _CMP_UNORD_Q);
+    const auto nan_b = _mm512_cmp_ps_mask(b, b, _CMP_UNORD_Q);
+    if constexpr (Predicate == _CMP_EQ_OQ) {
+        return (ordinary | (nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_NEQ_UQ) {
+        return (~(nan_a & nan_b) & ordinary);
+    } else if constexpr (Predicate == _CMP_LT_OQ) {
+        return (ordinary | (~nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_LE_OQ) {
+        return (ordinary | nan_b);
+    } else if constexpr (Predicate == _CMP_GT_OQ) {
+        return (ordinary | (~nan_b & nan_a));
+    } else {
+        static_assert(Predicate == _CMP_GE_OQ);
+        return (ordinary | nan_a);
+    }
+}
+
+template <int Predicate>
+inline __mmask8
+total_mm512_cmp_pd_mask(__m512d a, __m512d b) {
+    const auto ordinary = _mm512_cmp_pd_mask(a, b, Predicate);
+    const auto nan_a = _mm512_cmp_pd_mask(a, a, _CMP_UNORD_Q);
+    const auto nan_b = _mm512_cmp_pd_mask(b, b, _CMP_UNORD_Q);
+    if constexpr (Predicate == _CMP_EQ_OQ) {
+        return (ordinary | (nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_NEQ_UQ) {
+        return (~(nan_a & nan_b) & ordinary);
+    } else if constexpr (Predicate == _CMP_LT_OQ) {
+        return (ordinary | (~nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_LE_OQ) {
+        return (ordinary | nan_b);
+    } else if constexpr (Predicate == _CMP_GT_OQ) {
+        return (ordinary | (~nan_b & nan_a));
+    } else {
+        static_assert(Predicate == _CMP_GE_OQ);
+        return (ordinary | nan_a);
+    }
+}
+
+template <int Predicate>
+inline __mmask8
+total_mm256_cmp_ps_mask(__m256 a, __m256 b) {
+    const auto ordinary = _mm256_cmp_ps_mask(a, b, Predicate);
+    const auto nan_a = _mm256_cmp_ps_mask(a, a, _CMP_UNORD_Q);
+    const auto nan_b = _mm256_cmp_ps_mask(b, b, _CMP_UNORD_Q);
+    if constexpr (Predicate == _CMP_EQ_OQ) {
+        return (ordinary | (nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_NEQ_UQ) {
+        return (~(nan_a & nan_b) & ordinary);
+    } else if constexpr (Predicate == _CMP_LT_OQ) {
+        return (ordinary | (~nan_a & nan_b));
+    } else if constexpr (Predicate == _CMP_LE_OQ) {
+        return (ordinary | nan_b);
+    } else if constexpr (Predicate == _CMP_GT_OQ) {
+        return (ordinary | (~nan_b & nan_a));
+    } else {
+        static_assert(Predicate == _CMP_GE_OQ);
+        return (ordinary | nan_a);
+    }
+}
+
 // count is expected to be in range [0, 64)
 inline uint64_t
 get_mask(const size_t count) {
@@ -305,6 +416,8 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     const __m512 target = _mm512_set1_ps(val);
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     // interleaved pages
@@ -316,7 +429,8 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
             for (size_t ip = 0; ip < N_BLOCKS; ip++) {
                 const __m512 v =
                     _mm512_loadu_ps(src + i + p + ip * BLOCK_COUNT);
-                const __mmask16 cmp_mask = _mm512_cmp_ps_mask(v, target, pred);
+                const __mmask16 cmp_mask =
+                    total_mm512_cmp_ps_mask_target<pred>(v, target, target_nan);
 
                 res_u16[(i + p + ip * BLOCK_COUNT) / 16] = cmp_mask;
 
@@ -331,7 +445,8 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
     const size_t size16 = (size / 16) * 16;
     for (size_t i = size_8p; i < size16; i += 16) {
         const __m512 v = _mm512_loadu_ps(src + i);
-        const __mmask16 cmp_mask = _mm512_cmp_ps_mask(v, target, pred);
+        const __mmask16 cmp_mask =
+            total_mm512_cmp_ps_mask_target<pred>(v, target, target_nan);
 
         res_u16[i / 16] = cmp_mask;
     }
@@ -340,8 +455,8 @@ OpCompareValImpl<float, Op>::op_compare_val(uint8_t* const __restrict res_u8,
     if (size16 != size) {
         // 8 elements to process
         const __m256 v = _mm256_loadu_ps(src + size16);
-        const __mmask8 cmp_mask =
-            _mm256_cmp_ps_mask(v, _mm512_castps512_ps256(target), pred);
+        const __mmask8 cmp_mask = total_mm256_cmp_ps_mask_target<pred>(
+            v, _mm512_castps512_ps256(target), target_nan);
 
         res_u8[size16 / 8] = cmp_mask;
     }
@@ -363,6 +478,8 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
 
     const __m512d target = _mm512_set1_pd(val);
 
+    const bool target_nan = std::isnan(val);
+
     // todo: aligned reads & writes
 
     // interleaved pages
@@ -374,7 +491,8 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
             for (size_t ip = 0; ip < N_BLOCKS; ip++) {
                 const __m512d v =
                     _mm512_loadu_pd(src + i + p + ip * BLOCK_COUNT);
-                const __mmask8 cmp_mask = _mm512_cmp_pd_mask(v, target, pred);
+                const __mmask8 cmp_mask =
+                    total_mm512_cmp_pd_mask_target<pred>(v, target, target_nan);
 
                 res_u8[(i + p + ip * BLOCK_COUNT) / 8] = cmp_mask;
 
@@ -389,7 +507,8 @@ OpCompareValImpl<double, Op>::op_compare_val(uint8_t* const __restrict res_u8,
     const size_t size8 = (size / 8) * 8;
     for (size_t i = size_8p; i < size8; i += 8) {
         const __m512d v = _mm512_loadu_pd(src + i);
-        const __mmask8 cmp_mask = _mm512_cmp_pd_mask(v, target, pred);
+        const __mmask8 cmp_mask =
+            total_mm512_cmp_pd_mask_target<pred>(v, target, target_nan);
 
         res_u8[i / 8] = cmp_mask;
     }
@@ -574,7 +693,7 @@ OpCompareColumnImpl<float, float, Op>::op_compare_column(
     for (size_t i = 0; i < size16; i += 16) {
         const __m512 vl = _mm512_loadu_ps(left + i);
         const __m512 vr = _mm512_loadu_ps(right + i);
-        const __mmask16 cmp_mask = _mm512_cmp_ps_mask(vl, vr, pred);
+        const __mmask16 cmp_mask = total_mm512_cmp_ps_mask<pred>(vl, vr);
 
         res_u16[i / 16] = cmp_mask;
     }
@@ -584,7 +703,7 @@ OpCompareColumnImpl<float, float, Op>::op_compare_column(
         // process 8 elements
         const __m256 vl = _mm256_loadu_ps(left + size16);
         const __m256 vr = _mm256_loadu_ps(right + size16);
-        const __mmask8 cmp_mask = _mm256_cmp_ps_mask(vl, vr, pred);
+        const __mmask8 cmp_mask = total_mm256_cmp_ps_mask<pred>(vl, vr);
 
         res_u8[size16 / 8] = cmp_mask;
     }
@@ -612,7 +731,7 @@ OpCompareColumnImpl<double, double, Op>::op_compare_column(
     for (size_t i = 0; i < size8; i += 8) {
         const __m512d vl = _mm512_loadu_pd(left + i);
         const __m512d vr = _mm512_loadu_pd(right + i);
-        const __mmask8 cmp_mask = _mm512_cmp_pd_mask(vl, vr, pred);
+        const __mmask8 cmp_mask = total_mm512_cmp_pd_mask<pred>(vl, vr);
 
         res_u8[i / 8] = cmp_mask;
     }
@@ -840,7 +959,7 @@ OpWithinRangeColumnImpl<float, Op>::op_within_range_column(
         const __m512 vl = _mm512_loadu_ps(lower + i);
         const __m512 vu = _mm512_loadu_ps(upper + i);
         const __m512 vv = _mm512_loadu_ps(values + i);
-        const __mmask16 cmpl_mask = _mm512_cmp_ps_mask(vl, vv, pred_lower);
+        const __mmask16 cmpl_mask = total_mm512_cmp_ps_mask<pred_lower>(vl, vv);
         const __mmask16 cmp_mask =
             _mm512_mask_cmp_ps_mask(cmpl_mask, vv, vu, pred_upper);
 
@@ -853,7 +972,7 @@ OpWithinRangeColumnImpl<float, Op>::op_within_range_column(
         const __m256 vl = _mm256_loadu_ps(lower + size16);
         const __m256 vu = _mm256_loadu_ps(upper + size16);
         const __m256 vv = _mm256_loadu_ps(values + size16);
-        const __mmask8 cmpl_mask = _mm256_cmp_ps_mask(vl, vv, pred_lower);
+        const __mmask8 cmpl_mask = total_mm256_cmp_ps_mask<pred_lower>(vl, vv);
         const __mmask8 cmp_mask =
             _mm256_mask_cmp_ps_mask(cmpl_mask, vv, vu, pred_upper);
 
@@ -888,7 +1007,7 @@ OpWithinRangeColumnImpl<double, Op>::op_within_range_column(
         const __m512d vl = _mm512_loadu_pd(lower + i);
         const __m512d vu = _mm512_loadu_pd(upper + i);
         const __m512d vv = _mm512_loadu_pd(values + i);
-        const __mmask8 cmpl_mask = _mm512_cmp_pd_mask(vl, vv, pred_lower);
+        const __mmask8 cmpl_mask = total_mm512_cmp_pd_mask<pred_lower>(vl, vv);
         const __mmask8 cmp_mask =
             _mm512_mask_cmp_pd_mask(cmpl_mask, vv, vu, pred_upper);
 
@@ -1217,7 +1336,7 @@ OpWithinRangeValImpl<float, Op>::op_within_range_val(
                 const __m512 vv =
                     _mm512_loadu_ps(values + i + p + ip * BLOCK_COUNT);
                 const __mmask16 cmpl_mask =
-                    _mm512_cmp_ps_mask(lower_v, vv, pred_lower);
+                    total_mm512_cmp_ps_mask<pred_lower>(lower_v, vv);
                 const __mmask16 cmp_mask =
                     _mm512_mask_cmp_ps_mask(cmpl_mask, vv, upper_v, pred_upper);
 
@@ -1234,7 +1353,8 @@ OpWithinRangeValImpl<float, Op>::op_within_range_val(
     const size_t size16 = (size / 16) * 16;
     for (size_t i = size_8p; i < size16; i += 16) {
         const __m512 vv = _mm512_loadu_ps(values + i);
-        const __mmask16 cmpl_mask = _mm512_cmp_ps_mask(lower_v, vv, pred_lower);
+        const __mmask16 cmpl_mask =
+            total_mm512_cmp_ps_mask<pred_lower>(lower_v, vv);
         const __mmask16 cmp_mask =
             _mm512_mask_cmp_ps_mask(cmpl_mask, vv, upper_v, pred_upper);
 
@@ -1245,8 +1365,8 @@ OpWithinRangeValImpl<float, Op>::op_within_range_val(
     if (size16 != size) {
         // process 8 elements
         const __m256 vv = _mm256_loadu_ps(values + size16);
-        const __mmask8 cmpl_mask =
-            _mm256_cmp_ps_mask(_mm512_castps512_ps256(lower_v), vv, pred_lower);
+        const __mmask8 cmpl_mask = total_mm256_cmp_ps_mask<pred_lower>(
+            _mm512_castps512_ps256(lower_v), vv);
         const __mmask8 cmp_mask = _mm256_mask_cmp_ps_mask(
             cmpl_mask, vv, _mm512_castps512_ps256(upper_v), pred_upper);
 
@@ -1287,7 +1407,7 @@ OpWithinRangeValImpl<double, Op>::op_within_range_val(
                 const __m512d vv =
                     _mm512_loadu_pd(values + i + p + ip * BLOCK_COUNT);
                 const __mmask8 cmpl_mask =
-                    _mm512_cmp_pd_mask(lower_v, vv, pred_lower);
+                    total_mm512_cmp_pd_mask<pred_lower>(lower_v, vv);
                 const __mmask8 cmp_mask =
                     _mm512_mask_cmp_pd_mask(cmpl_mask, vv, upper_v, pred_upper);
 
@@ -1304,7 +1424,8 @@ OpWithinRangeValImpl<double, Op>::op_within_range_val(
     const size_t size8 = (size / 8) * 8;
     for (size_t i = size_8p; i < size8; i += 8) {
         const __m512d vv = _mm512_loadu_pd(values + i);
-        const __mmask8 cmpl_mask = _mm512_cmp_pd_mask(lower_v, vv, pred_lower);
+        const __mmask8 cmpl_mask =
+            total_mm512_cmp_pd_mask<pred_lower>(lower_v, vv);
         const __mmask8 cmp_mask =
             _mm512_mask_cmp_pd_mask(cmpl_mask, vv, upper_v, pred_upper);
 
@@ -1365,7 +1486,7 @@ struct ArithHelperF32<ArithOpType::Add, CmpOp> {
     op(const __m512 left, const __m512 right, const __m512 value) {
         // left + right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm512_cmp_ps_mask(_mm512_add_ps(left, right), value, pred);
+        return total_mm512_cmp_ps_mask<pred>(_mm512_add_ps(left, right), value);
     }
 };
 
@@ -1375,7 +1496,7 @@ struct ArithHelperF32<ArithOpType::Sub, CmpOp> {
     op(const __m512 left, const __m512 right, const __m512 value) {
         // left - right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm512_cmp_ps_mask(_mm512_sub_ps(left, right), value, pred);
+        return total_mm512_cmp_ps_mask<pred>(_mm512_sub_ps(left, right), value);
     }
 };
 
@@ -1385,7 +1506,7 @@ struct ArithHelperF32<ArithOpType::Mul, CmpOp> {
     op(const __m512 left, const __m512 right, const __m512 value) {
         // left * right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm512_cmp_ps_mask(_mm512_mul_ps(left, right), value, pred);
+        return total_mm512_cmp_ps_mask<pred>(_mm512_mul_ps(left, right), value);
     }
 };
 
@@ -1396,14 +1517,14 @@ struct ArithHelperF32<ArithOpType::Div, CmpOp> {
         // this is valid for the positive denominator, == and != cases.
         // left == right * value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm512_cmp_ps_mask(left, _mm512_mul_ps(right, value), pred);
+        return total_mm512_cmp_ps_mask<pred>(left, _mm512_mul_ps(right, value));
     }
 
     static inline __mmask16
     op(const __m512 left, const __m512 right, const __m512 value) {
         // left / right == value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
-        return _mm512_cmp_ps_mask(_mm512_div_ps(left, right), value, pred);
+        return total_mm512_cmp_ps_mask<pred>(_mm512_div_ps(left, right), value);
     }
 };
 
@@ -1417,7 +1538,7 @@ struct ArithHelperF64<ArithOpType::Add, CmpOp> {
     op(const __m512d left, const __m512d right, const __m512d value) {
         // left + right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm512_cmp_pd_mask(_mm512_add_pd(left, right), value, pred);
+        return total_mm512_cmp_pd_mask<pred>(_mm512_add_pd(left, right), value);
     }
 };
 
@@ -1427,7 +1548,7 @@ struct ArithHelperF64<ArithOpType::Sub, CmpOp> {
     op(const __m512d left, const __m512d right, const __m512d value) {
         // left - right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm512_cmp_pd_mask(_mm512_sub_pd(left, right), value, pred);
+        return total_mm512_cmp_pd_mask<pred>(_mm512_sub_pd(left, right), value);
     }
 };
 
@@ -1437,7 +1558,7 @@ struct ArithHelperF64<ArithOpType::Mul, CmpOp> {
     op(const __m512d left, const __m512d right, const __m512d value) {
         // left * right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm512_cmp_pd_mask(_mm512_mul_pd(left, right), value, pred);
+        return total_mm512_cmp_pd_mask<pred>(_mm512_mul_pd(left, right), value);
     }
 };
 
@@ -1448,14 +1569,14 @@ struct ArithHelperF64<ArithOpType::Div, CmpOp> {
         // this is valid for the positive denominator, == and != cases.
         // left == right * value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm512_cmp_pd_mask(left, _mm512_mul_pd(right, value), pred);
+        return total_mm512_cmp_pd_mask<pred>(left, _mm512_mul_pd(right, value));
     }
 
     static inline __mmask8
     op(const __m512d left, const __m512d right, const __m512d value) {
         // left / right == value
         constexpr auto pred = ComparePredicate<double, CmpOp>::value;
-        return _mm512_cmp_pd_mask(_mm512_div_pd(left, right), value, pred);
+        return total_mm512_cmp_pd_mask<pred>(_mm512_div_pd(left, right), value);
     }
 };
 
@@ -1795,7 +1916,7 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1855,14 +1976,9 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<float,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }
@@ -1942,7 +2058,7 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1990,14 +2106,9 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
                 }
 
                 return true;
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<double,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }

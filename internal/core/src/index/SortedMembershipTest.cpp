@@ -72,6 +72,8 @@ TYPED_TEST(SortedMembershipTest, RandomizedScanOracle) {
                             rows[i] = std::nextafter(T(1.25), T(2));
                         if (i % 19 == 8)
                             rows[i] = -std::numeric_limits<T>::denorm_min();
+                        if (i % 19 == 9)
+                            rows[i] = std::numeric_limits<T>::quiet_NaN();
                     }
                 }
                 valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
@@ -95,7 +97,9 @@ TYPED_TEST(SortedMembershipTest, RandomizedScanOracle) {
                 }
                 for (int order : {0, 1, 2}) {
                     if (n && order == 1)
-                        std::sort(queries.get(), queries.get() + n);
+                        std::sort(queries.get(),
+                                  queries.get() + n,
+                                  ScalarLessThan<T>{});
                     if (n && order == 2)
                         std::reverse(queries.get(), queries.get() + n);
                     std::vector<unsigned char> original(n * sizeof(T));
@@ -121,14 +125,14 @@ TYPED_TEST(SortedMembershipTest, RandomizedScanOracle) {
                             not_in[row] = false;
                         },
                         [&](T value, const Entry& entry) {
-                            EXPECT_EQ(entry.a_, value);
+                            EXPECT_TRUE(ScalarEqual(entry.a_, value));
                             ++validations;
                         });
                     size_t hits = 0;
                     for (size_t row = 0; row < row_count; ++row) {
                         bool hit = false;
                         for (size_t i = 0; i < n; ++i)
-                            hit |= rows[row] == queries[i];
+                            hit |= ScalarEqual(rows[row], queries[i]);
                         EXPECT_EQ(in[row], valid[row] && hit);
                         EXPECT_EQ(not_in[row], valid[row] && !hit);
                         EXPECT_EQ(visits[row], valid[row] && hit ? 1 : 0);
@@ -151,48 +155,46 @@ class SortedFloatingMembershipTest : public testing::Test {};
 using FloatingMembershipTypes = testing::Types<float, double>;
 TYPED_TEST_SUITE(SortedFloatingMembershipTest, FloatingMembershipTypes);
 
-TYPED_TEST(SortedFloatingMembershipTest, NaNRetainsBinarySearchSemantics) {
+TYPED_TEST(SortedFloatingMembershipTest, NaNSelfEqualityAndOrdering) {
     using T = TypeParam;
     using Entry = IndexStructure<T>;
-    std::vector<Entry> entries;
-    const T rows[] = {-std::numeric_limits<T>::infinity(),
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T rows[] = {nan,
+                      -std::numeric_limits<T>::infinity(),
                       T(-1),
                       T(-0.0),
                       T(0.0),
-                      std::numeric_limits<T>::denorm_min(),
                       T(1),
-                      std::numeric_limits<T>::infinity()};
-    for (size_t i = 0; i < std::size(rows); ++i)
+                      std::numeric_limits<T>::infinity(),
+                      -nan};
+    std::vector<Entry> entries;
+    for (size_t i = 0; i < std::size(rows); ++i) {
         entries.emplace_back(rows[i], i);
-    const T nan = std::numeric_limits<T>::quiet_NaN();
+    }
+    std::sort(entries.begin(), entries.end());
     for (const auto& queries : std::vector<std::vector<T>>{
              {nan},
              {nan, T(0), nan},
              {T(1), nan, T(-1)},
              {nan, -nan, std::numeric_limits<T>::infinity()}}) {
         auto original = queries;
-        std::vector<int32_t> expected, actual;
-        size_t validations = 0;
-        // Independent copy of the pre-optimization lookup, including
-        // repeated visits and the values passed to the diagnostic callback.
-        for (T value : queries) {
-            auto lb =
-                std::lower_bound(entries.begin(), entries.end(), Entry(value));
-            auto ub = std::upper_bound(lb, entries.end(), Entry(value));
-            for (; lb != ub; ++lb) expected.push_back(lb->idx_);
-        }
+        std::vector<int> visits(std::size(rows), 0);
         detail::VisitSortedMatches(
             entries.begin(),
             entries.end(),
             queries.size(),
             queries.data(),
-            [&](int32_t row) { actual.push_back(row); },
-            [&](T value, const Entry& entry) {
-                EXPECT_TRUE(std::isnan(value) || entry.a_ == value);
-                ++validations;
+            [&](int32_t row) { ++visits[row]; },
+            [&](T query, const Entry& entry) {
+                EXPECT_TRUE(ScalarEqual(query, entry.a_));
             });
-        EXPECT_EQ(actual, expected);
-        EXPECT_EQ(validations, expected.size());
+        for (size_t row = 0; row < std::size(rows); ++row) {
+            const bool expected =
+                std::any_of(queries.begin(), queries.end(), [&](T query) {
+                    return ScalarEqual(rows[row], query);
+                });
+            EXPECT_EQ(visits[row], expected ? 1 : 0);
+        }
         EXPECT_EQ(
             std::memcmp(
                 queries.data(), original.data(), queries.size() * sizeof(T)),

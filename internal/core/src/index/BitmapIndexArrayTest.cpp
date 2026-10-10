@@ -18,8 +18,12 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cmath>
+#include <cstring>
+#include <map>
 #include <iosfwd>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -35,6 +39,7 @@
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "index/InvertedIndexTantivy.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -1823,9 +1828,8 @@ MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
 // Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
 // sort index can serve high-cardinality data: STL_SORT must replace INVERTED
 // once distinct values reach the bitmap cardinality limit (default 100) AND
-// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
-// fields keep INVERTED regardless of version because the sort index cannot
-// handle array values.
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Ordinary arrays
+// require the separate version 6 threshold for parent-row sorted postings.
 TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
     auto root_path =
         fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
@@ -1842,8 +1846,7 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
                   std::vector<FieldDataPtr>{high_card_field_data}),
               ScalarIndexType::STLSORT);
 
-    // Regular (non-nested) array fields must stay on INVERTED at high
-    // cardinality, even at/above the nested STL_SORT version threshold.
+    // Ordinary arrays retain INVERTED until their own sorted-index threshold.
     TestHybridScalarIndexString regular(7, ctx, false);
     regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(regular.SelectIndexBuildTypePublic(
@@ -1864,6 +1867,87 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
                   std::vector<FieldDataPtr>{low_card_field_data}),
               ScalarIndexType::BITMAP);
 
+    boost::filesystem::remove_all(root_path);
+}
+
+// The array switch must preserve old readers and the nested v4 behavior.
+TEST(BitmapIndexArrayNestedTest, HybridOrdinaryArrayStlsortVersionGate) {
+    auto root_path =
+        fmt::format("{}/hybrid_array_high_card_stlsort", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3142);
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+    auto low_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(10, 1));
+
+    for (int32_t version : {kNestedHybridStlSortMinVersion,
+                            kArrayHybridStlSortMinVersion - 1,
+                            kArrayHybridStlSortMinVersion}) {
+        TestHybridScalarIndexString regular(7, ctx, false);
+        regular.scalar_index_version_ = version;
+        EXPECT_EQ(regular.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  version >= kArrayHybridStlSortMinVersion
+                      ? ScalarIndexType::STLSORT
+                      : ScalarIndexType::INVERTED)
+            << "scalar_index_version=" << version;
+
+        TestHybridScalarIndexString nested(7, ctx, true);
+        nested.scalar_index_version_ = version;
+        EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  ScalarIndexType::STLSORT);
+
+        for (bool is_nested : {false, true}) {
+            TestHybridScalarIndexString low(7, ctx, is_nested);
+            low.scalar_index_version_ = version;
+            EXPECT_EQ(low.SelectIndexBuildTypePublic(
+                          std::vector<FieldDataPtr>{low_card_field_data}),
+                      ScalarIndexType::BITMAP);
+        }
+    }
+    boost::filesystem::remove_all(root_path);
+}
+
+// Nullable array cardinality counts valid parent rows only. RawValue for a
+// compact nullable field returns nullptr for NULL, so it must not be read.
+TEST(BitmapIndexArrayNestedTest, HybridNullableArrayCardinalitySelection) {
+    auto root_path = fmt::format("{}/hybrid_nullable_array", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, true, 3143);
+    std::vector<ScalarFieldProto> rows(4);
+    for (int i = 0; i < 120; ++i) {
+        rows[0].mutable_string_data()->add_data(fmt::format("ignored_{}", i));
+    }
+    rows[1].mutable_string_data()->add_data("apple");
+    rows[1].mutable_string_data()->add_data("banana");
+    rows[2].mutable_string_data();
+    rows[3].mutable_string_data()->add_data("apple");
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        arrays.emplace_back(row);
+    }
+    const uint8_t valid_bitmap = 0x0a;
+    auto field_data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::NONE, true);
+    field_data->FillFieldData(arrays.data(), &valid_bitmap, rows.size(), 0);
+    for (int32_t version :
+         {kArrayHybridStlSortMinVersion - 1, kArrayHybridStlSortMinVersion}) {
+        for (bool is_nested : {false, true}) {
+            TestHybridScalarIndexString hybrid(7, ctx, is_nested);
+            hybrid.scalar_index_version_ = version;
+            // The NULL row's 120 distinct strings must not select high cardinality.
+            hybrid.bitmap_index_cardinality_limit_ = 3;
+            EXPECT_EQ(hybrid.SelectIndexBuildTypePublic({field_data}),
+                      ScalarIndexType::BITMAP);
+            hybrid.bitmap_index_cardinality_limit_ = 2;
+            EXPECT_EQ(hybrid.SelectIndexBuildTypePublic({field_data}),
+                      is_nested || version >= kArrayHybridStlSortMinVersion
+                          ? ScalarIndexType::STLSORT
+                          : ScalarIndexType::INVERTED);
+        }
+    }
     boost::filesystem::remove_all(root_path);
 }
 
@@ -1894,4 +1978,383 @@ TEST(BitmapIndexArrayNestedTest,
     }
 
     boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+class TestHybridScalarIndexDouble : public index::HybridScalarIndex<double> {
+ public:
+    using index::HybridScalarIndex<double>::HybridScalarIndex;
+    ScalarIndexType
+    SelectPublic(const std::vector<FieldDataPtr>& fields) {
+        return SelectIndexBuildType(fields);
+    }
+    void
+    BuildPublic(const std::vector<FieldDataPtr>& fields) {
+        BuildInternal(fields);
+        this->is_built_ = true;
+    }
+};
+}  // namespace
+
+TEST(BitmapIndexArrayNestedTest, HybridArrayNaNFirstStillSelectsStlsort) {
+    auto root_path = fmt::format("{}/hybrid_array_nan_first", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::Double, false, 3144);
+    ctx.fieldDataMeta.field_schema.set_name("array");
+    ScalarFieldProto scalar;
+    scalar.mutable_double_data()->add_data(
+        std::numeric_limits<double>::quiet_NaN());
+    for (int i = 0; i < 120; ++i) {
+        scalar.mutable_double_data()->add_data(i);
+    }
+    Array array(scalar);
+    auto field =
+        storage::CreateFieldData(DataType::ARRAY, DataType::DOUBLE, false);
+    field->FillFieldData(&array, 1);
+    TestHybridScalarIndexDouble hybrid(7, ctx, false);
+    hybrid.scalar_index_version_ = kArrayHybridStlSortMinVersion;
+    EXPECT_EQ(hybrid.SelectPublic({field}), ScalarIndexType::STLSORT);
+    hybrid.BuildPublic({field});
+    EXPECT_EQ(hybrid.Count(), 1);
+    const double finite = 119;
+    auto found = hybrid.In(1, &finite);
+    ASSERT_EQ(found.size(), 1);
+    EXPECT_TRUE(found[0]);
+    boost::filesystem::remove_all(root_path);
+}
+
+namespace {
+template <typename T>
+class FloatingIndexQueryTest : public testing::Test {};
+using FloatingQueryTypes = testing::Types<float, double>;
+TYPED_TEST_SUITE(FloatingIndexQueryTest, FloatingQueryTypes);
+
+template <typename T>
+void
+CheckFloatingQueries(index::ScalarIndex<T>& index) {
+    const T inf = std::numeric_limits<T>::infinity();
+    ASSERT_EQ(index.Count(), 6);
+    EXPECT_EQ(index.In(0, nullptr).count(), 0);
+    const auto empty_not_in = index.NotIn(0, nullptr);
+    const auto non_null = index.IsNotNull();
+    ASSERT_EQ(empty_not_in.size(), non_null.size());
+    for (size_t row = 0; row < non_null.size(); ++row) {
+        EXPECT_EQ(empty_not_in[row], non_null[row]);
+    }
+    const T one = T(1);
+    auto hit = index.In(1, &one);
+    EXPECT_EQ(hit.count(), 1);
+    EXPECT_TRUE(hit[3]);
+    EXPECT_EQ(index.NotIn(1, &one).count(), 4);
+    for (const T zero : {T(0), -T(0)}) {
+        const auto zeros = index.In(1, &zero);
+        EXPECT_EQ(zeros.count(), 2);
+        EXPECT_TRUE(zeros[1]);
+        EXPECT_TRUE(zeros[2]);
+    }
+    EXPECT_EQ(index.In(1, &inf).count(), 1);
+    const T zero = 0;
+    EXPECT_EQ(index.Range(zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(index.Range(zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(index.Range(-zero, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(-zero, OpType::GreaterEqual).count(), 4);
+    EXPECT_EQ(index.Range(-zero, true, zero, true).count(), 2);
+}
+
+template <typename T>
+std::pair<storage::FileManagerContext, FieldDataPtr>
+MakeFloatingQueryFixture(const std::string& name, int64_t index_id) {
+    constexpr auto dtype = std::is_same_v<T, float>
+                               ? proto::schema::DataType::Float
+                               : proto::schema::DataType::Double;
+    auto ctx = MakeNestedCtx(
+        fmt::format("{}/{}", TestLocalPath, name), dtype, true, index_id);
+    ctx.fieldDataMeta.field_schema.set_name("scalar");
+    ctx.fieldDataMeta.field_schema.set_data_type(dtype);
+    ctx.fieldDataMeta.field_schema.set_element_type(
+        proto::schema::DataType::None);
+    const T inf = std::numeric_limits<T>::infinity();
+    const T values[] = {
+        -inf, -T(0), T(0), T(1), inf, std::numeric_limits<T>::quiet_NaN()};
+    auto field =
+        std::make_shared<FieldData<T>>(static_cast<DataType>(dtype), true);
+    const uint8_t validity = 0x1f;
+    field->FillFieldData(values, &validity, std::size(values), 0);
+    return {ctx, field};
+}
+}  // namespace
+
+TYPED_TEST(FloatingIndexQueryTest, BitmapFiniteQueriesPreserveValidity) {
+    using T = TypeParam;
+    auto [ctx, field] = MakeFloatingQueryFixture<T>("bitmap_nan_query", 3190);
+    index::BitmapIndex<T> built(ctx);
+    built.BuildWithFieldData({field});
+    // Reload selects the mode for the serialized postings.
+    auto binary = built.Serialize({});
+    index::BitmapIndex<T> loaded(ctx);
+    loaded.Load(binary, {});
+    CheckFloatingQueries(loaded);
+}
+
+TYPED_TEST(FloatingIndexQueryTest,
+           BitmapInvalidNaNPayloadDoesNotEnterOrderedPostings) {
+    using T = TypeParam;
+    constexpr auto dtype = std::is_same_v<T, float>
+                               ? proto::schema::DataType::Float
+                               : proto::schema::DataType::Double;
+    for (bool nested : {false, true}) {
+        auto ctx = MakeNestedCtx(
+            fmt::format("{}/bitmap_hidden_nan_{}", TestLocalPath, nested),
+            dtype,
+            false,
+            3194 + nested);
+        ScalarFieldProto members;
+        auto add = [&](T value, bool valid) {
+            if constexpr (std::is_same_v<T, float>) {
+                members.mutable_float_data()->add_data(value);
+            } else {
+                members.mutable_double_data()->add_data(value);
+            }
+            members.add_valid_data(valid);
+        };
+        add(std::numeric_limits<T>::quiet_NaN(), false);
+        for (int i = 0; i < 600; ++i) {
+            add(T(i), true);
+        }
+        Array array(members, true);
+        auto field =
+            storage::CreateFieldData(DataType::ARRAY, DataType::NONE, false);
+        field->FillFieldData(&array, 1);
+        index::BitmapIndex<T> built(ctx, nested);
+        built.BuildWithFieldData({field});
+        EXPECT_EQ(built.Cardinality(), 600);
+        for (const auto& entry : built.data_) {
+            EXPECT_FALSE(std::isnan(entry.first));
+        }
+        auto check = [nested](index::BitmapIndex<T>& loaded) {
+            EXPECT_EQ(loaded.Count(), nested ? 601 : 1);
+            const T target = 42;
+            const auto hits = loaded.In(1, &target);
+            EXPECT_EQ(hits.count(), 1);
+            EXPECT_TRUE(hits[nested ? 43 : 0]);
+        };
+        auto binary = built.Serialize({});
+        for (bool mmap : {false, true}) {
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] =
+                    ctx.chunkManagerPtr->GetRootPath() + "/legacy.mmap";
+            }
+            index::BitmapIndex<T> loaded(ctx, nested);
+            loaded.Load(binary, config);
+            check(loaded);
+        }
+        auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            for (bool async : {false, true}) {
+                auto load_ctx = ctx;
+                load_ctx.set_for_loading_index(true);
+                load_ctx.use_async_load = async;
+                Config config;
+                config[index::INDEX_FILES] = stats->GetIndexFiles();
+                if (mmap) {
+                    config[MMAP_FILE_PATH] =
+                        ctx.chunkManagerPtr->GetRootPath() + "/packed.mmap";
+                }
+                index::BitmapIndex<T> loaded(load_ctx, nested);
+                loaded.LoadUnified(config);
+                check(loaded);
+            }
+        }
+    }
+}
+
+TYPED_TEST(FloatingIndexQueryTest, InvertedFiniteQueriesPreserveValidity) {
+    using T = TypeParam;
+    auto [ctx, field] = MakeFloatingQueryFixture<T>("inverted_nan_query", 3191);
+    index::InvertedIndexTantivy<T> built(7, ctx);
+    built.BuildWithFieldData({field});
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.LoadUnified(config);
+    CheckFloatingQueries(loaded);
+    const T one = T(1);
+    EXPECT_EQ(
+        loaded.InApplyFilter(1, &one, [](size_t) { return true; }).count(), 1);
+    size_t callbacks = 0;
+    loaded.InApplyCallback(1, &one, [&](size_t row) {
+        EXPECT_EQ(row, 3);
+        ++callbacks;
+    });
+    EXPECT_EQ(callbacks, 1);
+}
+
+TEST(BitmapIndexArrayNestedTest,
+     LowCardinalityHybridFiniteQueryUsesBitmapCorrectly) {
+    auto [ctx, field] =
+        MakeFloatingQueryFixture<double>("hybrid_bitmap_nan_query", 3192);
+    TestHybridScalarIndexDouble hybrid(7, ctx);
+    hybrid.scalar_index_version_ = 6;
+    EXPECT_EQ(hybrid.SelectPublic({field}), ScalarIndexType::BITMAP);
+    hybrid.BuildPublic({field});
+    auto binary = hybrid.Serialize({});
+    TestHybridScalarIndexDouble loaded(7, ctx);
+    loaded.Load(binary, {});
+    CheckFloatingQueries(loaded);
+}
+
+namespace {
+template <typename T>
+FieldDataPtr
+FloatingNaNDomainField() {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    const T values[] = {-nan, -inf, -T(0), T(0), T(1), inf, nan, nan};
+    const uint8_t validity = 0x7f;
+    constexpr auto dtype =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto field = std::make_shared<FieldData<T>>(dtype, true);
+    field->FillFieldData(values, &validity, std::size(values), 0);
+    return field;
+}
+
+// Both backends index the same eight scalar rows. Counts are an independent
+// expected-value matrix, not calls back into the production comparator.
+template <typename T>
+void
+CheckFloatingNaNDomain(index::ScalarIndex<T>& index) {
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const T inf = std::numeric_limits<T>::infinity();
+    const T zero = 0;
+    ASSERT_EQ(index.Count(), 8);
+    EXPECT_EQ(index.IsNotNull().count(), 7);
+    EXPECT_EQ(index.IsNull().count(), 1);
+    const auto not_zero = index.NotIn(1, &zero);
+    EXPECT_EQ(not_zero.count(), 5);
+    EXPECT_TRUE(not_zero[0]);
+    EXPECT_TRUE(not_zero[6]);
+    EXPECT_FALSE(not_zero[7]);
+    EXPECT_EQ(index.Range(zero, OpType::LessThan).count(), 1);
+    EXPECT_EQ(index.Range(zero, OpType::LessEqual).count(), 3);
+    EXPECT_EQ(index.Range(zero, OpType::GreaterThan).count(), 4);
+    EXPECT_EQ(index.Range(zero, OpType::GreaterEqual).count(), 6);
+    EXPECT_EQ(index.Range(-inf, OpType::LessEqual).count(), 1);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterEqual).count(), 3);
+    EXPECT_EQ(index.In(1, &nan).count(), 2);
+    EXPECT_EQ(index.NotIn(1, &nan).count(), 5);
+    EXPECT_EQ(index.Range(inf, OpType::GreaterThan).count(), 2);
+    EXPECT_EQ(index.Range(nan, OpType::LessThan).count(), 5);
+    EXPECT_EQ(index.Range(nan, OpType::LessEqual).count(), 7);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterThan).count(), 0);
+    EXPECT_EQ(index.Range(nan, OpType::GreaterEqual).count(), 2);
+    EXPECT_EQ(index.Range(-inf, true, nan, true).count(), 7);
+    EXPECT_EQ(index.Range(nan, true, nan, true).count(), 2);
+    auto numeric = index.Range(-inf, true, inf, true);
+    EXPECT_EQ(numeric.count(), 5);
+    EXPECT_FALSE(numeric[0]);
+    EXPECT_FALSE(numeric[6]);
+    EXPECT_FALSE(numeric[7]);
+}
+}  // namespace
+
+TYPED_TEST(FloatingIndexQueryTest,
+           InvertedNumericRangesOrderEveryNaNAfterInfinity) {
+    using T = TypeParam;
+    auto [ctx, ignored] =
+        MakeFloatingQueryFixture<T>("inverted_nan_range_domain", 3193);
+    auto field = FloatingNaNDomainField<T>();
+    index::InvertedIndexTantivy<T> built(7, ctx);
+    built.BuildWithFieldData({field});
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    config[ENABLE_MMAP] = false;
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.LoadUnified(config);
+    CheckFloatingNaNDomain<T>(loaded);
+}
+
+TYPED_TEST(FloatingIndexQueryTest, BitmapNaNHasDistinctPostingAndTotalOrder) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    auto [ctx, ignored] =
+        MakeFloatingQueryFixture<T>("bitmap_nan_total_order", 3198);
+    auto field = FloatingNaNDomainField<T>();
+    index::BitmapIndex<T> built(ctx);
+    built.BuildWithFieldData({field});
+    auto check = [&](index::BitmapIndex<T>& index) {
+        CheckFloatingNaNDomain<T>(index);
+        EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(0)));
+        EXPECT_TRUE(std::isnan(*index.Reverse_Lookup(6)));
+        EXPECT_EQ(index.Reverse_Lookup(7), std::nullopt);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    index::BitmapIndex<T> loaded(ctx);
+    loaded.Load(binary, {});
+    check(loaded);
+    auto stats = built.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    index::BitmapIndex<T> packed(ctx);
+    packed.LoadUnified(config);
+    check(packed);
+    // Legacy writers retain native std::map accumulation, including its
+    // order-dependent NaN equivalence. Only v6 uses independent NaN postings.
+    for (const auto& legacy_rows :
+         {std::vector<T>{nan, T(1), T(2)}, std::vector<T>{T(1), T(2), nan}}) {
+        auto legacy_field = std::make_shared<FieldData<T>>(
+            std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE,
+            false);
+        legacy_field->FillFieldData(legacy_rows.data(), legacy_rows.size());
+        index::BitmapIndex<T> legacy(ctx);
+        legacy.SetSupportsNaNTotalOrder(false);
+        ASSERT_NO_THROW(legacy.BuildWithFieldData({legacy_field}));
+        std::map<T, roaring::Roaring> expected;
+        for (size_t row = 0; row < legacy_rows.size(); ++row) {
+            expected[legacy_rows[row]].add(row);
+        }
+        ASSERT_EQ(legacy.data_.size(), expected.size());
+        auto actual = legacy.data_.begin();
+        for (const auto& [key, postings] : expected) {
+            EXPECT_EQ(std::memcmp(&actual->first, &key, sizeof(T)), 0);
+            EXPECT_EQ(actual->second.cardinality(), postings.cardinality());
+            for (size_t row = 0; row < legacy_rows.size(); ++row) {
+                EXPECT_EQ(actual->second.contains(row), postings.contains(row));
+            }
+            ++actual;
+        }
+    }
+    index::BitmapIndex<T> legacy_reader(ctx);
+    legacy_reader.SetSupportsNaNTotalOrder(false);
+    try {
+        legacy_reader.Load(binary, {});
+        FAIL() << "Legacy bitmap reader must reject canonical NaN keys";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+    }
+}
+
+TYPED_TEST(FloatingIndexQueryTest, InvertedLegacyWriterPreservesNegativeZero) {
+    using T = TypeParam;
+    auto [ctx, field] =
+        MakeFloatingQueryFixture<T>("inverted_legacy_negative_zero", 3200);
+    index::InvertedIndexTantivy<T> legacy(7, ctx);
+    legacy.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(legacy.BuildWithFieldData({field}));
+    auto stats = legacy.UploadUnified({});
+    ctx.set_for_loading_index(true);
+    Config config;
+    config[index::INDEX_FILES] = stats->GetIndexFiles();
+    index::InvertedIndexTantivy<T> loaded(7, ctx);
+    loaded.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(loaded.LoadUnified(config));
+    EXPECT_EQ(loaded.Count(), 6);
+    EXPECT_EQ(loaded.IsNotNull().count(), 5);
 }

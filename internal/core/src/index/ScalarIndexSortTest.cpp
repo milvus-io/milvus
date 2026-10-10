@@ -14,9 +14,12 @@
 #include <utility>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/FieldData.h"
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
@@ -25,6 +28,7 @@
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/IndexFactory.h"
+#include "index/HybridScalarIndex.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/ScalarIndexSort.h"
 #include "index/SortedMembership.h"
@@ -92,6 +96,474 @@ struct ScalarSortAsyncLoadFixture {
     milvus_storage::ArrowFileSystemPtr fs;
     storage::FileManagerContext ctx;
 };
+
+// The array cases exercise the same legacy and direct packed readers in both
+// memory and mmap mode; each callback retains its own row-domain assertions.
+template <typename T, typename Check>
+void
+CheckArrayReloads(const storage::FileManagerContext& ctx,
+                  const BinarySet& binary,
+                  const std::vector<std::string>& files,
+                  bool nested,
+                  Check check) {
+    for (bool mmap : {false, true}) {
+        Config config;
+        config[ENABLE_MMAP] = mmap;
+        ScalarIndexSort<T> legacy(ctx, nested);
+        legacy.Load(binary, config);
+        check(legacy);
+        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+        auto reader = milvus::test::OpenDirectIndexEntryReader(
+            milvus::test::ReadPackedIndexBytes(ctx, files), &remote_file);
+        ScalarIndexSort<T> packed(ctx, nested);
+        auto plan =
+            packed.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
+        folly::coro::blockingWait(reader->ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        folly::coro::blockingWait(packed.FinishLoadAsync(plan, config));
+        plan.Commit();
+        check(packed);
+    }
+}
+
+}  // namespace
+
+namespace {
+
+template <typename T>
+class ScalarIndexSortNaNTest : public testing::Test {};
+using NaNTypes = testing::Types<float, double>;
+TYPED_TEST_SUITE(ScalarIndexSortNaNTest, NaNTypes);
+
+template <typename T>
+FieldDataPtr
+NaNScalarFieldData(const std::vector<T>& rows, uint8_t validity) {
+    const auto type =
+        std::is_same_v<T, float> ? DataType::FLOAT : DataType::DOUBLE;
+    auto field = std::make_shared<FieldData<T>>(type, true);
+    field->FillFieldData(rows.data(), &validity, rows.size(), 0);
+    return field;
+}
+
+template <typename T>
+FieldDataPtr
+NaNArrayFieldData(const std::vector<std::vector<T>>& rows, uint8_t validity) {
+    std::vector<Array> arrays;
+    for (const auto& row : rows) {
+        ScalarFieldProto values;
+        for (T value : row) {
+            if constexpr (std::is_same_v<T, float>) {
+                values.mutable_float_data()->add_data(value);
+            } else {
+                values.mutable_double_data()->add_data(value);
+            }
+        }
+        arrays.emplace_back(values);
+    }
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, true);
+    field->FillFieldData(arrays.data(), &validity, arrays.size(), 0);
+    return field;
+}
+
+template <typename T>
+void
+CheckIndexedNaN(ScalarIndexSort<T>& index,
+                const std::vector<T>& rows,
+                const bool* valid = nullptr) {
+    ASSERT_EQ(index.Count(), rows.size());
+    const auto is_null = index.IsNull();
+    const auto is_not_null = index.IsNotNull();
+    size_t indexed = 0;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const bool source_valid = valid == nullptr || valid[i];
+        EXPECT_EQ(is_null[i], !source_valid);
+        EXPECT_EQ(is_not_null[i], source_valid);
+        const auto value = index.Reverse_Lookup(i);
+        ASSERT_EQ(value.has_value(), source_valid);
+        if (source_valid) {
+            ++indexed;
+            if (std::isnan(rows[i])) {
+                EXPECT_TRUE(std::isnan(*value));
+            } else {
+                EXPECT_EQ(*value, rows[i]);
+                EXPECT_EQ(std::signbit(*value), std::signbit(rows[i]));
+            }
+        }
+    }
+    ASSERT_EQ(index.Size(), indexed);
+    for (auto it = index.begin(); it != index.end(); ++it) {
+        ASSERT_LT(static_cast<size_t>(it->idx_), rows.size());
+        EXPECT_TRUE(ScalarEqual(it->a_, rows[it->idx_]));
+    }
+    for (const auto& queries : std::vector<std::vector<T>>{
+             {},
+             {T(2)},
+             {T(9)},
+             {T(0)},
+             {std::numeric_limits<T>::quiet_NaN()},
+             {T(2), std::numeric_limits<T>::quiet_NaN()},
+             std::vector<T>(129, T(2))}) {
+        const auto in = index.In(queries.size(), queries.data());
+        const auto not_in = index.NotIn(queries.size(), queries.data());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool source_valid = valid == nullptr || valid[row];
+            const bool hit =
+                source_valid &&
+                std::any_of(queries.begin(), queries.end(), [&](T query) {
+                    return ScalarEqual(rows[row], query);
+                });
+            EXPECT_EQ(in[row], hit);
+            EXPECT_EQ(not_in[row], source_valid && !hit);
+        }
+    }
+    for (T value : {T(0),
+                    T(2),
+                    T(9),
+                    std::numeric_limits<T>::infinity(),
+                    std::numeric_limits<T>::quiet_NaN()}) {
+        for (auto op : {OpType::LessThan,
+                        OpType::LessEqual,
+                        OpType::GreaterThan,
+                        OpType::GreaterEqual}) {
+            const auto result = index.Range(value, op);
+            for (size_t row = 0; row < rows.size(); ++row) {
+                bool hit = false;
+                switch (op) {
+                    case OpType::LessThan:
+                        hit = ScalarLess(rows[row], value);
+                        break;
+                    case OpType::LessEqual:
+                        hit = ScalarLessEqual(rows[row], value);
+                        break;
+                    case OpType::GreaterThan:
+                        hit = ScalarGreater(rows[row], value);
+                        break;
+                    case OpType::GreaterEqual:
+                        hit = ScalarGreaterEqual(rows[row], value);
+                        break;
+                    default:
+                        FAIL() << "unexpected operator";
+                }
+                EXPECT_EQ(result[row], (valid == nullptr || valid[row]) && hit);
+            }
+        }
+    }
+    const auto range = index.Range(-std::numeric_limits<T>::infinity(),
+                                   true,
+                                   std::numeric_limits<T>::infinity(),
+                                   true);
+    for (size_t row = 0; row < rows.size(); ++row) {
+        EXPECT_EQ(range[row],
+                  (valid == nullptr || valid[row]) && !std::isnan(rows[row]));
+    }
+}
+
+// Compare legacy physical entries with the pre-v6 native comparator. Query
+// predicates on these entries deliberately are not a canonical-order oracle.
+template <typename T>
+void
+CheckLegacySortedEntries(ScalarIndexSort<T>& index,
+                         const std::vector<T>& rows) {
+    std::vector<IndexStructure<T>> expected;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        expected.emplace_back(rows[i], i);
+    }
+    std::sort(expected.begin(),
+              expected.end(),
+              [](const auto& a, const auto& b) { return a.a_ < b.a_; });
+    ASSERT_EQ(index.Size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(index[i].idx_, expected[i].idx_);
+        EXPECT_EQ(std::memcmp(&index[i].a_, &expected[i].a_, sizeof(T)), 0);
+    }
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, IndexesNaNInEveryBuildRoute) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> rows{nan, T(1), T(2), nan, T(3), T(4), T(5)};
+    ScalarIndexSort<T> raw;
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data()));
+    CheckIndexedNaN(raw, rows);
+
+    auto scalar_data = NaNScalarFieldData(rows, 0x7f);
+    ScalarIndexSort<T> scalar;
+    ASSERT_NO_THROW(scalar.BuildWithFieldData({scalar_data}));
+    CheckIndexedNaN(scalar, rows);
+
+    auto array_data = NaNArrayFieldData<T>(
+        {{nan, T(1)}, {T(2), nan}, {T(3), T(4), T(5)}}, 0x07);
+    ScalarIndexSort<T> nested({}, true);
+    ASSERT_NO_THROW(nested.BuildWithFieldData({array_data}));
+    CheckIndexedNaN(nested, rows);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, AllNaNBuildsRemainSourceValid) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> rows{nan, nan, nan};
+    ScalarIndexSort<T> raw;
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data()));
+    CheckIndexedNaN(raw, rows);
+    ScalarIndexSort<T> scalar;
+    ASSERT_NO_THROW(
+        scalar.BuildWithFieldData({NaNScalarFieldData(rows, 0x07)}));
+    CheckIndexedNaN(scalar, rows);
+    ScalarIndexSort<T> nested({}, true);
+    ASSERT_NO_THROW(nested.BuildWithFieldData(
+        {NaNArrayFieldData<T>({{nan}, {nan, nan}}, 0x03)}));
+    CheckIndexedNaN(nested, rows);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, LegacyAndPackedReloadsPreserveNaNRows) {
+    using T = TypeParam;
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    const auto type =
+        std::is_same_v<T, float> ? proto::schema::Float : proto::schema::Double;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    for (bool nested : {false, true}) {
+        for (bool all_nan : {false, true}) {
+            SCOPED_TRACE(testing::Message()
+                         << "nested=" << nested << " all_nan=" << all_nan);
+            ScalarSortAsyncLoadFixture fixture("scalar_sort_nan_reload", type);
+            auto ctx = fixture.ctx;
+            if (nested) {
+                ctx.fieldDataMeta.field_schema.set_data_type(
+                    proto::schema::Array);
+                ctx.fieldDataMeta.field_schema.set_element_type(type);
+            }
+            const std::vector<T> rows =
+                all_nan
+                    ? std::vector<T>{nan, nan, nan}
+                    : std::vector<T>{nan, nan, T(1), T(2), T(3), T(4), T(5)};
+            auto valid = std::make_unique<bool[]>(rows.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                valid[i] = i != 0;
+            }
+            ScalarIndexSort<T> built(ctx, nested);
+            std::vector<T> expected_rows = rows;
+            const bool* expected_valid = valid.get();
+            if (nested) {
+                expected_rows.erase(expected_rows.begin());
+                expected_valid = nullptr;
+                std::vector<T> remaining(rows.begin() + 1, rows.end());
+                built.BuildWithFieldData(
+                    {NaNArrayFieldData<T>({{nan}, remaining}, 0x02)});
+            } else {
+                const uint8_t mask = all_nan ? 0x06 : 0x7e;
+                built.BuildWithFieldData({NaNScalarFieldData(rows, mask)});
+            }
+            CheckIndexedNaN(built, expected_rows, expected_valid);
+            const auto stats = built.UploadUnified({});
+            const auto binaries = built.Serialize({});
+            ASSERT_FALSE(binaries.Contains("nan_rows"));
+            EXPECT_EQ(binaries.Contains("valid_bitset"), nested);
+            for (bool mmap : {false, true}) {
+                Config config;
+                config[ENABLE_MMAP] = mmap;
+                config[milvus::LOAD_PRIORITY] =
+                    proto::common::LoadPriority::HIGH;
+                config[INDEX_FILES] = stats->GetIndexFiles();
+                for (bool async : {false, true}) {
+                    SCOPED_TRACE(testing::Message()
+                                 << "mmap=" << mmap << " async=" << async);
+                    auto load_ctx = ctx;
+                    load_ctx.use_async_load = async;
+                    ScalarIndexSort<T> loaded(load_ctx, nested);
+                    ASSERT_NO_THROW(loaded.LoadUnified(config));
+                    CheckIndexedNaN(loaded, expected_rows, expected_valid);
+                }
+                ScalarIndexSort<T> legacy(ctx, nested);
+                ASSERT_NO_THROW(legacy.Load(binaries, config));
+                CheckIndexedNaN(legacy, expected_rows, expected_valid);
+            }
+        }
+    }
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, FactoryGatesNaNTotalOrderByEngineVersion) {
+    using T = TypeParam;
+    const auto type =
+        std::is_same_v<T, float> ? proto::schema::Float : proto::schema::Double;
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_nan_factory", type);
+    const std::vector<T> rows{std::numeric_limits<T>::quiet_NaN(), T(1), T(2)};
+    for (int32_t version : {5, kMinScalarIndexVersionForNaNTotalOrder}) {
+        for (const auto& index_type : {ASCENDING_SORT, HYBRID_INDEX_TYPE}) {
+            SCOPED_TRACE(testing::Message()
+                         << "version=" << version << " type=" << index_type);
+            CreateIndexInfo info;
+            info.field_type = static_cast<DataType>(type);
+            info.index_type = index_type;
+            info.scalar_index_engine_version = version;
+            auto base =
+                IndexFactory::GetInstance().CreateIndex(info, fixture.ctx);
+            auto* scalar = dynamic_cast<ScalarIndex<T>*>(base.get());
+            ASSERT_NE(scalar, nullptr);
+            auto* hybrid = dynamic_cast<HybridScalarIndex<T>*>(base.get());
+            if (hybrid != nullptr) {
+                // Exercise the legacy physical SORT backend without asserting
+                // that the old NaN cardinality calculation selects it by default.
+                hybrid->bitmap_index_cardinality_limit_ = 0;
+                hybrid->high_cardinality_index_type_ = ScalarIndexType::STLSORT;
+            }
+            ASSERT_NO_THROW(scalar->Build(rows.size(), rows.data()));
+            ScalarIndexSort<T>* sorted = nullptr;
+            if (hybrid != nullptr) {
+                EXPECT_EQ(hybrid->internal_index_type_,
+                          ScalarIndexType::STLSORT);
+                sorted = dynamic_cast<ScalarIndexSort<T>*>(
+                    hybrid->internal_index_.get());
+            } else {
+                sorted = dynamic_cast<ScalarIndexSort<T>*>(base.get());
+            }
+            ASSERT_NE(sorted, nullptr);
+            EXPECT_EQ(sorted->Count(), rows.size());
+            EXPECT_EQ(sorted->Size(), 3);
+            EXPECT_FALSE(sorted->Serialize({}).Contains("nan_rows"));
+            EXPECT_FALSE(sorted->Serialize({}).Contains("valid_bitset"));
+            if (version >= 6) {
+                CheckIndexedNaN(*sorted, rows);
+            } else {
+                CheckLegacySortedEntries(*sorted, rows);
+            }
+        }
+
+        auto ctx = fixture.ctx;
+        ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::Array);
+        ctx.fieldDataMeta.field_schema.set_element_type(type);
+        CreateIndexInfo info;
+        info.field_type = DataType::ARRAY;
+        info.field_name = "parent[value]";
+        info.index_type = ASCENDING_SORT;
+        info.scalar_index_engine_version = version;
+        auto base = IndexFactory::GetInstance().CreateIndex(info, ctx);
+        auto* sorted = dynamic_cast<ScalarIndexSort<T>*>(base.get());
+        ASSERT_NE(sorted, nullptr);
+        ASSERT_NO_THROW(sorted->BuildWithFieldData(
+            {NaNArrayFieldData<T>({{rows[0], rows[1]}, {rows[2]}}, 0x03)}));
+        EXPECT_EQ(sorted->Count(), rows.size());
+        EXPECT_EQ(sorted->Size(), 3);
+        EXPECT_FALSE(sorted->Serialize({}).Contains("nan_rows"));
+        EXPECT_TRUE(sorted->Serialize({}).Contains("valid_bitset"));
+        if (version >= 6) {
+            CheckIndexedNaN(*sorted, rows);
+        } else {
+            CheckLegacySortedEntries(*sorted, rows);
+        }
+    }
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, InvalidOffsetsRemainDataFormatErrors) {
+    using T = TypeParam;
+    const auto dtype =
+        std::is_same_v<T, float> ? proto::schema::Float : proto::schema::Double;
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_nan_offsets", dtype);
+    const std::vector<T> rows{std::numeric_limits<T>::quiet_NaN(), T(1), T(2)};
+    ScalarIndexSort<T> built(fixture.ctx);
+    built.Build(rows.size(), rows.data());
+    const auto binaries = built.Serialize({});
+    ASSERT_FALSE(binaries.Contains("nan_rows"));
+    const auto stats = built.UploadUnified({});
+    for (int32_t offset : {-1, -2, 3}) {
+        SCOPED_TRACE(offset);
+        milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+        auto reader = milvus::test::OpenDirectIndexEntryReader(
+            milvus::test::ReadPackedIndexBytes(fixture.ctx,
+                                               stats->GetIndexFiles()),
+            &remote_file);
+        ASSERT_FALSE(reader->Directory().HasEntry("nan_rows"));
+        Config config;
+        config[ENABLE_MMAP] = false;
+        ScalarIndexSort<T> loaded(fixture.ctx);
+        auto plan =
+            loaded.PlanLoad(reader->Directory(), reader->IndexMeta(), config);
+        folly::coro::blockingWait(reader->ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        int32_t* offsets = nullptr;
+        for (auto& entry : plan.entries) {
+            if (entry.name == "idx_to_offsets") {
+                auto* target =
+                    std::get_if<storage::MemoryEntryTarget>(&entry.target);
+                ASSERT_NE(target, nullptr);
+                offsets = reinterpret_cast<int32_t*>(target->data);
+            }
+        }
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(offsets[0], 2);
+        EXPECT_EQ(offsets[1], 0);
+        EXPECT_EQ(offsets[2], 1);
+        offsets[0] = offset;
+        folly::coro::blockingWait(loaded.FinishLoadAsync(plan, config));
+        plan.Commit();
+        try {
+            loaded.Reverse_Lookup(0);
+            FAIL() << "A source-valid row must have a valid sorted offset";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+        }
+    }
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest,
+           IgnoresNullPayloadAndPreservesOrderedValues) {
+    using T = TypeParam;
+    const std::vector<T> rows{std::numeric_limits<T>::quiet_NaN(),
+                              -std::numeric_limits<T>::infinity(),
+                              T(-0.0),
+                              T(0.0),
+                              std::numeric_limits<T>::infinity()};
+    const bool valid[] = {false, true, true, true, true};
+    ScalarIndexSort<T> raw;
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data(), valid));
+    auto scalar_data = NaNScalarFieldData(rows, 0x1e);
+    ScalarIndexSort<T> scalar;
+    ASSERT_NO_THROW(scalar.BuildWithFieldData({scalar_data}));
+    for (auto* index : {&raw, &scalar}) {
+        CheckIndexedNaN(*index, rows, valid);
+        EXPECT_EQ(index->Count(), rows.size());
+        EXPECT_EQ(index->Size(), 4);
+        EXPECT_FALSE(index->Reverse_Lookup(0).has_value());
+        for (size_t row = 1; row < rows.size(); ++row) {
+            const auto value = index->Reverse_Lookup(row);
+            ASSERT_TRUE(value.has_value());
+            EXPECT_EQ(*value, rows[row]);
+            EXPECT_EQ(std::signbit(*value), std::signbit(rows[row]));
+        }
+        const T zero = T(0);
+        auto in = index->In(1, &zero);
+        auto not_in = index->NotIn(1, &zero);
+        EXPECT_FALSE(in[0]);
+        EXPECT_FALSE(not_in[0]);
+        EXPECT_TRUE(in[2]);
+        EXPECT_TRUE(in[3]);
+        EXPECT_EQ(in.count(), 2);
+        EXPECT_TRUE(not_in[1]);
+        EXPECT_TRUE(not_in[4]);
+        EXPECT_EQ(not_in.count(), 2);
+    }
+
+    auto array_data = NaNArrayFieldData<T>(
+        {{rows[0]}, {rows[1], rows[2], rows[3], rows[4]}}, 0x02);
+    ScalarIndexSort<T> nested({}, true);
+    ASSERT_NO_THROW(nested.BuildWithFieldData({array_data}));
+    EXPECT_EQ(nested.Count(), 4);
+    EXPECT_EQ(nested.Size(), 4);
+    for (size_t offset = 0; offset < 4; ++offset) {
+        const auto value = nested.Reverse_Lookup(offset);
+        ASSERT_TRUE(value.has_value());
+        EXPECT_EQ(*value, rows[offset + 1]);
+        EXPECT_EQ(std::signbit(*value), std::signbit(rows[offset + 1]));
+    }
+    const T zero = T(0);
+    auto in = nested.In(1, &zero);
+    auto not_in = nested.NotIn(1, &zero);
+    EXPECT_TRUE(in[1]);
+    EXPECT_TRUE(in[2]);
+    EXPECT_EQ(in.count(), 2);
+    EXPECT_TRUE(not_in[0]);
+    EXPECT_TRUE(not_in[3]);
+    EXPECT_EQ(not_in.count(), 2);
+}
 
 }  // namespace
 
@@ -412,11 +884,6 @@ CheckTypedMembership(ScalarIndexSort<T>& index,
         queries.push_back({T(1.25),
                            std::nextafter(T(1.25), T(2)),
                            std::nextafter(T(1.25), T(0))});
-        queries.push_back({std::numeric_limits<T>::quiet_NaN()});
-        queries.push_back({T(31),
-                           std::numeric_limits<T>::quiet_NaN(),
-                           T(-0.0),
-                           std::numeric_limits<T>::quiet_NaN()});
     }
     ASSERT_EQ(index.Count(), rows.size());
     for (const auto& query : queries) {
@@ -428,16 +895,8 @@ CheckTypedMembership(ScalarIndexSort<T>& index,
         const auto not_in = index.NotIn(query.size(), values);
         ASSERT_EQ(in.size(), rows.size());
         ASSERT_EQ(not_in.size(), rows.size());
-        bool legacy_nan_query = false;
-        if constexpr (std::is_floating_point_v<T>) {
-            legacy_nan_query = std::any_of(
-                query.begin(), query.end(), [](T v) { return std::isnan(v); });
-        }
         for (size_t row = 0; row < rows.size(); ++row) {
-            // Keep the legacy NaN-query contract distinct from the equality
-            // scan oracle: lower/upper_bound(NaN) spans every non-NaN entry.
             const bool hit =
-                legacy_nan_query ||
                 std::find(query.begin(), query.end(), rows[row]) != query.end();
             const bool is_valid = !valid || valid[row];
             ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
@@ -641,3 +1100,301 @@ TEST(StlSortIndexTest, MmapByteSizeCountsValidBitsetOnce) {
 
 // V2 compat test removed: kScalarIndexUseV3 flag deleted,
 // Upload()/Load() now always route to V3 paths.
+
+namespace {
+
+FieldDataPtr
+OrdinaryNumericArrayData() {
+    std::vector<Array> arrays;
+    for (const auto& values : std::vector<std::vector<int64_t>>{
+             {1, 1, 100}, {}, {}, {2, 3}, {1, 4}}) {
+        ScalarFieldProto proto;
+        for (auto value : values) {
+            proto.mutable_long_data()->add_data(value);
+        }
+        // Preserve the element type for an empty array.
+        proto.mutable_long_data();
+        arrays.emplace_back(proto);
+    }
+    auto data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
+    const uint8_t valid =
+        0x1b;  // row 2 is null; row 1 is an empty valid array.
+    data->FillFieldData(arrays.data(), &valid, arrays.size(), 0);
+    return data;
+}
+
+void
+CheckOrdinaryNumericArray(ScalarIndexSort<int64_t>& index) {
+    ASSERT_EQ(index.Count(), 5);
+    EXPECT_FALSE(index.HasRawData());
+    EXPECT_FALSE(index.IsNestedIndex());
+    EXPECT_EQ(index.Reverse_Lookup(0), std::nullopt);
+    auto valid = index.IsNotNull();
+    auto nulls = index.IsNull();
+    for (size_t row = 0; row < 5; ++row) {
+        EXPECT_EQ(valid[row], row != 2);
+        EXPECT_EQ(nulls[row], row == 2);
+    }
+    const int64_t one = 1, four = 4;
+    auto any = index.In(1, &one);
+    auto all = any.clone();
+    all &= index.In(1, &four);
+    EXPECT_TRUE(any[0]);
+    EXPECT_TRUE(any[4]);
+    EXPECT_EQ(any.count(), 2);
+    EXPECT_EQ(all.count(), 1);
+    EXPECT_TRUE(all[4]);
+    // A matching element must survive another element outside the range.
+    auto range = index.Range(int64_t(1), true, int64_t(4), true);
+    EXPECT_TRUE(range[0]);
+    EXPECT_TRUE(range[3]);
+    EXPECT_TRUE(range[4]);
+    EXPECT_EQ(range.count(), 3);
+    auto upper = index.Range(int64_t(4), OpType::LessEqual);
+    EXPECT_EQ(upper.count(), 3);
+    auto not_in = index.NotIn(1, &one);
+    EXPECT_TRUE(not_in[1]);
+    EXPECT_FALSE(not_in[2]);
+    EXPECT_TRUE(not_in[3]);
+}
+
+}  // namespace
+
+TEST(ScalarIndexSortArrayTest, RowPostingsLegacyAndV3Reload) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_ordinary_array",
+                                       proto::schema::DataType::Array);
+    fixture.field_meta.field_schema.set_element_type(
+        proto::schema::DataType::Int64);
+    fixture.ctx.fieldDataMeta = fixture.field_meta;
+    ExposedScalarIndexSort index(fixture.ctx);
+    index.BuildWithFieldData({OrdinaryNumericArrayData()});
+    CheckOrdinaryNumericArray(index);
+    auto binary = index.Serialize({});
+    auto stats = index.UploadUnified({});
+    CheckArrayReloads<int64_t>(fixture.ctx,
+                               binary,
+                               stats->GetIndexFiles(),
+                               false,
+                               CheckOrdinaryNumericArray);
+}
+
+TEST(ScalarIndexSortArrayTest, NaNMatchesAndEmptyRowsRemainValid) {
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_float_array",
+                                       proto::schema::DataType::Array);
+    ScalarFieldProto values;
+    values.mutable_double_data()->add_data(
+        std::numeric_limits<double>::quiet_NaN());
+    values.mutable_double_data()->add_data(3);
+    ScalarFieldProto empty;
+    empty.mutable_double_data();
+    std::vector<Array> arrays{Array(values), Array(empty)};
+    auto data = storage::CreateFieldData(DataType::ARRAY, DataType::DOUBLE);
+    data->FillFieldData(arrays.data(), arrays.size());
+    ScalarIndexSort<double> index(fixture.ctx);
+    index.BuildWithFieldData({data});
+    double three = 3;
+    EXPECT_EQ(index.In(1, &three).count(), 1);
+    EXPECT_EQ(index.Range(three, true, three, true).count(), 1);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_EQ(index.In(1, &nan).count(), 1);
+    EXPECT_EQ(index.Range(three, OpType::GreaterThan).count(), 1);
+    EXPECT_EQ(index.IsNotNull().count(), 2);
+}
+
+TEST(ScalarIndexSortArrayTest, EmptyArraysHaveNoPostingsAcrossReloads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    ScalarSortAsyncLoadFixture fixture("scalar_sort_empty_array",
+                                       proto::schema::DataType::Array);
+    ScalarFieldProto empty;
+    empty.mutable_long_data();
+    std::vector<Array> arrays{Array(empty), Array(empty)};
+    auto data =
+        storage::CreateFieldData(DataType::ARRAY, DataType::INT64, true);
+    const uint8_t validity = 1;
+    data->FillFieldData(arrays.data(), &validity, arrays.size(), 0);
+    ExposedScalarIndexSort built(fixture.ctx);
+    built.BuildWithFieldData({data});
+    auto check = [](ScalarIndexSort<int64_t>& index) {
+        ASSERT_EQ(index.Count(), 2);
+        EXPECT_EQ(index.Size(), 0);
+        auto valid = index.IsNotNull();
+        EXPECT_TRUE(valid[0]);
+        EXPECT_FALSE(valid[1]);
+        const int64_t query = 1;
+        EXPECT_EQ(index.In(1, &query).count(), 0);
+        EXPECT_EQ(index.NotIn(1, &query).count(), 1);
+        EXPECT_EQ(index.Range(query, OpType::LessEqual).count(), 0);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    auto stats = built.UploadUnified({});
+    CheckArrayReloads<int64_t>(
+        fixture.ctx, binary, stats->GetIndexFiles(), false, check);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, OrdinaryArrayNaNRowsRetainParentValidity) {
+    using T = TypeParam;
+    ScalarSortAsyncLoadFixture fixture("ordinary_array_nan_parent_rows",
+                                       proto::schema::DataType::Array);
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    ScalarIndexSort<T> built(fixture.ctx);
+    built.BuildWithFieldData({NaNArrayFieldData<T>(
+        {{nan, T(1), T(100)}, {nan}, {}, {}, {T(2), T(3)}}, 0x17)});
+    auto check = [&](ScalarIndexSort<T>& index) {
+        EXPECT_EQ(index.Count(), 5);
+        EXPECT_FALSE(index.HasRawData());
+        auto valid = index.IsNotNull();
+        EXPECT_TRUE(valid[0]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_TRUE(valid[2]);
+        EXPECT_FALSE(valid[3]);
+        EXPECT_TRUE(valid[4]);
+        EXPECT_EQ(index.In(1, &nan).count(), 2);
+        EXPECT_EQ(index.Range(T(100), OpType::GreaterThan).count(), 2);
+        const T one = T(1);
+        auto matches = index.In(1, &one);
+        EXPECT_TRUE(matches[0]);
+        EXPECT_EQ(matches.count(), 1);
+        EXPECT_EQ(index.NotIn(1, &one).count(), 3);
+        auto range = index.Range(T(1), true, T(3), true);
+        EXPECT_TRUE(range[0]);
+        EXPECT_TRUE(range[4]);
+        EXPECT_EQ(range.count(), 2);
+        EXPECT_EQ(index.Reverse_Lookup(0), std::nullopt);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    auto stats = built.UploadUnified({});
+    // Ordinary arrays retain raw data and need no scalar NaN reverse lookup.
+    EXPECT_FALSE(binary.Contains("nan_rows"));
+    CheckArrayReloads<T>(
+        fixture.ctx, binary, stats->GetIndexFiles(), false, check);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, NestedIgnoresInvalidNaNPayload) {
+    using T = TypeParam;
+    ScalarSortAsyncLoadFixture fixture("nested_invalid_nan_payload");
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    ScalarFieldProto members;
+    for (T value : {nan, nan, T(3), T(9)}) {
+        if constexpr (std::is_same_v<T, float>) {
+            members.mutable_float_data()->add_data(value);
+        } else {
+            members.mutable_double_data()->add_data(value);
+        }
+    }
+    for (bool valid : {false, true, true, true}) {
+        members.add_valid_data(valid);
+    }
+    ScalarFieldProto empty;
+    std::vector<Array> arrays{Array(members, true), Array(empty), Array(empty)};
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, true);
+    const uint8_t parent_validity = 0x03;  // empty parent then null parent
+    field->FillFieldData(arrays.data(), &parent_validity, arrays.size(), 0);
+    ScalarIndexSort<T> built(fixture.ctx, true);
+    built.BuildWithFieldData({field});
+    auto check = [&](ScalarIndexSort<T>& index) {
+        ASSERT_EQ(index.Count(), 4);
+        ASSERT_EQ(index.Size(), 3);
+        auto valid = index.IsNotNull();
+        EXPECT_FALSE(valid[0]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_TRUE(valid[2]);
+        EXPECT_TRUE(valid[3]);
+        EXPECT_EQ(index.Reverse_Lookup(0), std::nullopt);
+        auto lookup = index.Reverse_Lookup(1);
+        ASSERT_TRUE(lookup.has_value());
+        EXPECT_TRUE(std::isnan(*lookup));
+        EXPECT_EQ(index.Reverse_Lookup(2), T(3));
+        EXPECT_EQ(index.Reverse_Lookup(3), T(9));
+        const T three = T(3), nine = T(9);
+        auto matches = index.In(1, &three);
+        EXPECT_EQ(matches.count(), 1);
+        EXPECT_TRUE(matches[2]);
+        EXPECT_EQ(index.In(1, &nine).count(), 1);
+        auto misses = index.NotIn(1, &three);
+        EXPECT_EQ(misses.count(), 2);
+        EXPECT_TRUE(misses[1]);
+        EXPECT_TRUE(misses[3]);
+        auto range = index.Range(three, OpType::LessEqual);
+        EXPECT_EQ(range.count(), 1);
+        EXPECT_TRUE(range[2]);
+    };
+    check(built);
+    auto binary = built.Serialize({});
+    auto stats = built.UploadUnified({});
+    CheckArrayReloads<T>(
+        fixture.ctx, binary, stats->GetIndexFiles(), true, check);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, LegacyVersionWritesNaNInEveryBuildRoute) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> rows{nan, T(3)};
+    ScalarIndexSort<T> raw;
+    raw.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data()));
+    CheckLegacySortedEntries(raw, rows);
+    ScalarIndexSort<T> scalar;
+    scalar.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(
+        scalar.BuildWithFieldData({NaNScalarFieldData(rows, 0x03)}));
+    CheckLegacySortedEntries(scalar, rows);
+    ScalarIndexSort<T> nested({}, true);
+    nested.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(
+        nested.BuildWithFieldData({NaNArrayFieldData<T>({rows}, 0x01)}));
+    CheckLegacySortedEntries(nested, rows);
+}
+
+TYPED_TEST(ScalarIndexSortNaNTest, UnsupportedVersionIgnoresNullPayloadNaN) {
+    using T = TypeParam;
+    const T nan = std::numeric_limits<T>::quiet_NaN();
+    const std::vector<T> rows{nan, T(3)};
+    const bool validity[] = {false, true};
+    auto check = [](ScalarIndexSort<T>& index) {
+        EXPECT_EQ(index.Size(), 1);
+        EXPECT_FALSE(std::isnan(index[0].a_));
+        EXPECT_FALSE(index.Serialize({}).Contains("nan_rows"));
+    };
+    ScalarIndexSort<T> raw;
+    raw.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(raw.Build(rows.size(), rows.data(), validity));
+    check(raw);
+    ScalarIndexSort<T> scalar;
+    scalar.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(
+        scalar.BuildWithFieldData({NaNScalarFieldData(rows, 0x02)}));
+    check(scalar);
+    ScalarFieldProto values;
+    if constexpr (std::is_same_v<T, float>) {
+        values.mutable_float_data()->add_data(nan);
+        values.mutable_float_data()->add_data(T(3));
+    } else {
+        values.mutable_double_data()->add_data(nan);
+        values.mutable_double_data()->add_data(T(3));
+    }
+    values.add_valid_data(false);
+    values.add_valid_data(true);
+    std::vector<Array> arrays{Array(values, true)};
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    field->FillFieldData(arrays.data(), arrays.size());
+    ScalarIndexSort<T> nested({}, true);
+    nested.SetSupportsNaNTotalOrder(false);
+    ASSERT_NO_THROW(nested.BuildWithFieldData({field}));
+    check(nested);
+    EXPECT_EQ(nested.Count(), 2);
+    EXPECT_FALSE(nested.IsNotNull()[0]);
+    EXPECT_TRUE(nested.IsNotNull()[1]);
+    ScalarSortAsyncLoadFixture fixture("ordinary_array_null_payload_nan",
+                                       proto::schema::DataType::Array);
+    ScalarIndexSort<T> ordinary(fixture.ctx);
+    // Parent-row ARRAY SORT is a v6 capability; this remains a canonical
+    // writer test of invalid-member payloads, not a legacy-format claim.
+    ASSERT_NO_THROW(ordinary.BuildWithFieldData({field}));
+    check(ordinary);
+    EXPECT_EQ(ordinary.Count(), 1);
+    EXPECT_TRUE(ordinary.IsNotNull()[0]);
+}

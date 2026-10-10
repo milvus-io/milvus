@@ -147,18 +147,21 @@ class IndexFactory {
     CreateNestedIndex(IndexType index_type,
                       int32_t tantivy_index_version,
                       const storage::FileManagerContext& file_manager_context =
-                          storage::FileManagerContext());
+                          storage::FileManagerContext(),
+                      int32_t scalar_index_version = 1);
 
     IndexBasePtr
     CreateNestedIndexInverted(
         int32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        int32_t scalar_index_version = 1);
 
     IndexBasePtr
     CreateNestedIndexScalarIndexSort(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        int32_t scalar_index_version = 1);
 
     IndexBasePtr
     CreateNestedIndexBitmap(
@@ -169,7 +172,8 @@ class IndexFactory {
     CreateNestedIndexHybrid(
         int32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        int32_t scalar_index_version = 1);
 
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,

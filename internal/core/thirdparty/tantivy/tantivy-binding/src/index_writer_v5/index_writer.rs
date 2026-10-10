@@ -17,7 +17,7 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_writer::TantivyValue;
-use crate::util::{c_ptr_to_str, ptr_len_to_str};
+use crate::util::{c_ptr_to_str, canonical_f64, ptr_len_to_str};
 
 const BATCH_SIZE: usize = 4096;
 
@@ -26,6 +26,7 @@ pub(crate) struct IndexWriterWrapperImpl {
     pub(crate) index_writer: Either<IndexWriter, SingleSegmentIndexWriter>,
     pub(crate) id_field: Option<Field>,
     pub(crate) _index: Arc<Index>,
+    pub(crate) supports_nan_total_order: bool,
 }
 
 #[inline]
@@ -69,6 +70,14 @@ impl TantivyValue<TantivyDocument> for f64 {
     #[inline]
     fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
         document.add_f64(Field::from_field_id(field), *self);
+    }
+
+    fn canonicalize(self, enabled: bool) -> Self {
+        if enabled {
+            canonical_f64(self)
+        } else {
+            self
+        }
     }
 }
 
@@ -125,6 +134,7 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Left(index_writer),
             id_field: Some(id_field),
             _index: Arc::new(index),
+            supports_nan_total_order: false,
         })
     }
 
@@ -147,6 +157,7 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Right(index_writer),
             id_field: None,
             _index: Arc::new(index),
+            supports_nan_total_order: false,
         })
     }
 
@@ -173,7 +184,8 @@ impl IndexWriterWrapperImpl {
         offset: Option<i64>,
     ) -> Result<()> {
         let mut document = TantivyDocument::default();
-        data.add_to_document(self.field.field_id(), &mut document);
+        data.canonicalize(self.supports_nan_total_order)
+            .add_to_document(self.field.field_id(), &mut document);
 
         self.add_document(document, offset)
     }
@@ -187,8 +199,10 @@ impl IndexWriterWrapperImpl {
         I: IntoIterator<Item = T>,
     {
         let mut document = TantivyDocument::default();
-        data.into_iter()
-            .for_each(|d| d.add_to_document(self.field.field_id(), &mut document));
+        data.into_iter().for_each(|d| {
+            d.canonicalize(self.supports_nan_total_order)
+                .add_to_document(self.field.field_id(), &mut document)
+        });
 
         self.add_document(document, offset)
     }

@@ -72,6 +72,11 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 				return
 			}
 		}
+		// Preserve the legacy protobuf-shaped JSON response while making its
+		// scalar NaN/infinity values representable as quoted JSON strings.
+		if c.NegotiateFormat(formatOffered...) == binding.MIMEJSON {
+			bodyFormatNegotiate.Data = restLegacyResponse(data)
+		}
 		c.Negotiate(http.StatusOK, bodyFormatNegotiate)
 	}
 }

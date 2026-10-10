@@ -144,6 +144,22 @@ ScalarIndexSort<T>::ScalarIndexSort(
 
 template <typename T>
 void
+ScalarIndexSort<T>::SortData() {
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!supports_nan_total_order_) {
+            std::sort(data_.begin(),
+                      data_.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return lhs.a_ < rhs.a_;
+                      });
+            return;
+        }
+    }
+    std::sort(data_.begin(), data_.end());
+}
+
+template <typename T>
+void
 ScalarIndexSort<T>::Build(const Config& config) {
     if (is_built_) {
         return;
@@ -169,17 +185,17 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     data_.reserve(n);
     total_num_rows_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    idx_to_offsets_.resize(n);
+    idx_to_offsets_.assign(n, -1);
 
     T* p = const_cast<T*>(values);
     for (size_t i = 0; i < n; ++i, ++p) {
         if (!valid_data || valid_data[i]) {
-            data_.emplace_back(IndexStructure(*p, i));
             valid_bitset_.set(i);
+            data_.emplace_back(IndexStructure(*p, i));
         }
     }
 
-    std::sort(data_.begin(), data_.end());
+    SortData();
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
@@ -196,6 +212,11 @@ void
 ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
     index_build_begin_ = std::chrono::system_clock::now();
+
+    if (is_array_field_ && !is_nested_index_) {
+        BuildWithArrayData(field_datas);
+        return;
+    }
 
     if (is_nested_index_) {
         BuildWithArrayDataNested(field_datas);
@@ -219,16 +240,15 @@ ScalarIndexSort<T>::BuildWithFieldData(
         for (size_t i = 0; i < slice_num; ++i) {
             if (data->is_valid(i)) {
                 auto value = reinterpret_cast<const T*>(data->RawValue(i));
-                data_.emplace_back(IndexStructure(*value, offset));
                 valid_bitset_.set(offset);
+                data_.emplace_back(IndexStructure(*value, offset));
             }
             offset++;
         }
     }
-    std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows_);
-    for (size_t i = 0; i < length; ++i) {
-        // TODO: there is an existing bug here, data_[i].idx_ is out of range, should be fixed
+    SortData();
+    idx_to_offsets_.assign(total_num_rows_, -1);
+    for (size_t i = 0; i < data_.size(); ++i) {
         if (data_[i].idx_ < 0 || data_[i].idx_ >= total_num_rows_) {
             continue;
         }
@@ -238,6 +258,47 @@ ScalarIndexSort<T>::BuildWithFieldData(
     idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
+    setup_data_pointers();
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::BuildWithArrayData(const std::vector<FieldDataPtr>& datas) {
+    total_num_rows_ = 0;
+    for (const auto& data : datas) {
+        total_num_rows_ += data->get_num_rows();
+    }
+    if (total_num_rows_ == 0) {
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build zero rows!");
+    }
+    data_.clear();
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    int64_t row = 0;
+    for (const auto& data : datas) {
+        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++row) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
+            // Empty arrays are valid rows even though they have no postings.
+            valid_bitset_.set(row);
+            const auto* array =
+                reinterpret_cast<const Array*>(data->RawValue(i));
+            for (int64_t j = 0; j < array->length(); ++j) {
+                if (!array->is_element_valid(j)) {
+                    continue;
+                }
+                auto value = array->get_data_unchecked<T>(j);
+                data_.emplace_back(IndexStructure(value, row));
+            }
+        }
+    }
+    SortData();
+    // Ordinary arrays cannot be reconstructed with scalar Reverse_Lookup.
+    idx_to_offsets_.assign(total_num_rows_, -1);
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
+    is_built_ = true;
     setup_data_pointers();
     ComputeByteSize();
 }
@@ -264,7 +325,6 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     }
 
     data_.reserve(total_num_rows_);
-    // all values are valid for nested index because any given slot in a valid_bitset_ denotes one element in a valid row
     valid_bitset_ = TargetBitmap(total_num_rows_, true);
     int64_t offset = 0;
     for (const auto& data : datas) {
@@ -276,15 +336,19 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                data_.emplace_back(
-                    IndexStructure(array->get_data_unchecked<T>(j), offset));
+                auto value = array->get_data_unchecked<T>(j);
+                if (!array->is_element_valid(j)) {
+                    valid_bitset_.reset(offset++);
+                    continue;
+                }
+                data_.emplace_back(IndexStructure(value, offset));
                 offset++;
             }
         }
     }
-    std::sort(data_.begin(), data_.end());
-    idx_to_offsets_.resize(total_num_rows_);
-    for (size_t i = 0; i < total_num_rows_; ++i) {
+    SortData();
+    idx_to_offsets_.assign(total_num_rows_, -1);
+    for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
@@ -323,6 +387,13 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     res_set.Append("index_length", index_length, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
     res_set.Append("is_nested_index", is_nested_data, sizeof(bool));
+    if (is_array_field_ || is_nested_index_) {
+        const auto bytes = valid_bitset_.size_in_bytes();
+        std::shared_ptr<uint8_t[]> validity(new uint8_t[bytes]);
+        milvus::fastmem::FastMemcpy(
+            validity.get(), valid_bitset_.data(), bytes);
+        res_set.Append("valid_bitset", validity, bytes);
+    }
 
     milvus::Disassemble(res_set);
 
@@ -442,8 +513,10 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
             load_priority);
     } else {
         data_.resize(index_size);
-        milvus::fastmem::FastMemcpy(
-            data_.data(), index_data->data.get(), (size_t)index_data->size);
+        if (index_data->size != 0) {
+            milvus::fastmem::FastMemcpy(
+                data_.data(), index_data->data.get(), (size_t)index_data->size);
+        }
     }
 
     setup_data_pointers();
@@ -457,7 +530,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         total_num_rows_ = index_size;
     }
 
-    idx_to_offsets_.resize(total_num_rows_);
+    idx_to_offsets_.assign(total_num_rows_, -1);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
 
     for (size_t i = 0; i < Size(); ++i) {
@@ -467,6 +540,14 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     }
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
     idx_to_offsets_size_ = idx_to_offsets_.size();
+
+    if (index_binary.Contains("valid_bitset")) {
+        const auto validity = index_binary.GetByName("valid_bitset");
+        AssertInfo(validity->size == valid_bitset_.size_in_bytes(),
+                   "invalid ScalarIndexSort validity bitmap size");
+        milvus::fastmem::FastMemcpy(
+            valid_bitset_.data(), validity->data.get(), validity->size);
+    }
 
     is_built_ = true;
     ComputeByteSize();
@@ -512,7 +593,7 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
 
     auto visit = [&](int32_t row) { bitset[row] = true; };
     auto validate = [](const T target, const auto& entry) {
-        if (entry.a_ != target) {
+        if (!ScalarEqual(entry.a_, target)) {
             LOG_ERROR(
                 "error happens in ScalarIndexSort<T>::In, "
                 "expected value is: {}, but real value is: {}",
@@ -534,7 +615,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
 
     auto visit = [&](int32_t row) { bitset[row] = false; };
     auto validate = [](const T target, const auto& entry) {
-        if (entry.a_ != target) {
+        if (!ScalarEqual(entry.a_, target)) {
             LOG_ERROR(
                 "error happens in ScalarIndexSort<T>::NotIn, "
                 "expected value is: {}, but real value is: {}",
@@ -594,7 +675,7 @@ ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
@@ -623,8 +704,8 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
                           const T& upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
-    if (lower_bound_value > upper_bound_value ||
-        (lower_bound_value == upper_bound_value &&
+    if (ScalarGreater(lower_bound_value, upper_bound_value) ||
+        (ScalarEqual(lower_bound_value, upper_bound_value) &&
          !(lb_inclusive && ub_inclusive))) {
         TargetBitmap bitset(Count());
         return bitset;
@@ -653,7 +734,7 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
     size_t hit_count = ub - lb;
     size_t total_count = Count();
 
-    if (hit_count > total_count / 2) {
+    if ((!is_array_field_ || is_nested_index_) && hit_count > total_count / 2) {
         // Most elements are in range, initialize with `valid_bitset_` and set non-matching to false
         TargetBitmap bitset = valid_bitset_.clone();
         // Set elements before lb to false
@@ -678,6 +759,9 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 template <typename T>
 std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
+    if (is_array_field_ && !is_nested_index_) {
+        return std::nullopt;
+    }
     AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
@@ -685,6 +769,12 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
         return std::nullopt;
     }
     auto offset = idx_to_offsets_ptr_[idx];
+    if (offset < 0 || static_cast<size_t>(offset) >= size_) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid ScalarIndexSort offset {} for row {}",
+                  offset,
+                  idx);
+    }
     return operator[](offset).a_;
 }
 
@@ -699,24 +789,24 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
         bool shouldSkip = false;
         switch (op) {
             case OpType::LessThan: {
-                shouldSkip = upper_value <= lower_bound->a_;
+                shouldSkip = ScalarLessEqual(upper_value, lower_bound->a_);
                 break;
             }
             case OpType::LessEqual: {
-                shouldSkip = upper_value < lower_bound->a_;
+                shouldSkip = ScalarLess(upper_value, lower_bound->a_);
                 break;
             }
             case OpType::GreaterThan: {
-                shouldSkip = lower_value >= upper_bound->a_;
+                shouldSkip = ScalarGreaterEqual(lower_value, upper_bound->a_);
                 break;
             }
             case OpType::GreaterEqual: {
-                shouldSkip = lower_value > upper_bound->a_;
+                shouldSkip = ScalarGreater(lower_value, upper_bound->a_);
                 break;
             }
             case OpType::Range: {
-                shouldSkip = (lower_value > upper_bound->a_) ||
-                             (upper_value < lower_bound->a_);
+                shouldSkip = (ScalarGreater(lower_value, upper_bound->a_)) ||
+                             (ScalarLess(upper_value, lower_bound->a_));
                 break;
             }
             default:
@@ -860,7 +950,7 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
                 context->offsets_file, 0, context->offsets_bytes}});
     } else {
         context->offsets =
-            std::make_shared<std::vector<int32_t>>(context->total_num_rows);
+            std::make_shared<std::vector<int32_t>>(context->total_num_rows, -1);
         plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::MemoryEntryTarget{
@@ -959,7 +1049,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         }
     } else {
         new_valid_bitset = TargetBitmap(context->total_num_rows, false);
-        new_offsets.resize(context->total_num_rows);
+        new_offsets.assign(context->total_num_rows, -1);
         auto* index_data =
             context->is_mmap
                 ? reinterpret_cast<const IndexStructure<T>*>(new_mmap_data)
@@ -1188,7 +1278,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                reader.Directory().HasEntry("valid_bitset")) {
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
-        idx_to_offsets_.resize(total_num_rows_);
+        idx_to_offsets_.assign(total_num_rows_, -1);
         size_t wo = 0;
         reader.ReadEntryStream(
             "idx_to_offsets", [&](const uint8_t* d, size_t len) {
@@ -1208,7 +1298,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         load_valid_bitset();
     } else {
         // Backward compat: recompute from index_data
-        idx_to_offsets_.resize(total_num_rows_);
+        idx_to_offsets_.assign(total_num_rows_, -1);
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
         for (size_t i = 0; i < Size(); ++i) {
             const auto& item = operator[](i);

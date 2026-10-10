@@ -28,6 +28,7 @@
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
 #include "common/Schema.h"
+#include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "index/IndexFactory.h"
@@ -1151,6 +1152,27 @@ class SegmentLoadInfo {
         }
     }
 
+    static bool
+    NeedsNaNTotalOrder(const LoadIndexInfo& info) {
+        auto is_float = [](DataType type) {
+            return type == DataType::FLOAT || type == DataType::DOUBLE;
+        };
+        if (is_float(info.field_type) || (info.field_type == DataType::ARRAY &&
+                                          is_float(info.element_type))) {
+            return true;
+        }
+        if (info.field_type == DataType::JSON) {
+            auto cast = info.index_params.find(JSON_CAST_TYPE);
+            if (cast == info.index_params.end()) {
+                return true;
+            }
+            auto type = JsonCastType::FromString(cast->second).element_type();
+            return type == JsonCastType::DataType::DOUBLE ||
+                   type == JsonCastType::DataType::JSON;
+        }
+        return false;
+    }
+
     void
     BuildCache() {
         BuildFieldBinlogCache();
@@ -1169,9 +1191,28 @@ class SegmentLoadInfo {
             if (!HasFieldInSchema(field_id)) {
                 continue;
             }
-            field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
+            // Old floating indexes may have split NaN terms, unordered SORT
+            // entries, or BITMAP keys that merged NaN with an ordinary value.
+            // Loading raw data is the only lossless common fallback. The normal
+            // scalar-version upgrade rebuilds them with canonical NaN keys.
+            if (index_info.current_scalar_index_version() <
+                    milvus::index::kMinScalarIndexVersionForNaNTotalOrder &&
+                NeedsNaNTotalOrder(load_index_info)) {
+                auto cast =
+                    load_index_info.index_params.find(JSON_CAST_FUNCTION);
+                if (load_index_info.field_type == DataType::JSON &&
+                    cast != load_index_info.index_params.end() &&
+                    !cast->second.empty()) {
+                    ThrowInfo(Unsupported,
+                              "JSON cast indexes below scalar engine version 6 "
+                              "must be rebuilt before loading; raw JSON does "
+                              "not apply the index-time cast");
+                }
+                continue;
+            }
+            field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto index_type_it =
                 load_index_info.index_params.find(milvus::index::INDEX_TYPE);
             auto scalar_version_it = load_index_info.index_params.find(

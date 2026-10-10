@@ -1026,3 +1026,37 @@ TEST_F(SkipIndexStatsBuilderTest,
         field_id, 1, OpType::Equal, int64_t(105)))
         << "out-of-range chunk ids must conservatively remain readable";
 }
+
+TEST(FloatFieldChunkMetricsTest, SqlNaNOrderAndIncompleteParquetBounds) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    // Raw statistics include NaN as the maximum, so a finite > predicate
+    // cannot skip a chunk that contains a NaN row.
+    FloatFieldChunkMetrics<double> complete(3.0, nan);
+    EXPECT_FALSE(complete.CanSkipUnaryRange(OpType::GreaterThan, 9.0));
+    EXPECT_FALSE(complete.CanSkipUnaryRange(OpType::Equal, nan));
+    EXPECT_FALSE(complete.CanSkipIn({nan}));
+    EXPECT_TRUE(complete.CanSkipUnaryRange(OpType::LessThan, 3.0));
+    // Parquet min/max may describe [NaN, 3] as [3, 3]. Preserve NaN
+    // candidates, while keeping useful finite equality/range pruning.
+    FloatFieldChunkMetrics<double> incomplete(3.0, 3.0, true);
+    EXPECT_FALSE(incomplete.CanSkipUnaryRange(OpType::GreaterThan, 9.0));
+    EXPECT_FALSE(incomplete.CanSkipUnaryRange(OpType::Equal, nan));
+    EXPECT_FALSE(incomplete.CanSkipPreparedIn(PreparedInQuery({nan})));
+    EXPECT_FALSE(incomplete.CanSkipBinaryRange(9.0, nan, true, true));
+    EXPECT_TRUE(incomplete.CanSkipUnaryRange(OpType::Equal, 9.0));
+    EXPECT_TRUE(incomplete.CanSkipBinaryRange(9.0, 10.0, true, true));
+    auto cloned = incomplete.Clone();
+    EXPECT_FALSE(cloned->CanSkipUnaryRange(OpType::GreaterThan, 9.0));
+}
+
+TEST(FloatFieldChunkMetricsTest, NaNInQueryBoundsNeverPruneMatchingChunk) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const FloatFieldChunkMetrics<double> all_nan(nan, nan);
+    const FloatFieldChunkMetrics<double> all_three(3.0, 3.0);
+    for (const auto& values :
+         std::vector<std::vector<Metrics>>{{nan, 3.0}, {3.0, nan}}) {
+        const PreparedInQuery query(values);
+        EXPECT_FALSE(all_nan.CanSkipPreparedIn(query));
+        EXPECT_FALSE(all_three.CanSkipPreparedIn(query));
+    }
+}

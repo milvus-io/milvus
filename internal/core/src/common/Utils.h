@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <fcntl.h>
 #include "common/FastMem.h"
 #include <fmt/core.h>
@@ -480,17 +481,7 @@ class Defer {
 template <typename T>
 FOLLY_ALWAYS_INLINE int
 comparePrimitiveAsc(const T& left, const T& right) {
-    if constexpr (std::is_floating_point<T>::value) {
-        bool leftNan = std::isnan(left);
-        bool rightNan = std::isnan(right);
-        if (leftNan) {
-            return rightNan ? 0 : 1;
-        }
-        if (rightNan) {
-            return -1;
-        }
-    }
-    return left < right ? -1 : left == right ? 0 : 1;
+    return ScalarLess(left, right) ? -1 : ScalarEqual(left, right) ? 0 : 1;
 }
 
 inline std::string

@@ -337,28 +337,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand ==
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarEqual(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand ==
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarEqual(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand ==
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarEqual(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand ==
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarEqual(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) == val);
+                            ScalarEqual(safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -367,28 +367,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) == val);
+                        BinaryArithRangeJSONCompare(ScalarEqual(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) == val);
+                        BinaryArithRangeJSONCompare(ScalarEqual(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) == val);
+                        BinaryArithRangeJSONCompare(ScalarEqual(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) == val);
+                        BinaryArithRangeJSONCompare(ScalarEqual(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) == val);
+                        BinaryArithRangeJSONCompare(ScalarEqual(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -403,28 +403,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::NotEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand !=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            !ScalarEqual(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand !=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            !ScalarEqual(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand !=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            !ScalarEqual(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand !=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            !ScalarEqual(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) != val);
+                            !ScalarEqual(safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -433,28 +433,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) != val);
+                        BinaryArithRangeJSONCompare(!ScalarEqual(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) != val);
+                        BinaryArithRangeJSONCompare(!ScalarEqual(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) != val);
+                        BinaryArithRangeJSONCompare(!ScalarEqual(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) != val);
+                        BinaryArithRangeJSONCompare(!ScalarEqual(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) != val);
+                        BinaryArithRangeJSONCompare(!ScalarEqual(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -469,28 +469,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand >
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreater(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand >
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreater(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand >
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreater(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand >
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreater(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -499,28 +499,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) > val);
+                        BinaryArithRangeJSONCompare(ScalarGreater(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -535,28 +535,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::GreaterEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand >=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreaterEqual(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand >=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreaterEqual(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand >=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreaterEqual(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand >=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarGreaterEqual(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -565,28 +565,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) >= val);
+                        BinaryArithRangeJSONCompare(ScalarGreaterEqual(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -601,28 +601,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand <
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLess(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand <
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLess(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand <
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLess(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand <
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLess(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) < val);
+                            ScalarLess(safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -631,28 +631,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) < val);
+                        BinaryArithRangeJSONCompare(ScalarLess(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) < val);
+                        BinaryArithRangeJSONCompare(ScalarLess(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) < val);
+                        BinaryArithRangeJSONCompare(ScalarLess(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) < val);
+                        BinaryArithRangeJSONCompare(ScalarLess(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) < val);
+                        BinaryArithRangeJSONCompare(ScalarLess(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -667,28 +667,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             case proto::plan::OpType::LessEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeJSONCompare(json_v + right_operand <=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLessEqual(json_v + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeJSONCompare(json_v - right_operand <=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLessEqual(json_v - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeJSONCompare(json_v * right_operand <=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLessEqual(json_v * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeJSONCompare(json_v / right_operand <=
-                                                    val);
+                        BinaryArithRangeJSONCompare(
+                            ScalarLessEqual(json_v / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeJSONCompare(
-                            safe_mod(json_v, right_operand) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            safe_mod(json_v, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -697,28 +697,28 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) & int64_t(right_operand)) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            (int64_t(json_v) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) | int64_t(right_operand)) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            (int64_t(json_v) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) ^ int64_t(right_operand)) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            (int64_t(json_v) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) << int64_t(right_operand)) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            (int64_t(json_v) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeJSONCompare(
-                            (int64_t(json_v) >> int64_t(right_operand)) <= val);
+                        BinaryArithRangeJSONCompare(ScalarLessEqual(
+                            (int64_t(json_v) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -821,7 +821,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                 valid_res[i] = false;                                     \
                 continue;                                                 \
             }                                                             \
-            if (index >= data[offset].length()) {                         \
+            if (index >= data[offset].length() ||                         \
+                !data[offset].is_element_valid(index)) {                  \
                 res[i] = false;                                           \
                 valid_res[i] = false;                                     \
                 continue;                                                 \
@@ -854,54 +855,54 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand ==
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarEqual(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand ==
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarEqual(value - right_operand, val));
 
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand ==
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarEqual(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand ==
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarEqual(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) == val);
+                            ScalarEqual(safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) == val);
+                        BinaryArithRangeArrayCompare(ScalarEqual(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) == val);
+                        BinaryArithRangeArrayCompare(ScalarEqual(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) == val);
+                        BinaryArithRangeArrayCompare(ScalarEqual(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) == val);
+                        BinaryArithRangeArrayCompare(ScalarEqual(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) == val);
+                        BinaryArithRangeArrayCompare(ScalarEqual(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -916,53 +917,53 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::NotEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand !=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            !ScalarEqual(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand !=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            !ScalarEqual(value - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand !=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            !ScalarEqual(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand !=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            !ScalarEqual(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) != val);
+                            !ScalarEqual(safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) != val);
+                        BinaryArithRangeArrayCompare(!ScalarEqual(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) != val);
+                        BinaryArithRangeArrayCompare(!ScalarEqual(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) != val);
+                        BinaryArithRangeArrayCompare(!ScalarEqual(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) != val);
+                        BinaryArithRangeArrayCompare(!ScalarEqual(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) != val);
+                        BinaryArithRangeArrayCompare(!ScalarEqual(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -977,53 +978,53 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::GreaterThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreater(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreater(value - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreater(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreater(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) > val);
+                            ScalarGreater(safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) > val);
+                        BinaryArithRangeArrayCompare(ScalarGreater(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) > val);
+                        BinaryArithRangeArrayCompare(ScalarGreater(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) > val);
+                        BinaryArithRangeArrayCompare(ScalarGreater(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) > val);
+                        BinaryArithRangeArrayCompare(ScalarGreater(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) > val);
+                        BinaryArithRangeArrayCompare(ScalarGreater(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -1038,53 +1039,53 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::GreaterEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreaterEqual(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreaterEqual(value - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreaterEqual(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarGreaterEqual(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) >= val);
+                        BinaryArithRangeArrayCompare(ScalarGreaterEqual(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -1099,53 +1100,53 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::LessThan: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLess(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLess(value - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLess(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLess(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) < val);
+                            ScalarLess(safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) < val);
+                        BinaryArithRangeArrayCompare(ScalarLess(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) < val);
+                        BinaryArithRangeArrayCompare(ScalarLess(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) < val);
+                        BinaryArithRangeArrayCompare(ScalarLess(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) < val);
+                        BinaryArithRangeArrayCompare(ScalarLess(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) < val);
+                        BinaryArithRangeArrayCompare(ScalarLess(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:
@@ -1160,53 +1161,53 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             case proto::plan::OpType::LessEqual: {
                 switch (arith_type) {
                     case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLessEqual(value + right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLessEqual(value - right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLessEqual(value * right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <=
-                                                     val);
+                        BinaryArithRangeArrayCompare(
+                            ScalarLessEqual(value / right_operand, val));
                         break;
                     }
                     case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            safe_mod(value, right_operand), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            (int64_t(value) & int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            (int64_t(value) | int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            (int64_t(value) ^ int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shl: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) << int64_t(right_operand)) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            (int64_t(value) << int64_t(right_operand)), val));
                         break;
                     }
                     case proto::plan::ArithOpType::Shr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) >> int64_t(right_operand)) <= val);
+                        BinaryArithRangeArrayCompare(ScalarLessEqual(
+                            (int64_t(value) >> int64_t(right_operand)), val));
                         break;
                     }
                     default:

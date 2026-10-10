@@ -17,11 +17,13 @@
 package json
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -748,8 +750,6 @@ func (suite *RowParserSuite) TestParseError() {
 			{name: "parse error int16", content: suite.genAllTypesRowData("int16", 0.2)},
 			{name: "parse error int32", content: suite.genAllTypesRowData("int32", 0.2)},
 			{name: "parse error int64", content: suite.genAllTypesRowData("int64", 0.2)},
-			{name: "invalid float", content: suite.genAllTypesRowData("float", "Infinity")},
-			{name: "invalid double", content: suite.genAllTypesRowData("double", "NaN")},
 			{name: "type error float_vector", content: suite.genAllTypesRowData("float_vector", "illegal")},
 			{name: "element parse error float_vector", content: suite.genAllTypesRowData("float_vector", []any{false, true})},
 			{name: "type error bin_vector", content: suite.genAllTypesRowData("bin_vector", "illegal")},
@@ -1110,4 +1110,54 @@ func TestParseTextFieldValue(t *testing.T) {
 	val, ok := result[int64(101)]
 	assert.True(t, ok)
 	assert.Equal(t, longText, val)
+}
+
+func TestTypedFloatingNonFiniteImport(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 2, Name: "f", DataType: schemapb.DataType_Float},
+			{FieldID: 3, Name: "d", DataType: schemapb.DataType_Double},
+			{
+				FieldID: 4, Name: "af", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}},
+			},
+			{
+				FieldID: 5, Name: "ad", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 100, Name: "objects",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID: 101, Name: "objects[score]",
+				DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "8"}},
+			}},
+		}},
+	}
+	parser, err := NewRowParser(schema)
+	require.NoError(t, err)
+	var input map[string]any
+	reader := json.NewDecoder(strings.NewReader(`{"id":1,"f":"NaN","d":"Infinity","af":["NaN","Infinity","-Infinity"],"ad":["NaN","Infinity","-Infinity"],"objects":[{"score":"NaN"},{"score":"Infinity"},{"score":"-Infinity"}]}`))
+	reader.UseNumber()
+	require.NoError(t, reader.Decode(&input))
+	row, err := parser.Parse(input)
+	require.NoError(t, err)
+	require.True(t, math.IsNaN(float64(row[2].(float32))))
+	require.True(t, math.IsInf(row[3].(float64), 1))
+	for _, id := range []int64{4, 5, 101} {
+		scalar := row[id].(*schemapb.ScalarField)
+		values := scalar.GetDoubleData().GetData()
+		if id != 5 {
+			values = nil
+			for _, value := range scalar.GetFloatData().GetData() {
+				values = append(values, float64(value))
+			}
+		}
+		require.Len(t, values, 3)
+		assert.True(t, math.IsNaN(values[0]))
+		assert.True(t, math.IsInf(values[1], 1))
+		assert.True(t, math.IsInf(values[2], -1))
+	}
 }

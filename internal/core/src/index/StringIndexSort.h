@@ -288,6 +288,13 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                        TargetBitmap& valid_bitset,
                        std::vector<int32_t>& idx_to_offsets);
 
+    // Ordinary arrays use parent row IDs, unlike flattened nested indexes.
+    void
+    BuildFromArrayData(const std::vector<FieldDataPtr>& field_datas,
+                       size_t total_num_rows,
+                       TargetBitmap& valid_bitset,
+                       std::vector<int32_t>& idx_to_offsets);
+
     void
     BuildFromArrayDataNested(const std::vector<FieldDataPtr>& field_datas,
                              size_t total_num_rows,
