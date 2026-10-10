@@ -91,11 +91,16 @@ type legacyClient struct {
 	queryStreamChunkBytes  int
 }
 
+// prefetchedReduceStream retains the first Search CHUNK consumed during Execute to check
+// whether stream creation can be retried before the stream is handed to PostExecute.
+// Its first Recv returns that CHUNK; later calls delegate to the underlying ReduceStream.
 type prefetchedReduceStream struct {
 	stream     searchutil.ReduceStream
 	firstChunk *internalpb.SearchResults
 }
 
+// prefetchedQueryReduceStream provides the same Execute-to-PostExecute handoff for Query.
+// Its first Recv returns the retained first CHUNK; later calls delegate to the underlying ReduceStream.
 type prefetchedQueryReduceStream struct {
 	stream     queryutil.ReduceStream
 	firstChunk *internalpb.RetrieveResults
