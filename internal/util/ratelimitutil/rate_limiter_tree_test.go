@@ -18,6 +18,7 @@ package ratelimitutil
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,7 +106,7 @@ func TestRateLimiterNodeCheck(t *testing.T) {
 	t.Run("quota exceed", func(t *testing.T) {
 		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
 		limitNode.limiters.Insert(internalpb.RateType_DMLInsert, ratelimitutil.NewLimiter(0, 0))
-		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		err := limitNode.Check(internalpb.RateType_DMLInsert, 10)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 	})
@@ -127,7 +128,7 @@ func TestRateLimiterNodeCheck(t *testing.T) {
 func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 	t.Run("write", func(t *testing.T) {
 		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
-		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DMLInsert)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
@@ -136,7 +137,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 
 	t.Run("read", func(t *testing.T) {
 		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
-		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToRead, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToRead, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DQLSearch)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
@@ -145,7 +146,7 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 
 	t.Run("ddl", func(t *testing.T) {
 		limitNode := NewRateLimiterNode(internalpb.RateScope_Database)
-		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToDDL, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
+		limitNode.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToDDL, &QuotaStateInfo{ErrorCode: commonpb.ErrorCode_ForceDeny})
 		err := limitNode.GetQuotaExceededError(internalpb.RateType_DDLCollection)
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		// reference: ratelimitutil.GetQuotaErrorString(errCode)
@@ -158,6 +159,35 @@ func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
 		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 		assert.True(t, strings.Contains(err.Error(), "rate type"))
 	})
+}
+
+func TestRateLimiterNodeConcurrentQuotaStatePublication(t *testing.T) {
+	limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+
+	const iterations = 1000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			quotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]()
+			quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, &QuotaStateInfo{
+				ErrorCode: commonpb.ErrorCode_ForceDeny,
+			})
+			limitNode.SetQuotaStates(quotaStates)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_ = limitNode.GetQuotaExceededError(internalpb.RateType_DMLInsert)
+			TraverseRateLimiterTree(limitNode, nil,
+				func(_ *RateLimiterNode, _ milvuspb.QuotaState, _ commonpb.ErrorCode, _ string) bool {
+					return true
+				})
+		}
+	}()
+	wg.Wait()
 }
 
 func TestRateLimiterTreeClearInvalidLimiterNode(t *testing.T) {
