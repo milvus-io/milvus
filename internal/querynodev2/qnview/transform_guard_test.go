@@ -154,7 +154,11 @@ func TestQueuedLoadRetainsReplayRangeAfterOriginatingViewDrops(t *testing.T) {
 			require.Eventually(t, func() bool {
 				physical.mu.Lock()
 				defer physical.mu.Unlock()
-				return physical.views[second] != nil
+				// Acquire records the reference synchronously, before replacing
+				// its borrowed replay guard. Wait for activation so this test
+				// exercises a surviving view with its own frontier installed.
+				ref := physical.views[second]
+				return ref != nil && ref.collectionGuard != nil
 			}, time.Second, time.Millisecond)
 			dropped := make(chan struct{})
 			manager.Release(ReleaseSegments{Key: first, OnDropped: func() { close(dropped) }})
