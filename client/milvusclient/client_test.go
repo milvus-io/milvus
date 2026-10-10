@@ -36,6 +36,36 @@ func (s *ClientSuite) TestNewClient() {
 		s.Error(err)
 		s.T().Log(err)
 	})
+
+	s.Run("add_tcp_scheme", func() {
+		c, err := New(ctx,
+			&ClientConfig{
+				Address: "xxxxx:19530",
+				DialOptions: []grpc.DialOption{
+					grpc.WithBlock(),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithContextDialer(s.mockDialer),
+				},
+			})
+		s.NoError(err)
+		s.NotNil(c)
+		s.Equal("tcp", c.config.parsedAddress.Scheme)
+	})
+
+	s.Run("use_provided_scheme", func() {
+		c, err := New(ctx,
+			&ClientConfig{
+				Address: "xds://xxxxx:19530",
+				DialOptions: []grpc.DialOption{
+					grpc.WithBlock(),
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithContextDialer(s.mockDialer),
+				},
+			})
+		s.NoError(err)
+		s.NotNil(c)
+		s.Equal("xds", c.config.parsedAddress.Scheme)
+	})
 }
 
 func TestClient(t *testing.T) {
