@@ -415,10 +415,11 @@ LoadState(bool use_async,
     std::shared_ptr<storage::LocalDirectory> staging;
     {
         auto local_io = [&] {
+            // A heap load still stages its trie file under the given parent.
             const auto staging_root =
-                effective.enable_mmap
-                    ? effective.mmap_dir
-                    : std::filesystem::temp_directory_path().string();
+                effective.mmap_dir.empty()
+                    ? std::filesystem::temp_directory_path().string()
+                    : effective.mmap_dir;
 
             staging = storage::LocalDirectory::CreateOwned(
                 staging_root, "marisa_XXXXXX", "marisa");
@@ -720,9 +721,9 @@ MarisaIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
                                        opts,
                                        plan,
                                        state->str_ids_bytes / sizeof(int64_t));
-    const auto root = state->effective.enable_mmap
-                          ? state->effective.mmap_dir
-                          : std::filesystem::temp_directory_path().string();
+    const auto root = state->effective.mmap_dir.empty()
+                          ? std::filesystem::temp_directory_path().string()
+                          : state->effective.mmap_dir;
     state->directory =
         storage::LocalDirectory::CreateOwned(root, "marisa_XXXXXX", "marisa");
     state->trie_path = state->directory->Path() + "/" + MARISA_TRIE_INDEX;
