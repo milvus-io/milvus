@@ -13,9 +13,7 @@
   - `internal/core/src/common/QueryResult.h`
   - `internal/querynodev2/tasks/search_task.go`
 - Related documents:
-  - [Chinese version](./20260720-segment-reopen-request-read-lease-drain-design_zh.md)
   - [Segment Reopen Atomic Read & Update with Copy-on-Write](./20260627-segment-reopen-atomic-read-update-cow.md)
-  - [Segment Reopen Review Page](./20260627-segment-reopen-generation-review/index.html)
 
 ---
 
