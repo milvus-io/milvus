@@ -445,3 +445,27 @@ func TestShuffleShardLeaders(t *testing.T) {
 // 		}
 // 	})
 // }
+
+// TestFilterByResourceGroup pins the contract of the one reader of
+// NodeInfo.ResourceGroup: an empty scope is the absence of a filter and hands
+// the input back untouched; a named scope keeps exactly the leaders whose
+// replica lives there; and an unknown tag (an old coordinator) never matches a
+// named group -- it must not be mistaken for "no resource group" and admitted.
+func TestFilterByResourceGroup(t *testing.T) {
+	leaders := []NodeInfo{
+		{NodeID: 1, ResourceGroup: "rg-a"},
+		{NodeID: 2, ResourceGroup: "rg-b"},
+		{NodeID: 3, ResourceGroup: ""}, // unknown
+		{NodeID: 4, ResourceGroup: "rg-b"},
+	}
+
+	unscoped := FilterByResourceGroup(leaders, "")
+	assert.Equal(t, leaders, unscoped, "an empty scope is the absence of a filter")
+
+	scoped := FilterByResourceGroup(leaders, "rg-b")
+	assert.Equal(t, []NodeInfo{{NodeID: 2, ResourceGroup: "rg-b"}, {NodeID: 4, ResourceGroup: "rg-b"}}, scoped)
+
+	assert.Empty(t, FilterByResourceGroup(leaders, "rg-c"), "a group with no leader on this channel is empty, not an error here")
+	assert.Empty(t, FilterByResourceGroup([]NodeInfo{{NodeID: 3}}, "rg-b"), "an unknown tag never matches a named group")
+	assert.Empty(t, FilterByResourceGroup(nil, "rg-b"))
+}
