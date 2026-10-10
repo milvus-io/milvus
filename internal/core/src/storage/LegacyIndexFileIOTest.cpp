@@ -28,6 +28,7 @@
 #include <gtest/gtest.h>
 #include <map>
 #include <numeric>
+#include <optional>
 
 namespace milvus::storage {
 namespace {
@@ -347,6 +348,61 @@ TEST_F(LegacyIndexFileIOTest, LocalSizeAndReadsRunOnLocalFilePool) {
     Run(StreamLegacyIndexFileAsync(*input, info, target, kPriority));
     EXPECT_EQ(output, expected);
 }
+// Remote ChunkManagers implement only whole-object reads.
+class WholeObjectChunkManager : public LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+    uint64_t
+    Read(const std::string&, uint64_t, void*, uint64_t) override {
+        ThrowInfo(NotImplemented, "Read with offset not implement");
+    }
+};
+
+TEST_F(LegacyIndexFileIOTest, SyncInspectOpensObjectsLikeAsyncInspect) {
+    test::TmpPath directory;
+    auto manager =
+        std::make_shared<WholeObjectChunkManager>(directory.get().string());
+    const auto path = (directory.get() / "legacy").string();
+    std::vector<uint8_t> payload(DefaultStreamSliceSize() + 7);
+    std::iota(payload.begin(), payload.end(), uint8_t{0});
+    auto encoded = Encode(payload);
+    manager->Write(path, encoded.data(), encoded.size());
+    auto local = std::make_shared<arrow::fs::LocalFileSystem>();
+    for (const auto& fs : {milvus_storage::ArrowFileSystemPtr{},
+                           milvus_storage::ArrowFileSystemPtr{local}}) {
+        try {
+            InspectLegacyIndexFile(manager, fs, path, kPriority);
+            FAIL() << "expected the ChunkManager to serve ranges";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), NotImplemented);
+        }
+    }
+    const milvus_storage::ArrowFileSystemPtr remote =
+        std::make_shared<arrow::fs::SubTreeFileSystem>("", local);
+    const auto info = InspectLegacyIndexFile(manager, remote, path, kPriority);
+    auto input = Open(encoded);
+    const auto expected = Run(InspectLegacyIndexFileAsync(*input, kPriority));
+    EXPECT_EQ(info.file_bytes, expected.file_bytes);
+    EXPECT_EQ(info.payload_bytes, expected.payload_bytes);
+    EXPECT_EQ(info.payload_offset, expected.payload_offset);
+    EXPECT_EQ(info.max_transient_bytes, expected.max_transient_bytes);
+    EXPECT_EQ(info.raw_payload, expected.raw_payload);
+    const auto missing = path + ".missing";
+    std::optional<ErrorCode> async_code;
+    try {
+        Run(OpenLegacyIndexInputAsync(manager, remote, missing));
+        FAIL() << "expected a missing object";
+    } catch (const SegcoreError& error) {
+        async_code = error.get_error_code();
+    }
+    try {
+        InspectLegacyIndexFile(manager, remote, missing, kPriority);
+        FAIL() << "expected a missing object";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), async_code);
+    }
+}
+
 class FailingSizeFile : public test::AsyncTrackingRandomAccessFile {
  public:
     explicit FailingSizeFile(ErrorCode code)

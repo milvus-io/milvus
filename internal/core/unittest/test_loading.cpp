@@ -52,6 +52,8 @@ EstimateLoadIndexResourceChecked(CLoadIndexInfo c_load_index_info) {
 using Param =
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>;
 
+using milvus::index::kScalarIndexFixedResidentBytes;
+
 class IndexLoadTest : public ::testing::TestWithParam<Param> {
  protected:
     void
@@ -217,87 +219,91 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"field_type", "string"}},
         // Legacy sort loads reserve a staging copy, including string sorts;
         // the reservation is transient and final_disk_cost remains zero.
-        {2UL * 1024 * 1024 * 1024,
+        {2UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          0UL,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "STL_SORT"},
          {"mmap", "true"},
          {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         0UL,
+         kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "false"}, {"field_type", "string"}},
-        {2UL * 1024 * 1024 * 1024,
+        {2UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          0UL,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "true"}, {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         0UL,
+         kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
          {"mmap", "false"},
          {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "INVERTED"},
          {"mmap", "true"},
          {"field_type", "string"}},
-        {1 * 1024 * 1024 * 1024,
+        {1 * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1 * 1024 * 1024 * 1024,
-         0,
+         kScalarIndexFixedResidentBytes,
          1 * 1024 * 1024 * 1024,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "NGRAM"}, {"mmap", "false"}, {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          0UL,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "NGRAM"}, {"mmap", "true"}, {"field_type", "string"}},
-        {1 * 1024 * 1024 * 1024,
+        {1 * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1 * 1024 * 1024 * 1024,
-         0,
+         kScalarIndexFixedResidentBytes,
          1 * 1024 * 1024 * 1024,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "false"}, {"field_type", "string"}},
-        {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
+        {2UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
+         0UL,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
+         0UL,
+         false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
         // Input, decoded Roaring, and two overlapping frozen output buffers.
         // Unknown row count reserves all 2^16 containers (64 bytes each),
         // plus the Roaring object rounded up to the 32-byte frozen alignment.
-        {4UL * 1024 * 1024 * 1024 +
-              2 * milvus::index::kBitmapFrozenBatchBytes +
+        {4UL * 1024 * 1024 * 1024 + 2 * milvus::index::kBitmapFrozenBatchBytes +
              3 * ((1UL << 16) * 64 +
-                  ((sizeof(roaring::Roaring) + 31) / 32) * 32),
+                  ((sizeof(roaring::Roaring) + 31) / 32) * 32) +
+             kScalarIndexFixedResidentBytes,
          2UL * 1024 * 1024 * 1024,
-         0UL,
+         kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
          false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "HYBRID"}, {"mmap", "true"}, {"field_type", "string"}},
-        {2UL * 1024 * 1024 * 1024,
+        {2UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+         1UL * 1024 * 1024 * 1024 + kScalarIndexFixedResidentBytes,
          1UL * 1024 * 1024 * 1024,
          false}),
     // VECTOR_ARRAY + HNSW (FLAT): keep field data resident for struct offsets
@@ -500,7 +506,8 @@ TEST(IndexLoadTest, SegmentAdmissionEstimateDoesNotOpenScalarV3File) {
 
     auto request = EstimateLoadIndexResourceChecked(&loadIndexInfo);
 
-    EXPECT_EQ(request.final_memory_cost, kIndexSize);
+    EXPECT_EQ(request.final_memory_cost,
+              kIndexSize + kScalarIndexFixedResidentBytes);
     EXPECT_EQ(request.final_disk_cost, 0);
     EXPECT_TRUE(request.max_memory_cost >= request.final_memory_cost);
 }
@@ -541,10 +548,12 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
         milvus::storage::EntryStreamTransientBytes(
             milvus::storage::MaxEntryStreamTaskBytes(), false));
 
-    ASSERT_EQ(request.final_memory_cost, kLegacyAuxBytes);
+    ASSERT_EQ(request.final_memory_cost,
+              kLegacyAuxBytes + kScalarIndexFixedResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
     ASSERT_EQ(request.max_memory_cost,
-              kLegacyAuxBytes + stream_memory_overhead);
+              kLegacyAuxBytes + kScalarIndexFixedResidentBytes +
+                  stream_memory_overhead);
     ASSERT_EQ(request.max_disk_cost, kIndexSize);
     ASSERT_TRUE(request.has_raw_data);
 }
@@ -585,10 +594,12 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
         milvus::storage::EntryStreamTransientBytes(
             milvus::storage::MaxEntryStreamTaskBytes(), false));
 
-    ASSERT_EQ(request.final_memory_cost, kIndexSize + kLegacyAuxBytes);
+    ASSERT_EQ(request.final_memory_cost,
+              kIndexSize + kLegacyAuxBytes + kScalarIndexFixedResidentBytes);
     ASSERT_EQ(request.final_disk_cost, 0);
     ASSERT_EQ(request.max_memory_cost,
-              kIndexSize + kLegacyAuxBytes + stream_memory_overhead);
+              kIndexSize + kLegacyAuxBytes + kScalarIndexFixedResidentBytes +
+                  stream_memory_overhead);
     ASSERT_EQ(request.max_disk_cost, 0);
     ASSERT_TRUE(request.has_raw_data);
 }
@@ -630,10 +641,12 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
         milvus::storage::EntryStreamTransientBytes(
             milvus::storage::MaxEntryStreamTaskBytes(), false));
 
-    ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
+    ASSERT_EQ(request.final_memory_cost,
+              kLegacyCsrResidentBytes + kScalarIndexFixedResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
     ASSERT_EQ(request.max_memory_cost,
-              kLegacyCsrPeakBytes + stream_memory_overhead);
+              kLegacyCsrPeakBytes + kScalarIndexFixedResidentBytes +
+                  stream_memory_overhead);
     ASSERT_EQ(request.max_disk_cost, kIndexSize);
     ASSERT_TRUE(request.has_raw_data);
 }

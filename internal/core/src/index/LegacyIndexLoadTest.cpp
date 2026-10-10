@@ -24,6 +24,7 @@
 #include <map>
 #include <numeric>
 #include "arrow/filesystem/localfs.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "common/Geometry.h"
 #include "common/OpContext.h"
 #include "common/Slice.h"
@@ -283,6 +284,52 @@ TEST_F(LegacyIndexLoadTest, SyncSizeReadsOnlyHeadersAndDoesNotCachePayload) {
     const std::vector<uint8_t> actual((std::istreambuf_iterator<char>(input)),
                                       {});
     EXPECT_EQ(actual, payload);
+    sink.ReleaseLocalStaging();
+}
+
+// Remote ChunkManagers implement only whole-object reads.
+class WholeObjectLegacyChunkManager final : public storage::LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+    uint64_t
+    Read(const std::string& path, void* data, uint64_t bytes) override {
+        ++whole_reads;
+        // LocalChunkManager's whole read dispatches to the virtual range read.
+        return LocalChunkManager::Read(path, 0, data, bytes);
+    }
+    uint64_t
+    Read(const std::string&, uint64_t, void*, uint64_t) override {
+        ThrowInfo(NotImplemented, "Read with offset not implement");
+    }
+    std::atomic<size_t> whole_reads{0};
+};
+
+TEST_F(LegacyIndexLoadTest, SyncSizeReadsHeadersThroughRemoteFilesystem) {
+    FILE_SLICE_SIZE.store(1024 * 1024);
+    auto manager = std::make_shared<WholeObjectLegacyChunkManager>(
+        context_.chunkManagerPtr->GetRootPath());
+    context_.chunkManagerPtr = manager;
+    storage::V1DiskSink sink(context_);
+    std::vector<uint8_t> payload(64 * 1024, 23);
+    sink.WriteEntry("payload", payload.data(), payload.size());
+    const auto stats = sink.Finish();
+    std::vector<std::string> paths;
+    for (const auto& file : stats.Files()) paths.push_back(file.file_name);
+    ASSERT_EQ(paths.size(), 1);
+    // A local filesystem keeps the ChunkManager as the range reader.
+    ExpectError(ErrorCode::NotImplemented, [&] {
+        storage::V1RemoteSource source(context_, paths, {});
+        source.EntrySize("payload");
+    });
+    context_.fs = std::make_shared<arrow::fs::SubTreeFileSystem>(
+        "", std::make_shared<arrow::fs::LocalFileSystem>());
+    ASSERT_FALSE(milvus_storage::IsLocalFileSystem(context_.fs));
+    storage::V1RemoteSource source(context_, paths, {});
+    manager->whole_reads.store(0);
+    EXPECT_EQ(source.EntrySize("payload"), payload.size());
+    EXPECT_EQ(manager->whole_reads.load(), 0);
+    EXPECT_EQ(source.ReadEntry("payload"), payload);
+    EXPECT_GT(manager->whole_reads.load(), 0);
     sink.ReleaseLocalStaging();
 }
 
