@@ -1,88 +1,112 @@
 # Vector indexes
 
-本目录按查询、构建、产物和加载拆分向量索引对象。共享协议见
-[`contracts/README.md`](../contracts/README.md)，增量写入见
-[`growing/README.md`](../growing/README.md)。拆分职责本身不要求改变 knowhere 算法或持久化格式；
-这不代表尚未接通的实现已经完成行为或性能验证。
+This directory splits vector index objects by query, build, artifact, and load. See
+[`contracts/README.md`](../contracts/README.md) for the shared contracts and
+[`growing/README.md`](../growing/README.md) for incremental writes. Splitting the responsibilities
+does not by itself require changing knowhere algorithms or persisted formats; this does not mean
+that implementations not yet wired in have completed behavior or performance verification.
 
-## 文件与职责
+## Files and responsibilities
 
-| 文件组 | 职责 |
+| File group | Responsibility |
 |---|---|
-| `KnowhereEngine` | 持有 native engine、完整 backing owner 及实际类型、metric、dim、physical/embedding-list 状态 |
-| `VectorIndexValidDataUtils` | nullable 行有效位图的编解码，以及把它发布进 knowhere IdMap（#50524，映射本身由 knowhere 持有） |
-| `contracts/query/IVectorReader.h` | 统一向量查询接口，包含搜索、取值、metadata、nullable、refine 与 embedding-list 操作 |
-| `VectorIndexReader` | 非模板统一 reader；运行时仅区分 memory/disk 搜索外壳与 DiskANN beamwidth，物理类型只在取值 leaf 分派 |
-| `VectorMemBuilder` | `IArtifactBuilder<VectorBuildInput<T>>`，一次接受完整输入，调用方持有 tensor 及 side inputs |
-| `VectorDiskBuilder` | `IArtifactBuilder<PreparedVectorBuildFiles<T>>`，由 knowhere 读取已准备的完整文件 |
-| `VectorMemArtifact` | BinarySet 具名逻辑条目；支持消费已构建 engine/validity 直接生成 reader |
-| `VectorDiskArtifact` | 仅按路径序列化大文件；查询必须经 `VectorDiskLoader` 打开持久化产物 |
-| `VectorMemLoader` | materialize 与 mmap 两种打开方式 |
-| `VectorDiskLoader` | 磁盘索引加载及流式后端对接 |
-| `VectorLoadUtils` / `VectorParamUtils` | 共用整数语法解析，不合并 mem/disk 各自的缺失值、别名与类型策略 |
-| `VectorReaderUtils` | 共用 dense 与 embedding-list 取回流程；不持有 engine 或 reader |
-| `storage::LocalDirectory` | 直接持有 loader/builder 新建的 mmap 或 disk 子目录，不拥有配置的 parent |
-| `RangeSearchParams` | 向量专用的 range-search 参数准备，隔离共享 scalar helper 的依赖 |
-| `VectorFamilies` | 注册无状态 loader 和已接通的 typed builder |
+| `KnowhereEngine` | Holds the native engine, the complete backing owner, and the actual type, metric, dim, and physical/embedding-list state |
+| `VectorIndexValidDataUtils` | Encodes and decodes the nullable row validity bitmap and publishes it into the knowhere IdMap (#50524; the mapping itself is owned by knowhere) |
+| `contracts/query/IVectorReader.h` | Unified vector query interface covering search, value retrieval, metadata, nullable, refine, and embedding-list operations |
+| `VectorIndexReader` | Non-template unified reader; at runtime it distinguishes only the memory/disk search shell and the DiskANN beamwidth, and dispatches on the physical type only at the retrieval leaf |
+| `VectorMemBuilder` | `IArtifactBuilder<VectorBuildInput<T>>`; accepts the complete input in one call, and the caller owns the tensor and side inputs |
+| `VectorDiskBuilder` | `IArtifactBuilder<PreparedVectorBuildFiles<T>>`; knowhere reads the prepared complete files |
+| `VectorMemArtifact` | Named logical BinarySet entries; supports consuming the built engine/validity to produce a reader directly |
+| `VectorDiskArtifact` | Serializes large files by path only; queries must open the persisted artifact through `VectorDiskLoader` |
+| `VectorMemLoader` | Two open modes: materialize and mmap |
+| `VectorDiskLoader` | Disk index loading and integration with streaming backends |
+| `VectorLoadUtils` / `VectorParamUtils` | Shared integer syntax parsing; does not merge the separate mem/disk policies for missing values, aliases, and types |
+| `VectorReaderUtils` | Shared dense and embedding-list retrieval flow; holds no engine or reader |
+| `storage::LocalDirectory` | Directly owns the mmap or disk subdirectory newly created by the loader/builder; does not own the configured parent |
+| `RangeSearchParams` | Vector-specific range-search parameter preparation; isolates the dependency on shared scalar helpers |
+| `VectorFamilies` | Registers the stateless loaders and the wired typed builders |
 
-## 查询与生命周期
+## Query and lifecycle
 
-`VectorIndexReader` 同时继承 `IIndexReaderBase` 与纯查询 mixin `IVectorReader`，并按值持有
-engine/validity。
-`KnowhereEngine` 内的 backing owner 先于 native handle 声明，使 native node 在 mmap 文件或
-FileManager generation 的最终 owner 之前析构。
-搜索只接收 `VectorSearchParams` 的参数、metric、topk、trace；可见性过滤、逻辑/物理坐标转换、
-元素到行的聚合和结果处理由消费者完成。
+`VectorIndexReader` inherits both `IIndexReaderBase` and the query-only mixin `IVectorReader`, and
+holds the engine/validity by value.
+Inside `KnowhereEngine`, the backing owner is declared before the native handle, so the native node
+is destroyed before the final owner of the mmap files or the FileManager generation.
+Search receives only the parameters, metric, topk, and trace from `VectorSearchParams`; visibility
+filtering, logical/physical coordinate translation, element-to-row aggregation, and result
+processing are done by the consumer.
 
-`IVectorReader` 同时提供 metric/dim/knowhere 类型及 iterator 参数准备、借用的 nullable offsets、
-距离重算和 embedding-list 取值。统一接口不代表每个后端或物理类型都支持所有操作；运行时检查
-和原 Unsupported 路径仍是实际能力边界。
-`CoordDomain` 保持 Row：VECTOR_ARRAY 的 element-level search 是单次查询模式，knowhere 返回的 element ID
-由消费者结合该查询的 array offsets 转成 `(row, element)`，不把 reader 的 inventory 坐标永久改成 Element。
+`IVectorReader` also provides the metric/dim/knowhere type and iterator parameter preparation,
+borrowed nullable offsets, distance recomputation, and embedding-list retrieval. A unified interface
+does not mean that every backend or physical type supports every operation; runtime checks and the
+existing Unsupported paths remain the actual capability boundary.
+`CoordDomain` stays Row: element-level search on VECTOR_ARRAY is a per-query mode. The consumer
+converts the element IDs returned by knowhere into `(row, element)` using that query's array
+offsets, and the reader's inventory coordinates are not permanently changed to Element.
 
-Growing reader 在发布时固定物理 Count、nullable mapping 和搜索默认参数。Search/Range 在调用 knowhere
-前用非空 bitset 长度限制可见物理前缀；更短的查询可见前缀仍由消费者提供。共享 live engine 允许
-Add 改变近似搜索的遍历，但旧 reader 不会返回其固定前缀之后的 ID，这属于逻辑前缀 pin，不能表述为
-底层 ANN engine 的物理不可变快照。
+A Growing reader fixes the physical Count, the nullable mapping, and the default search parameters
+when it is published. Before calling knowhere, Search/Range use the length of a non-empty bitset to
+limit the visible physical prefix; a shorter query-visible prefix is still supplied by the consumer.
+The shared live engine allows Add to change the traversal of approximate search, but an older reader
+never returns IDs beyond its fixed prefix. This is a logical prefix pin and must not be described as
+a physically immutable snapshot of the underlying ANN engine.
 
-`Iterators` 返回的 knowhere iterator 不携带 reader pin，而且借用传入 bitset；延后消费的 merge iterator
-还可能保存 reader offset mapping 的裸指针。Growing 消费者必须把同一个 `GrowingIndexSnapshotPin` 和
-物化后的 prefix bitset 与结果一起保活，直到 iterator 消费结束；不能仅靠 iterator 的共享句柄认定生命周期安全。
+The knowhere iterators returned by `Iterators` carry no reader pin and borrow the bitset passed in;
+a merge iterator consumed later may also hold a raw pointer to the reader's offset mapping. A Growing
+consumer must keep the same `GrowingIndexSnapshotPin` and the materialized prefix bitset alive
+together with the results until iterator consumption finishes; the iterator's shared handle alone is
+not enough to conclude that the lifetime is safe.
 
-## 持久化与 IO
+## Persistence and IO
 
-- 内存 Builder 接收完整 tensor、parent validity、可选 embedding offsets 和标量分类组。
-  调用方按 `InputSpec().side_inputs` 预检并交付实际数据；生产输入由物化器持有 compact tensor，
-  Builder 在同步构建期间借用输入，不在其内部再存一份 raw 缓冲。
-- DiskANN 的完整输入文件由调用方保留到同步 Build 结束；输出 staging 单独持有。
-  输入文件与有效性元数据不因 Artifact/Reader 后续存活而被借用。
-- 内存 artifact 写逻辑条目；切片、组装和传输命名属于 source/sink。当前不实现 packed V3 vector 格式。
-- mmap 加载将有序 engine 条目流式拼接到本地文件。embedding-list sidecar 保持独立文件，
-  validity/empty-list 元数据单独解析。FileSource 仅在打开期间借用，reader 必须保留其后备文件。
-- DiskANN 大文件按路径流式处理；仅 V1/V2 DiskFiles index source 可创建 disk-engine handle。
-  loader 先用 LocalFiles handle 探测能力，stream-load 后端再改用限制在 engine inventory 内的
-  RemoteStreams handle；reader 保留最终选中的 handle 及其 FileManager 和本地 generation。
-- `IArtifactBuilder` 以 `Build(input)` 返回完成的 Artifact，Artifact 负责序列化，构建服务编排上传和
-  `FileSink::Finish()`。只有 `VectorMemArtifact` 提供一次性消费转换：engine 与 validity 被移动到独立 reader；
-  `VectorDiskArtifact` 不提供该能力，只能先序列化，再由 `VectorDiskLoader` 打开。
-  本地 staging 的清理由实际持有者负责，不能删除仍被 reader 使用的文件。
+- The in-memory builder receives the complete tensor, parent validity, optional embedding offsets,
+  and scalar category groups. The caller pre-checks against `InputSpec().side_inputs` and delivers
+  the actual data; for production input the materializer owns the compact tensor, and the builder
+  borrows the input during the synchronous build without keeping another raw buffer of its own.
+- The caller keeps DiskANN's complete input files until the synchronous Build finishes; the output
+  staging is owned separately. An Artifact/Reader that lives on afterwards does not borrow the input
+  files or the validity metadata.
+- The in-memory artifact writes logical entries; slicing, assembly, and transport naming belong to
+  the source/sink. The packed V3 vector format is not implemented at present.
+- An mmap load streams the ordered engine entries and concatenates them into a local file.
+  Embedding-list sidecars stay separate files, and validity/empty-list metadata is parsed separately.
+  The FileSource is borrowed only while opening; the reader must retain its backing files.
+- Large DiskANN files are streamed by path; only a V1/V2 DiskFiles index source can create a
+  disk-engine handle. The loader first probes capabilities with a LocalFiles handle, and a
+  stream-load backend then switches to a RemoteStreams handle restricted to the engine inventory;
+  the reader retains the finally selected handle together with its FileManager and local generation.
+- `IArtifactBuilder` returns the finished Artifact from `Build(input)`; the Artifact is responsible
+  for serialization, and the build service orchestrates the upload and `FileSink::Finish()`. Only
+  `VectorMemArtifact` provides a one-shot consuming conversion, in which the engine and validity are
+  moved into an independent reader; `VectorDiskArtifact` does not provide this capability and must
+  first be serialized and then opened by `VectorDiskLoader`.
+  Local staging is cleaned up by its actual owner, which must not delete files still in use by a
+  reader.
 
-## 已知未完成项
+## Known incomplete items
 
-- 完整输入与 typed builder 注册已通过默认配置的 `index_tests` 构建和行为测试；
-  HNSW 标量 side input 已覆盖真实 build/load，DiskANN 标量 sidecar 按后端能力跳过。
-  性能尚未验证。当前不支持的多额外字段和 VECTOR_ARRAY 额外标量字段组合仍会被拒绝。
-- `ReaderCaps` 缺少向量 raw-value/refine 能力位；默认 false 查询位和 exact=true 不能替代完整能力判断。
-- `IVectorReader` 同时提供 dense/sparse getter，磁盘后端的 sparse retrieval 仍返回 Unsupported。
-- reader 的 `MemoryUsage` 和 `CellByteSize` 返回显式记录的 unavailable-zero sentinel，不表示
-  knowhere resident/file footprint 实测为零。`LoadOptions::estimated_bytes` 与
-  `VectorLoadResource`/`IndexLoadResource` 继续负责预加载准入；live sealed translator 和 growing
-  segment 的既有估算与安全系数不变。按 backend 精确拆分原生 memory/file 属于 follow-up，
-  不阻塞当前生产接线验证。
-- Growing owner 的初始 Build、后续 Add 和发布已有 `index_tests` 行为覆盖；consumer 路由
-  还需结合 `all_tests` 的运行结果判断。发布记录固定
-  reader Count、mapping 和 CoveredRowEnd；它与后续 Add 共享 live engine，因此只承诺上述逻辑前缀，
-  不承诺近似 ANN 遍历结果是物理稳定快照。
+- Complete input and typed builder registration pass the `index_tests` build and behavior tests in
+  the default configuration; HNSW scalar side inputs are covered by real build/load, and DiskANN
+  scalar sidecars are skipped according to backend capability.
+  Performance has not been verified. The currently unsupported combinations (multiple extra fields,
+  and VECTOR_ARRAY with extra scalar fields) are still rejected.
+- `ReaderCaps` lacks vector raw-value/refine capability bits; the default-false query bits and
+  exact=true cannot replace a complete capability check.
+- `IVectorReader` provides both dense and sparse getters, and sparse retrieval on the disk backend
+  still returns Unsupported.
+- The reader's `MemoryUsage` and `CellByteSize` return an explicitly recorded unavailable-zero
+  sentinel; this does not mean the knowhere resident/file footprint was measured as zero.
+  `LoadOptions::estimated_bytes` and `VectorLoadResource`/`IndexLoadResource` remain responsible for
+  pre-load admission; the existing estimates and safety factors of the live sealed translator and
+  the growing segment are unchanged. Splitting native memory/file usage exactly by backend is a
+  follow-up and does not block verification of the current production wiring.
+- The Growing owner's initial Build, subsequent Add, and publication have `index_tests` behavior
+  coverage; consumer routing still has to be judged together with the `all_tests` results. A
+  publication record fixes the reader Count, mapping, and CoveredRowEnd; it shares the live engine
+  with later Adds, so it guarantees only the logical prefix described above and does not guarantee
+  that approximate ANN traversal results are a physically stable snapshot.
 
-迁移 TODO 中引用的旧 VectorIndex/VectorMemIndex/VectorDiskIndex 文件位于历史提交 `e255009e01`，
-可通过 `git show e255009e01:internal/core/src/index/<file>` 查阅；上述本地说明不依赖迁移设计文档。
+The old VectorIndex/VectorMemIndex/VectorDiskIndex files referenced in migration TODOs are in the
+historical commit `e255009e01` and can be viewed with
+`git show e255009e01:internal/core/src/index/<file>`; the local notes above do not depend on the
+migration design document.

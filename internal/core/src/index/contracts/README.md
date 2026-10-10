@@ -1,168 +1,222 @@
 # Index contracts
 
-接口行为测试的 case 与边界矩阵见 [TESTING.md](TESTING.md)。
+For the cases and boundary matrix of the interface behavior tests, see [TESTING.md](TESTING.md).
 
-本目录定义索引的查询、构建、加载和 growing 发布接口。持久化边界见
-[`storage/artifact/`](../../storage/artifact/)，growing 实现约束见
-[`index/growing/README.md`](../growing/README.md)。`query/`、`build/`、`growing/`
-只按职责分目录，不增加 namespace 层级；接口位于 `milvus::index`。Loader 与 builder registry
-定义在本目录根部的 `Registry.h` 和 `Registry.cpp`。
+This directory defines the query, build, load, and growing publication interfaces of indexes. The
+persistence boundary is in [`storage/artifact/`](../../storage/artifact/), and constraints on growing
+implementations are in [`index/growing/README.md`](../growing/README.md). `query/`, `build/`, and
+`growing/` split files by responsibility only and add no namespace level; the interfaces live in
+`milvus::index`. The loader and builder registries are defined in `Registry.h` and `Registry.cpp`
+at the root of this directory.
 
-## 生命周期与所有权
+## Lifecycle and ownership
 
-| 对象 | 职责 | 所有权与生命周期 |
+| Object | Responsibility | Ownership and lifetime |
 |---|---|---|
-| `IIndexReaderBase` + 查询 mixin | 查询一个已经打开的索引 | loader 或 Artifact 转换返回 `unique_ptr`；消费者借用查询接口，并让对应 pin 存活 |
-| `IArtifactBuilder<Input>` | 对调用方物化的完整输入执行一次同步构建 | `Build(input) &&` 消费 builder 并返回完成的 Artifact；builder 和 Artifact 均不得保留借用输入 |
-| `storage::Artifact` | 持有一次构建的结果 | 暴露 `Serialize`；具体状态与目标 storage generation 是否可序列化由 family 定义 |
-| `LoaderEntry` | 派生 metadata-only caps，并从持久化数据打开 reader | registry 按值保存静态函数对，不创建无状态 loader 对象 |
-| `IGrowingIndex` + `IAppendable<Batch>` | 接受增量输入并发布可 pin 的读记录 | Segment 唯一持有 owner；`GrowingIndexSnapshotPin` 保留一个发布记录及其依赖 |
+| `IIndexReaderBase` + query mixins | Queries an index that is already open | A loader or an Artifact conversion returns a `unique_ptr`; consumers borrow query interfaces and keep the corresponding pin alive |
+| `IArtifactBuilder<Input>` | Runs one synchronous build over the complete input materialized by the caller | `Build(input) &&` consumes the builder and returns the finished Artifact; neither the builder nor the Artifact may retain the borrowed input |
+| `storage::Artifact` | Holds the result of one build | Exposes `Serialize`; the family defines whether a concrete state can be serialized to a target storage generation |
+| `LoaderEntry` | Derives metadata-only caps and opens a reader from persisted data | The registry stores a pair of static functions by value and creates no stateless loader object |
+| `IGrowingIndex` + `IAppendable<Batch>` | Accepts incremental input and publishes read records that can be pinned | The Segment is the sole holder of the owner; `GrowingIndexSnapshotPin` retains one published record and its dependencies |
 
-一次性 sealed 构建、持久化加载和 growing append 是三个独立生命周期。查询能力是 reader
-对象上的 mixin，不把 reader 的共享所有权交给消费者。
+One-shot sealed builds, persisted loads, and growing appends are three independent lifecycles.
+Query capabilities are mixins on the reader object; they do not give consumers shared ownership of
+the reader.
 
-## 查询接口（`query/`）
+## Query interfaces (`query/`)
 
-| 文件 | 语义 |
+| File | Semantics |
 |---|---|
-| `IIndexReaderBase.h` | 类型擦除基类、坐标域、数量、值类型和资源自描述 |
-| `ReaderCaps.h` | 单个 inventory entry 的 metadata-only 能力描述 |
-| `IScalarPredicateReader.h` | 点查与范围查询；字符串输入为调用期间借用的 `string_view` |
-| `INullReader.h` | 独立于点查的 null 查询；不单设 caps 位 |
-| `IPatternMatchReader.h` | 字符串模式匹配及 typed reader 的 adapter；精确性与每次调用的代价护栏分开表达 |
-| `ITextMatchReader.h` | 分词全文查询；支持 text match 不自动表示支持 null 查询 |
-| `INgramReader.h` | ngram 候选超集；消费者读取原值并精确验证 |
-| `ISpatialReader.h` | MBR 候选超集；消费者用原始 geometry 验证精确关系或距离 |
-| `IScalarValueReader.h` | 反查；`Lookup` 返回拥有数据，`Gather` 回调可短暂借用视图 |
-| `IJsonIndexReader.h` | 把 path/cast 路由到普通 reader，不定义新的谓词语义 |
-| `IVectorReader.h` | 向量搜索、取值、metadata、nullable mapping、refine 与 embedding-list 查询 |
+| `IIndexReaderBase.h` | Type-erased base class, coordinate domain, count, value type, and resource self-description |
+| `ReaderCaps.h` | Metadata-only capability description of a single inventory entry |
+| `IScalarPredicateReader.h` | Point and range queries; string inputs are `string_view`s borrowed for the duration of the call |
+| `INullReader.h` | Null queries, independent of point queries; no separate caps bit |
+| `IPatternMatchReader.h` | String pattern matching and the adapter for typed readers; exactness and the per-call cost guard are expressed separately |
+| `ITextMatchReader.h` | Tokenized full-text queries; supporting text match does not imply supporting null queries |
+| `INgramReader.h` | ngram candidate superset; the consumer reads the raw values and verifies them exactly |
+| `ISpatialReader.h` | MBR candidate superset; the consumer verifies the exact relation or distance against the raw geometry |
+| `IScalarValueReader.h` | Reverse lookup; `Lookup` returns owned data, and the `Gather` callback may briefly borrow views |
+| `IJsonIndexReader.h` | Routes a path/cast to an ordinary reader; defines no new predicate semantics |
+| `IVectorReader.h` | Vector search, value retrieval, metadata, nullable mapping, refine, and embedding-list queries |
 
-具体 reader 非虚继承 `IIndexReaderBase` 和它实际支持的纯查询 mixin；mixin 不继承基类。
-消费者 pin 一次后转换到所需接口，后续查询不依赖具体 family。能力缺失通过 metadata、空 resolve
-结果或明确的 Unsupported 表达；打开失败不能伪装成能力缺失。
+A concrete reader non-virtually inherits `IIndexReaderBase` and the pure query mixins it actually
+supports; mixins do not inherit the base class. A consumer pins once and then converts to the
+required interface; later queries do not depend on the concrete family. A missing capability is
+expressed through metadata, an empty resolve result, or an explicit Unsupported; an open failure
+must not masquerade as a missing capability.
 
-`ReaderCaps` 只描述一个 entry，不能把多个索引的 bit OR 成不存在的 reader。执行路径先使用
-metadata 派生的 caps，打开后再与 `reader.Caps()` 校验。literal 长度等依赖查询输入的判断在
-pin 后调用对应接口完成。
+`ReaderCaps` describes only one entry; the bits of multiple indexes must not be ORed into a reader
+that does not exist. The execution path first uses the caps derived from metadata and, after
+opening, checks them against `reader.Caps()`. Decisions that depend on query input, such as literal
+length, are made by calling the corresponding interface after pinning.
 
-`PatternMatchReaderAdapter<Derived, T>` 可被 typed reader 无条件继承，但主模板是空类；只有
-`T = std::string_view` 的特化继承 `IPatternMatchReader`。因此数值实例即使出现在同一个模板继承
-列表中，也不暴露 pattern-match 能力。
+Typed readers may inherit `PatternMatchReaderAdapter<Derived, T>` unconditionally, but the primary
+template is an empty class; only the `T = std::string_view` specialization inherits
+`IPatternMatchReader`. Numeric instantiations therefore do not expose the pattern-match capability,
+even when they appear in the same template inheritance list.
 
-## 位图、NULL 与覆盖边界
+## Bitmaps, NULL, and coverage boundaries
 
-- 标量查询位图中 1 表示命中，位图尺寸必须恰好等于 reader 的 `Count()`，坐标由
-  `CoordDomain()` 决定。该约定不描述向量搜索结果的形状。
-- `INullReader::IsNull()` 和 `IsNotNull()` 只回答同一个 reader 的精确 `Count()` 与坐标域；
-  reader 不接收消费者的 active row count，也不为自身域外的行合成 validity。
-- 谓词结果用 `(data, valid)` 表示三值逻辑；`UNKNOWN` 是 `(0, 0)`。逻辑 `NOT` 只能翻转
-  valid 行的 data，不能把 `UNKNOWN` 变成命中。
-- growing reader 的 `CoveredRowEnd()` 是 Segment 行坐标中的完整前缀 `[0, covered)`，与
-  `Reader::Count()` 独立。null 行计入 coverage；nested reader 的 element count、已完成的最大
-  offset 或累计 append 数都不能代替 coverage。
-- 消费者负责把 reader 结果拼入查询可见区间 `[0, active)`。对 `[covered, active)`，只有存在
-  语义等价的 raw evaluator 且原始数据可读时，才能精确计算 tail 的 data 和 validity；否则该
-  tail 必须保持 `UNKNOWN (data=0, valid=0)`。候选型操作可以临时把 tail 置为全 1 超集，但仅限
-  后续必然对这些行执行 raw 精确验证的路径，不能直接输出；validity 在任何情况下都不能补 true。
-  并非每种索引操作都有 raw fallback。
-- `IS NULL`、`IS NOT NULL` 和它们外层的 `NOT` 同样遵守该规则。索引未覆盖不等于字段为 NULL
-  或非 NULL；没有精确 raw null evaluator 时，未覆盖行仍为 `UNKNOWN`，三值 `NOT` 后也仍为
-  `UNKNOWN`。
+- In a scalar query bitmap, 1 means a hit. The bitmap size must equal the reader's `Count()`
+  exactly, and coordinates are determined by `CoordDomain()`. This convention does not describe the
+  shape of vector search results.
+- `INullReader::IsNull()` and `IsNotNull()` answer only for the exact `Count()` and coordinate
+  domain of the same reader; the reader does not receive the consumer's active row count and does
+  not synthesize validity for rows outside its own domain.
+- Predicate results express three-valued logic as `(data, valid)`; `UNKNOWN` is `(0, 0)`. Logical
+  `NOT` may flip data only for valid rows and must not turn `UNKNOWN` into a hit.
+- A growing reader's `CoveredRowEnd()` is the complete prefix `[0, covered)` in Segment row
+  coordinates and is independent of `Reader::Count()`. Null rows count toward coverage; a nested
+  reader's element count, the largest completed offset, or the cumulative append count cannot stand
+  in for coverage.
+- The consumer is responsible for splicing reader results into the query-visible range
+  `[0, active)`. For `[covered, active)`, the tail's data and validity can be computed exactly only
+  when a semantically equivalent raw evaluator exists and the raw data is readable; otherwise the
+  tail must remain `UNKNOWN (data=0, valid=0)`. A candidate operation may temporarily set the tail
+  to an all-ones superset, but only on paths that are guaranteed to run exact raw verification on
+  those rows afterwards, and the result must not be output directly; validity must never be filled
+  with true under any circumstances. Not every index operation has a raw fallback.
+- `IS NULL`, `IS NOT NULL`, and an enclosing `NOT` follow the same rule. A row not covered by the
+  index is not thereby NULL or non-NULL; without an exact raw null evaluator, uncovered rows remain
+  `UNKNOWN`, and they are still `UNKNOWN` after a three-valued `NOT`.
 
-## 坐标、值与 JSON
+## Coordinates, values, and JSON
 
-- nested 索引的 `CoordDomain()` 为 `Element`，`Count()` 数元素而非行。索引不持有列 offsets，
-  也不把元素命中折叠为行；执行层使用列 offsets 完成投影并保留各 nullable 层的 validity。
-- `CoordDomain` 只编码 `Row`/`Element`，不编码 nested 深度。多层投影必须逐层组合列 offsets 和
-  validity；缺少任一层投影上下文时必须明确拒绝该路径。
-- 投影位置由查询语义决定。相关 struct 谓词先在同一元素坐标组合，再折叠到行；分别折叠会允许
-  不同元素错误地满足两侧。非相关的 `contains(1) AND contains(2)` 允许不同元素满足，因此各自
-  折叠后再组合。`NOT contains(1)` 是 `not exists i: x[i] == 1`，不是
-  `exists i: x[i] != 1`。
-- 输入视图只在调用期间借用。`owned_t<string_view>` 是 `string`，其余为 `T`；压缩结构可能在
-  调用栈上重建值，因此 `Lookup` 不能返回悬空视图。
-- `JsonResolvedReader` 可以拥有临时 reader 视图或借用子 reader，但两种形式都要求父 reader
-  的 pin 存活。`CastTypesOf(path)` 为空表示不支持该形状；非空且路径在所有行都不存在时，
-  `Exists` 返回全零位图。
-- `CompareOp`、`PatternOp`、`SpatialOp` 使用 contract 本地枚举，plan 或引擎枚举在边界转换。
-  JSON 路由使用 `JsonCastType`，不表示所有 `DataType` 都可用。
+- For a nested index, `CoordDomain()` is `Element`, and `Count()` counts elements rather than rows.
+  The index holds no column offsets and does not fold element hits into rows; the execution layer
+  uses the column offsets to perform the projection and preserves the validity of each nullable
+  level.
+- `CoordDomain` encodes only `Row`/`Element`, not nested depth. A multi-level projection must
+  combine column offsets and validity level by level; if the projection context of any level is
+  missing, that path must be explicitly rejected.
+- Query semantics determine where the projection happens. Correlated struct predicates are first
+  combined at the same element coordinate and then folded to rows; folding them separately would
+  wrongly let different elements satisfy the two sides. The uncorrelated
+  `contains(1) AND contains(2)` allows different elements to satisfy it, so each side is folded
+  first and then combined. `NOT contains(1)` is `not exists i: x[i] == 1`, not
+  `exists i: x[i] != 1`.
+- Input views are borrowed only for the duration of the call. `owned_t<string_view>` is `string`,
+  and every other type is `T`; compressed structures may reconstruct values on the call stack, so
+  `Lookup` must not return a dangling view.
+- `JsonResolvedReader` may own a temporary reader view or borrow a child reader, but both forms
+  require the parent reader's pin to stay alive. An empty `CastTypesOf(path)` means the shape is not
+  supported; when it is non-empty and the path exists in no row, `Exists` returns an all-zero
+  bitmap.
+- `CompareOp`, `PatternOp`, and `SpatialOp` use enums local to the contract; plan or engine enums
+  are converted at the boundary. JSON routing uses `JsonCastType`, which does not mean that every
+  `DataType` is usable.
 
-## 构建、Artifact 与加载
+## Build, Artifact, and load
 
-`IArtifactBuilder<Input>` 按完整输入的物理形状模板化。调用方在读取稳定的
-`BuilderInputSpec` 后一次性物化输入；builder 可以在同步 `Build` 内多次遍历，但不能要求 cursor、
-远端读取或 replay 协议。
+`IArtifactBuilder<Input>` is templated on the physical shape of the complete input. After reading a
+stable `BuilderInputSpec`, the caller materializes the input once; the builder may traverse it
+multiple times within the synchronous `Build`, but must not require a cursor, remote reads, or a
+replay protocol.
 
-- `ScalarBuildInput<T>` 借用稳定的 typed batches；values 与逻辑行对齐并包含 null 行。空
-  validity view 表示全有效，不能被下标访问。字符串和数组的传递后备存储须存活到 Build 结束。
-- `VectorBuildInput<T>` 借用完整的 dense tensor 或 sparse rows，并明确逻辑行数、物理行数、
-  parent validity、可选 embedding offsets 与额外标量分类。有效空列表与 null 行必须可区分。
-  `T` 是 registry/引擎分派标签；sparse span 的元素是 owning `SparseRow`。
-- `PreparedVectorBuildFiles<T>` 借用完整 raw 文件与可选 sidecar。调用方保持输入文件稳定直到
-  Build 返回或抛错；Artifact 的输出 staging 独立拥有。`scalar_info_path` 区分未交付、已交付但
-  无文件、以及实际文件路径三种状态。
+- `ScalarBuildInput<T>` borrows stable typed batches; values are aligned with logical rows and
+  include null rows. An empty validity view means all rows are valid and must not be subscripted.
+  The backing storage passed for strings and arrays must stay alive until Build finishes.
+- `VectorBuildInput<T>` borrows the complete dense tensor or sparse rows and states the logical row
+  count, physical row count, parent validity, optional embedding offsets, and additional scalar
+  categories. A valid empty list and a null row must be distinguishable. `T` is the registry/engine
+  dispatch tag; the elements of a sparse span are owning `SparseRow`s.
+- `PreparedVectorBuildFiles<T>` borrows the complete raw files and optional sidecars. The caller
+  keeps the input files stable until Build returns or throws; the Artifact owns its output staging
+  independently. `scalar_info_path` distinguishes three states: not delivered, delivered without a
+  file, and an actual file path.
 
-Hybrid 在一次 Build 内选择 concrete family，并让该 builder 消费同一个完整输入；调用方无需
-重放或保存第二份完整列。Artifact 记录 selector，加载端先解析 selector，再查找 concrete loader。
+Hybrid selects the concrete family within one Build and has that family's builder consume the same
+complete input; the caller does not need to replay the input or keep a second complete copy of the
+column. The Artifact records the selector; the load side resolves the selector first and then looks
+up the concrete loader.
 
-`storage::Artifact::Serialize(FileSink&)` 只把逻辑 named entries 或本地文件交给 sink；sink 负责
-transport、切片、命名与 publication metadata，上传编排属于调用方。接口存在不代表任意 Artifact
-状态都支持任意 storage generation；不支持的组合必须明确失败。`IReaderConvertible` 是可选的
-消费式能力：`FromArtifact` 接管 Artifact 后检查能力并调用 `IntoReader() &&`，不隐式执行
-serialize/load 或其他 IO。调用方同时需要持久化和直接查询时，必须先完成持久化，再消费 Artifact。
+`storage::Artifact::Serialize(FileSink&)` only hands logical named entries or local files to the
+sink; the sink is responsible for transport, slicing, naming, and publication metadata, and upload
+orchestration belongs to the caller. The existence of the interface does not mean that every
+Artifact state supports every storage generation; unsupported combinations must fail explicitly.
+`IReaderConvertible` is an optional consuming capability: `FromArtifact` takes over the Artifact,
+checks the capability, and calls `IntoReader() &&`, without implicitly performing serialize/load or
+any other IO. A caller that needs both persistence and direct queries must finish persisting before
+consuming the Artifact.
 
-`LoaderEntry::Load` 负责打开持久化 source，再调用 `LoaderEntry::create` 生成内部
-`IndexLoader` 并完成 `Load`。loader 不依赖 builder 或原 Artifact。`FileSource` 负责把逻辑
-entry 解析为 buffer、本地文件或 file-backed handle。
-`PutMeta`/`GetMeta` 保留 JSON 类型；`LoadOptions::params` 是单次加载参数，不由 storage
-持久化或解释。
+`LoaderEntry::Load` opens the persisted source, then calls `LoaderEntry::create` to create the
+internal `IndexLoader` and completes `Load`. The loader does not depend on the builder or the
+original Artifact. `FileSource` resolves a logical entry into a buffer, a local file, or a
+file-backed handle.
+`PutMeta`/`GetMeta` preserve JSON types; `LoadOptions::params` are per-load parameters that storage
+neither persists nor interprets.
 
-Builder/Reader 不接收 Segment、executor、列 cursor 或 `FileManagerContext`。JSON shredding、列
-zone map、元素 offsets 和 segment 级能力聚合也不属于索引查询 contract。向量 contract 可以使用
-knowhere 类型，共享/标量 contract 不增加 knowhere 依赖。
+A Builder/Reader does not receive a Segment, an executor, a column cursor, or a
+`FileManagerContext`. JSON shredding, column zone maps, element offsets, and segment-level
+capability aggregation are not part of the index query contract either. Vector contracts may use
+knowhere types; shared/scalar contracts add no knowhere dependency.
 
-`CellByteSize()` 描述打开 reader 所拥有的 heap 与 file-backed 资源。实现若使用全零 unavailable
-sentinel 或约定的 post-load estimate，必须在其契约中明确；调用方不能把 sentinel 当作实测零，
-也不能按每个 pin 重复计费。`LoadOptions::estimated_bytes` 等加载前准入估算与 reader 打开后的
-所有权计账是两个独立值。
+`CellByteSize()` describes the heap and file-backed resources owned by the opened reader. An
+implementation that uses an all-zero unavailable sentinel or an agreed post-load estimate must state
+this in its contract; callers must not treat the sentinel as a measured zero, nor charge it again
+for every pin. Pre-load admission estimates such as `LoadOptions::estimated_bytes` and the
+ownership accounting after a reader is opened are two independent values.
 
-## Registry 与扩展规则
+## Registry and extension rules
 
-- `LoaderRegistry` 以 family key 保存 `{derive_caps, create}` 静态函数对。`derive_caps` 只读加载
-  metadata，不打开 payload；未知 family 返回空 entry。
-- `BuilderRegistry<Input>` 按完整输入类型隔离 factory。factory 立即解析自己的 typed 参数；
-  registry 不解释 family 参数，也不擦除输入形状。未知 family 或不支持该输入形状时返回空指针。
-- 新 family 在自己的实现 translation unit 注册 builder/loader，并保证该 translation unit 进入最终
-  链接产物。loader 派生的 caps 必须与打开后的 `Reader::Caps()` 一致。
-- 新查询能力应作为独立 mixin；只有路径选择需要在打开前识别的能力才加入 `ReaderCaps`。实现必须
-  同时声明结果是 exact 还是 candidate superset，以及由哪一层完成精确验证。
-- Artifact 的可序列化 generation、可直接转换能力和失败语义由 concrete state 显式定义，不从
-  family 名称推断，也不通过隐藏 IO 补齐。
+- `LoaderRegistry` stores the static function pair `{derive_caps, create}` keyed by family.
+  `derive_caps` reads only the load metadata and does not open the payload; an unknown family
+  returns an empty entry.
+- `BuilderRegistry<Input>` keeps factories separate per complete input type. A factory parses its
+  own typed parameters immediately; the registry neither interprets family parameters nor erases
+  the input shape. An unknown family, or one that does not support the input shape, yields a null
+  pointer.
+- A new family registers its builder/loader in its own implementation translation unit and ensures
+  that this translation unit is included in the final link output. The caps derived by the loader
+  must match `Reader::Caps()` after opening.
+- A new query capability should be a separate mixin; only capabilities that path selection must
+  recognize before opening are added to `ReaderCaps`. The implementation must also declare whether
+  its result is exact or a candidate superset, and which layer performs exact verification.
+- An Artifact's serializable generations, direct-conversion capability, and failure semantics are
+  defined explicitly by the concrete state; they are not inferred from the family name or filled in
+  through hidden IO.
 
-## Growing 发布协议
+## Growing publication protocol
 
-- `IAppendable<Batch>` 是独立的输入 mixin。`ScalarBatch<T>`、`TextBatch`、`VectorBatch<T>` 是
-  调用期间借用的平坦视图，`Append` 返回前必须完成消费或复制。嵌套输入需要显式 offsets/validity。
-- Append 成功表示输入已接受，不表示一定已经发布。写侧负责串行化 append/commit 或满足 family
-  的并发协议；查询正确性只依赖发布记录与 coverage，不依赖具体 family 的提交节奏。
-- 每个发布记录唯一拥有一个 const reader，并原子固定 `Reader::Count()`、`CoveredRowEnd()`、
-  validity/offset mapping 和依赖生命周期。`const` 不自动保证底层引擎不可变或 Add/Search 并发安全。
-- `PinSnapshot()` 只 pin 已发布记录。空 pin 的 coverage 为 0；非空 pin 可复制或移动，移出后为空。
-  reader 引用和 query-interface 指针不能越过 pin 生命周期。获取 pin 时 owner 必须仍受保护，获取后
-  pin 可独立存活。
-- coverage 单调不减且不能跨越行号空洞。发布构造、分配或校验失败不得替换当前记录；旧记录在
-  发布锁外释放，已有 pin 继续保留其 reader 与依赖。
-- `CommitIfNeeded()` 给 interval writer 一个查询前提交点；错误原样传播，不能用旧 pin 掩盖。
-  `Flush()` 是强边界：已经构建的 owner 成功返回时，所有已接受行必须进入发布记录；尚未达到
-  family 构建阈值的 owner 可以保持空 pin。
-- Knowhere 向量首次 cold build 只有在从未发布 engine 且完整 raw source 仍可查询和重试时，才可
-  保留空 pin。engine 建成后的 Add 失败必须传播且不得把失败输入发布；若 Add 已成功而 publication
-  失败，重试只能发布已接受状态，不能再次 Add。
-- 不可变引擎的发布记录固定引擎视图。共享单活 Add/Search 引擎的记录可以观察到后续 ANN 状态，
-  但每个 pin 的逻辑/物理前缀、Count、coverage、mapping 和依赖仍必须固定，且引擎负责并发安全。
-- growing 向量 ANN 只有在 snapshot coverage 包含完整 query-visible 行前缀时才可使用；否则整次
-  查询走 raw vector fallback，不能把 ANN 前缀与未覆盖 tail 拼接。使用 ANN 时，search、iterator、
-  value lookup 和 raw refine 都限制在同一 query-visible 前缀并保留同一个 pin。
-- growing 标量/文本/空间消费者按照“位图、NULL 与覆盖边界”一节合并已覆盖前缀和未覆盖 tail。
-  缺少对应 raw evaluator 时 fail closed 为 `UNKNOWN`，不能假定所有能力都有 raw fallback。
-- growing 初始化、append、commit 和发布不消费 Artifact；发布记录由 `IGrowingIndex` 管理。
+- `IAppendable<Batch>` is a separate input mixin. `ScalarBatch<T>`, `TextBatch`, and
+  `VectorBatch<T>` are flat views borrowed for the duration of the call; they must be fully consumed
+  or copied before `Append` returns. Nested input requires explicit offsets/validity.
+- A successful Append means the input was accepted, not necessarily that it was published. The
+  write side is responsible for serializing append/commit or satisfying the family's concurrency
+  protocol; query correctness depends only on published records and coverage, not on a concrete
+  family's commit cadence.
+- Each published record solely owns one const reader and atomically fixes `Reader::Count()`,
+  `CoveredRowEnd()`, the validity/offset mapping, and the lifetimes of its dependencies. `const`
+  does not by itself guarantee that the underlying engine is immutable or that Add/Search are safe
+  to run concurrently.
+- `PinSnapshot()` pins only an already published record. An empty pin has coverage 0; a non-empty
+  pin can be copied or moved and is empty after being moved from. Reader references and
+  query-interface pointers must not outlive the pin. The owner must still be protected while the pin
+  is acquired; once acquired, the pin can live independently.
+- Coverage is monotonically non-decreasing and cannot cross a hole in row numbers. A failure while
+  constructing, allocating, or validating a publication must not replace the current record; the old
+  record is released outside the publication lock, and existing pins keep their reader and
+  dependencies.
+- `CommitIfNeeded()` gives an interval writer a commit point before a query; errors propagate
+  unchanged and must not be masked by an old pin. `Flush()` is a strong boundary: when it returns
+  successfully for an owner that has already been built, every accepted row must be in a published
+  record; an owner that has not yet reached the family's build threshold may keep an empty pin.
+- For the first cold build of a Knowhere vector index, an empty pin may be kept only if no engine
+  has ever been published and the complete raw source can still be queried and retried. Once the
+  engine is built, an Add failure must propagate and the failed input must not be published; if Add
+  succeeded but publication failed, a retry may only publish the accepted state and must not Add
+  again.
+- A published record of an immutable engine fixes the engine view. A record of a shared, single-live
+  Add/Search engine may observe later ANN state, but each pin's logical/physical prefix, Count,
+  coverage, mapping, and dependencies must still be fixed, and the engine is responsible for
+  concurrency safety.
+- Growing vector ANN may be used only when the snapshot coverage includes the complete
+  query-visible row prefix; otherwise the whole query takes the raw vector fallback, and an ANN
+  prefix must not be spliced with an uncovered tail. When ANN is used, search, iterator, value
+  lookup, and raw refine are all limited to the same query-visible prefix and hold the same pin.
+- Growing scalar/text/spatial consumers merge the covered prefix and the uncovered tail as described
+  in the "Bitmaps, NULL, and coverage boundaries" section. When the corresponding raw evaluator is
+  missing, they fail closed to `UNKNOWN`; they must not assume that every capability has a raw
+  fallback.
+- Growing initialization, append, commit, and publication do not consume an Artifact; published
+  records are managed by `IGrowingIndex`.

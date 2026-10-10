@@ -1,76 +1,99 @@
 # Scalar indexes
 
-本目录实现 sealed scalar index family。`IArtifactBuilder`、Artifact、Loader 和 Reader
-分别负责完整输入构建、构建结果持有与序列化、持久化产物打开和查询；公共代码通过无状态 helper
-与 family 内部模板复用，不建立跨 family 的有状态 builder/reader 基类。
+This directory implements the sealed scalar index families. `IArtifactBuilder`, Artifact, Loader and
+Reader are responsible for building from the complete input, holding and serializing the build
+result, opening persisted artifacts, and querying, respectively. Shared code is reused through
+stateless helpers and family-internal templates; there is no stateful builder/reader base class
+across families.
 
-## 构建、持久化与 Reader
+## Build, persistence and Reader
 
-sealed `IArtifactBuilder` 一次接受完整的 `ScalarBuildInput<T>` 并返回完成的 Artifact。
-`ScalarBuildInput<T>` 借用稳定的 typed batches：values 与逻辑行对齐并包含 null 行，空 validity
-view 表示全有效，字符串等变长值的后备存储须存活到 `Build` 返回。builder 可在同步调用内重复遍历，
-但 builder 和 Artifact 都不得保留借用输入。
+A sealed `IArtifactBuilder` accepts the complete `ScalarBuildInput<T>` in one call and returns a
+completed Artifact. `ScalarBuildInput<T>` borrows stable typed batches: values are aligned with
+logical rows and include null rows, an empty validity view means all rows are valid, and the backing
+storage of variable-length values such as strings must stay alive until `Build` returns. The builder
+may iterate the input repeatedly within the synchronous call, but neither the builder nor the
+Artifact may retain the borrowed input.
 
-Artifact 拥有构建结果并通过 `Serialize` 输出；Loader 从持久化产物独立打开 Reader；Reader 拥有查询
-所需的引擎、映射、后备文件和计账状态。`hybrid/` 在同一次 `Build` 中探测基数，按字段形状、
-nested 状态、版本和低/高基数配置选择 concrete family，再把同一完整输入交给该 family；Hybrid
-Artifact 记录 selector。平台 AUTOINDEX 配置不属于这里的 Hybrid 策略。
+The Artifact owns the build result and emits it through `Serialize`; the Loader opens a Reader
+independently from the persisted artifact; the Reader owns the engine, mappings, backing files and
+accounting state that queries need. `hybrid/` probes cardinality within the same `Build`, selects a
+concrete family by field shape, nested state, version and the low/high-cardinality configuration,
+and then hands the same complete input to that family; the Hybrid Artifact records the selector. The
+platform AUTOINDEX configuration is not part of the Hybrid policy here.
 
-`TextIndexArtifact` 实现可选的消费式 Reader 转换，把完成的 Tantivy engine、null 状态以及需要的
-directory owner 移交给 `TextIndexReader`。转换会消费 Artifact；Hybrid 和 JSON projected Artifact
-只包装选择或投影的序列化状态，不透传该能力。
+`TextIndexArtifact` implements the optional consuming Reader conversion, handing the completed
+Tantivy engine, the null state and the directory owner, when needed, to `TextIndexReader`. The
+conversion consumes the Artifact; Hybrid and JSON projected Artifacts only wrap the serialized state
+of the selection or projection and do not pass this capability through.
 
-同一 family 的数值与字符串 reader 可以共享按值类型模板化的查询流程，并统一继承
-`PatternMatchReaderAdapter<Derived, T>`。adapter 主模板为空；只有 `T = std::string_view` 的特化
-继承 `IPatternMatchReader`，因此数值实例不暴露该接口，`Caps()` 必须与实际继承一致。Bitmap 在
-最终 concrete reader 接入 adapter，Inverted 与 Sorted 在各自 typed reader 接入。
+Numeric and string readers of the same family may share a query flow templated on the value type,
+and all of them inherit `PatternMatchReaderAdapter<Derived, T>`. The adapter's primary template is
+empty; only the `T = std::string_view` specialization inherits `IPatternMatchReader`, so numeric
+instances do not expose that interface, and `Caps()` must match the actual inheritance. Bitmap
+attaches the adapter at its final concrete reader; Inverted and Sorted attach it at their own typed
+readers.
 
-Sorted 使用统一的 `SortedIndexReader<T>`；数值 pair 与字符串 dictionary/posting 的布局、搜索和
-计费分别封装在 type-specific storage view。Bitmap posting key 使用 `owned_t<T>`，字符串查找使用
-透明比较；`Lookup` 返回拥有的值，`Gather` 的 `string_view` 只在同步回调期间有效。
+Sorted uses a single `SortedIndexReader<T>`; the layout, search and accounting of numeric pairs and
+of string dictionary/postings are each encapsulated in a type-specific storage view. Bitmap posting
+keys use `owned_t<T>`, and string lookups use transparent comparison; `Lookup` returns owned values,
+and the `string_view` from `Gather` is valid only during the synchronous callback.
 
-## V3 加载
+## V3 loading
 
-V3 Artifact 直接写入 `IndexEntryWriter`。读取直接使用 `IndexEntryReader` 或
-`AsyncIndexEntryReader`；`FileSink` / `FileSource` 只处理 legacy 文件。
-每个 Loader 的 `PlanPacked` 校验 directory 和 metadata 并指定最终内存/文件目标，
-`FinishPacked` 从已完成的目标创建 Reader。同步和异步入口共用这两步。
-`PackedIndexLoad` 负责读取、CRC、取消后的 drain、目标提交和失败清理；异步文件准备与
-文件型 engine 初始化在 LocalFileIOPool 执行。文件目标提交前由 plan 负责清理，成功后
-由 Reader 的映射/目录 owner 维持生命周期。无文件目标的初始化沿用 async executor。
+V3 Artifacts write directly to `IndexEntryWriter`. Reads use `IndexEntryReader` or
+`AsyncIndexEntryReader` directly; `FileSink` / `FileSource` handle only legacy files.
+Each Loader's `PlanPacked` validates the directory and metadata and assigns the final memory/file
+targets, and `FinishPacked` creates the Reader from the completed targets. The synchronous and
+asynchronous entry points share these two steps. `PackedIndexLoad` handles reads, CRC, draining
+after cancellation, target commit and failure cleanup; asynchronous file preparation and file-backed
+engine initialization run on LocalFileIOPool. Before file targets are committed, the plan is
+responsible for cleaning them up; after success, the Reader's mapping/directory owner keeps them
+alive. Initialization without file targets stays on the async executor.
 
-## Family 边界
+## Family boundaries
 
-- Marisa、FM、Text、Ngram 和 RTree 分别拥有 trie、FM、全文、候选和空间算法对象，不共享有状态
-  concrete Reader 基类。
-- NGRAM 的 `NgramIndexBuilder<T>` 接受 scalar `string_view` 与 `JsonProjectedString` 两种完整输入。
-  两种实例共享 writer core；scalar validity 与 JSON 的 field-null/missing/value 三态各自处理，并有
-  独立 registry 入口。
-- JSON projected Artifact 包装一个普通 scalar Artifact，并序列化 path、cast、row count 和
-  non-exist 状态；加载后由 `JsonPathIndexReader` 路由到内部 typed Reader，外层不直接暴露内部
-  predicate/pattern/ngram mixin。
-- JsonFlat 的 root 与 path Reader 共享不可变 field state；bool、numeric、string path Reader 分别
-  实现布尔范围、跨 int64/double 数值边界和字符串 ownership/pattern routing。
+- Marisa, FM, Text, Ngram and RTree own their trie, FM, full-text, candidate and spatial algorithm
+  objects, respectively, and do not share a stateful concrete Reader base class.
+- NGRAM's `NgramIndexBuilder<T>` accepts two kinds of complete input: scalar `string_view` and
+  `JsonProjectedString`. The two instantiations share the writer core; scalar validity and the JSON
+  field-null/missing/value tri-state are handled separately, and each has its own registry entry.
+- A JSON projected Artifact wraps a plain scalar Artifact and serializes the path, cast, row count
+  and non-exist state; after loading, `JsonPathIndexReader` routes to the inner typed Reader, and the
+  outer layer does not directly expose the inner predicate/pattern/ngram mixins.
+- JsonFlat's root and path Readers share immutable field state; the bool, numeric and string path
+  Readers implement boolean ranges, numeric bounds across int64/double, and string
+  ownership/pattern routing, respectively.
 
-## 参数、存储与资源约束
+## Parameter, storage and resource constraints
 
-- `../ParamUtils.h` 按 `nested`、`is_nested`、`is_nested_index` 顺序读取 nested 别名，并拒绝互相
-  冲突的值。schema/boundary 值是权威值，进入要求 normalized 参数的 Loader 前会写入 canonical
-  runtime keys；Loader 将缺少该内部参数视为契约错误。
-- 参数 helper 只负责别名、一致性和基础类型解码。支持类型、required/default、显式 null 语义以及
-  字段/元素/值类型关系由各 family 定义。布尔参数统一使用 `GetValueFromConfig<bool>`。
-- Bitmap 的 STRING/VARCHAR 判断不包含 TEXT。Sorted 按声明的文件长度完成精确读取，提前 EOF
-  是错误；Bitmap 在自己的格式边界报告 posting 与文件大小溢出。
-- Tantivy family 分别定义保留文件名、sidecar 集合和各 storage generation 的校验。公共文件枚举
-  明确区分普通文件与所有非目录条目；JsonFlat 执行自己的文件集合与 sidecar 冲突校验。
-- 正常路径上的显式 close/unlink 失败必须报告；析构和异常展开期间的清理为 best-effort。Reader
-  必须让文件映射、directory owner 和其他后备资源覆盖查询对象的完整生命周期，并按依赖逆序销毁。
+- `../ParamUtils.h` reads the nested aliases in the order `nested`, `is_nested`, `is_nested_index`
+  and rejects values that conflict with each other. The schema/boundary value is authoritative and
+  is written to the canonical runtime keys before entering a Loader that requires normalized
+  parameters; the Loader treats a missing internal parameter as a contract violation.
+- The parameter helpers handle only aliases, consistency and basic type decoding. Supported types,
+  required/default values, explicit null semantics and field/element/value type relationships are
+  defined by each family. Boolean parameters always use `GetValueFromConfig<bool>`.
+- Bitmap's STRING/VARCHAR check does not include TEXT. Sorted reads exactly the declared file
+  length, and a premature EOF is an error; Bitmap reports posting and file size overflow at its own
+  format boundary.
+- Each Tantivy family defines its own reserved file names, sidecar set and per-storage-generation
+  validation. The shared file enumeration explicitly distinguishes regular files from all
+  non-directory entries; JsonFlat performs its own file-set and sidecar-conflict validation.
+- Explicit close/unlink failures on the normal path must be reported; cleanup during destruction and
+  exception unwinding is best-effort. A Reader must keep file mappings, the directory owner and
+  other backing resources alive for the full lifetime of its query objects, and destroy them in
+  reverse dependency order.
 
-## 阅读顺序
+## Reading order
 
-1. `../ParamUtils.h`：参数别名、一致性检查及规范化整数 `DataType` 解码。
-2. family 的 Params 或 Builder/Loader：支持类型、默认值、null 与字段/元素/值类型关系。
-3. `ScalarIndexUtils.h`：C++ 标量类型映射、类型匹配、字符串赋值及 validity bitmap 构造。
-4. `../../storage/artifact/FileSourceUtils.h`、`LocalFileUtils.h`：文件名、文件枚举、句柄和
-   临时文件生命周期。
-5. family 的 Builder/Artifact/Loader/Reader：输入校验、算法状态、sidecar、序列化、打开与查询。
+1. `../ParamUtils.h`: parameter aliases, consistency checks and normalized integer `DataType`
+   decoding.
+2. The family's Params or Builder/Loader: supported types, defaults, null semantics and
+   field/element/value type relationships.
+3. `ScalarIndexUtils.h`: C++ scalar type mapping, type matching, string assignment and validity
+   bitmap construction.
+4. `../../storage/artifact/FileSourceUtils.h`, `LocalFileUtils.h`: file names, file enumeration,
+   handles and temporary file lifetime.
+5. The family's Builder/Artifact/Loader/Reader: input validation, algorithm state, sidecars,
+   serialization, opening and querying.
