@@ -19,6 +19,7 @@ package grpcclient
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -95,6 +98,57 @@ func TestClientBase_connect(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, errMock))
 	})
+}
+
+func TestClientBase_NodeIDChangesOnExistingConnection(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
+			lis, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			serverID := atomic.NewInt64(10)
+			server := grpc.NewServer(
+				grpc.UnaryInterceptor(interceptor.ServerIDValidationUnaryServerInterceptor(serverID.Load)),
+				grpc.StreamInterceptor(interceptor.ServerIDValidationStreamServerInterceptor(serverID.Load)),
+				grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
+					if err := stream.RecvMsg(&milvuspb.GetComponentStatesRequest{}); err != nil {
+						return err
+					}
+					return stream.SendMsg(&milvuspb.ComponentStates{})
+				}),
+			)
+			rootcoordpb.RegisterRootCoordServer(server, &mockCompressionServer{})
+			go func() { _ = server.Serve(lis) }()
+			t.Cleanup(server.Stop)
+
+			base := ClientBase[rootcoordpb.RootCoordClient]{
+				ClientMaxRecvSize: 1 << 20,
+				ClientMaxSendSize: 1 << 20,
+				DialTimeout:       5 * time.Second,
+			}
+			base.SetNodeID(serverID.Load())
+			base.SetGetAddrFunc(func() (string, error) { return lis.Addr().String(), nil })
+			base.SetNewGrpcClientFunc(rootcoordpb.NewRootCoordClient)
+			t.Cleanup(func() { assert.NoError(t, base.Close()) })
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			require.NoError(t, base.connect(ctx))
+
+			for _, id := range []int64{10, 11} {
+				serverID.Store(id)
+				base.SetNodeID(id)
+				if !streaming {
+					_, err := base.grpcClient.client.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{})
+					require.NoError(t, err, "RPC after updating NodeID to %d", id)
+					continue
+				}
+				stream, err := base.grpcClient.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/test.ServerID/Stream")
+				require.NoError(t, err)
+				require.NoError(t, stream.SendMsg(&milvuspb.GetComponentStatesRequest{}))
+				require.NoError(t, stream.CloseSend())
+				require.NoError(t, stream.RecvMsg(&milvuspb.ComponentStates{}), "stream after updating NodeID to %d", id)
+			}
+		})
+	}
 }
 
 func TestClientBase_NodeSessionNotExist(t *testing.T) {
