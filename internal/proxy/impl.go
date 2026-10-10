@@ -6661,9 +6661,12 @@ func (node *Proxy) AllocTimestamp(ctx context.Context, req *milvuspb.AllocTimest
 }
 
 func (node *Proxy) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
-	// TODO implement me
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetVersionResponse{Status: merr.Status(err)}, nil
+	}
 	return &milvuspb.GetVersionResponse{
-		Status: merr.Success(),
+		Status:  merr.Success(),
+		Version: os.Getenv(metricsinfo.GitBuildTagsEnvKey),
 	}, nil
 }
 

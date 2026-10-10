@@ -249,6 +249,8 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/quotacenter/describe": "GetQuotaMetrics",
 
 	"/v2/vectordb/common/run_analyzer": "RunAnalyzer",
+
+	"/v2/vectordb/server/version": "GetVersion",
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
@@ -427,6 +429,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// common
 	router.POST(CommonCategory+RunAnalyzerAction, timeoutMiddleware(wrapperPost(func() any { return &RunAnalyzerReq{} }, wrapperTraceLog(h.runAnalyzer))))
+
+	// server
+	router.POST(ServerCategory+VersionAction, timeoutMiddleware(wrapperPost(func() any { return &ServerVersionReq{} }, wrapperTraceLog(h.getServerVersion))))
 }
 
 type (
@@ -482,6 +487,12 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 
 		resp, err := v2(ctx, gCtx, req, dbName)
 		methodTag, ok := routeToMethod[gCtx.FullPath()]
+		if val, exists := gCtx.Get(ContextMethodTag); exists {
+			if strVal, ok2 := val.(string); ok2 && strVal != "" {
+				methodTag = strVal
+				ok = true
+			}
+		}
 		if !ok {
 			return
 		}
@@ -4598,5 +4609,68 @@ func (h *HandlersV2) runAnalyzer(ctx context.Context, c *gin.Context, anyReq any
 		})
 	}
 
+	return resp, err
+}
+
+func (h *HandlersV2) getServerVersion(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*ServerVersionReq)
+	detail := httpReq.Detail
+	if !detail {
+		if q := c.Query("detail"); strings.EqualFold(q, "true") || q == "1" {
+			detail = true
+		}
+	}
+
+	if detail {
+		c.Set(ContextMethodTag, "Connect")
+		req := &milvuspb.ConnectRequest{}
+		c.Set(ContextRequest, req)
+		resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Connect", func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.Connect(reqCtx, req.(*milvuspb.ConnectRequest))
+		})
+		if err == nil {
+			connectResp := resp.(*milvuspb.ConnectResponse)
+			serverInfo := connectResp.GetServerInfo()
+			buildTags := ""
+			buildTime := ""
+			gitCommit := ""
+			goVersion := ""
+			deployMode := ""
+			if serverInfo != nil {
+				buildTags = serverInfo.GetBuildTags()
+				buildTime = serverInfo.GetBuildTime()
+				gitCommit = serverInfo.GetGitCommit()
+				goVersion = serverInfo.GetGoVersion()
+				deployMode = serverInfo.GetDeployMode()
+			}
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
+				HTTPReturnData: gin.H{
+					"version":    buildTags,
+					"buildTags":  buildTags,
+					"buildTime":  buildTime,
+					"gitCommit":  gitCommit,
+					"goVersion":  goVersion,
+					"deployMode": deployMode,
+				},
+			})
+		}
+		return resp, err
+	}
+
+	req := &milvuspb.GetVersionRequest{}
+	c.Set(ContextRequest, req)
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetVersion", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetVersion(reqCtx, req.(*milvuspb.GetVersionRequest))
+	})
+	if err == nil {
+		versionResp := resp.(*milvuspb.GetVersionResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{
+				"version": versionResp.GetVersion(),
+			},
+		})
+	}
 	return resp, err
 }

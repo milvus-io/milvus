@@ -7277,3 +7277,130 @@ func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
 
 	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), HTTPHeaderIdempotencyKey)
 }
+
+func TestServerVersionV2(t *testing.T) {
+	path := versionalV2(ServerCategory, VersionAction)
+
+	t.Run("basic version default empty payload", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetVersion(mock.Anything, mock.Anything).Return(&milvuspb.GetVersionResponse{
+			Status:  merr.Success(),
+			Version: "v2.6.11",
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte("{}")))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		assert.Equal(t, "v2.6.11", gjson.Get(w.Body.String(), "data.version").String())
+	})
+
+	t.Run("basic version detail false", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetVersion(mock.Anything, mock.Anything).Return(&milvuspb.GetVersionResponse{
+			Status:  merr.Success(),
+			Version: "v2.6.11",
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"detail": false}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		assert.Equal(t, "v2.6.11", gjson.Get(w.Body.String(), "data.version").String())
+	})
+
+	t.Run("detailed version detail true in body", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().Connect(mock.Anything, mock.Anything).Return(&milvuspb.ConnectResponse{
+			Status: merr.Success(),
+			ServerInfo: &commonpb.ServerInfo{
+				BuildTags:  "v2.6.11",
+				BuildTime:  "2026-02-26",
+				GitCommit:  "abcdef123",
+				GoVersion:  "go1.23",
+				DeployMode: "cluster",
+			},
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"detail": true}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		assert.Equal(t, "v2.6.11", gjson.Get(w.Body.String(), "data.version").String())
+		assert.Equal(t, "v2.6.11", gjson.Get(w.Body.String(), "data.buildTags").String())
+		assert.Equal(t, "2026-02-26", gjson.Get(w.Body.String(), "data.buildTime").String())
+		assert.Equal(t, "abcdef123", gjson.Get(w.Body.String(), "data.gitCommit").String())
+		assert.Equal(t, "go1.23", gjson.Get(w.Body.String(), "data.goVersion").String())
+		assert.Equal(t, "cluster", gjson.Get(w.Body.String(), "data.deployMode").String())
+	})
+
+	t.Run("detailed version detail true in query param", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().Connect(mock.Anything, mock.Anything).Return(&milvuspb.ConnectResponse{
+			Status: merr.Success(),
+			ServerInfo: &commonpb.ServerInfo{
+				BuildTags: "v2.6.11-custom",
+			},
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path+"?detail=true", bytes.NewReader([]byte("{}")))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(0), gjson.Get(w.Body.String(), "code").Int())
+		assert.Equal(t, "v2.6.11-custom", gjson.Get(w.Body.String(), "data.version").String())
+		assert.Equal(t, "v2.6.11-custom", gjson.Get(w.Body.String(), "data.buildTags").String())
+	})
+
+	t.Run("basic version error propagation", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().GetVersion(mock.Anything, mock.Anything).Return(&milvuspb.GetVersionResponse{
+			Status: merr.Status(merr.WrapErrServiceNotReady(1, 1, "test")),
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte("{}")))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(merr.Code(merr.ErrServiceNotReady)), gjson.Get(w.Body.String(), "code").Int())
+	})
+
+	t.Run("detailed version error propagation", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		mp.EXPECT().Connect(mock.Anything, mock.Anything).Return(&milvuspb.ConnectResponse{
+			Status: merr.Status(merr.WrapErrServiceNotReady(1, 1, "test")),
+		}, nil).Once()
+
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{"detail": true}`)))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(merr.Code(merr.ErrServiceNotReady)), gjson.Get(w.Body.String(), "code").Int())
+	})
+
+	t.Run("invalid json body", func(t *testing.T) {
+		mp := mocks.NewMockProxy(t)
+		testEngine := initHTTPServerV2(mp, false)
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte("not json")))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int64(merr.Code(merr.ErrIncorrectParameterFormat)), gjson.Get(w.Body.String(), "code").Int())
+	})
+}

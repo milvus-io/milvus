@@ -69,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1113,6 +1114,28 @@ func TestProxy_ListClientInfos(t *testing.T) {
 		resp, err := node.ListClientInfos(context.TODO(), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxy_GetVersion(t *testing.T) {
+	t.Run("proxy unhealthy", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		resp, err := node.GetVersion(context.TODO(), &milvuspb.GetVersionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		node := &Proxy{}
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		t.Setenv(metricsinfo.GitBuildTagsEnvKey, "v2.6.11")
+
+		resp, err := node.GetVersion(context.TODO(), &milvuspb.GetVersionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, "v2.6.11", resp.GetVersion())
 	})
 }
 
