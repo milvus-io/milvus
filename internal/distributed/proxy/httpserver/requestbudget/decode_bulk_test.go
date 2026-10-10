@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -76,6 +77,50 @@ func TestBufferedLargeBodyStopsDecodeAfterCancellation(t *testing.T) {
 	if oldContext.Err() != context.Canceled || oldInput.read != len(body) || len(oldRequest.Data) != 4096 {
 		t.Fatalf("legacy decoder unexpectedly stopped: context=%v bytes=%d rows=%d", oldContext.Err(), oldInput.read, len(oldRequest.Data))
 	}
+}
+
+func TestConcurrentBufferedBulkWorkersExitAfterCancellation(t *testing.T) {
+	const workers = 8
+	row := `{"text":"` + strings.Repeat("x", 1024) + `"}`
+	body := `{"collectionName":"c","data":[` + strings.Repeat(row+",", 8191) + row + `]}`
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, workers)
+	release := make(chan struct{})
+	done := make(chan error, workers)
+	for range workers {
+		go func() {
+			input := &countingJSONReader{reader: strings.NewReader(body), onRead: func() {
+				started <- struct{}{}
+				<-release
+			}}
+			_, err := DecodeBulkJSON(ctx, input, MaxJSONUnitBytes, MaxJSONBodyBytes, func([]byte) error { return nil })
+			done <- err
+		}()
+	}
+	for range workers {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			cancel()
+			close(release)
+			t.Fatal("workers did not enter body decoding")
+		}
+	}
+	cancel()
+	cutoff := time.Now()
+	close(release)
+	for range workers {
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("worker error = %v, want context canceled", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("worker remained active after cancellation")
+		}
+	}
+	t.Logf("%d buffered-body decode workers exited within %s after cancellation", workers, time.Since(cutoff))
 }
 
 func TestDecodeBulkJSONStopsAfterCanceledRow(t *testing.T) {
