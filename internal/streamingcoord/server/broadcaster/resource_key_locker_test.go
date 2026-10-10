@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -122,6 +123,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		if err == nil {
 			t.Fatal("Second FastLock should have failed")
 		}
+		require.ErrorIs(t, err, errFastLockFailed)
 
 		// After unlock, fast lock should succeed again
 		guards1.Unlock()
@@ -130,6 +132,29 @@ func TestResourceKeyLocker(t *testing.T) {
 			t.Fatalf("FastLock after unlock failed: %v", err)
 		}
 		guards2.Unlock()
+	})
+
+	t.Run("try lock releases partially acquired locks", func(t *testing.T) {
+		locker := newResourceKeyLocker()
+		key1 := message.NewCollectionNameResourceKey("collection_1")
+		key2 := message.NewCollectionNameResourceKey("collection_2")
+
+		guards2 := locker.Lock(key2)
+		guards, ok := locker.TryLock(key1, key2)
+		require.False(t, ok)
+		require.Nil(t, guards)
+
+		// key1 was acquired before TryLock failed on key2, so it must have been released.
+		guards1, ok := locker.TryLock(key1)
+		require.True(t, ok)
+		require.NotNil(t, guards1)
+		guards1.Unlock()
+
+		guards2.Unlock()
+		guards, ok = locker.TryLock(key1, key2)
+		require.True(t, ok)
+		require.NotNil(t, guards)
+		guards.Unlock()
 	})
 }
 

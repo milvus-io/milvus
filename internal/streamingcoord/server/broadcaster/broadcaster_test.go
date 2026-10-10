@@ -86,6 +86,7 @@ func TestBroadcaster(t *testing.T) {
 					[]byte{0x00, 0x00, 0x00}),
 			}, nil
 		}).Times(1)
+	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	done := typeutil.NewConcurrentSet[uint64]()
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, broadcastID uint64, bt *streamingpb.BroadcastTask) error {
 		if ctx.Err() != nil {
@@ -220,6 +221,12 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 
 	streaming.SetWALForTest(operator)
 	return appended
+}
+
+func registerDropCollectionNoopCallbacks() {
+	registry.RegisterDropCollectionV1AckCallback(func(context.Context, message.BroadcastResultDropCollectionMessageV1) error {
+		return nil
+	})
 }
 
 func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) message.BroadcastMutableMessage {
@@ -511,6 +518,7 @@ func TestWithUnreplicableResourceKeys(t *testing.T) {
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 	meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	rc := idalloc.NewMockRootCoordClient(t)
 	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	f.Set(rc)

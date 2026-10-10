@@ -15,7 +15,7 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception i
 3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
 5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
-6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
+6. **Tombstone & GC**: After callbacks complete and TOMBSTONE is persisted, resource locks are released and the caller is unblocked. The task is handed off asynchronously; `tombstoneScheduler` garbage-collects aged-out tasks from the catalog without delaying ACK completion.
 
 ## Idempotent Broadcast
 
@@ -53,6 +53,8 @@ flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel
 before Ack on each business VChannel, and the checker completes the job after
 all channel commits. The RPC is a no-op for new jobs when sent by old nodes.
 See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
+
+GC removes eligible tombstones in batches bounded by `metastore.maxEtcdTxnNum` (default 64), using exact broadcast-task keys. Each successful batch retires its in-memory tasks and advances the queue; failures retain the batch for idempotent retry, including when the deletion result is ambiguous. Late ACKs on TOMBSTONE or DONE tasks are ignored, so GC deletion holds neither task nor manager locks. Manager shutdown cancels an in-flight deletion; recovery only enqueues records still present in the catalog and does not replay their completed callbacks.
 
 ## Resource Key Locking
 
