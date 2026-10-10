@@ -99,6 +99,14 @@ func BenchmarkRetrieve_Int64Scalar(b *testing.B) {
 	}
 }
 
+func BenchmarkRetrieve_SealedSegmentIDs(b *testing.B) {
+	ids := make([]int64, 1000)
+	for i := range ids {
+		ids[i] = 1<<59 + int64(i) // nine-byte positive varints
+	}
+	benchRetrieve(b, &internalpb.RetrieveResults{SealedSegmentIDsRetrieved: ids})
+}
+
 // --- Insert path: InsertRequest (UTF-8 validated) ---
 
 func benchInsert(b *testing.B, ir *milvuspb.InsertRequest) {
@@ -136,6 +144,14 @@ func BenchmarkInsert_Varchar(b *testing.B) {
 func BenchmarkInsert_Vector(b *testing.B) {
 	ir := &milvuspb.InsertRequest{CollectionName: "c", FieldsData: vectorFieldData(1000, 768)}
 	benchInsert(b, ir)
+}
+
+func BenchmarkInsert_HashKeys(b *testing.B) {
+	keys := make([]uint32, 1000)
+	for i := range keys {
+		keys[i] = 0xf0000000 + uint32(i) // five-byte varints
+	}
+	benchInsert(b, &milvuspb.InsertRequest{CollectionName: "c", NumRows: 1000, HashKeys: keys})
 }
 
 // --- Upsert path: UpsertRequest (UTF-8 validated; fields 1-8 fast, 9/10/11 fold) ---
