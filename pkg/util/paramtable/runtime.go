@@ -36,6 +36,7 @@ var (
 	once               sync.Once
 	params             ComponentParam
 	fastPBEnabledState atomic.Bool
+	fastPBUpdateMu     sync.Mutex
 	paramsInitialized  atomic.Bool
 	runtimeParam       = runtimeConfig{
 		components: typeutil.ConcurrentSet[string]{},
@@ -96,13 +97,14 @@ func FastPBEnabled() bool {
 	return fastPBEnabledState.Load()
 }
 
-func storeFastPBEnabled(enabled bool) {
-	fastPBEnabledState.Store(enabled)
-}
-
-func updateFastPBEnabled(_ context.Context, _, _, value string) error {
-	storeFastPBEnabled(getAsBool(value))
-	return nil
+func updateFastPBEnabled() {
+	// Serialize the read and publication so concurrent refreshes cannot publish
+	// an older snapshot after a newer one. RPC decoding only reads the atomic.
+	fastPBUpdateMu.Lock()
+	defer fastPBUpdateMu.Unlock()
+	// Exact-key handlers run before typed-cache eviction. Read the uncached
+	// effective value, including runtime overrides and the default after DELETE.
+	fastPBEnabledState.Store(getAsBool(params.CommonCfg.EnableFastPB.GetValue()))
 }
 
 // RefreshRemoteConfigsLinearizable makes the etcd config source re-read every key with a
