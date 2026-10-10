@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -86,7 +87,8 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			rootPatch := mockey.Mock(binlog.GetRootPath).Return(objectRoot).Build()
 			defer rootPatch.UnPatch()
 			catalog := kvdatacoord.NewCatalog(kv, objectRoot, root)
-			m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+			store := metacache.NewMetaStore(catalog)
+			m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(store), metaStore: store, channelSync: newChannelSync()}
 			handler := &ServerHandler{s: &Server{ctx: ctx, meta: m}}
 			gc := newGarbageCollector(m, handler, GcOption{cli: cli, dropTolerance: 0})
 			defer gc.close()
@@ -96,7 +98,9 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			if tc.marker != "" {
 				require.NoError(t, kv.Save(ctx, markerKey, tc.marker))
 			}
-			m.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}}
+			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+				channel: {ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}},
+			})
 			segment := NewSegmentInfo(&datapb.SegmentInfo{
 				ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: channel,
 				State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L1,
@@ -136,8 +140,16 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					require.Equal(t, uint64(120), persisted[0].GetDmlPosition().GetTimestamp())
 					require.Len(t, persisted[0].GetBinlogs(), 1)
 					// Recover the segment cache from persisted metadata, rather than
-					// relying only on the pre-GC in-memory copy.
-					m.segments = NewSegmentsInfo()
+					// relying only on the pre-GC in-memory copy. A fresh store is
+					// what makes that real: reusing the old one would still hold
+					// the pre-GC segment. The channel checkpoint is re-seeded
+					// because GetDataVChanPositions resolves through it.
+					recovered := metacache.NewMetaStore(catalog)
+					recovered.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+						channel: {ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}},
+					})
+					m.segments = NewSegmentsInfo(recovered)
+					m.metaStore = recovered
 					m.segments.SetSegment(3, NewSegmentInfo(persisted[0]))
 					recovery := handler.GetDataVChanPositions(&channelMeta{Name: channel, CollectionID: 1}, allPartitionID)
 					require.Equal(t, []int64{3}, recovery.GetDroppedSegmentIds())
@@ -171,7 +183,12 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					}
 				}
 				if stillRetained {
-					m.channelCPs.checkpoints[channel].Timestamp = 130
+					// Advance the checkpoint past the segment's DML position.
+					// Goes through m.metaStore because assertState may have
+					// swapped in the recovered store above.
+					m.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+						channel: {ChannelName: channel, Timestamp: 130, MsgID: []byte{1}},
+					})
 					gc.recycleDroppedSegments(ctx, nil)
 					assertState(false)
 					require.Equal(t, 2, markerReads, "checkpoint progress must unblock GC even if marker reads still fail")

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1035,12 +1036,13 @@ func TestSnapshotManager_ListRestoreJobs_FilterByDbID(t *testing.T) {
 	defer mockGetJobBy.UnPatch()
 
 	// Build meta with collections in different databases
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		metaStore: ms,
 	}
-	m.collections.Insert(100, &collectionInfo{ID: 100, DatabaseID: 1})
-	m.collections.Insert(200, &collectionInfo{ID: 200, DatabaseID: 1})
-	m.collections.Insert(300, &collectionInfo{ID: 300, DatabaseID: 2})
+	m.AddCollection(&collectionInfo{ID: 100, DatabaseID: 1})
+	m.AddCollection(&collectionInfo{ID: 200, DatabaseID: 1})
+	m.AddCollection(&collectionInfo{ID: 300, DatabaseID: 2})
 
 	sm := NewSnapshotManager(m, nil, &copySegmentMeta{}, nil, nil, nil, nil, nil)
 
@@ -1904,7 +1906,8 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
 
-	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+	ms := metacache.NewMetaStore(catalog)
+	mt := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(ms), metaStore: ms, channelSync: newChannelSync()}
 	mt.segments.SetSegment(11, NewSegmentInfo(&datapb.SegmentInfo{ID: 11}))
 
 	var err error
@@ -6177,14 +6180,15 @@ func TestRestoreExternalSnapshot_SerializesSameTarget(t *testing.T) {
 // --- Test getDBCollectionIDs ---
 
 func TestSnapshotManager_getDBCollectionIDs(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		metaStore: ms,
 	}
-	m.collections.Insert(1, &collectionInfo{ID: 1, DatabaseID: 10})
-	m.collections.Insert(2, &collectionInfo{ID: 2, DatabaseID: 10})
-	m.collections.Insert(3, &collectionInfo{ID: 3, DatabaseID: 20})
-	m.collections.Insert(4, &collectionInfo{ID: 4, DatabaseID: 10})
-	m.collections.Insert(5, &collectionInfo{ID: 5, DatabaseID: 30})
+	m.AddCollection(&collectionInfo{ID: 1, DatabaseID: 10})
+	m.AddCollection(&collectionInfo{ID: 2, DatabaseID: 10})
+	m.AddCollection(&collectionInfo{ID: 3, DatabaseID: 20})
+	m.AddCollection(&collectionInfo{ID: 4, DatabaseID: 10})
+	m.AddCollection(&collectionInfo{ID: 5, DatabaseID: 30})
 
 	sm := &snapshotManager{
 		meta: m,
@@ -6209,11 +6213,12 @@ func TestSnapshotManager_getDBCollectionIDs(t *testing.T) {
 }
 
 func TestSnapshotManager_getDBCollectionIDs_EmptyResult(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		metaStore: ms,
 	}
-	m.collections.Insert(1, &collectionInfo{ID: 1, DatabaseID: 10})
-	m.collections.Insert(2, &collectionInfo{ID: 2, DatabaseID: 20})
+	m.AddCollection(&collectionInfo{ID: 1, DatabaseID: 10})
+	m.AddCollection(&collectionInfo{ID: 2, DatabaseID: 20})
 
 	sm := &snapshotManager{
 		meta: m,

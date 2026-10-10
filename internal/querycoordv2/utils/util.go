@@ -62,9 +62,12 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 		return merr.WrapErrChannelNotAvailable(leader.Channel, "still catching up streaming data")
 	}
 
-	segmentDist := targetMgr.GetSealedSegmentsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)
+	// Require every segment the target owns, taken from its ID set: a segment
+	// the shared store can no longer resolve must still be accounted for, or a
+	// delegator missing it would be reported ready.
+	segmentIDs := targetMgr.GetSealedSegmentIDsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)
 	// Check whether segments are fully loaded
-	for segmentID := range segmentDist {
+	for segmentID := range segmentIDs {
 		version, exist := leader.Segments[segmentID]
 		if !exist {
 			mlog.RatedInfo(context.TODO(), rate.Limit(10), "leader is not available due to lack of segment", mlog.Int64("segmentID", segmentID))

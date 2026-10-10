@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -71,7 +72,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, broker)
+	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 	s.meta = meta
 

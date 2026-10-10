@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -49,6 +50,9 @@ type rgLoadPercentageFixture struct {
 	dist      *meta.DistributionManager
 	broker    *meta.MockBroker
 	nodeMgr   *session.NodeManager
+	// store is the shared MetaView the TargetManager resolves target
+	// segments from; putTarget registers each target segment here.
+	store metacache.MetaStore
 }
 
 func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
@@ -59,8 +63,9 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 	catalog.On("SaveResourceGroup", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	nodeMgr := session.NewNodeManager()
+	store := metacache.NewMetaStore(nil)
 	m := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(catalog),
+		CollectionManager: meta.NewCollectionManager(catalog, store),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
 		// The surfaces validate rgName against the ResourceManager before
 		// anything else, so the fixture carries one; putReplica registers
@@ -72,10 +77,11 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 
 	return &rgLoadPercentageFixture{
 		meta:      m,
-		targetMgr: meta.NewTargetManager(broker, m),
+		targetMgr: meta.NewTargetManager(broker, m, store),
 		dist:      meta.NewDistributionManager(nodeMgr),
 		broker:    broker,
 		nodeMgr:   nodeMgr,
+		store:     store,
 	}
 }
 
@@ -126,6 +132,9 @@ func (f *rgLoadPercentageFixture) putTarget(t *testing.T, collectionID, partitio
 	}
 	vChannel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
 
+	for _, segment := range segmentInfos {
+		f.store.PutSegment(segment)
+	}
 	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return([]*datapb.VchannelInfo{vChannel}, segmentInfos, nil).Once()
 	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
 }
@@ -752,6 +761,9 @@ func (f *rgLoadPercentageFixture) putTargetTwoPartitions(t *testing.T, collectio
 	}
 	vChannel := &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}
 
+	for _, segment := range segmentInfos {
+		f.store.PutSegment(segment)
+	}
 	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return([]*datapb.VchannelInfo{vChannel}, segmentInfos, nil).Once()
 	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, collectionID))
 }
@@ -806,12 +818,16 @@ func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T
 	require.EqualValues(t, 100, before, "the fixture must start fully loaded")
 
 	// A new segment lands in the next target, as after a flush or compaction.
+	segments := []*datapb.SegmentInfo{
+		{ID: 1, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
+		{ID: 2, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
+	}
+	for _, segment := range segments {
+		f.store.PutSegment(segment)
+	}
 	f.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1500)).Return(
 		[]*datapb.VchannelInfo{{CollectionID: 1500, ChannelName: "1500-dmc0"}},
-		[]*datapb.SegmentInfo{
-			{ID: 1, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
-			{ID: 2, CollectionID: 1500, PartitionID: 15000, InsertChannel: "1500-dmc0"},
-		}, nil).Once()
+		segments, nil).Once()
 	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, 1500))
 
 	after, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1500, "rg-target")

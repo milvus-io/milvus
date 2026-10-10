@@ -329,7 +329,10 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 		if len(currentSegments) > 0 {
 			currentUsage, err = estimateLoadResourceForLoadConfig(
 				ctx,
-				currentSchema(req),
+				// The live DescribeCollection response. This used to prefer a
+				// schema cached on meta.Collection at load time, which was
+				// both a duplicate of DC's copy and staler than this one.
+				req.CollectionInfo.GetSchema(),
 				req.CollectionInfo.GetProperties(),
 				currentSegments,
 				indexes,
@@ -343,13 +346,6 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 	}
 
 	return buildRequiredLoadResourceByRGForLoadConfig(expectedUsage, currentUsage, currentReplicasNumber, req.Expected.ExpectedReplicaNumber), nil
-}
-
-func currentSchema(req *job.AlterLoadConfigRequest) *schemapb.CollectionSchema {
-	if req.Current.Collection != nil && req.Current.Collection.Schema != nil {
-		return req.Current.Collection.Schema
-	}
-	return req.CollectionInfo.GetSchema()
 }
 
 func estimateLoadResourceForLoadConfig(ctx context.Context, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64) (autoscaleResourceUsage, error) {

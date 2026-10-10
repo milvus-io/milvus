@@ -27,9 +27,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -63,6 +65,10 @@ type TargetManagerSuite struct {
 	catalog metastore.QueryCoordCatalog
 	meta    *Meta
 	broker  *MockBroker
+	// store backs the shared metacache.MetaView wired into mgr; tests that
+	// fetch new segments via the mock broker must also mirror them here,
+	// the same way DataCoord would populate the real shared store.
+	store metacache.MetaStore
 	// Test object
 	mgr *TargetManager
 
@@ -122,9 +128,10 @@ func (suite *TargetManagerSuite) SetupTest() {
 	// meta
 	suite.catalog = querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = NewMeta(idAllocator, suite.catalog, session.NewNodeManager())
+	suite.meta = NewMeta(idAllocator, suite.catalog, session.NewNodeManager(), metacache.NewMetaStore(nil))
 	suite.broker = NewMockBroker(suite.T())
-	suite.mgr = NewTargetManager(suite.broker, suite.meta)
+	suite.store = metacache.NewMetaStore(nil)
+	suite.mgr = NewTargetManager(suite.broker, suite.meta, suite.store)
 
 	for _, collection := range suite.collections {
 		dmChannels := make([]*datapb.VchannelInfo, 0)
@@ -146,6 +153,9 @@ func (suite *TargetManagerSuite) SetupTest() {
 					PartitionID:   partitionID,
 				})
 			}
+		}
+		for _, segment := range allSegments {
+			suite.store.PutSegment(segment)
 		}
 		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 
@@ -234,6 +244,9 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
+	for _, segment := range nextTargetSegments {
+		suite.store.PutSegment(segment)
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
@@ -247,6 +260,126 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.NoError(err)
+}
+
+func (suite *TargetManagerSuite) TestUpdateNextTargetSharedStore() {
+	ctx := suite.ctx
+	collectionID := int64(2000)
+
+	store := metacache.NewMetaStore(nil)
+	store.PutSegment(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  collectionID,
+		PartitionID:   10,
+		InsertChannel: "ch-0",
+		NumOfRows:     500,
+		State:         commonpb.SegmentState_Flushed,
+	})
+	suite.mgr = NewTargetManager(suite.broker, suite.meta, store)
+
+	suite.meta.PutCollection(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  10,
+		},
+	})
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID:      collectionID,
+				ChannelName:       "ch-0",
+				FlushedSegmentIds: []int64{1},
+			},
+		},
+		[]*datapb.SegmentInfo{
+			{
+				ID:            1,
+				CollectionID:  collectionID,
+				PartitionID:   10,
+				InsertChannel: "ch-0",
+				NumOfRows:     500,
+			},
+		},
+		nil,
+	)
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.NoError(err)
+
+	seg := suite.mgr.GetSealedSegment(ctx, collectionID, 1, NextTarget)
+	suite.NotNil(seg)
+	suite.EqualValues(500, seg.GetNumOfRows())
+
+	target := suite.mgr.next.getCollectionTarget(collectionID)
+	suite.NotNil(target)
+	suite.True(target.Ready())
+}
+
+// TestUpdateNextTargetUnresolvableSegment verifies that a target keeps its
+// membership when the shared store cannot resolve a segment. The broker's
+// recovery info is what defines the target, so the target is ready and owns
+// the segment even though the store holds nothing; only the resolved details
+// are missing.
+func (suite *TargetManagerSuite) TestUpdateNextTargetUnresolvableSegment() {
+	ctx := suite.ctx
+	collectionID := int64(2001)
+
+	// Empty store: segment 1 will never resolve.
+	store := metacache.NewMetaStore(nil)
+	suite.mgr = NewTargetManager(suite.broker, suite.meta, store)
+
+	suite.meta.PutCollection(ctx, &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  collectionID,
+			ReplicaNumber: 1,
+		},
+	})
+	suite.meta.PutPartition(ctx, &Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  10,
+		},
+	})
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID:      collectionID,
+				ChannelName:       "ch-0",
+				FlushedSegmentIds: []int64{1},
+			},
+		},
+		[]*datapb.SegmentInfo{
+			{
+				ID:            1,
+				CollectionID:  collectionID,
+				PartitionID:   10,
+				InsertChannel: "ch-0",
+				NumOfRows:     500,
+			},
+		},
+		nil,
+	)
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.NoError(err)
+
+	target := suite.mgr.next.getCollectionTarget(collectionID)
+	suite.NotNil(target)
+	suite.True(target.Ready(), "the broker infos define the target, not the store")
+	suite.True(target.ContainSegment(1))
+	suite.Len(target.GetChannelSegmentIDs("ch-0"), 1)
+	suite.Empty(target.GetAllSegments(), "details resolve from the store, which is empty")
+	suite.Zero(target.GetRowCount(), "row counts are summed live from the store")
+	suite.True(suite.mgr.HasSealedSegment(ctx, collectionID, 1, NextTarget))
+	suite.Len(suite.mgr.GetSealedSegmentIDsByCollection(ctx, collectionID, NextTarget), 1)
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
@@ -357,7 +490,8 @@ func (suite *TargetManagerSuite) assertSegments(expected []int64, actual map[int
 func (suite *TargetManagerSuite) TestGetCollectionTargetVersion() {
 	ctx := suite.ctx
 	t1 := time.Now().UnixNano()
-	target := NewCollectionTarget(nil, nil, nil)
+	store := metacache.NewMetaStore(nil)
+	target := NewCollectionTarget(nil, nil, nil, store)
 	t2 := time.Now().UnixNano()
 
 	version := target.GetTargetVersion()
@@ -422,6 +556,9 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 		},
 	}
 
+	for _, segment := range nextTargetSegments {
+		suite.store.PutSegment(segment)
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.Len(suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget), 2)
@@ -621,6 +758,9 @@ func (suite *TargetManagerSuite) TestRecover() {
 		},
 	}
 
+	for _, segment := range nextTargetSegments {
+		suite.store.PutSegment(segment)
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
@@ -654,8 +794,8 @@ func TestRecoverGetTargetsFail(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	broker := NewMockBroker(t)
-	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
-	mgr := NewTargetManager(broker, meta)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager(), metacache.NewMetaStore(nil))
+	mgr := NewTargetManager(broker, meta, metacache.NewMetaStore(nil))
 
 	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
 	mockCatalog.EXPECT().GetCollectionTargets(mock.Anything).Return(nil, errors.New("mock error"))
@@ -668,8 +808,8 @@ func TestRecoverRemoveTargetsFail(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	broker := NewMockBroker(t)
-	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
-	mgr := NewTargetManager(broker, meta)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager(), metacache.NewMetaStore(nil))
+	mgr := NewTargetManager(broker, meta, metacache.NewMetaStore(nil))
 
 	collectionID := int64(2001)
 	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
@@ -700,8 +840,8 @@ func TestRecoverEmptyTargets(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	broker := NewMockBroker(t)
-	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
-	mgr := NewTargetManager(broker, meta)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager(), metacache.NewMetaStore(nil))
+	mgr := NewTargetManager(broker, meta, metacache.NewMetaStore(nil))
 
 	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
 	mockCatalog.EXPECT().GetCollectionTargets(mock.Anything).Return(map[int64]*querypb.CollectionTarget{}, nil)
@@ -755,6 +895,9 @@ func (suite *TargetManagerSuite) TestGetTargetJSON() {
 		},
 	}
 
+	for _, segment := range nextTargetSegments {
+		suite.store.PutSegment(segment)
+	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.NoError(suite.mgr.UpdateCollectionNextTarget(ctx, collectionID))
 	suite.True(suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID))
@@ -920,8 +1063,8 @@ func BenchmarkTargetManager(b *testing.B) {
 
 	catalog := querycoord.NewCatalog(kv)
 	idAllocator := RandomIncrementIDAllocator()
-	meta := NewMeta(idAllocator, catalog, session.NewNodeManager())
-	mgr := NewTargetManager(nil, meta)
+	meta := NewMeta(idAllocator, catalog, session.NewNodeManager(), metacache.NewMetaStore(nil))
+	mgr := NewTargetManager(nil, meta, metacache.NewMetaStore(nil))
 
 	segmentNum := 1000
 	segments := make(map[int64]*datapb.SegmentInfo)
@@ -941,9 +1084,13 @@ func BenchmarkTargetManager(b *testing.B) {
 		},
 	}
 
+	store := metacache.NewMetaStore(nil)
+	for _, seg := range segments {
+		store.PutSegment(seg)
+	}
 	collectionNum := 10000
 	for i := 0; i < collectionNum; i++ {
-		mgr.current.collectionTargetMap.Insert(int64(i), NewCollectionTarget(segments, channels, nil))
+		mgr.current.collectionTargetMap.Insert(int64(i), NewCollectionTarget(segments, channels, nil, store))
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

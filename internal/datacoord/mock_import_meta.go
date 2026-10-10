@@ -782,8 +782,7 @@ func (_c *MockImportMeta_UpdateTask_Call) RunAndReturn(run func(context.Context,
 func NewMockImportMeta(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockImportMeta {
+}) *MockImportMeta {
 	mock := &MockImportMeta{}
 	mock.Mock.Test(t)
 

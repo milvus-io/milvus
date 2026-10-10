@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -92,7 +93,7 @@ func TestUpdateStartPosition(t *testing.T) {
 
 	t.Run("missing segment", func(t *testing.T) {
 		pack := &updateSegmentPack{
-			meta:     &meta{ctx: context.Background(), segments: NewSegmentsInfo()},
+			meta:     &meta{ctx: context.Background(), segments: NewSegmentsInfo(metacache.NewMetaStore(nil))},
 			segments: make(map[int64]*SegmentInfo),
 		}
 		require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{{
@@ -105,8 +106,9 @@ func TestUpdateStartPosition(t *testing.T) {
 func TestUpdateImportSegmentPosition(t *testing.T) {
 	t.Run("segment not found", func(t *testing.T) {
 		// Create a meta with empty segments to properly test the "not found" case
-		segments := NewSegmentsInfo()
-		m := &meta{segments: segments}
+		store := metacache.NewMetaStore(nil)
+		segments := NewSegmentsInfo(store)
+		m := &meta{segments: segments, metaStore: store}
 		modPack := &updateSegmentPack{
 			meta:     m,
 			segments: make(map[int64]*SegmentInfo),
@@ -171,7 +173,7 @@ func TestUpdateImportSegmentPosition(t *testing.T) {
 // Complete data positions must survive a later position-free final commit.
 // A newer growing segment must block only the Deletes that can affect its rows.
 func TestGrowingDataPositionsProtectL0AndSurviveFinalCommit(t *testing.T) {
-	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo()}
+	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo(metacache.NewMetaStore(nil))}
 	segment := NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1, CollectionID: 1, PartitionID: 1, InsertChannel: "ch",
 		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1,

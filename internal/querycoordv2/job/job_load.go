@@ -240,7 +240,6 @@ func (job *LoadCollectionJob) Execute() error {
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
-		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
 	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
