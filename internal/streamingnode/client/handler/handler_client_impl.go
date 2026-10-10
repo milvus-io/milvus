@@ -32,6 +32,7 @@ var (
 )
 
 type handlerClientImpl struct {
+	analyzerClient   AnalyzerClient
 	lifetime         *typeutil.Lifetime
 	service          lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
 	rb               resolver.Builder

@@ -1,6 +1,9 @@
 from typing import Any, Protocol, cast
 
 import pytest
+import requests
+from pymilvus import DataType, Function, FunctionType
+from common import common_func as cf
 from base.client_v2_base import TestMilvusClientV2Base
 from common.common_type import CaseLabel
 from common.text_generator import generate_text_by_analyzer
@@ -425,3 +428,53 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
         assert len(token_list) > 0
         # With empty stop words, no filtering should occur
         assert "is" in token_list  # Common stop word should still be present
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("with_bm25", [False, True])
+    @pytest.mark.parametrize("protocol", ["python", "rest"])
+    def test_field_analyzer_without_query_resources(self, request, with_bm25, protocol):
+        """Field analyzers are WAL resources, available before load and after release."""
+        client = self._client()
+        name = cf.gen_collection_name_by_testcase_name()
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
+        schema.add_field("text", DataType.VARCHAR, max_length=1000,
+                         enable_analyzer=True, analyzer_params={"type": "standard"})
+        if with_bm25:
+            schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
+            schema.add_function(Function(name="bm25", function_type=FunctionType.BM25,
+                                         input_field_names=["text"], output_field_names=["sparse"]))
+        self.create_collection(client, name, schema=schema, shards_num=2)
+
+        def analyze():
+            if protocol == "python":
+                result = client.run_analyzer("Hello world", collection_name=name,
+                                             field_name="text", with_detail=True, with_hash=True)
+                tokens = result.tokens
+            else:
+                endpoint = (f"http://{request.config.getoption('host')}:"
+                            f"{request.config.getoption('http_port')}")
+                response = requests.post(endpoint + "/v2/vectordb/common/run_analyzer",
+                                         json={"text": ["Hello world"], "collectionName": name,
+                                               "fieldName": "text", "withDetail": True, "withHash": True},
+                                         timeout=30)
+                response.raise_for_status()
+                body = response.json()
+                assert body["code"] == 0, body
+                tokens = body["data"]["results"][0]["tokens"]
+            assert [token["token"] for token in tokens] == ["hello", "world"]
+            assert all(token["hash"] for token in tokens)
+
+        # Create without indexes/load; there is no loaded delegator.
+        analyze()
+        indexes = client.prepare_index_params()
+        indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        if with_bm25:
+            indexes.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.create_index(name, indexes)
+        client.load_collection(name)
+        analyze()
+        client.release_collection(name)
+        analyze()
