@@ -59,12 +59,16 @@ struct LegacyIndexFileInfo {
 };
 
 /**
- * @brief Inspect a legacy envelope using synchronous ChunkManager range reads.
- * @note Shares validation and metadata admission with async inspection, but
- * performs I/O inline without depending on an executor. Does not read payloads.
+ * @brief Inspect a legacy envelope using synchronous range reads.
+ * @note Opens the object as OpenLegacyIndexInputAsync does: a remote
+ * filesystem serves the ranges, while a missing or local filesystem uses the
+ * ChunkManager. Shares validation and metadata admission with async
+ * inspection, but performs I/O inline without depending on an executor. Does
+ * not read payloads.
  */
 LegacyIndexFileInfo
 InspectLegacyIndexFile(const ChunkManagerPtr& chunk_manager,
+                       const milvus_storage::ArrowFileSystemPtr& fs,
                        const std::string& path,
                        proto::common::LoadPriority priority,
                        folly::CancellationToken token = {});

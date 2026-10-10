@@ -106,6 +106,14 @@ class LegacyChunkInput final : public milvus::InputStream {
     size_t position_{0};
 };
 
+// Legacy local uploads use ChunkManager paths directly, whereas Arrow's local
+// filesystem is rooted and would prepend its root a second time. Remote
+// ChunkManagers only read whole objects, so a remote filesystem serves ranges.
+bool
+ReadsThroughChunkManager(const milvus_storage::ArrowFileSystemPtr& fs) {
+    return !fs || milvus_storage::IsLocalFileSystem(fs);
+}
+
 void
 CheckFormat(bool valid, const char* message) {
     if (!valid) {
@@ -364,9 +372,7 @@ OpenLegacyIndexInputAsync(const ChunkManagerPtr& chunk_manager,
                           proto::common::LoadPriority priority) {
     const auto token = co_await folly::coro::co_current_cancellation_token;
     ThrowIfCancelled(token, "LegacyIndexFileIO::Open");
-    // Legacy local uploads use ChunkManager paths directly, whereas Arrow's
-    // local filesystem is rooted and would prepend its root a second time.
-    if (!fs || milvus_storage::IsLocalFileSystem(fs)) {
+    if (ReadsThroughChunkManager(fs)) {
         AssertInfo(chunk_manager != nullptr,
                    "Legacy index requires a file source");
         std::shared_ptr<milvus::InputStream> input;
@@ -503,13 +509,25 @@ InspectLegacyIndexFileImpl(milvus::InputStream& input,
 
 LegacyIndexFileInfo
 InspectLegacyIndexFile(const ChunkManagerPtr& chunk_manager,
+                       const milvus_storage::ArrowFileSystemPtr& fs,
                        const std::string& path,
                        proto::common::LoadPriority priority,
                        folly::CancellationToken token) {
     ThrowIfCancelled(token, "LegacyIndexFileIO::Inspect");
-    LegacyChunkInput input(chunk_manager, path);
+    std::unique_ptr<milvus::InputStream> input;
+    if (ReadsThroughChunkManager(fs)) {
+        AssertInfo(chunk_manager != nullptr,
+                   "Legacy index requires a file source");
+        input = std::make_unique<LegacyChunkInput>(chunk_manager, path);
+    } else {
+        auto opened = fs->OpenInputFile(path);
+        if (!opened.ok()) {
+            throw milvus_storage::ToSegcoreError(opened.status());
+        }
+        input = std::make_unique<RemoteInputStream>(std::move(*opened));
+    }
     return folly::coro::blockingWait(
-        InspectLegacyIndexFileImpl(input, priority, std::move(token), false));
+        InspectLegacyIndexFileImpl(*input, priority, std::move(token), false));
 }
 
 folly::coro::Task<LegacyIndexFileInfo>
