@@ -15,6 +15,7 @@ mod util;
 pub(crate) use arabic_normalization_filter::ArabicNormalizationFilter;
 pub(crate) use cn_char_filter::{CnAlphaNumOnlyFilter, CnCharOnlyFilter};
 pub(crate) use decimal_digit_filter::DecimalDigitFilter;
+pub(crate) use stemmer_filter::Stemmer;
 
 use pinyin_filter::PinyinFilter;
 use regex_filter::RegexFilter;
