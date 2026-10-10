@@ -20,9 +20,10 @@ FILE_COVERAGE_INFO="$PWD/go_coverage.txt"
 FILE_COVERAGE_HTML="$PWD/go_coverage.html"
 
 
+set -e
+
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
-
 set -e
 
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}

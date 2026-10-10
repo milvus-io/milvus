@@ -20,6 +20,7 @@ package chain
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -288,7 +289,11 @@ func (o *GroupByOp) processChunk(ctx *types.FuncContext, input *DataFrame, chunk
 	// - same groupScore: larger group first
 	// - same groupScore and size: smaller first id first
 	sort.SliceStable(groups, func(i, j int) bool {
-		if groups[i].groupScore != groups[j].groupScore {
+		iNaN, jNaN := math.IsNaN(float64(groups[i].groupScore)), math.IsNaN(float64(groups[j].groupScore))
+		if iNaN != jNaN {
+			return !iNaN // NaN follows numeric scores in either direction.
+		}
+		if !iNaN && groups[i].groupScore != groups[j].groupScore {
 			if o.sortDescending {
 				return groups[i].groupScore > groups[j].groupScore
 			}
@@ -388,7 +393,11 @@ func (o *GroupByOp) sortAndLimitGroup(g *group) {
 
 	sort.SliceStable(indices, func(i, j int) bool {
 		si, sj := g.scores[indices[i]], g.scores[indices[j]]
-		if si != sj {
+		iNaN, jNaN := math.IsNaN(float64(si)), math.IsNaN(float64(sj))
+		if iNaN != jNaN {
+			return !iNaN // Keep numeric candidates ahead of NaN before trimming.
+		}
+		if !iNaN && si != sj {
 			if o.sortDescending {
 				return si > sj
 			}

@@ -19,6 +19,8 @@
 package tasks
 
 import (
+	"context"
+	"runtime"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,7 +30,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -183,6 +187,78 @@ func TestMarshalReduceResult_GroupBy(t *testing.T) {
 	for _, fd := range data.FieldsData {
 		assert.NotEqual(t, groupByCol, fd.FieldName, "group-by column leaked into FieldsData")
 	}
+}
+
+func TestMarshalReduceResult_ZeroCopyStringsSurviveDataFrameRelease(t *testing.T) {
+	// Production heap-merge results use Go-backed Arrow builders. Exported
+	// strings may share those buffers and must keep them alive after Release.
+	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+
+	idBuilder := array.NewStringBuilder(pool)
+	idBuilder.AppendValues([]string{"pk-1", "pk-2"}, nil)
+	idArr := idBuilder.NewArray()
+	idBuilder.Release()
+
+	scoreBuilder := array.NewFloat32Builder(pool)
+	scoreBuilder.AppendValues([]float32{0.9, 0.8}, nil)
+	scoreArr := scoreBuilder.NewArray()
+	scoreBuilder.Release()
+
+	groupByBuilder := array.NewStringBuilder(pool)
+	groupByBuilder.AppendValues([]string{"red", "blue"}, nil)
+	groupByArr := groupByBuilder.NewArray()
+	groupByBuilder.Release()
+
+	const groupByFieldID = int64(105)
+	groupByColName := groupByColumnName(groupByFieldID)
+	builder := chain.NewDataFrameBuilder()
+	builder.SetChunkSizes([]int64{2})
+	builder.SetFieldType(idFieldName, schemapb.DataType_VarChar)
+	builder.SetFieldNullable(idFieldName, false)
+	require.NoError(t, builder.AddColumnFromChunks(idFieldName, []arrow.Array{idArr}))
+	builder.SetFieldType(scoreFieldName, schemapb.DataType_Float)
+	builder.SetFieldNullable(scoreFieldName, false)
+	require.NoError(t, builder.AddColumnFromChunks(scoreFieldName, []arrow.Array{scoreArr}))
+	builder.SetFieldType(groupByColName, schemapb.DataType_VarChar)
+	builder.SetFieldID(groupByColName, groupByFieldID)
+	builder.SetFieldNullable(groupByColName, false)
+	require.NoError(t, builder.AddColumnFromChunks(groupByColName, []arrow.Array{groupByArr}))
+	df := builder.Build()
+	released := false
+	defer func() {
+		if !released {
+			df.Release()
+		}
+		pool.AssertSize(t, 0)
+	}()
+
+	data, err := marshalReduceResult(&mergeResult{
+		DF:      df,
+		Sources: [][]segmentSource{{{InputIdx: 0}, {InputIdx: 0}}},
+	})
+	require.NoError(t, err)
+
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+	paramtable.Get().Save(key, "true")
+
+	encoded, err := segments.EncodeSearchResultData(context.Background(), data, 1, 2, "IP")
+	require.NoError(t, err)
+	require.NotNil(t, encoded.GetResultData())
+	assert.Empty(t, encoded.GetSlicedBlob())
+
+	// Release Arrow ownership without mutating the shared, immutable strings.
+	// The response's string references must keep the Go buffers alive through GC.
+	df.Release()
+	released = true
+	pool.AssertSize(t, 0)
+	runtime.GC()
+
+	assert.Equal(t, []string{"pk-1", "pk-2"}, encoded.GetResultData().GetIds().GetStrId().GetData())
+	require.Len(t, encoded.GetResultData().GetGroupByFieldValues(), 1)
+	assert.Equal(t, []string{"red", "blue"},
+		encoded.GetResultData().GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
 }
 
 func TestMarshalReduceResult_GroupByNullableValidData(t *testing.T) {

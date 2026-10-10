@@ -722,6 +722,9 @@ func ToSearchResultData(df *DataFrame) (*schemapb.SearchResultData, error) {
 }
 
 // ToSearchResultDataWithOptions exports the DataFrame to SearchResultData with options.
+// Exported strings share the Arrow value buffers. Callers must provide immutable,
+// Go-managed string buffers that are not recycled on Release. QueryNode reduce
+// and Proxy rerank build these buffers with memory.DefaultAllocator.
 func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemapb.SearchResultData, error) {
 	result := &schemapb.SearchResultData{
 		NumQueries: int64(df.NumChunks()),
@@ -853,11 +856,36 @@ func exportScores(df *DataFrame) ([]float32, error) {
 		return nil, merr.WrapErrServiceInternalMsg("exportScores: column %s not found", types.ScoreFieldName)
 	}
 
-	data, err := exportChunkedValues[float32, *array.Float32](col, types.ScoreFieldName)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("exportScores: %v", err)
+	if col.DataType().ID() != arrow.FLOAT32 {
+		return nil, merr.WrapErrFunctionFailedMsg("exportScores: $score type mismatch: expected Float32, got %s", col.DataType())
+	}
+	data := make([]float32, 0, col.Len())
+	for chunkIdx, chunk := range col.Chunks() {
+		if err := ValidateScoreChunk(chunk, chunkIdx); err != nil {
+			return nil, merr.Wrap(err, "exportScores")
+		}
+		data = append(data, chunk.(*array.Float32).Float32Values()...)
 	}
 	return data, nil
+}
+
+// ValidateScoreChunk requires Float32, non-null, finite scores at a stage
+// boundary. chunkIdx identifies the original query chunk for error reporting.
+// Intermediate function-chain columns may still contain invalid scores.
+func ValidateScoreChunk(chunk arrow.Array, chunkIdx int) error {
+	scores, ok := chunk.(*array.Float32)
+	if !ok {
+		return merr.WrapErrFunctionFailedMsg("$score type mismatch: expected Float32, got %s", chunk.DataType())
+	}
+	for rowIdx, score := range scores.Float32Values() {
+		if scores.IsNull(rowIdx) {
+			return merr.WrapErrFunctionFailedMsg("$score contains null in chunk %d at row %d", chunkIdx, rowIdx)
+		}
+		if math.IsNaN(float64(score)) || math.IsInf(float64(score), 0) {
+			return merr.WrapErrFunctionFailedMsg("$score contains non-finite value %v in chunk %d at row %d", score, chunkIdx, rowIdx)
+		}
+	}
+	return nil
 }
 
 func exportElementIndices(df *DataFrame) (*schemapb.LongArray, error) {
