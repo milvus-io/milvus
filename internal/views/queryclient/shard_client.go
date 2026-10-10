@@ -2,7 +2,6 @@ package queryclient
 
 import (
 	"context"
-	"io"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -119,37 +118,6 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 	})
 }
 
-type vchannelReduceStream struct {
-	stream searchutil.ReduceStream
-}
-
-func (s *vchannelReduceStream) Recv() (*internalpb.SearchResults, error) {
-	chunk, err := s.stream.Recv()
-	if err == nil {
-		return chunk, nil
-	}
-	if errors.Is(err, io.EOF) {
-		if closeErr := s.stream.Close(); closeErr != nil {
-			return nil, closeErr
-		}
-		return nil, io.EOF
-	}
-
-	return nil, errors.Join(err, s.stream.Close())
-}
-
-func (s *vchannelReduceStream) Close() error {
-	return s.stream.Close()
-}
-
-func (s *vchannelReduceStream) Interrupt() (*internalpb.SearchResults, error) {
-	metadata, err := s.stream.Interrupt()
-	if err != nil {
-		return nil, errors.Join(err, s.stream.Close())
-	}
-	return metadata, nil
-}
-
 // SearchStream opens the SN/QN child streams for one vchannel and returns the
 // request-scoped ReduceStream without consuming its output.
 func (s *shardViewQueryClient) SearchStream(
@@ -232,14 +200,12 @@ func (s *shardViewQueryClient) SearchStream(
 			return nil, nil, err
 		}
 
-		return &vchannelReduceStream{
-				stream: reducedStream,
-			}, &ShardPlan{
-				ShardID:   shardID,
-				Version:   plan.Version,
-				Mvcc:      plan.GetMvcc(),
-				WorkNodes: workNodes,
-			}, nil
+		return reducedStream, &ShardPlan{
+			ShardID:   shardID,
+			Version:   plan.Version,
+			Mvcc:      plan.GetMvcc(),
+			WorkNodes: workNodes,
+		}, nil
 	}
 	return nil, nil, lastErr
 }
