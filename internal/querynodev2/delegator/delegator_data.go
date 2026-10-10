@@ -581,10 +581,8 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			var activateIfReadable bool
 			err := retry.Do(ctx, func() error {
-				activateIfReadable = sd.distribution.IsReadableSealedSegment(info.GetSegmentID())
-				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm, activateIfReadable)
+				return idfOracle.LoadSealedForReopen(ctx, info.GetSegmentID(), info, cm)
 			},
 				retry.Attempts(reopenBM25LoadRetryCount+1),
 				retry.Sleep(reopenBM25LoadRetryInitialBackoff),
@@ -595,7 +593,6 @@ func (sd *shardDelegator) loadBM25StatsForReopen(ctx context.Context, infos []*q
 				mlog.Warn(ctx, "failed to load reopened bm25 stats for segment",
 					mlog.FieldCollectionID(req.GetCollectionID()),
 					mlog.FieldSegmentID(info.GetSegmentID()),
-					mlog.Bool("activateIfReadable", activateIfReadable),
 					mlog.Err(err))
 				return nil, err
 			}
@@ -674,6 +671,29 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if err != nil {
 		log.Warn(ctx, "delegator failed to find worker", mlog.Err(err))
 		return err
+	}
+	if req.GetLoadScope() == querypb.LoadScope_Reopen {
+		if idfOracle := sd.getIDFOracle(); idfOracle != nil {
+			type reopenFields struct {
+				segmentID int64
+				fieldIDs  []int64
+			}
+			pending := make([]reopenFields, 0, len(req.GetInfos()))
+			for _, info := range req.GetInfos() {
+				paths, err := packed.NewStatsResolverFromLoadInfo(info).BM25StatsPaths()
+				if err != nil {
+					return err
+				}
+				fieldIDs := make([]int64, 0, len(paths))
+				for fieldID := range paths {
+					fieldIDs = append(fieldIDs, fieldID)
+				}
+				pending = append(pending, reopenFields{segmentID: info.GetSegmentID(), fieldIDs: fieldIDs})
+			}
+			for _, fields := range pending {
+				idfOracle.BeginReopen(fields.segmentID, fields.fieldIDs)
+			}
+		}
 	}
 
 	req.Base.TargetID = targetNodeID
