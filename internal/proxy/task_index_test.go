@@ -2294,6 +2294,58 @@ func Test_parseIndexParams_AutoIndexBM25FunctionOutput(t *testing.T) {
 	})
 }
 
+func Test_parseIndexParams_AutoIndexSparseMetricSpecificConfigs(t *testing.T) {
+	paramtable.Init()
+	cfg := &Params.AutoIndexConfig
+	assert.NoError(t, Params.Save(cfg.SparseIPIndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP", "drop_ratio_build": 0.1}`))
+	assert.NoError(t, Params.Save(cfg.SparseBM25IndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "drop_ratio_build": 0.3}`))
+	t.Cleanup(func() {
+		Params.Reset(cfg.Enable.Key)
+		Params.Reset(cfg.SparseIPIndexParams.Key)
+		Params.Reset(cfg.SparseBM25IndexParams.Key)
+	})
+
+	for _, cloudEnabled := range []bool{false, true} {
+		mode := "oss"
+		if cloudEnabled {
+			mode = "cloud"
+		}
+		t.Run(mode, func(t *testing.T) {
+			assert.NoError(t, Params.Save(cfg.Enable.Key, strconv.FormatBool(cloudEnabled)))
+
+			t.Run("IP", func(t *testing.T) {
+				task := &createIndexTask{
+					fieldSchema: &schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector},
+					req:         &milvuspb.CreateIndexRequest{},
+				}
+				err := task.parseIndexParams(context.TODO())
+				assert.NoError(t, err)
+				params := funcutil.KeyValuePair2Map(task.newIndexParams)
+				assert.Equal(t, metric.IP, params[common.MetricTypeKey])
+				assert.Equal(t, "0.1", params["drop_ratio_build"])
+			})
+
+			t.Run("BM25", func(t *testing.T) {
+				task := &createIndexTask{
+					fieldSchema: &schemapb.FieldSchema{
+						DataType:         schemapb.DataType_SparseFloatVector,
+						IsFunctionOutput: true,
+					},
+					functionSchema: &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25},
+					req:            &milvuspb.CreateIndexRequest{},
+				}
+				err := task.parseIndexParams(context.TODO())
+				assert.NoError(t, err)
+				params := funcutil.KeyValuePair2Map(task.newIndexParams)
+				assert.Equal(t, metric.BM25, params[common.MetricTypeKey])
+				assert.Equal(t, "0.3", params["drop_ratio_build"])
+			})
+		})
+	}
+}
+
 func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 	t.Run("nil config", func(t *testing.T) {
 		result := indexparamcheck.AdjustAutoIndexParamsByDataType(nil, schemapb.DataType_FloatVector)

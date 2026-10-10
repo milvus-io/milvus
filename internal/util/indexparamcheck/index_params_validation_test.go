@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -346,6 +347,20 @@ func TestPrepareFunctionOutputIndexParams(t *testing.T) {
 		assert.Equal(t, "100", params["bm25_avgdl"])
 	})
 
+	t.Run("BM25 function uses metric-specific sparse config", func(t *testing.T) {
+		cfg := &paramtable.Get().AutoIndexConfig
+		err := paramtable.Get().Save(cfg.SparseBM25IndexParams.Key,
+			`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "drop_ratio_build": 0.3}`)
+		assert.NoError(t, err)
+		defer paramtable.Get().Reset(cfg.SparseBM25IndexParams.Key)
+
+		params, resolved, err := PrepareFunctionOutputIndexParams(schemapb.FunctionType_BM25, sparseField, nil, nil)
+		assert.NoError(t, err)
+		assert.True(t, resolved)
+		assert.Equal(t, "BM25", params[common.MetricTypeKey])
+		assert.Equal(t, "0.3", params["drop_ratio_build"])
+	})
+
 	t.Run("AUTOINDEX with metric resolves", func(t *testing.T) {
 		params, resolved, err := PrepareFunctionOutputIndexParams(schemapb.FunctionType_BM25, sparseField, nil, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
@@ -496,4 +511,35 @@ func TestPrepareFunctionOutputIndexParams(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+}
+
+func TestGetSparseAutoIndexParams(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().AutoIndexConfig
+	assert.NotPanics(t, CheckAutoIndexConfig)
+	t.Cleanup(func() {
+		paramtable.Get().Reset(cfg.SparseIndexParams.Key)
+		paramtable.Get().Reset(cfg.SparseIPIndexParams.Key)
+		paramtable.Get().Reset(cfg.SparseBM25IndexParams.Key)
+	})
+
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseIPIndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP", "drop_ratio_build": 0.1}`))
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseBM25IndexParams.Key,
+		`{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "drop_ratio_build": 0.3}`))
+	assert.Equal(t, "0.1", GetSparseAutoIndexParams(metric.IP, schemapb.FunctionType_Unknown)["drop_ratio_build"])
+	assert.Equal(t, "0.3", GetSparseAutoIndexParams("", schemapb.FunctionType_BM25)["drop_ratio_build"])
+
+	assert.NoError(t, paramtable.Get().Reset(cfg.SparseIPIndexParams.Key))
+	assert.NoError(t, paramtable.Get().Reset(cfg.SparseBM25IndexParams.Key))
+	assert.NoError(t, paramtable.Get().Save(cfg.SparseIndexParams.Key,
+		`{"index_type": "SPARSE_WAND", "drop_ratio_build": 0.2}`))
+	ipParams := GetSparseAutoIndexParams(metric.IP, schemapb.FunctionType_Unknown)
+	bm25Params := GetSparseAutoIndexParams("", schemapb.FunctionType_BM25)
+	assert.Equal(t, "SPARSE_WAND", ipParams[common.IndexTypeKey])
+	assert.Equal(t, "0.2", ipParams["drop_ratio_build"])
+	assert.Equal(t, metric.IP, ipParams[common.MetricTypeKey])
+	assert.Equal(t, "SPARSE_WAND", bm25Params[common.IndexTypeKey])
+	assert.Equal(t, "0.2", bm25Params["drop_ratio_build"])
+	assert.Equal(t, metric.BM25, bm25Params[common.MetricTypeKey])
 }
