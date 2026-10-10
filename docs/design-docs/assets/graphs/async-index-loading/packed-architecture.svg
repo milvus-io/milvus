@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="packed-architecture-title packed-architecture-desc">
+<title id="packed-architecture-title">Packed scalar V3: bytes to a usable index</title>
+<desc id="packed-architecture-desc">A packed catalog drives direct destination materialization under admission, followed by scalar restoration and file commit.</desc>
+<defs>
+<marker id="packed-architecture-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="packed-architecture-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="packed-architecture-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Packed scalar V3: bytes to a usable index</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">One packed object contains multiple entries; the plan names their final destinations.</text>
+<path d="M 360 248 L 456 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#packed-architecture-arrow)"/>
+<path d="M 776 248 L 872 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#packed-architecture-arrow)"/>
+<path d="M 200 420 L 200 368 Q 200 360 208 360 L 552 360 Q 560 360 560 352 L 560 320" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#packed-architecture-arrow)"/>
+<path d="M 672 420 L 672 384 Q 672 376 680 376 L 936 376 Q 944 376 944 368 L 944 320" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#packed-architecture-arrow)"/>
+<path d="M 1032 320 L 1032 420" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#packed-architecture-arrow)"/>
+<g data-node="Packed .v3 object"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Packed .v3 object</text>
+<text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Entry directory + index bytes</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Plain or encrypted</text>
+</g>
+<g data-node="AsyncIndexEntryReader"><rect x="456" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
+<text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">AsyncIndexEntryReader</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Read directory, then byte ranges</text>
+<text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Decrypt on async worker</text>
+</g>
+<g data-node="IndexMaterializer"><rect x="872" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">IndexMaterializer</text>
+<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Use index-chosen destinations</text>
+<text x="892" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Fill heap or writable mappings</text>
+</g>
+<g data-node="Global admission"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Global admission</text>
+<text x="60" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Bytes + one slot per slice</text>
+<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Fixed per-load window</text>
+</g>
+<g data-node="LocalFileIOPool"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
+<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Preallocate / map writable files</text>
+<text x="476" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Unmap / close / retain files</text>
+</g>
+<g data-node="Scalar index"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Scalar index</text>
+<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Parse the completed inputs</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Restore state on async worker</text>
+</g>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Numeric Sort example: index_data + idx_to_offsets may be mapped; validity stays in heap.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Combine slice CRCs in logical order. Commit retained files only after successful finalization.</text>
+</g></svg>
