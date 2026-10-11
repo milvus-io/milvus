@@ -139,11 +139,16 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
         return plan;
     }
 
-    if (params.elem_type == DataType::NONE) {
+    // Knowhere writes embedding-list sidecars only for embedding-list metrics;
+    // an element-level VECTOR_ARRAY index is serialized as an ordinary index.
+    const bool emb_list_metric =
+        params.elem_type != DataType::NONE &&
+        knowhere::get_el_metric_type(params.metric_type).has_value();
+    if (!emb_list_metric) {
         if (plan.has_emb_meta || plan.has_emb_raw) {
             ThrowInfo(DataFormatBroken,
-                      "ordinary vector artifact contains embedding-list "
-                      "sidecars");
+                      "ordinary or element-level vector artifact contains "
+                      "embedding-list sidecars");
         }
     } else if (!plan.has_emb_meta) {
         ThrowInfo(DataFormatBroken,
@@ -409,7 +414,7 @@ PopulateState(bool use_async,
             co_await source.ReadEntriesToLocalFileAsync(
                 plan.engine_names, main_path, use_async);
             config[ENABLE_MMAP] = true;
-            if (params.elem_type != DataType::NONE) {
+            if (plan.has_emb_meta) {
                 const auto meta_path =
                     (std::filesystem::path(directory) / EMB_LIST_META_FILE_NAME)
                         .string();
