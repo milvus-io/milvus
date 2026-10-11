@@ -133,15 +133,14 @@ class SegmentReadSnapshot {
         return GetDataScanResources(field_id).first.get();
     }
 
+    // Returns nullptr when this field has no struct mapping in the captured
+    // state. Consumers that require element-to-row conversion must check it.
     virtual std::shared_ptr<const IStructElementOffsets>
-    GetStructElementOffsets(FieldId field_id, OpContext* op_ctx) const {
-        return nullptr;
-    }
+    GetStructElementOffsets(FieldId field_id, OpContext* op_ctx) const = 0;
 
+    // Must return a non-null schema from the same captured state as the columns.
     virtual SchemaPtr
-    get_schema_snapshot() const {
-        return nullptr;
-    }
+    get_schema_snapshot() const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API

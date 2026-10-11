@@ -1509,9 +1509,10 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     explicit SealedReadSnapshot(
         std::shared_ptr<const PublishedSegmentState> state)
         : state_(std::move(state)) {
-        AssertInfo(state_ != nullptr && state_->runtime != nullptr,
+        AssertInfo(state_ != nullptr && state_->schema != nullptr &&
+                       state_->runtime != nullptr,
                    "sealed read snapshot must hold a published state with a "
-                   "non-null runtime");
+                   "non-null schema and runtime");
     }
 
     int64_t
