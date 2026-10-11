@@ -287,7 +287,10 @@ JsonFlatIndexBuilder::AddBatch(
             continue;
         }
 
-        auto nested = document.doc().at_pointer(params_.nested_path);
+        // The nested value borrows the on-demand document's iterator, so the
+        // document must outlive both lookup and serialization.
+        auto nested_document = document.doc();
+        auto nested = nested_document.at_pointer(params_.nested_path);
         if (nested.error() != simdjson::SUCCESS) {
             AddEmptyDocument(*engine_, offset);
             ++count_;
