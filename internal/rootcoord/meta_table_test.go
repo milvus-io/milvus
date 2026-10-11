@@ -584,10 +584,8 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 			"age == $current_principal_tags['age']",
 			"owner == $current_principal",
 			`dept == "{literal}"`,
-			`dept == r"{raw_literal}"`,
 			`dept == "$current_principal"`,
 			`dept == "$current_principal_tags['dept']"`,
-			`dept == r"$current_principal"`,
 			`dept in ["sales", "engineering"]`,
 			"array_contains(tags, $current_principal)",
 			"array_contains(scores, $current_principal_tags['score'])",
@@ -626,6 +624,9 @@ func TestMetaTable_RLSMetadata(t *testing.T) {
 		require.NoError(t, validateRLSPolicyExpressions(coll, "ts == ISO '2025-01-01 00:00:00'", ""))
 
 		invalidExprs := []string{
+			// The 2.6 parser does not support raw string literals.
+			`dept == r"{raw_literal}"`,
+			`dept == r"$current_principal"`,
 			`dept == "sales" and owner == "alice"`,
 			`dept == "sales" or owner == "alice"`,
 			"missing == 'sales'",
