@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -169,6 +170,9 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 
 func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	mlog.With(mlog.String("CollectionName", t.Req.CollectionName))
+	if err := ingestion.ValidateCollection(schema); err != nil {
+		return err
+	}
 	if t.Req.GetCollectionName() != schema.GetName() {
 		mlog.Error(ctx, "collection name not matches schema name", mlog.String("SchemaName", schema.Name))
 		msg := fmt.Sprintf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
@@ -248,7 +252,34 @@ func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *
 	if err != nil {
 		return nil, err
 	}
-	return c.validateAnalyzerInfos(ctx, analyzerInfos)
+	ids, err := c.validateAnalyzerInfos(ctx, analyzerInfos)
+	if err != nil {
+		return nil, err
+	}
+	names, err := ingestion.ResourceNames(schema)
+	if err != nil || len(names) == 0 {
+		return ids, err
+	}
+	resources, _ := c.meta.ListFileResource(ctx)
+	byName := make(map[string]int64, len(resources))
+	for _, resource := range resources {
+		byName[resource.GetName()] = resource.GetId()
+	}
+	seen := make(map[int64]struct{}, len(ids)+len(names))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	for _, name := range names {
+		id, exists := byName[name]
+		if !exists {
+			return nil, merr.WrapErrParameterInvalidMsg("ingestion py_udf file resource %q does not exist", name)
+		}
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*querypb.AnalyzerInfo) ([]int64, error) {

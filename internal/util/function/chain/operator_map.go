@@ -71,10 +71,11 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 	}
 
 	// 1. Read input columns from DataFrame using inputs
-	inputs, err := o.ReadInputColumns("map_op", input)
+	inputs, err := o.readResolvedColumns("map_op", input, ctx.Pool())
 	if err != nil {
 		return nil, err
 	}
+	defer releaseColumns(inputs)
 
 	// 2. Call FunctionExpr to process columns
 	outputs, err := o.function.Execute(ctx, inputs)
@@ -95,6 +96,10 @@ func (o *MapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, e
 		return nil, merr.WrapErrServiceInternalMsg("map_op: function returned %d outputs, expected %d",
 			len(outputs), len(o.outputs))
 	}
+	if err := validateFunctionOutputShape(outputs, input.chunkSizes); err != nil {
+		releaseColumns(outputs)
+		return nil, err
+	}
 
 	return o.buildOutputDataFrame(input, outputs)
 }
@@ -105,6 +110,7 @@ func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked)
 	defer builder.Release()
 
 	builder.SetChunkSizes(input.chunkSizes)
+	builder.CopyAllMetadata(input)
 
 	// Build set of output column names (these will replace any existing columns with the same name)
 	outputColSet := make(map[string]struct{})
@@ -130,7 +136,17 @@ func (o *MapOp) buildOutputDataFrame(input *DataFrame, outputs []*arrow.Chunked)
 
 	// 6. Add all output columns at once
 	if err := builder.AddColumns(o.outputs, outputs); err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("map_op: %v", err)
+		return nil, merr.Wrap(err, "map_op")
+	}
+	for i, name := range o.outputs {
+		if dataType, err := ToMilvusType(outputs[i].DataType()); err == nil {
+			builder.SetFieldType(name, dataType)
+		}
+		builder.SetFieldNullable(name, outputs[i].NullN() > 0)
+		if original := input.Column(name); original != nil && arrow.TypeEqual(original.DataType(), outputs[i].DataType()) {
+			builder.CopyFieldMetadata(input, name)
+			builder.SetFieldNullable(name, input.fieldNullables[name] || outputs[i].NullN() > 0)
+		}
 	}
 
 	return builder.Build(), nil
@@ -154,7 +170,7 @@ func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("map function: %v", err)
+		return nil, merr.Wrap(err, "map function")
 	}
 	if len(repr.Inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires inputs")
@@ -163,4 +179,23 @@ func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires outputs")
 	}
 	return NewMapOp(fn, repr.Inputs, repr.Outputs)
+}
+
+func (o *MapOp) Expression() types.FunctionExpr { return o.function }
+
+func validateFunctionOutputShape(outputs []*arrow.Chunked, sizes []int64) error {
+	for index, output := range outputs {
+		if output == nil {
+			return merr.WrapErrFunctionFailedMsg("function output %d is nil", index)
+		}
+		if len(output.Chunks()) != len(sizes) {
+			return merr.WrapErrFunctionFailedMsg("function output %d has inconsistent chunk count", index)
+		}
+		for group, chunk := range output.Chunks() {
+			if chunk == nil || int64(chunk.Len()) != sizes[group] {
+				return merr.WrapErrFunctionFailedMsg("function output %d group %d must preserve %d rows", index, group, sizes[group])
+			}
+		}
+	}
+	return nil
 }

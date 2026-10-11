@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1230,8 +1231,10 @@ func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetri
 
 func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 	buildTags := os.Getenv(metricsinfo.GitBuildTagsEnvKey)
+	status := merr.Success()
+	status.ExtraInfo = map[string]string{common.FunctionChainTransformVersionKey: common.FunctionChainTransformVersion}
 	return &milvuspb.GetVersionResponse{
-		Status:  merr.Success(),
+		Status:  status,
 		Version: buildTags,
 	}, nil
 }

@@ -29,6 +29,9 @@ const (
 	OpTypeLimit   = "limit"
 	OpTypeGroupBy = "group_by"
 	OpTypeMerge   = "merge"
+	OpTypeSelect  = "select"
+	OpTypeExplode = "explode"
+	OpTypeFlatMap = "flat_map"
 )
 
 // =============================================================================

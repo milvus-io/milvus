@@ -147,6 +147,9 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		repr.Function = expr
 		repr.Inputs = exprInputs
 	}
+	if opType == types.OpTypeSelect && len(repr.Outputs) == 0 {
+		repr.Outputs = append([]string(nil), repr.Inputs...)
+	}
 
 	inputDataTypes, err := parseInputDataTypes(repr.Params, len(repr.Inputs))
 	if err != nil {
@@ -256,6 +259,7 @@ func (repr *ChainRepr) RefreshInfo() error {
 		Ops:            make([]OperatorReprInfo, 0, len(repr.Operators)),
 	}
 	produced := make(map[string]struct{})
+	scopeLocked := false
 	seenRequiredInputs := make(map[string]struct{})
 	seenWrittenNames := make(map[string]struct{})
 
@@ -272,6 +276,9 @@ func (repr *ChainRepr) RefreshInfo() error {
 		outputs, err := normalizeReprNames(op.Outputs, "output")
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
+		}
+		if opType == types.OpTypeSelect && len(outputs) == 0 {
+			outputs = append([]string(nil), inputs...)
 		}
 
 		repr.Operators[i].Type = opType
@@ -296,8 +303,11 @@ func (repr *ChainRepr) RefreshInfo() error {
 		})
 
 		for _, input := range inputs {
-			if _, ok := produced[input]; ok {
+			if producedColumn(produced, input) {
 				continue
+			}
+			if scopeLocked && !IsFunctionChainSystemName(input) {
+				return merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", i, input)
 			}
 			if _, ok := seenRequiredInputs[input]; !ok {
 				seenRequiredInputs[input] = struct{}{}
@@ -305,6 +315,10 @@ func (repr *ChainRepr) RefreshInfo() error {
 			}
 		}
 
+		if opType == types.OpTypeSelect {
+			produced = make(map[string]struct{}, len(outputs))
+			scopeLocked = true
+		}
 		for _, output := range outputs {
 			produced[output] = struct{}{}
 			if _, ok := seenWrittenNames[output]; !ok {
@@ -316,6 +330,18 @@ func (repr *ChainRepr) RefreshInfo() error {
 
 	repr.Info = info
 	return nil
+}
+
+func producedColumn(produced map[string]struct{}, name string) bool {
+	if _, ok := produced[name]; ok {
+		return true
+	}
+	root := ColumnReferenceRoot(name)
+	if root != name {
+		_, ok := produced[root]
+		return ok
+	}
+	return false
 }
 
 // FuncChainFromRepr creates a FuncChain from a ChainRepr.

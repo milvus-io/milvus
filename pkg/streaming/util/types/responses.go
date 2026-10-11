@@ -95,6 +95,10 @@ func NewAppendResponseN(n int) AppendResponses {
 type AppendResponse struct {
 	AppendResult *AppendResult
 	Error        error
+	// AppendNotAttempted is set only at sources that reject a batch before
+	// invoking any producer commit. An error without this evidence may have
+	// lost its acknowledgement after the corresponding write persisted.
+	AppendNotAttempted bool
 }
 
 // AppendResponses is the response of append operation.

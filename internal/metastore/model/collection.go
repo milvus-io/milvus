@@ -21,6 +21,7 @@ import (
 	"slices"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -42,6 +43,8 @@ type Collection struct {
 	Fields            []*Field
 	StructArrayFields []*StructArrayField
 	Functions         []*Function
+	// FunctionChains persist collection-bound ingestion plans in the schema.
+	FunctionChains []*schemapb.FunctionChain
 	// RLS policies are owned by RootCoord and persisted in their own KV namespace.
 	RLSPolicies map[string]*RLSPolicy
 
@@ -98,6 +101,7 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
+		FunctionChains:       c.FunctionChains,
 		RLSPolicies:          maps.Clone(c.RLSPolicies),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -140,6 +144,7 @@ func (c *Collection) Clone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
+		FunctionChains:       CloneFunctionChains(c.FunctionChains),
 		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -165,6 +170,7 @@ func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
 		Fields:             MarshalFieldModels(c.Fields),
 		StructArrayFields:  MarshalStructArrayFieldModels(c.StructArrayFields),
 		Functions:          MarshalFunctionModels(c.Functions),
+		FunctionChains:     CloneFunctionChains(c.FunctionChains),
 		EnableDynamicField: c.EnableDynamicField,
 		EnableNamespace:    c.EnableNamespace,
 		Properties:         c.Properties,
@@ -196,7 +202,8 @@ func (c *Collection) Equal(other Collection) bool {
 		c.ConsistencyLevel == other.ConsistencyLevel &&
 		checkParamsEqual(c.Properties, other.Properties) &&
 		c.EnableDynamicField == other.EnableDynamicField &&
-		c.EnableNamespace == other.EnableNamespace
+		c.EnableNamespace == other.EnableNamespace &&
+		FunctionChainsEqual(c.FunctionChains, other.FunctionChains)
 }
 
 func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, body *message.AlterCollectionMessageBody) {
@@ -226,6 +233,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.EnableDynamicField = updates.Schema.EnableDynamicField
 			c.EnableNamespace = updates.Schema.EnableNamespace
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
+			c.FunctionChains = CloneFunctionChains(updates.Schema.GetFunctionChains())
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
 			c.FileResourceIds = updates.Schema.GetFileResourceIds()
@@ -287,6 +295,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		AutoID:               coll.Schema.AutoID,
 		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
 		StructArrayFields:    UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
+		FunctionChains:       CloneFunctionChains(coll.GetSchema().GetFunctionChains()),
 		Partitions:           partitions,
 		VirtualChannelNames:  coll.VirtualChannelNames,
 		PhysicalChannelNames: coll.PhysicalChannelNames,
@@ -359,6 +368,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		FileResourceIds:    coll.FileResourceIds,
 		ExternalSource:     coll.ExternalSource,
 		ExternalSpec:       coll.ExternalSpec,
+		FunctionChains:     CloneFunctionChains(coll.FunctionChains),
 	}
 
 	if c.withFields {
@@ -416,4 +426,29 @@ func MarshalCollectionModelWithOption(coll *Collection, opts ...Option) *pb.Coll
 		opt(c)
 	}
 	return marshalCollectionModelWithConfig(coll, c)
+}
+
+func CloneFunctionChains(chains []*schemapb.FunctionChain) []*schemapb.FunctionChain {
+	if chains == nil {
+		return nil
+	}
+	result := make([]*schemapb.FunctionChain, len(chains))
+	for i, chain := range chains {
+		if chain != nil {
+			result[i] = proto.Clone(chain).(*schemapb.FunctionChain)
+		}
+	}
+	return result
+}
+
+func FunctionChainsEqual(left, right []*schemapb.FunctionChain) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !proto.Equal(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
 }

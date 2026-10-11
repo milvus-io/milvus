@@ -1254,6 +1254,9 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 	if t.GetIsAdvanced() && t.rerankMeta != nil {
 		outputFieldNames.Insert(t.rerankMeta.GetInputFieldNames()...)
 	}
+	if t.postProcess != nil {
+		outputFieldNames.Insert(t.postProcess.inputNames...)
+	}
 	// Union order_by field names with output fields for requery
 	// Use OutputFieldName which is the proper name for requery:
 	// - For dynamic fields: the original key (e.g., "age") so QueryNode extracts only that subfield
@@ -1718,6 +1721,7 @@ type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
 	roundDecimal     int64
+	postProcess      bool
 }
 
 func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
@@ -1729,23 +1733,26 @@ func newEndOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
 		roundDecimal:     roundDecimal,
+		postProcess:      t.postProcess != nil,
 	}, nil
 }
 
 func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	for _, retField := range result.Results.FieldsData {
-		for _, fieldSchema := range op.fieldSchemas {
-			if retField != nil && retField.FieldId == fieldSchema.FieldID {
-				retField.FieldName = fieldSchema.Name
-				retField.Type = fieldSchema.DataType
-				retField.IsDynamic = fieldSchema.IsDynamic
+	if !op.postProcess {
+		for _, retField := range result.Results.FieldsData {
+			for _, fieldSchema := range op.fieldSchemas {
+				if retField != nil && retField.FieldId == fieldSchema.FieldID {
+					retField.FieldName = fieldSchema.Name
+					retField.Type = fieldSchema.DataType
+					retField.IsDynamic = fieldSchema.IsDynamic
+				}
 			}
 		}
+		result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
+			return lo.Contains(op.outputFieldNames, field.FieldName)
+		})
 	}
-	result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
-		return lo.Contains(op.outputFieldNames, field.FieldName)
-	})
 	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
 	result.GetResults().AllSearchCount = allSearchCount
 	roundSearchScores(result.GetResults(), op.roundDecimal)
@@ -3595,15 +3602,27 @@ func newSearchPipeline(t *SearchTask) (*pipeline, error) {
 	}
 
 	if t.highlighter != nil {
-		err := p.AddNodes(t, highlightNode, endNode)
+		err := p.AddNodes(t, highlightNode)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		err := p.AddNodes(t, endNode)
-		if err != nil {
+	}
+	if t.postProcess != nil {
+		if err := p.AddNodes(t, &nodeDef{
+			name: "post_process", inputs: []string{"result"}, outputs: []string{"result"}, opName: lambdaOp,
+			params: map[string]any{lambdaParamKey: func(ctx context.Context, _ trace.Span, inputs ...any) ([]any, error) {
+				result := inputs[0].(*milvuspb.SearchResults)
+				if err := t.executeSearchPostProcess(ctx, result); err != nil {
+					return nil, err
+				}
+				return []any{result}, nil
+			}},
+		}); err != nil {
 			return nil, err
 		}
+	}
+	if err := p.AddNodes(t, endNode); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

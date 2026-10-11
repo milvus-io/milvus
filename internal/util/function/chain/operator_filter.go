@@ -74,15 +74,16 @@ func (o *FilterOp) Name() string { return "Filter" }
 
 func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
 	// Read input columns from DataFrame
-	inputs, err := o.ReadInputColumns("filter_op", input)
+	inputs, err := o.readResolvedColumns("filter_op", input, ctx.Pool())
 	if err != nil {
 		return nil, err
 	}
+	defer releaseColumns(inputs)
 
 	// Execute FunctionExpr to get boolean result
 	outputs, err := o.function.Execute(ctx, inputs)
 	if err != nil {
-		return nil, merr.WrapErrFunctionFailed(err, "filter_op: function execution failed")
+		return nil, merr.Wrap(err, "filter_op: function execution failed")
 	}
 
 	// Validate output at runtime (especially important for dynamic output types)
@@ -95,6 +96,10 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		return nil, merr.WrapErrFunctionFailedMsg("filter_op: function must return exactly 1 output, got %d", len(outputs))
 	}
 
+	if err := validateFunctionOutputShape(outputs, input.chunkSizes); err != nil {
+		releaseColumns(outputs)
+		return nil, err
+	}
 	filterCol := outputs[0]
 	defer filterCol.Release() // Release the temporary boolean column
 
@@ -110,6 +115,7 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// Process each chunk - extract boolean chunks with type safety
 	newChunkSizes := make([]int64, 0, input.NumChunks())
 	filterChunks := make([]*array.Boolean, input.NumChunks())
+	pickedRows := make([][]int, input.NumChunks())
 	for chunkIdx := range input.NumChunks() {
 		boolChunk, ok := filterCol.Chunk(chunkIdx).(*array.Boolean)
 		if !ok {
@@ -122,12 +128,19 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 		for i := range boolChunk.Len() {
 			if boolChunk.IsValid(i) && boolChunk.Value(i) {
 				trueCount++
+				pickedRows[chunkIdx] = append(pickedRows[chunkIdx], i)
 			}
 		}
 		newChunkSizes = append(newChunkSizes, trueCount)
 	}
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	// Use ChunkCollector for filtered chunks
 	colNames := input.ColumnNames()
@@ -156,6 +169,8 @@ func (o *FilterOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 
 	return builder.Build(), nil
 }
+
+func (o *FilterOp) Expression() types.FunctionExpr { return o.function }
 
 func (o *FilterOp) String() string {
 	return fmt.Sprintf("Filter(%s)", o.function.Name())

@@ -208,6 +208,13 @@ func projectDescribeCollectionSchema(source *schemapb.CollectionSchema, sourceSh
 		ExternalSpec:       source.GetExternalSpec(),
 		EnableNamespace:    source.GetEnableNamespace(),
 	}
+	for _, plan := range source.GetFunctionChains() {
+		if plan == nil {
+			projected.FunctionChains = append(projected.FunctionChains, nil)
+		} else {
+			projected.FunctionChains = append(projected.FunctionChains, proto.Clone(plan).(*schemapb.FunctionChain))
+		}
+	}
 
 	for _, field := range source.GetFields() {
 		if field.GetIsDynamic() || field.GetName() == common.NamespaceFieldName ||

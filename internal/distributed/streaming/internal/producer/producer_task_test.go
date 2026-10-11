@@ -410,6 +410,7 @@ func TestBatchCommitProduce_ReservationError(t *testing.T) {
 	err := resp.UnwrapFirstError()
 	assert.Error(t, err)
 	assert.Equal(t, context.Canceled, err)
+	assert.True(t, resp.Responses[0].AppendNotAttempted, "reservation cancellation precedes every producer commit")
 }
 
 func TestProduceGuard_Commit_Txn(t *testing.T) {

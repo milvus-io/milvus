@@ -101,6 +101,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 	defer collector.Release()
 
 	newChunkSizes := make([]int64, input.NumChunks())
+	pickedRows := make([][]int, input.NumChunks())
 
 	// Process each chunk independently
 	for chunkIdx := range input.NumChunks() {
@@ -162,6 +163,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 			})
 		}
 		newChunkSizes[chunkIdx] = int64(chunkLen)
+		pickedRows[chunkIdx] = indices
 
 		// Reorder each column
 		for _, colName := range colNames {
@@ -169,7 +171,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 			dataChunk := col.Chunk(chunkIdx)
 			reordered, err := reorderArray(ctx.Pool(), dataChunk, indices)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s: %v", colName, err)
+				return nil, merr.Wrapf(err, "sort_op: column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, reordered)
 		}
@@ -180,6 +182,12 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 	defer builder.Release()
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	for _, colName := range colNames {
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {

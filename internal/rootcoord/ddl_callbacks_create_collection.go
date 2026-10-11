@@ -215,6 +215,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Fields:               model.UnmarshalFieldModels(body.CollectionSchema.Fields),
 		StructArrayFields:    model.UnmarshalStructArrayFieldModels(body.CollectionSchema.StructArrayFields),
 		Functions:            model.UnmarshalFunctionModels(body.CollectionSchema.Functions),
+		FunctionChains:       model.CloneFunctionChains(body.CollectionSchema.GetFunctionChains()),
 		VirtualChannelNames:  body.VirtualChannelNames,
 		PhysicalChannelNames: body.PhysicalChannelNames,
 		ShardsNum:            int32(len(body.VirtualChannelNames)),

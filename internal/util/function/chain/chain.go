@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
@@ -132,37 +133,82 @@ func (fc *FuncChain) Validate() error {
 // validateOperators is an internal helper that validates all operators in a single pass.
 // It checks that operators are not nil, have valid functions, and support the given stage.
 func (fc *FuncChain) validateOperators(stage string) error {
+	produced := make(map[string]struct{})
+	scopeLocked := false
 	for i, op := range fc.operators {
 		if op == nil {
 			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
 		}
 
-		// Validate MapOp
-		if mapOp, ok := op.(*MapOp); ok {
-			if mapOp.function == nil {
-				return merr.WrapErrServiceInternalMsg("operator[%d] MapOp has nil function", i)
+		if expression, ok := op.(interface{ Expression() types.FunctionExpr }); ok {
+			function := expression.Expression()
+			if function == nil {
+				return merr.WrapErrServiceInternalMsg("operator[%d] %s has nil function", i, op.Name())
 			}
-			if !mapOp.function.IsRunnable(stage) {
-				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q",
-					i, mapOp.function.Name(), stage)
+			if !function.IsRunnable(stage) {
+				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q", i, function.Name(), stage)
 			}
 		}
-
-		// Validate FilterOp
-		if filterOp, ok := op.(*FilterOp); ok {
-			if filterOp.function == nil {
-				return merr.WrapErrServiceInternalMsg("operator[%d] FilterOp has nil function", i)
+		if err := validateOperatorStage(op, stage); err != nil {
+			return merr.Wrapf(err, "operator[%d]", i)
+		}
+		for _, name := range op.Inputs() {
+			if scopeLocked && !IsFunctionChainSystemName(name) && !producedColumn(produced, name) {
+				return merr.WrapErrParameterInvalidMsg("operator[%d] input %q is unavailable after select", i, name)
 			}
-			if !filterOp.function.IsRunnable(stage) {
-				return merr.WrapErrParameterInvalidMsg("operator[%d] filter function %q does not support stage %q",
-					i, filterOp.function.Name(), stage)
-			}
+		}
+		if _, ok := op.(*SelectOp); ok {
+			produced = make(map[string]struct{}, len(op.Outputs()))
+			scopeLocked = true
+		}
+		for _, name := range op.Outputs() {
+			produced[name] = struct{}{}
 		}
 
 		// Validate MergeOp placement: MergeOp can only be at index 0
 		if _, ok := op.(*MergeOp); ok && i > 0 {
 			return merr.WrapErrParameterInvalidMsg("operator[%d] MergeOp can only be the first operator in the chain", i)
 		}
+	}
+	return nil
+}
+
+func isTransformStage(stage string) bool {
+	return stage == types.StageIngestion || stage == types.StagePreProcess || stage == types.StagePostProcess
+}
+
+func validateOperatorStage(op Operator, stage string) error {
+	switch op.(type) {
+	case *ExplodeOp, *FlatMapOp:
+		if stage != types.StageIngestion {
+			return merr.WrapErrParameterInvalidMsg("%s cannot expand rows in stage %q", op.Name(), stage)
+		}
+	case *SelectOp:
+		if !isTransformStage(stage) {
+			return merr.WrapErrParameterInvalidMsg("select is only supported by transform stages")
+		}
+	}
+	if !isTransformStage(stage) {
+		return nil // Existing rerank endpoint/operator allowlists remain authoritative.
+	}
+	allowed := false
+	switch op.(type) {
+	case *MapOp, *SelectOp:
+		allowed = true
+	case *FilterOp, *ExplodeOp, *FlatMapOp:
+		allowed = stage == types.StageIngestion
+	}
+	if !allowed {
+		return merr.WrapErrParameterInvalidMsg("%s is not supported by transform stage %q", op.Name(), stage)
+	}
+	for i, output := range op.Outputs() {
+		if !strings.HasPrefix(strings.TrimSpace(output), "$") {
+			continue
+		}
+		if selectOp, ok := op.(*SelectOp); ok && output == selectOp.inputs[i] {
+			continue
+		}
+		return merr.WrapErrParameterInvalidMsg("transform cannot rewrite system output %q", output)
 	}
 	return nil
 }
@@ -250,7 +296,13 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 			}
 		}
 
-		newResult, err := op.Execute(funcCtx, result)
+		var newResult *DataFrame
+		var err error
+		if flatMap, ok := op.(*FlatMapOp); ok && plan != nil {
+			newResult, err = flatMap.executeWithProjection(funcCtx, result, plan.PruneAfter[i], plan.SystemColumnPolicy)
+		} else {
+			newResult, err = op.Execute(funcCtx, result)
+		}
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
 			return nil, merr.Wrapf(err, "%s failed", op.Name())

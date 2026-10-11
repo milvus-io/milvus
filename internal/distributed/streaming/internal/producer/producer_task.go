@@ -43,7 +43,7 @@ func BatchCommitProduce(ctx context.Context, tasks ...*ProduceGuard) types.Appen
 			task.Cancel()
 		}
 		resp := types.NewAppendResponseN(len(tasks))
-		resp.FillAllError(err)
+		resp.FillAllResponse(types.AppendResponse{Error: err, AppendNotAttempted: true})
 		return resp
 	}
 

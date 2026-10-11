@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -112,6 +113,12 @@ type SearchTask struct {
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
 	rankParams *rankParams
+
+	preProcess         []*searchTransformMeta
+	postProcess        *searchTransformMeta
+	postOutputFields   []string
+	transformsPrepared bool
+	preProcessed       bool
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -347,6 +354,10 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	if err := t.prepareSearchTransforms(); err != nil {
+		return err
+	}
+
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
 	if err != nil {
@@ -372,6 +383,9 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.Nq = nq
+	if err := t.executeSearchPreProcess(ctx); err != nil {
+		return err
+	}
 
 	if t.IgnoreGrowing, err = isIgnoreGrowing(t.request.SearchParams); err != nil {
 		return err
@@ -664,6 +678,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
 	t.needRequery = t.needRequery || (t.rerankMeta != nil && len(t.rerankMeta.GetInputFieldNames()) > 0)
+	if t.postProcess != nil && len(t.postProcess.inputNames) > 0 {
+		t.needRequery = true
+	}
 	if t.skipRequeryByNamespacePartitionMode() {
 		t.needRequery = false
 	}
@@ -682,6 +699,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg(
 				"sub-search[%d] function chains only support L0 and L1 stages", index)
 		}
+		if hasFunctionChainStage(subReq.GetFunctionChains(), schemapb.FunctionChainStage_FunctionChainStagePostProcess) {
+			return merr.WrapErrParameterInvalidMsg("sub-search[%d]: POST_PROCESS belongs to the top-level hybrid request", index)
+		}
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
 		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(
 			subReq.GetSearchParams(),
@@ -698,8 +718,14 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 				"search iterator v2 is not supported for hybrid search")
 		}
 
+		if err := t.bindPreProcessVectorOutput(index, subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId()); err != nil {
+			return err
+		}
 		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
 		if err != nil {
+			if len(t.preProcess) > index && t.preProcess[index] != nil {
+				return searchTransformOutputError(err, "PRE_PROCESS native query conversion")
+			}
 			return err
 		}
 		if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType); err != nil {
@@ -818,6 +844,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			}
 			allFieldIDs := typeutil.NewSet(t.OutputFieldsId...)
 			allFieldIDs.Insert(rerankInputFieldIDs...)
+			if t.postProcess != nil {
+				allFieldIDs.Insert(t.postProcess.inputIDs...)
+			}
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
@@ -1052,7 +1081,8 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		if hasFunctionChainStage(qnChains, schemapb.FunctionChainStage_FunctionChainStageL1Rerank) && t.aggCtx != nil {
 			return merr.WrapErrParameterInvalidMsg("L1 function chain is not supported with search_aggregation")
 		}
-	} else if t.request.FunctionScore != nil {
+	}
+	if t.rerankMeta == nil && t.request.FunctionScore != nil {
 		t.rerankMeta, err = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 		if err != nil {
 			return err
@@ -1140,6 +1170,9 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	if t.skipRequeryByNamespacePartitionMode() {
 		t.needRequery = false
 	}
+	if t.postProcess != nil && len(t.postProcess.inputNames) > 0 && !t.skipRequeryByNamespacePartitionMode() {
+		t.needRequery = true
+	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
 		rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
@@ -1153,6 +1186,9 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		}
 		allFieldIDs := typeutil.NewSet[int64](t.OutputFieldsId...)
 		allFieldIDs.Insert(rerankInputFieldIDs...)
+		if t.postProcess != nil {
+			allFieldIDs.Insert(t.postProcess.inputIDs...)
+		}
 		allFieldIDs.Insert(primaryFieldSchema.FieldID)
 		plan.OutputFieldIds = allFieldIDs.Collect()
 		plan.DynamicFields = t.userDynamicFields
@@ -1199,8 +1235,14 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
 	var placeholderType commonpb.PlaceholderType
+	if err := t.bindPreProcessVectorOutput(0, t.request.GetPlaceholderGroup(), t.FieldId); err != nil {
+		return err
+	}
 	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
 	if err != nil {
+		if len(t.preProcess) > 0 && t.preProcess[0] != nil {
+			return searchTransformOutputError(err, "PRE_PROCESS native query conversion")
+		}
 		return err
 	}
 	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
@@ -1277,21 +1319,36 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	return nil
 }
 
-// retainRerankDynamicFields keeps hidden L2 inputs in the materialized dynamic
-// root for ordinary Search and each Hybrid sub-search. Empty DynamicFields
-// already fetches the whole root; userOutputFields still owns client projection.
+// retainRerankDynamicFields keeps hidden L2/POST inputs in the materialized
+// dynamic root for ordinary Search and each Hybrid sub-search. Empty
+// DynamicFields already fetches the whole root; userOutputFields still owns
+// client projection.
 func (t *SearchTask) retainRerankDynamicFields(plan *planpb.PlanNode) {
-	if len(plan.DynamicFields) == 0 || t.rerankMeta == nil {
+	if len(plan.DynamicFields) == 0 {
 		return
 	}
-	inputPlan := t.rerankMeta.GetInputPlan()
-	if inputPlan == nil {
-		return
+	inputPlans := make([]*chain.DataFrameInputPlan, 0, 2)
+	if t.rerankMeta != nil {
+		inputPlans = append(inputPlans, t.rerankMeta.GetInputPlan())
+	}
+	if t.postProcess != nil {
+		for _, name := range t.postProcess.repr.Info.RequiredInputs {
+			if name == common.MetaFieldName {
+				plan.DynamicFields = nil
+				return
+			}
+		}
+		inputPlans = append(inputPlans, t.postProcess.jsonPlan)
 	}
 	fields := typeutil.NewSet[string](plan.DynamicFields...)
-	for _, input := range inputPlan.Inputs {
-		if input.FieldName == common.MetaFieldName && len(input.NestedPath) > 0 {
-			fields.Insert(input.NestedPath[0])
+	for _, inputPlan := range inputPlans {
+		if inputPlan == nil {
+			continue
+		}
+		for _, input := range inputPlan.Inputs {
+			if input.FieldName == common.MetaFieldName && len(input.NestedPath) > 0 {
+				fields.Insert(input.NestedPath[0])
+			}
 		}
 	}
 	plan.DynamicFields = fields.Collect()
@@ -1604,12 +1661,16 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	t.fillResult()
-	t.result.Results.OutputFields = t.userOutputFields
-	reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
+	if t.postProcess == nil {
+		t.result.Results.OutputFields = t.userOutputFields
+		reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
+	} else {
+		t.result.Results.OutputFields = t.postOutputFields
+	}
 	t.result.CollectionName = t.request.GetCollectionName()
 
 	primaryFieldSchema, _ := t.schema.GetPkField()
-	if t.userRequestedPkFieldExplicitly {
+	if t.userRequestedPkFieldExplicitly && t.postProcess == nil {
 		t.result.Results.OutputFields = append(t.result.Results.OutputFields, primaryFieldSchema.GetName())
 		var scalars *schemapb.ScalarField
 		if primaryFieldSchema.GetDataType() == schemapb.DataType_Int64 {

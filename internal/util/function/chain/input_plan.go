@@ -123,6 +123,7 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 	}
 	plan := &DataFrameInputPlan{Inputs: make([]ResolvedChainInput, 0)}
 	produced := make(map[string]struct{})
+	scopeLocked := false
 	inputOffsets := make(map[string]int)
 
 	for opIdx := range repr.Operators {
@@ -132,8 +133,11 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 		}
 
 		for inputIdx, name := range op.Inputs {
-			if _, ok := produced[name]; ok {
+			if producedColumn(produced, name) {
 				continue
+			}
+			if scopeLocked && !IsFunctionChainSystemName(name) {
+				return nil, merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", opIdx, name)
 			}
 			hint := op.InputDataTypes[inputIdx]
 			if isRuntimeFunctionChainInput(name) {
@@ -165,9 +169,15 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 			plan.Inputs = append(plan.Inputs, input)
 		}
 
+		if op.Type == types.OpTypeSelect {
+			produced = make(map[string]struct{}, len(op.Outputs))
+			scopeLocked = true
+		}
 		for _, output := range op.Outputs {
-			if err := validateChainOutputName(schemaHelper, output); err != nil {
-				return nil, merr.Wrapf(err, "op[%d] output %q", opIdx, output)
+			if op.Type != types.OpTypeSelect {
+				if err := validateChainOutputName(schemaHelper, output); err != nil {
+					return nil, merr.Wrapf(err, "op[%d] output %q", opIdx, output)
+				}
 			}
 			produced[output] = struct{}{}
 		}

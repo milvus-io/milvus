@@ -189,6 +189,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	// Prepare group score builder
 	groupScoreChunks := make([]arrow.Array, numChunks)
 	newChunkSizes := make([]int64, numChunks)
+	pickedRows := make([][]int, numChunks)
 
 	// Release groupScoreChunks on error
 	success := false
@@ -210,6 +211,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 		}
 
 		newChunkSizes[chunkIdx] = int64(len(result.indices))
+		pickedRows[chunkIdx] = result.indices
 		groupScoreChunks[chunkIdx] = result.groupScores
 
 		// Reorder existing columns by indices
@@ -218,7 +220,7 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 			dataChunk := col.Chunk(chunkIdx)
 			reordered, err := dispatchPickByIndices(ctx.Pool(), dataChunk, result.indices)
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("group_by_op: reorder column %s: %v", colName, err)
+				return nil, merr.Wrapf(err, "group_by_op: reorder column %s", colName)
 			}
 			collector.Set(colName, chunkIdx, reordered)
 		}
@@ -229,6 +231,12 @@ func (o *GroupByOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 	defer builder.Release()
 
 	builder.SetChunkSizes(newChunkSizes)
+	builder.CopyAllMetadata(input)
+	lineage, err := pickLineage(input, pickedRows)
+	if err != nil {
+		return nil, err
+	}
+	builder.SetLineage(lineage)
 
 	// Add existing columns
 	for _, colName := range colNames {

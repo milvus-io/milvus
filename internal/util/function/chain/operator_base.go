@@ -20,9 +20,11 @@ package chain
 
 import (
 	"cmp"
+	"context"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/compute"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -101,8 +103,34 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T", data)
+		return takeArrayWithNulls(pool, data, indices)
 	}
+}
+
+// takeArrayWithNulls supports nested List/Struct and fixed-size vector columns.
+// A -1 index creates a typed null, used by outer explode and nullable structs.
+func takeArrayWithNulls(pool memory.Allocator, data arrow.Array, indices []int) (arrow.Array, error) {
+	if data == nil {
+		return nil, merr.WrapErrServiceInternal("take input array is nil")
+	}
+	builder := array.NewInt64Builder(pool)
+	defer builder.Release()
+	for _, index := range indices {
+		if index == -1 {
+			builder.AppendNull()
+		} else if index < 0 || index >= data.Len() {
+			return nil, merr.WrapErrServiceInternalMsg("take index %d exceeds array length %d", index, data.Len())
+		} else {
+			builder.Append(int64(index))
+		}
+	}
+	selection := builder.NewArray()
+	defer selection.Release()
+	result, err := compute.TakeArray(compute.WithAllocator(context.Background(), pool), data, selection)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "Arrow take failed")
+	}
+	return result, nil
 }
 
 // =============================================================================

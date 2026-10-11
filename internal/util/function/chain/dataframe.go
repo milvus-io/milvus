@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/transform"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -62,7 +63,9 @@ type DataFrame struct {
 	fieldTypes     map[string]schemapb.DataType // Preserve Milvus type info for export
 	fieldIDs       map[string]int64             // Field IDs for export
 	fieldNullables map[string]bool              // Field nullable info for schema creation
+	fieldMetadata  map[string]arrow.Metadata    // Arrow type/storage metadata, including nested fields
 	metadata       map[string]string            // Arbitrary key-value metadata (e.g., metric_type)
+	lineage        [][]transform.RowLineage     // Optional sources rooted at stage input, never user columns
 }
 
 // =============================================================================
@@ -98,6 +101,26 @@ func (df *DataFrame) ChunkSizes() []int64 {
 // Schema returns the Arrow schema.
 func (df *DataFrame) Schema() *arrow.Schema {
 	return df.schema
+}
+
+// Lineage returns an independent copy of optional original-input row sources.
+// Nil means lineage tracking was not initialized for this DataFrame.
+func (df *DataFrame) Lineage() [][]transform.RowLineage {
+	return cloneLineage(df.lineage)
+}
+
+func cloneLineage(lineage [][]transform.RowLineage) [][]transform.RowLineage {
+	if lineage == nil {
+		return nil
+	}
+	result := make([][]transform.RowLineage, len(lineage))
+	for group, rows := range lineage {
+		result[group] = make([]transform.RowLineage, len(rows))
+		for row, sources := range rows {
+			result[group][row] = append(transform.RowLineage(nil), sources...)
+		}
+	}
+	return result
 }
 
 // =============================================================================
@@ -214,6 +237,7 @@ func NewDataFrameBuilder() *DataFrameBuilder {
 			fieldTypes:     make(map[string]schemapb.DataType),
 			fieldIDs:       make(map[string]int64),
 			fieldNullables: make(map[string]bool),
+			fieldMetadata:  make(map[string]arrow.Metadata),
 			metadata:       make(map[string]string),
 		},
 	}
@@ -226,6 +250,30 @@ func (b *DataFrameBuilder) SetChunkSizes(sizes []int64) *DataFrameBuilder {
 	}
 	b.result.chunkSizes = make([]int64, len(sizes))
 	copy(b.result.chunkSizes, sizes)
+	return b
+}
+
+// SetLineage copies row-source metadata; Arrow ownership is unaffected.
+func (b *DataFrameBuilder) SetLineage(lineage [][]transform.RowLineage) *DataFrameBuilder {
+	if b.result != nil {
+		b.result.lineage = cloneLineage(lineage)
+	}
+	return b
+}
+
+// SetIdentityLineage initializes sources relative to this builder's chunk sizes.
+func (b *DataFrameBuilder) SetIdentityLineage() *DataFrameBuilder {
+	if b.result == nil {
+		return b
+	}
+	lineage := make([][]transform.RowLineage, len(b.result.chunkSizes))
+	for group, size := range b.result.chunkSizes {
+		lineage[group] = make([]transform.RowLineage, int(size))
+		for row := range lineage[group] {
+			lineage[group][row] = transform.RowLineage{{Group: group, Row: int64(row)}}
+		}
+	}
+	b.result.lineage = lineage
 	return b
 }
 
@@ -253,6 +301,13 @@ func (b *DataFrameBuilder) SetFieldNullable(name string, nullable bool) *DataFra
 		return b
 	}
 	b.result.fieldNullables[name] = nullable
+	return b
+}
+
+func (b *DataFrameBuilder) SetArrowFieldMetadata(name string, metadata arrow.Metadata) *DataFrameBuilder {
+	if b.result != nil {
+		b.result.fieldMetadata[name] = arrow.MetadataFrom(metadata.ToMap())
+	}
 	return b
 }
 
@@ -422,6 +477,11 @@ func (b *DataFrameBuilder) CopyFieldMetadata(source *DataFrame, colName string) 
 	if nullable, ok := source.fieldNullables[colName]; ok {
 		b.result.fieldNullables[colName] = nullable
 	}
+	if source.schema != nil {
+		if indices := source.schema.FieldIndices(colName); len(indices) == 1 {
+			b.SetArrowFieldMetadata(colName, source.schema.Field(indices[0]).Metadata)
+		}
+	}
 	return b
 }
 
@@ -433,7 +493,47 @@ func (b *DataFrameBuilder) CopyAllMetadata(source *DataFrame) *DataFrameBuilder 
 	for k, v := range source.metadata {
 		b.result.metadata[k] = v
 	}
+	b.result.lineage = cloneLineage(source.lineage)
 	return b
+}
+
+// WithIdentityLineage returns an owned immutable copy sharing retained columns.
+func WithIdentityLineage(source *DataFrame) (*DataFrame, error) {
+	if err := validateFrameShape(source); err != nil {
+		return nil, merr.Wrap(err, "initialize row lineage")
+	}
+	builder := NewDataFrameBuilder()
+	defer builder.Release()
+	builder.SetChunkSizes(source.chunkSizes).CopyAllMetadata(source).SetIdentityLineage()
+	for _, name := range source.ColumnNames() {
+		if err := builder.AddColumnFrom(source, name); err != nil {
+			return nil, err
+		}
+	}
+	return builder.Build(), nil
+}
+
+func pickLineage(input *DataFrame, indices [][]int) ([][]transform.RowLineage, error) {
+	if input.lineage == nil {
+		return nil, nil
+	}
+	if len(input.lineage) != input.NumChunks() || len(indices) != input.NumChunks() {
+		return nil, merr.WrapErrServiceInternal("lineage chunk count is inconsistent")
+	}
+	result := make([][]transform.RowLineage, len(indices))
+	for group, rows := range indices {
+		if int64(len(input.lineage[group])) != input.chunkSizes[group] {
+			return nil, merr.WrapErrServiceInternal("lineage row count is inconsistent")
+		}
+		result[group] = make([]transform.RowLineage, len(rows))
+		for output, row := range rows {
+			if row < 0 || row >= len(input.lineage[group]) {
+				return nil, merr.WrapErrServiceInternal("lineage source index is out of bounds")
+			}
+			result[group][output] = append(transform.RowLineage(nil), input.lineage[group][row]...)
+		}
+	}
+	return result, nil
 }
 
 // Build returns the constructed DataFrame and invalidates the builder.
@@ -448,6 +548,7 @@ func (b *DataFrameBuilder) Build() *DataFrame {
 				Name:     f.Name,
 				Type:     f.Type,
 				Nullable: b.result.fieldNullables[f.Name],
+				Metadata: b.result.fieldMetadata[f.Name],
 			}
 		}
 		b.result.schema = arrow.NewSchema(finalFields, nil)

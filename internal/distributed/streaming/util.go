@@ -29,7 +29,7 @@ func (w *walAccesserImpl) AppendMessagesWithOptions(ctx context.Context, msgs []
 
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		err := types.NewAppendResponseN(len(msgs))
-		err.FillAllError(ErrWALAccesserClosed)
+		err.FillAllResponse(types.AppendResponse{Error: ErrWALAccesserClosed, AppendNotAttempted: true})
 		return err
 	}
 	defer w.lifetime.Done()
@@ -52,7 +52,7 @@ func (w *walAccesserImpl) AppendMessagesWithOptions(ctx context.Context, msgs []
 			for _, guard := range guards {
 				guard.Cancel()
 			}
-			resp.FillAllError(err)
+			resp.FillAllResponse(types.AppendResponse{Error: err, AppendNotAttempted: true})
 			return resp
 		}
 		guards = append(guards, g)

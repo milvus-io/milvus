@@ -5535,7 +5535,7 @@ func genFunctionChains(chains []FunctionChainReq) ([]*schemapb.FunctionChain, er
 	for i, chainReq := range chains {
 		chainPB, err := genFunctionChain(chainReq)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("functionChains[%d]: %v", i, err)
+			return nil, merr.Wrapf(err, "functionChains[%d]", i)
 		}
 		result = append(result, chainPB)
 	}
@@ -5552,7 +5552,7 @@ func genFunctionChain(req FunctionChainReq) (*schemapb.FunctionChain, error) {
 	for i, opReq := range req.Ops {
 		opPB, err := genFunctionChainOp(opReq)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("ops[%d]: %v", i, err)
+			return nil, merr.Wrapf(err, "ops[%d]", i)
 		}
 		ops = append(ops, opPB)
 	}
@@ -5571,6 +5571,10 @@ func genFunctionChainStage(stageName string) (schemapb.FunctionChainStage, error
 		return schemapb.FunctionChainStage_FunctionChainStageUnspecified, merr.WrapErrParameterInvalidMsg("unsupported function chain stage: %s", stageName)
 	}
 	stage := schemapb.FunctionChainStage(stageValue)
+	switch stage {
+	case schemapb.FunctionChainStage_FunctionChainStageIngestion, schemapb.FunctionChainStage_FunctionChainStagePreProcess, schemapb.FunctionChainStage_FunctionChainStagePostProcess:
+		return schemapb.FunctionChainStage_FunctionChainStageUnspecified, merr.WrapErrAsInputError(merr.WrapErrOperationNotSupportedMsg("REST transform FunctionChain stages require the SDK or gRPC API"))
+	}
 	if _, err := chain.ProtoStageToReprStage(stage); err != nil {
 		return schemapb.FunctionChainStage_FunctionChainStageUnspecified, err
 	}

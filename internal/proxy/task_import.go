@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function/ingestion"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -147,6 +148,9 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	}
 
 	schema := colInfo.Schema
+	if err := ingestion.RejectUnsupportedWrite(schema.CollectionSchema, "import"); err != nil {
+		return err
+	}
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportSysFailed("collection schema has no fields")
 	}
