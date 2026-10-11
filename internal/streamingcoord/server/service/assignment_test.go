@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
@@ -811,10 +812,10 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
-	// UpdateReplicateConfiguration reads the latest assignment three times: once
-	// to fill the redacted connection tokens, once for the validation before the
-	// cluster resource key is acquired, and once for the validation after it.
-	// Only the third read must observe the configuration as already applied.
+	// UpdateReplicateConfiguration reads the latest assignment twice: once for
+	// the validation before the cluster resource key is acquired and once for
+	// the validation after it (each fills the redacted tokens from its own
+	// read). Only the second read must observe the configuration as applied.
 	callCount := 0
 	cfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
@@ -835,7 +836,7 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 2 {
+		if callCount <= 1 {
 			// Before the resource key: config is different (nil)
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
@@ -1277,8 +1278,8 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
-	// As above, the first two reads serve the token filling and the validation
-	// before the resource key is acquired; the failure belongs to the third.
+	// As above, the first read serves the validation before the resource key
+	// is acquired; the failure belongs to the second.
 	callCount := 0
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
@@ -1289,7 +1290,7 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 2 {
+		if callCount <= 1 {
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
 					Channels: map[channel.ChannelID]*channel.PChannelMeta{
@@ -1557,4 +1558,68 @@ func TestUpdateReplicateConfigBroadcastCarriesStoredTokens(t *testing.T) {
 		tokens[cluster.GetClusterId()] = cluster.GetConnectionParam().GetToken()
 	}
 	assert.Equal(t, map[string]string{"by-dev": "by-dev", "test2": "test2"}, tokens)
+}
+
+// CDC can apply a newer configuration on a secondary while it handles a
+// request. The redacted tokens must be filled from the same assignment read
+// that the request is compared and validated against: a configuration that
+// adds a cluster, read back from the primary and sent to a secondary that
+// still stores the older one, must not be rejected because the added cluster
+// is compared with an empty token against the newer stored configuration.
+func TestUpdateReplicateConfigFillAndValidateSameSnapshot(t *testing.T) {
+	twoClusters := storedTestConfig([]*commonpb.CrossClusterTopology{{SourceClusterId: "test2", TargetClusterId: "by-dev"}})
+	threeClusters := storedTestConfig([]*commonpb.CrossClusterTopology{
+		{SourceClusterId: "test2", TargetClusterId: "by-dev"},
+		{SourceClusterId: "test2", TargetClusterId: "test3"},
+	})
+	threeClusters.Clusters = append(threeClusters.Clusters, &commonpb.MilvusCluster{
+		ClusterId: "test3", Pchannels: []string{"test3"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test3:19530", Token: "test3"},
+	})
+	incoming := proto.Clone(threeClusters).(*commonpb.ReplicateConfiguration)
+	for _, cluster := range incoming.GetClusters() {
+		cluster.ConnectionParam.Token = ""
+	}
+
+	b, mb := setupUpdateReplicateConfigTest(t, nil)
+	// The first read still sees the two-cluster configuration; CDC applies the
+	// three-cluster one right after it.
+	reads := 0
+	b.EXPECT().GetLatestChannelAssignment().Unset()
+	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
+		reads++
+		stored := twoClusters
+		if reads > 1 {
+			stored = threeClusters
+		}
+		return &balancer.WatchChannelAssignmentsCallbackParam{
+			PChannelView: &channel.PChannelView{
+				Channels: map[channel.ChannelID]*channel.PChannelMeta{
+					{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+				},
+			},
+			ReplicateConfiguration: stored,
+		}, nil
+	})
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(nil, broadcaster.ErrNotPrimary)
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).Unset()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		if err := cb(balancer.WatchChannelAssignmentsCallbackParam{ReplicateConfiguration: threeClusters}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	as := NewAssignmentService()
+	_, err := as.UpdateReplicateConfiguration(ctx, &streamingpb.UpdateReplicateConfigurationRequest{Configuration: incoming})
+	assert.NoError(t, err)
+
+	// And when the newer configuration is already stored at the first read, the
+	// request is recognized as applied: every token, including the added
+	// cluster's, is filled from that read.
+	reads = 1
+	_, err = as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{Configuration: incoming})
+	assert.NoError(t, err)
 }
