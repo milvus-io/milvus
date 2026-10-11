@@ -311,6 +311,9 @@ message AnalyzeTask {
     string fail_reason = 11;
     int64 dim = 12;
     string centroids_file = 13;
+    int64 num_clusters = 14;
+    string cluster_type = 15;
+    map<string, string> cluster_params = 16;
 }
 
 message SegmentStats {

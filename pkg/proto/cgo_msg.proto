@@ -25,6 +25,20 @@ message LoadIndexInfo {
   int64 num_rows = 17;
   int32 current_scalar_index_version = 18;
   index.IndexStorePathVersion index_store_path_version = 19;
+  // Present only for a snapshot-owned clustering index. Collection, partition,
+  // field/shape and num_rows (num_clusters) use the common fields above. The
+  // field type selects vector index_engine_version or current_scalar_index_version.
+  // segmentID/indexID/index_buildID/index_version/index_store_path_version are
+  // inapplicable: use snapshot identity for cache keys and local paths instead.
+  // PR1 declares the payload only; callers must wait for native loader support.
+  PartitionStatsContext partition_stats = 20;
+}
+
+// Runtime load context, not a second persisted copy of snapshot ownership.
+// Absence on LoadIndexInfo preserves the segment-index loading path.
+message PartitionStatsContext {
+  string channel = 1;
+  int64 version = 2;
 }
 
 message IndexStats {

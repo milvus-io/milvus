@@ -6441,6 +6441,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionChunkSizePerCentroid   ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -7332,7 +7333,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Key:          "dataCoord.compaction.clustering.maxTrainSizeRatio",
 		Version:      "2.4.7",
 		DefaultValue: "0.8",
-		Doc:          "max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit",
+		Doc:          "Fraction of worker memory used to budget KMeans training data; sample when the input exceeds this budget",
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxTrainSizeRatio.Init(base.mgr)
@@ -7381,6 +7382,15 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
+
+	p.ClusteringCompactionChunkSizePerCentroid = ParamItem{
+		Key:          "dataCoord.compaction.clustering.chunkSizePerCentroid",
+		Version:      "3.1.0",
+		DefaultValue: "8MB",
+		Doc:          "Target raw vector bytes per centroid; must be positive and is independent of segment size",
+		Export:       true,
+	}
+	p.ClusteringCompactionChunkSizePerCentroid.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
