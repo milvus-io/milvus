@@ -93,7 +93,7 @@ func GetMemoryCount() uint64 {
 		return limit
 	}
 
-	if err != nil || limit > stats.Total {
+	if err != nil {
 		mlog.RatedWarn(context.TODO(), rate.Limit(3600), "failed to get container memory limit",
 			mlog.Uint64("containerLimit", limit),
 			mlog.Err(err))
