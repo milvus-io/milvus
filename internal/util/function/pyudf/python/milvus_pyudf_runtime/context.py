@@ -46,3 +46,33 @@ class PyUDFContext:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "runtime_info", MappingProxyType(dict(self.runtime_info)))
+
+
+@dataclass(frozen=True, slots=True)
+class PyUDFQueryInput:
+    """One ANN input: values[i] belongs to query i.
+
+    VarChar values are strings; vector values retain the original encoded bytes
+    and their PlaceholderType name in data_type. No vector precision is lost.
+    """
+
+    data_type: str
+    values: tuple[str | bytes, ...]
+    tag: str
+
+
+@dataclass(frozen=True, slots=True)
+class PyUDFCallContext:
+    """Request-owned context; never part of the cached factory instance.
+
+    queries/original_queries contain one entry per ANN input, each with NQ
+    values. Rerank receives query_index. POST receives every candidate group
+    once, with query_index=None; result_offsets also describe a flattened view.
+    """
+
+    stage: str
+    query_count: int
+    query_index: int | None = None
+    queries: tuple[PyUDFQueryInput, ...] = ()
+    original_queries: tuple[PyUDFQueryInput, ...] = ()
+    result_offsets: tuple[int, ...] = ()

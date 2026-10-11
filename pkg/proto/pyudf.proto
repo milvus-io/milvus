@@ -36,6 +36,25 @@ message ExecuteRequest {
   // UDF argument position -> zero-based IPC column index. Repeated indices
   // reuse the same decoded array. Empty means IPC columns in their stored order.
   repeated uint32 input_column_indices = 7;
+  // Per-request query metadata, separate from user-controlled UDF parameters.
+  QueryContext query_context = 8;
+  // 0 is the legacy per-group callable; 2 adds query context and batch POST.
+  // A v2 client requires the worker to acknowledge v2 in its success response.
+  uint32 execution_version = 9;
+}
+
+// Keep raw vector encodings and text values without importing public SDK
+// descriptors into the worker. data_type is the PlaceholderType enum name.
+message QueryInput {
+  string data_type = 1;
+  repeated bytes values = 2;
+  string tag = 3;
+}
+
+message QueryContext {
+  // Entries align with ANN subrequests; each has one value per NQ.
+  repeated QueryInput original_queries = 1;
+  repeated QueryInput queries = 2;
 }
 
 // Runtime-owned parameter types. Keep these independent of Milvus API protos:
@@ -61,6 +80,7 @@ message FunctionParamObject {
 }
 
 message ExecuteResponse {
+  uint32 execution_version = 3;
   oneof result {
     // One complete Arrow IPC stream; output layout is independent of inputs.
     bytes outputs = 1;

@@ -197,7 +197,9 @@ input semantics without promising one external model call across all retries.
 
 POST executes after reduction/fusion/rerank, required field retrieval and
 configured highlighting. Each original query is one candidate group, including
-zero-hit groups. Physical Arrow batches do not define query boundaries.
+zero-hit groups. A PyUDF POST invocation receives all these groups together,
+plus every original/prepared query. Physical Arrow batches do not define query
+boundaries or separate POST invocations.
 
 Stored fields and typed JSON paths resolve before execution. Scalar arrays,
 scalar StructArray parents/children and supported single-vector fields can be
@@ -279,11 +281,55 @@ selection, filtering and successive expansions. PRE/POST require singleton
 identity lineage; ingestion allows single-parent subsets/expansion in parent
 order. Multi-source lineage is representable but not executable in v1.
 
-Wheel factories use the `milvus.pyudf` entry point and receive stage context.
-Instances implement exactly one callable: `transform(params, columns)` for
-ingestion, or `transform_query(params, columns)` for PRE/POST/L2. Arrays returned
-by Python have one outer value per input row; native FlatMap performs expansion
-after validating that outer shape.
+Wheel factories use the `milvus.pyudf` entry point and receive initialization
+context. Runtime 0.2 adds a separate, immutable `PyUDFCallContext` for each
+invocation. It is never stored in the cached factory context or user parameters.
+Instances implement exactly one callable:
+
+| Stage | Callable | Invocation unit |
+|---|---|---|
+| INGESTION | `transform(params, columns)` | One INSERT batch |
+| PRE | `transform_query(params, columns, context=...)` | All NQ query rows of one ANN input |
+| L0/L1/L2 contract | `transform_query(params, columns, context=...)` | One query's candidates; `context.query_index` selects that query |
+| POST | `transform_batch(params, batches, context=...)` | All NQ candidate groups in one call; `context.query_index` is `None` |
+
+The rerank grouping/index contract is common to L0/L1/L2. This implementation
+enables PyUDF execution at the existing Proxy L2 boundary; QueryNode L0/L1 still
+reject PyUDF and have no Python supervisor integration. Worker-level tests for
+the three rerank stage names verify the common contract, not QueryNode execution.
+
+`context.original_queries` and `context.queries` each contain one input per ANN
+subrequest (one for ordinary Search). `values[i]` belongs to query index `i`.
+Original values are captured before PRE; prepared values are captured after
+PRE and before native query embedding/conversion. VarChar values become Python
+strings. Vector values retain their original bytes with the PlaceholderType
+name in `data_type`. Hybrid inputs remain separate; the runtime never chooses
+the first ANN input as an implicit canonical query.
+PRE itself sees its stage-entry snapshot in context; intermediate query values
+are read from its input columns.
+
+For rerank, each group receives its zero-based `query_index`, even if an earlier
+query has zero hits. For POST, `batches[i]` is the tuple of selected Arrow input
+columns for query `i`, including typed empty arrays. `result_offsets` describes
+the same groups as cumulative row counts. This representation avoids copying
+all candidate arrays into a concatenated buffer. POST returns one sequence of
+output arrays per input group, preserving group/row counts and identity. Merely
+receiving all groups does not enable aggregate/reduce output cardinality.
+
+Existing two-argument INGESTION/PRE/L2 methods remain callable; a method that
+accepts the `context` keyword receives it. Signature selection precedes the
+user call, so a TypeError in its body never causes a second invocation. POST
+wheels must implement `transform_batch` for the new execution contract.
+Arrays retain one outer value per input row; native FlatMap owns expansion.
+
+The internal worker request uses execution version 2 and includes query
+metadata outside user-controlled params. A successful response must acknowledge
+version 2; an old worker cannot silently return legacy per-query POST output.
+New workers retain the execution-version-0 path for old clients. Query metadata
+count/type failures are internal contract errors at the worker; malformed
+original client query payloads are rejected as input errors by Proxy first.
+This metadata transports query snapshots only; it does not export arbitrary
+temporary PRE/L2 columns to another stage.
 
 The supervisor uses installed `python3 -I -m milvus_pyudf_runtime.supervisor`.
 `function.pyUDF.enabled` defaults to false; Proxy FileResource mode must be
@@ -356,6 +402,10 @@ certification.
 
 | Verification | Recorded result | Local evidence |
 |---|---|---|
+| Query-context runtime 0.2 Python suite, including installed-wheel execution | Passed, 85 tests and 61 subtests | `/tmp/milvus-function-chain-query-context-python-installed.log` |
+| Query-context chain, DQL, DML and PyUDF Go suites with race detector | Passed; client fixtures acknowledge execution version 2 in the final client rerun | `/tmp/milvus-function-chain-query-context-go-tests.log`, `/tmp/milvus-function-chain-query-context-go-client-rerun.log` |
+| Complete real INSERT → PRE → L2 → POST example | Passed; same candidates rank differently for each query; POST sees all six hits | `/tmp/milvus-function-chain-query-context-e2e/sdk-running.log` |
+| Real Hybrid and zero-hit POST grouping | Passed; both ANN inputs retained, one POST call per request for group counts `[3,3]`, `[2,0]`, `[0,0]` | `/tmp/milvus-function-chain-query-context-e2e/hybrid-probe-final.log` |
 | Server build with pinned protocol and `GOWORK=off`, module requirements read-only | Passed; binary metadata confirms the pinned protocol version/checksum | `/tmp/milvus-function-chain-pinned-build.log` |
 | Complete chain/DML/DQL suites against the pinned module with `GOWORK=off` and race detector | Passed | `/tmp/milvus-function-chain-pinned-regression.log` |
 | SDK chain/ingestion-future/hybrid/async regressions after protocol pinning | Passed, 222 tests | `/tmp/milvus-function-chain-pinned-sdk-tests.log` |
@@ -456,5 +506,6 @@ and become upstream links when the change is merged.
 - [Streaming producer provenance](https://github.com/milvus-io/milvus/blob/master/internal/distributed/streaming/internal/producer/producer_task.go)
 - [PRE/POST adapters](https://github.com/milvus-io/milvus/blob/master/internal/proxy/dql/function_chain_transform.go), [stage classification](https://github.com/milvus-io/milvus/blob/master/internal/proxy/dql/function_chain_validator.go), [pipeline](https://github.com/milvus-io/milvus/blob/master/internal/proxy/dql/search_pipeline.go)
 - [PyUDF expression](https://github.com/milvus-io/milvus/blob/master/internal/util/function/chain/expr/pyudf_expr.go), [Python instance contract](https://github.com/milvus-io/milvus/blob/master/internal/util/function/pyudf/python/milvus_pyudf_runtime/instance.py)
+- [Query snapshots](https://github.com/milvus-io/milvus/blob/master/internal/proxy/dql/function_chain_query_context.go), [call context](https://github.com/milvus-io/milvus/blob/master/internal/util/function/pyudf/python/milvus_pyudf_runtime/context.py), [worker invocation modes](https://github.com/milvus-io/milvus/blob/master/internal/util/function/pyudf/python/milvus_pyudf_runtime/worker.py)
 - [Demonstration wheel](https://github.com/milvus-io/milvus/blob/master/internal/util/function/pyudf/python/examples/transform_demo/milvus_transform_demo.py)
 - [REST guards](https://github.com/milvus-io/milvus/blob/master/internal/distributed/proxy/httpserver/function_chain_transform.go), [WAL/CDC architecture](https://github.com/milvus-io/milvus/blob/master/docs/agent_guides/streaming-system/streaming-system.md)

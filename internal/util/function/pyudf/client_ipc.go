@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/ipc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pyudfpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -260,7 +262,7 @@ func outputValueBufferSize(values arrow.Array) int64 {
 }
 
 func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb.ExecuteRequest, error) {
-	wire := &pyudfpb.ExecuteRequest{ResourceName: request.ResourceName, UdfPath: request.UDFPath, Stage: request.Stage, Params: encodeParams(request.Params)}
+	wire := &pyudfpb.ExecuteRequest{ResourceName: request.ResourceName, UdfPath: request.UDFPath, Stage: request.Stage, Params: encodeParams(request.Params), ExecutionVersion: executionVersion}
 	// BaseOp resolves repeated field references to the same Chunked object.
 	// Deduplicate by identity, not equal values: distinct columns stay distinct.
 	unique := make([]*arrow.Chunked, 0, len(request.Inputs))
@@ -280,8 +282,51 @@ func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb
 		return nil, err
 	}
 	wire.Inputs = payload
+	if request.QueryContext != nil {
+		nq := len(request.Inputs[0].Chunks())
+		if strings.EqualFold(request.Stage, "pre_process") {
+			if nq != 1 {
+				return nil, merr.WrapErrServiceInternal("py_udf: PRE requires one query-row group")
+			}
+			nq = request.Inputs[0].Chunk(0).Len()
+		}
+		original, err := encodeQueryInputs(request.QueryContext.OriginalQueries, nq)
+		if err != nil {
+			return nil, err
+		}
+		prepared, err := encodeQueryInputs(request.QueryContext.Queries, nq)
+		if err != nil {
+			return nil, err
+		}
+		if len(original) == 0 || len(original) != len(prepared) {
+			return nil, merr.WrapErrServiceInternal("py_udf: query context ANN inputs do not align")
+		}
+		wire.QueryContext = &pyudfpb.QueryContext{OriginalQueries: original, Queries: prepared}
+	}
 
 	return wire, nil
+}
+
+func encodeQueryInputs(inputs []*commonpb.PlaceholderValue, nq int) ([]*pyudfpb.QueryInput, error) {
+	result := make([]*pyudfpb.QueryInput, len(inputs))
+	for index, input := range inputs {
+		if input == nil || len(input.GetValues()) != nq {
+			return nil, merr.WrapErrServiceInternalMsg("py_udf: query input %d does not match NQ %d", index, nq)
+		}
+		name, ok := commonpb.PlaceholderType_name[int32(input.GetType())]
+		if !ok || input.GetType() == commonpb.PlaceholderType_None {
+			return nil, merr.WrapErrServiceInternal("py_udf: query context has invalid placeholder type")
+		}
+		if input.GetType() == commonpb.PlaceholderType_VarChar {
+			for _, value := range input.GetValues() {
+				if !utf8.Valid(value) {
+					return nil, merr.WrapErrServiceInternal("py_udf: query context contains invalid UTF-8")
+				}
+			}
+		}
+		result[index] = &pyudfpb.QueryInput{DataType: name, Values: input.GetValues(), Tag: input.GetTag()}
+	}
+	return result, nil
 }
 
 // Translate API parameters at the Go boundary so Python only loads the

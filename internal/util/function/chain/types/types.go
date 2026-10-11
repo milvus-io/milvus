@@ -51,9 +51,10 @@ const (
 // FuncContext is the execution context for function chains.
 // The pool is immutable after creation.
 type FuncContext struct {
-	ctx   context.Context // context for cancellation and timeouts
-	pool  memory.Allocator
-	stage string // execution stage for filtering operators
+	ctx     context.Context // context for cancellation and timeouts
+	pool    memory.Allocator
+	stage   string // execution stage for filtering operators
+	queries *QueryContext
 }
 
 // NewFuncContext creates a new FuncContext with the given allocator.

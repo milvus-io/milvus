@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "milvus-pyudf-runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python gRPC worker runtime for Milvus PyUDF"
 requires-python = ">=3.10"
 dependencies = ["pyarrow==23.0.1", "grpcio==1.74.0", "grpcio-health-checking==1.74.0", "protobuf==6.31.1"]

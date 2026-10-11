@@ -45,6 +45,12 @@ remain unchanged after regeneration. The Python worker runtime has its own
 protocol and wheel; run the Milvus `check-pyudf-proto-product` and
 `build-pyudf-runtime-wheel` targets for it.
 
+The query-context update requires worker runtime 0.2 and execution protocol 2.
+Deploy that wheel with the matching server, and update POST UDFs to implement
+`transform_batch`. This update changes the private worker protocol; the public
+milvus-proto dependency pin above remains the same. New clients reject a worker
+success response that does not acknowledge the new execution contract.
+
 The [design verification matrix](../design-docs/design_docs/20261010-function-chain-transform-stages.md)
 records feature coverage and the remaining failures in the full Go gate.
 Focused checks do not replace that gate. Before enabling ingestion, upgrade

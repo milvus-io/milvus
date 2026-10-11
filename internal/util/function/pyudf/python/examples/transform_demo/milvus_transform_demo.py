@@ -38,7 +38,7 @@ class Ingestion:
 
 
 class Query:
-    def transform_query(self, params, columns):
+    def transform_query(self, params, columns, *, context):
         mode = params.get("mode", "embedding")
         if mode == "embedding":
             return [pa.array([vector(value.as_py()) for value in columns[0]], type=pa.list_(pa.float32(), 2))]
@@ -49,18 +49,48 @@ class Query:
                     type=pa.string(),
                 )
             ]
+        if mode == "rerank":
+            query = context.original_queries[0].values[context.query_index]
+            preferred = {"hello": "alpha", "world": "gamma"}.get(query)
+            return [pa.array([1.0 if value.as_py() == preferred else 0.1 for value in columns[0]], type=pa.float32())]
+        raise ValueError(f"unsupported query mode: {mode}")
+
+
+class PostProcess:
+    def transform_batch(self, params, batches, *, context):
+        total_hits = sum(len(columns[0]) for columns in batches)
+        output_type = pa.struct(
+            [
+                ("text", pa.string()),
+                ("start", pa.int64()),
+                ("query", pa.string()),
+                ("query_index", pa.int64()),
+                ("query_count", pa.int64()),
+                ("total_hits", pa.int64()),
+            ]
+        )
         return [
-            pa.array(
-                [{"text": value.as_py(), "start": 0} for value in columns[0]],
-                type=pa.struct(
+            [
+                pa.array(
                     [
-                        ("text", pa.string()),
-                        ("start", pa.int64()),
-                    ]
-                ),
-            )
+                        {
+                            "text": value.as_py(),
+                            "start": 0,
+                            "query": context.original_queries[0].values[index],
+                            "query_index": index,
+                            "query_count": context.query_count,
+                            "total_hits": total_hits,
+                        }
+                        for value in columns[0]
+                    ],
+                    type=output_type,
+                )
+            ]
+            for index, columns in enumerate(batches)
         ]
 
 
 def factory(context):
+    if context.stage == "post_process":
+        return PostProcess()
     return Ingestion() if context.stage == "ingestion" else Query()

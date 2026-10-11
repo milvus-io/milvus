@@ -72,7 +72,7 @@ func (e *transformExecutor) Execute(ctx context.Context, plan *schemapb.Function
 		return transform.Result{}, err
 	}
 	defer frame.Release()
-	opts := ExecuteOptions{}
+	opts := ExecuteOptions{QueryContext: input.QueryContext}
 	if len(fc.operators) > 0 {
 		if selection, ok := fc.operators[len(fc.operators)-1].(*SelectOp); ok {
 			// A terminal select explicitly defines every ordinary result column.

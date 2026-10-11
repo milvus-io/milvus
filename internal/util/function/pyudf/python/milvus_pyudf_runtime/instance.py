@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -51,18 +52,31 @@ class PyUDFInstance:
         try:
             transform = getattr(instance, "transform", None)
             transform_query = getattr(instance, "transform_query", None)
+            transform_batch = getattr(instance, "transform_batch", None)
             close = getattr(instance, "close", None)
         except MemoryError:
             raise
         except Exception as exc:
             raise PyUDFLoadError("PyUDF instance attribute access raised an exception") from exc
-        if callable(transform) == callable(transform_query):
-            raise PyUDFLoadError("PyUDF instance must implement exactly one callable transform or transform_query")
+        methods = {"transform": transform, "transform_query": transform_query, "transform_batch": transform_batch}
+        callables = [name for name, method in methods.items() if callable(method)]
+        if len(callables) != 1:
+            raise PyUDFLoadError(
+                "PyUDF instance must implement exactly one callable transform or transform_query or transform_batch"
+            )
         if close is not None and not callable(close):
             raise PyUDFLoadError("PyUDF close attribute must be callable when present")
         self.instance = instance
-        self.callable_name = "transform" if callable(transform) else "transform_query"
+        self.callable_name = callables[0]
         self._close = close
+        # Determine the signature before execution. Never retry a user call on
+        # TypeError: its body may already have performed external side effects.
+        try:
+            signature = inspect.signature(methods[self.callable_name])
+            signature.bind(None, None, context=None)
+            self._accepts_context = True
+        except (TypeError, ValueError):
+            self._accepts_context = False
 
     def execute_query(
         self,
@@ -77,6 +91,7 @@ class PyUDFInstance:
         params: Mapping[str, Any],
         columns: Sequence[pa.Array],
         stage: str,
+        context=None,
     ) -> tuple[pa.Array, ...]:
         """Execute a logical input group, keeping nested values in Arrow arrays."""
         expected = "transform" if stage == "ingestion" else "transform_query"
@@ -87,12 +102,48 @@ class PyUDFInstance:
         if not isinstance(columns, Sequence) or not all(isinstance(column, pa.Array) for column in columns):
             raise PyUDFExecutionError("columns must contain only pyarrow.Array objects", wire.INTERNAL)
 
+        result = self._invoke(params, tuple(columns), context)
+        return self._validate_outputs(result)
+
+    def execute_batch(self, params, batches, context) -> tuple[tuple[pa.Array, ...], ...]:
+        """Invoke POST once for every query group, including zero-hit groups."""
+        if self.callable_name != "transform_batch":
+            raise PyUDFExecutionError(
+                "POST_PROCESS execution version 2 requires transform_batch(params, batches, context=...)"
+            )
+        if not isinstance(params, Mapping):
+            raise PyUDFExecutionError("params must be an immutable mapping", wire.INTERNAL)
+        inputs = tuple(tuple(columns) for columns in batches)
+        if any(not all(isinstance(column, pa.Array) for column in columns) for columns in inputs):
+            raise PyUDFExecutionError("batch columns must contain pyarrow.Array objects", wire.INTERNAL)
+        result = self._invoke(params, inputs, context)
+        if not isinstance(result, Sequence) or isinstance(result, (str, bytes, bytearray)):
+            raise PyUDFExecutionError("transform_batch must return one output-column sequence per query")
+        if len(result) != len(inputs):
+            raise PyUDFExecutionError("transform_batch changed query group count")
+        output = []
+        for index, group in enumerate(result):
+            values = self._validate_outputs(group)
+            if not values:
+                raise PyUDFExecutionError("transform_batch must return at least one output column per query")
+            if any(len(value) != len(inputs[index][0]) for value in values):
+                raise PyUDFExecutionError(f"transform_batch changed candidate count for query {index}")
+            output.append(values)
+        return tuple(output)
+
+    def _invoke(self, params, inputs, context):
         try:
-            result = getattr(self.instance, self.callable_name)(params, tuple(columns))
+            method = getattr(self.instance, self.callable_name)
+            if self._accepts_context:
+                return method(params, inputs, context=context)
+            return method(params, inputs)
         except MemoryError:
             raise
         except Exception as exc:
-            raise PyUDFExecutionError(f"PyUDF {expected} raised an exception") from exc
+            raise PyUDFExecutionError(f"PyUDF {self.callable_name} raised an exception") from exc
+
+    def _validate_outputs(self, result):
+        expected = self.callable_name
 
         if not isinstance(result, Sequence) or isinstance(result, (str, bytes, bytearray)):
             raise PyUDFExecutionError(f"{expected} must return a sequence of pyarrow.Array")

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
+	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -119,6 +120,7 @@ type SearchTask struct {
 	postOutputFields   []string
 	transformsPrepared bool
 	preProcessed       bool
+	queryContext       *chaintypes.QueryContext
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField

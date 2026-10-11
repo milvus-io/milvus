@@ -241,7 +241,7 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 		return nil, err
 	}
 
-	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage)
+	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage).WithQueryContext(opts.QueryContext)
 
 	var result *DataFrame
 	startIdx := 0

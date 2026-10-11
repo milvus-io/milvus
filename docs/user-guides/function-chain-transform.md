@@ -13,7 +13,7 @@ The complete deterministic example is
 Its wheel source is
 [`transform_demo`](../../internal/util/function/pyudf/python/examples/transform_demo/milvus_transform_demo.py).
 The example performs INSERT chunking/embedding/tagging, query translation and
-embedding, and a Struct-valued POST highlight. Vectors and translations are
+embedding, query-dependent L2 ranking, and a Struct-valued POST highlight. Vectors and translations are
 deterministic; it calls no paid external model API. The source links for new
 files become upstream links when the corresponding changes are merged.
 
@@ -78,7 +78,7 @@ From the Milvus checkout:
   --wheel-dir ./dist/transform-demo
 ```
 
-Upload `milvus_transform_demo-0.1.0-py3-none-any.whl` to the object storage
+Upload `milvus_transform_demo-0.2.0-py3-none-any.whl` to the object storage
 available to Milvus FileResource, using your storage client. Register its
 storage object path, not a client-local filesystem path:
 
@@ -88,7 +88,7 @@ from pymilvus import MilvusClient
 client = MilvusClient("http://127.0.0.1:19530")
 client.add_file_resource(
     name="transform_demo",
-    path="udf/milvus_transform_demo-0.1.0-py3-none-any.whl",
+    path="udf/milvus_transform_demo-0.2.0-py3-none-any.whl",
 )
 ```
 
@@ -238,9 +238,21 @@ post = (
     )
     .select(["highlight"])
 )
+rerank = (
+    FunctionChain(FunctionChainStage.L2_RERANK, "query_aware_rerank")
+    .map(
+        "$score",
+        fn.py_udf(
+            col("text"), resource_name="transform_demo",
+            udf_params={"mode": "rerank"},
+        ),
+    )
+    .sort("$score", desc=True)
+    .limit(3)
+)
 hits = client.search(
     "chunks", data=["hello", "world"], anns_field="vector", limit=3,
-    function_chains=[pre, post],
+    function_chains=[pre, rerank, post],
 )
 ```
 
@@ -250,9 +262,14 @@ Generated vector dimension/type must match the target field, with native
 FloatVector-to-FP16/BF16 conversion supported. Final text can instead enter a
 collection's native query embedding or BM25 path.
 
-POST runs on complete candidate fields after ranking. Here Python returns an
-Arrow Struct containing `text` and `start`; it becomes a JSON highlight object
-in each hit's entity. Select exposes only highlight payload. IDs, scores and
+L2 receives a separate candidate group and `query_index` for each query. The
+demo ranks `alpha` first for `hello` and `gamma` first for `world`.
+
+POST calls `transform_batch` once with all query groups after ranking. Here
+Python returns one Struct array per group, including `text`, `start`, the
+original query, its index and total hit count across all groups. Each Struct
+becomes a JSON highlight object in the corresponding hit's entity. Select
+exposes only highlight payload. IDs, scores and
 query/candidate boundaries remain dedicated result metadata. A final select
 also controls aliases/output order; without select, original requested fields
 and generated payloads are returned, while hidden model inputs remain hidden.
@@ -307,12 +324,61 @@ exports `factory` in `milvus.pyudf`. The factory receives stage context and
 returns an instance with exactly one callable:
 
 - INGESTION: `transform(params, columns)`.
-- PRE/POST/L2: `transform_query(params, columns)`.
+- PRE/L2: `transform_query(params, columns, *, context)`.
+- POST: `transform_batch(params, batches, *, context)`.
+
+Use runtime 0.2 or newer for this contract and update POST wheels to the batch
+callable. Existing two-argument INGESTION/PRE/L2 methods are accepted; declare
+the `context` keyword when using request metadata. Keep the factory's
+initialization context separate from this per-invocation context.
+
+For an ordinary search, a reranker reads the corresponding original query as:
+
+```python
+query = context.original_queries[0].values[context.query_index]
+```
+
+In L2/POST, `context.queries` contains the final PRE payloads, before native embedding.
+They may already be vectors if PRE performs embedding itself. VarChar values
+are strings; vector values are bytes with a `data_type` name. For HybridSearch,
+the outer index identifies the ANN subrequest, and each input has NQ values.
+L0/L1 use the same proposed grouping/index contract but do not yet execute
+PyUDF in QueryNode.
+During PRE, context contains the payloads from entry to the PRE chain; current
+intermediate query values are available in `columns`.
+
+POST receives all query inputs in context and all candidate groups in `batches`:
+
+```python
+import pyarrow as pa
+
+class PostProcess:
+    def transform_batch(self, params, batches, *, context):
+        outputs = []
+        for query_index, columns in enumerate(batches):
+            query = context.original_queries[0].values[query_index]
+            outputs.append([
+                pa.array(
+                    [f"{query}: {text.as_py()}" for text in columns[0]],
+                    type=pa.string(),
+                )
+            ])
+        return outputs
+```
+
+`batches[i]` contains the selected input columns for query `i`; zero-hit queries
+remain present as typed empty arrays. `context.query_index` is `None` for POST,
+and `context.result_offsets` gives cumulative candidate counts. POST returns
+the same number of groups and candidates; N-to-one aggregation remains a
+separate capability.
+Include `col("$id")` or `col("$score")` in the expression when the UDF needs
+candidate identity or scores as input columns.
 
 Return a sequence of typed `pyarrow.Array` objects with one outer value per
 input row. Specify types for zero-row and all-null arrays. A map can return
 several arrays when its output names match their count; flat_map returns one
-List array. Factory instances can be called concurrently, so keep model state
+List array. POST wraps these output arrays in one sequence per query group.
+Factory instances can be called concurrently, so keep model state
 thread safe. Set external API timeouts explicitly; a Milvus RPC timeout does
 not terminate running Python or undo an external call.
 
@@ -367,12 +433,17 @@ or stages through REST. Bound collections reject Upsert/partial update/Import
 and ingestion INSERT idempotency keys. Binding replacement through ALTER and
 multi-row aggregate/reduce are not implemented.
 
-The matching local SDK/server/worker/WAL demonstration passed after the pruning
-fix with 2 inputs →
-3 stored rows, aligned CSR, two PRE-prepared queries and JSON highlight-only
-POST output. Empty input returned zero rows; deliberate UDF failure returned
+The matching local SDK/server/runtime-0.2/WAL demonstration passed with
+2 inputs → 3 stored rows, aligned CSR, two PRE-prepared queries, query-aware
+L2 reranking and one POST call containing both result groups. The two queries
+ranked different documents first, and every POST hit carried the correct
+query/index plus the total hit count across both groups. A separate Hybrid
+Search probe retained both ANN query inputs. Candidate group sizes `[3, 3]`,
+`[2, 0]` and `[0, 0]` each produced exactly one POST invocation, including
+empty groups. Empty INSERT returned zero rows; deliberate UDF failure returned
 code 2400, retained its MutationResult with known outcome, and added no rows.
-A restarted server retained the binding and the three rows/vectors/tags.
+The earlier ingestion demonstration also verified that a restarted server
+retained the binding and the three rows/vectors/tags.
 These observations do not validate external model services, CDC fault recovery
 or mixed-version deployment. Graceful shutdown was not verified: existing etcd
 cleanup panicked during SIGTERM.

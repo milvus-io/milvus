@@ -961,6 +961,7 @@ func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64
 }
 
 type rerankOperator struct {
+	queryContext     *chaintypes.QueryContext
 	nq               int64
 	topK             int64
 	offset           int64
@@ -1021,6 +1022,7 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 			})
 		}
 		return &rerankOperator{
+			queryContext:     t.queryContext,
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
 			offset:           t.rankParams.offset,
@@ -1035,6 +1037,7 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 		}, nil
 	}
 	return &rerankOperator{
+		queryContext:     t.queryContext,
 		nq:               t.GetNq(),
 		topK:             t.GetTopk(),
 		offset:           0, // Search performs Offset in the reduce phase
@@ -1182,6 +1185,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	// Execute chain. Liveness pruning removes scalar inputs after their last use;
 	// system columns remain available for result export.
 	executeOpts := chain.ExecuteOptions{
+		QueryContext:        op.queryContext,
 		EnableColumnPruning: true,
 		SystemColumnPolicy: chain.SystemColumnPolicy{
 			KeepAllSystemColumns: true,

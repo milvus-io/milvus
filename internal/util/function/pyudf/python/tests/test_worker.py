@@ -114,6 +114,148 @@ class WorkerTests(unittest.TestCase):
     def execute(self, request):
         return self.client.Execute(request, timeout=3)
 
+    def query_request(self, path, batches, stage="L2_rerank"):
+        request = self.request(path, batches)
+        request.stage = stage
+        request.execution_version = 2
+        request.query_context.original_queries.add(data_type="VarChar", tag="$0", values=[b"cat", b"empty", b"dog"])
+        request.query_context.queries.add(data_type="VarChar", tag="$0", values=[b"CAT", b"EMPTY", b"DOG"])
+        return request
+
+    def test_query_context_rerank_preserves_query_indexes_and_empty_groups(self):
+        path, package = self.wheel("""
+import pyarrow as pa
+from dataclasses import FrozenInstanceError
+calls=[]
+class UDF:
+ def transform_query(self, params, columns, *, context):
+  i=context.query_index
+  assert context.query_count==3
+  assert context.result_offsets==(0,2,2,4)
+  assert context.original_queries[0].values==('cat','empty','dog')
+  assert context.queries[0].values==('CAT','EMPTY','DOG')
+  try: context.query_index=999
+  except FrozenInstanceError: pass
+  else: raise AssertionError('mutable execution context')
+  calls.append((context.stage, i, context.queries[0].values[i]))
+  return [pa.array([float(i+1)]*len(columns[0]),type=pa.float32())]
+def factory(context): return UDF()
+""")
+        batches = [
+            pa.record_batch([pa.array(rows, type=pa.string())], names=["text"])
+            for rows in (["same", "candidates"], [], ["same", "candidates"])
+        ]
+        # These exercise the common worker contract. QueryNode deployment of
+        # L0/L1 PyUDF is independently gated by the server stage/runtime support.
+        for stage in ("L0_rerank", "L1_rerank", "L2_rerank"):
+            request = self.query_request(path, batches, stage)
+            request.params.fields["query_index"].int64_value = 999
+            response = self.execute(request)
+            self.assertEqual(response.WhichOneof("result"), "outputs", response)
+            self.assertEqual(response.execution_version, 2)
+            self.assertEqual(
+                [group.column(0).to_pylist() for group in decode(response.outputs)], [[1.0, 1.0], [], [3.0, 3.0]]
+            )
+        self.assertEqual(
+            [item[1:] for item in importlib.import_module(package).calls], [(0, "CAT"), (1, "EMPTY"), (2, "DOG")] * 3
+        )
+
+    def test_post_calls_once_with_all_queries_and_hybrid_inputs(self):
+        path, package = self.wheel("""
+import pyarrow as pa
+calls=[]
+class UDF:
+ def transform_batch(self, params, batches, *, context):
+  assert context.query_index is None
+  assert context.query_count==len(batches)==3
+  assert context.result_offsets==(0,2,2,4)
+  assert [len(group[0]) for group in batches]==[2,0,2]
+  assert all(group[0] is group[1] for group in batches)
+  assert context.queries[1].data_type=='Int8Vector'
+  assert context.queries[1].values==(b'\\x01',b'\\x02',b'\\x03')
+  calls.append(context.queries[0].values)
+  return [[pa.array([context.queries[0].values[i]]*len(group[0]),type=pa.string())] for i,group in enumerate(batches)]
+def factory(context): return UDF()
+""")
+        batches = [
+            pa.record_batch([pa.array(rows, type=pa.string())], names=["text"])
+            for rows in (["same", "candidates"], [], ["same", "candidates"])
+        ]
+        request = self.query_request(path, batches, "post_process")
+        request.input_column_indices.extend([0, 0])
+        request.query_context.original_queries.add(data_type="Int8Vector", values=[b"\x01", b"\x02", b"\x03"])
+        request.query_context.queries.add(data_type="Int8Vector", values=[b"\x01", b"\x02", b"\x03"])
+        for queries in ([b"CAT", b"EMPTY", b"DOG"], [b"NEW", b"QUERY", b"VALUES"]):
+            request.query_context.queries[0].values[:] = queries
+            response = self.execute(request)
+            self.assertEqual(response.WhichOneof("result"), "outputs", response)
+            self.assertEqual(response.execution_version, 2)
+            self.assertEqual(
+                [group.column(0).to_pylist() for group in decode(response.outputs)],
+                [[queries[0].decode()] * 2, [], [queries[2].decode()] * 2],
+            )
+        self.assertEqual(importlib.import_module(package).calls, [("CAT", "EMPTY", "DOG"), ("NEW", "QUERY", "VALUES")])
+
+    def test_pre_calls_once_for_all_query_rows_with_context(self):
+        path, package = self.wheel("""
+calls=0
+class UDF:
+ def transform_query(self, params, columns, *, context):
+  global calls
+  calls+=1
+  assert context.query_index is None and context.query_count==3
+  assert len(columns[0])==3
+  assert context.original_queries[0].values==('cat','empty','dog')
+  return columns
+def factory(context): return UDF()
+""")
+        batch = pa.record_batch([pa.array(["cat", "empty", "dog"])], names=["query"])
+        response = self.execute(self.query_request(path, [batch], "pre_process"))
+        self.assertEqual(response.WhichOneof("result"), "outputs", response)
+        self.assertEqual(importlib.import_module(package).calls, 1)
+        self.assertEqual(decode(response.outputs)[0].column(0).to_pylist(), ["cat", "empty", "dog"])
+
+    def test_query_context_rejects_malformed_metadata_before_loading(self):
+        batches = [pa.record_batch([pa.array([1])], names=["value"])] * 3
+        for invalid in ("missing", "query_count", "ann_count", "utf8", "type", "version"):
+            request = self.query_request(self.directory / "not-loaded.whl", batches, "post_process")
+            if invalid == "missing":
+                request.ClearField("query_context")
+            elif invalid == "query_count":
+                del request.query_context.queries[0].values[-1]
+            elif invalid == "ann_count":
+                request.query_context.queries.add(data_type="VarChar", values=[b"a"] * 3)
+            elif invalid == "utf8":
+                request.query_context.queries[0].values[0] = b"\xff"
+            elif invalid == "type":
+                request.query_context.queries[0].data_type = ""
+            else:
+                request.execution_version = 999
+            with self.subTest(invalid=invalid):
+                self.assert_code(self.execute(request), wire.UNSUPPORTED if invalid == "version" else wire.INTERNAL)
+
+    def test_post_rejects_changed_groups_rows_and_single_query_callable(self):
+        path, package = self.wheel("""
+import pyarrow as pa
+calls=0
+class UDF:
+ def transform_batch(self, params, batches, *, context):
+  global calls
+  calls+=1
+  if params['mode']=='groups': return [batches[0]]
+  if params['mode']=='rows': return [[pa.array([1,2])]]*len(batches)
+  raise TypeError('failure after side effect')
+def factory(context): return UDF()
+""")
+        batches = [pa.record_batch([pa.array([1])], names=["value"])] * 3
+        for mode in ("groups", "rows", "typeerror"):
+            request = self.query_request(path, batches, "post_process")
+            request.params.fields["mode"].string_value = mode
+            self.assert_code(self.execute(request), wire.UDF_FAILED)
+        self.assertEqual(importlib.import_module(package).calls, 3, "TypeError must not repeat a UDF invocation")
+        old_path, _ = self.wheel()
+        self.assert_code(self.execute(self.query_request(old_path, batches, "post_process")), wire.UDF_FAILED)
+
     def assert_code(self, response, code):
         self.assertEqual(response.WhichOneof("result"), "error")
         self.assertEqual(response.error.code, code, response.error.message)

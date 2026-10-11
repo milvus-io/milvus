@@ -23,11 +23,13 @@ import os
 import signal
 import sys
 from concurrent import futures
+from dataclasses import replace
 from types import MappingProxyType
 
 import grpc
 
 from .config import MAX_PARAM_NESTING_DEPTH, ServerConfig, parse_startup_args
+from .context import PyUDFCallContext, PyUDFQueryInput
 from .errors import RequestInactive, WorkerError, error_response
 from .health import register_health_service
 from .ipc import OutputIPC, decode_inputs
@@ -69,6 +71,57 @@ def _param(value, depth):
     raise WorkerError("unset function parameter", wire.INVALID_ARGUMENT)
 
 
+def _query_inputs(inputs, nq):
+    result = []
+    for item in inputs:
+        if not item.data_type or item.data_type == "None" or len(item.values) != nq:
+            raise WorkerError("query metadata type/count does not match NQ")
+        try:
+            values = (
+                tuple(value.decode("utf-8") for value in item.values)
+                if item.data_type == "VarChar"
+                else tuple(item.values)
+            )
+        except UnicodeDecodeError as exc:
+            raise WorkerError("query metadata contains invalid UTF-8") from exc
+        result.append(PyUDFQueryInput(item.data_type, values, item.tag))
+    return tuple(result)
+
+
+def _call_context(request, batches):
+    stage = request.stage.lower()
+    if stage not in ("ingestion", "pre_process", "l0_rerank", "l1_rerank", "l2_rerank", "post_process"):
+        raise WorkerError("unsupported query-context execution stage", wire.UNSUPPORTED)
+    if any(batch.num_columns == 0 for batch in batches):
+        raise WorkerError("query-context execution requires input columns")
+    if stage == "ingestion":
+        if request.HasField("query_context"):
+            raise WorkerError("ingestion must not contain query metadata")
+        return PyUDFCallContext(request.stage, 0)
+    if stage == "pre_process":
+        if len(batches) != 1:
+            raise WorkerError("PRE_PROCESS requires one query-row batch")
+        nq = batches[0].num_rows
+        offsets = ()
+    else:
+        nq = len(batches)
+        sizes = [0]
+        for batch in batches:
+            sizes.append(sizes[-1] + batch.num_rows)
+        offsets = tuple(sizes)
+    original = _query_inputs(request.query_context.original_queries, nq)
+    queries = _query_inputs(request.query_context.queries, nq)
+    if not queries or len(original) != len(queries):
+        raise WorkerError("query-context execution requires aligned original and prepared ANN inputs")
+    return PyUDFCallContext(
+        stage=request.stage,
+        query_count=nq,
+        queries=queries,
+        original_queries=original,
+        result_offsets=offsets,
+    )
+
+
 class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
     def __init__(self):
         self.loader = PyUDFLoader()
@@ -80,6 +133,8 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
 
         try:
             check_active()
+            if request.execution_version not in (0, 2):
+                raise WorkerError("unsupported execution version", wire.UNSUPPORTED)
             if not request.resource_name.strip():
                 raise WorkerError("resource_name must be nonblank")
             if (
@@ -94,21 +149,39 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
             indices = tuple(request.input_column_indices)
             if any(index >= batches[0].num_columns for index in indices):
                 raise WorkerError("input column reference is out of range")
+            call_context = _call_context(request, batches) if request.execution_version == 2 else None
             instance = self.loader.load(request.resource_name, request.udf_path, request.stage, check_active)
             output = OutputIPC()
-            for query, batch in enumerate(batches):
-                check_active()
+
+            def arguments(batch):
                 columns = batch.columns
-                if indices:
-                    columns = [columns[index] for index in indices]
-                try:
-                    values = instance.execute(params, columns, request.stage)
-                except WorkerError as exc:
-                    raise WorkerError(f"query={query}: UDF execution failed", exc.code) from exc
+                return tuple(columns[index] for index in indices) if indices else tuple(columns)
+
+            if request.execution_version == 2 and request.stage.lower() == "post_process":
                 check_active()
-                output.append(values)
+                groups = tuple(arguments(batch) for batch in batches)
+                results = instance.execute_batch(params, groups, call_context)
+                check_active()
+                for values in results:
+                    check_active()
+                    output.append(values)
+            else:
+                for query, batch in enumerate(batches):
+                    check_active()
+                    group_context = call_context
+                    if call_context is not None and request.stage.lower() in ("l0_rerank", "l1_rerank", "l2_rerank"):
+                        group_context = replace(call_context, query_index=query)
+                    try:
+                        if group_context is None:
+                            values = instance.execute(params, arguments(batch), request.stage)
+                        else:
+                            values = instance.execute(params, arguments(batch), request.stage, context=group_context)
+                    except WorkerError as exc:
+                        raise WorkerError(f"query={query}: UDF execution failed", exc.code) from exc
+                    check_active()
+                    output.append(values)
             payload = output.finish(check_active)
-            response = wire.ExecuteResponse(outputs=payload)
+            response = wire.ExecuteResponse(outputs=payload, execution_version=request.execution_version)
             check_active()
             return response
         except RequestInactive:

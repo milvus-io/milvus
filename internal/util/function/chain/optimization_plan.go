@@ -18,7 +18,10 @@
 
 package chain
 
-import "github.com/milvus-io/milvus/pkg/v3/util/merr"
+import (
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
 
 // ColumnSet is a small set helper for column names.
 type ColumnSet map[string]struct{}
@@ -92,6 +95,7 @@ func normalizeSystemColumnPolicy(policy SystemColumnPolicy) SystemColumnPolicy {
 type ExecuteOptions struct {
 	EnableColumnPruning bool
 	EnableParallel      bool // reserved for future schedule support
+	QueryContext        *types.QueryContext
 
 	Downstream         DownstreamSpec
 	SystemColumnPolicy SystemColumnPolicy

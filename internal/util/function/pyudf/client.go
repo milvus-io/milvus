@@ -27,11 +27,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pyudfpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ExecuteRequest borrows Inputs and Params for the duration of Execute. Each
+// ExecuteRequest borrows Inputs, Params and QueryContext during Execute. Each
 // input column has one chunk per query, including queries with zero rows.
 type ExecuteRequest struct {
 	ResourceName string
@@ -39,7 +40,11 @@ type ExecuteRequest struct {
 	Stage        string
 	Params       *schemapb.FunctionParamObject
 	Inputs       []*arrow.Chunked
+	QueryContext *types.QueryContext
 }
+
+// executionVersion requires query context and one-call POST batch semantics.
+const executionVersion uint32 = 2
 
 // Client owns the process's fixed worker connections. Concurrent Execute calls
 // share these connections without a queue, admission limit or business retries.
@@ -160,6 +165,9 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (outputs [
 	case *pyudfpb.ExecuteResponse_Error:
 		return nil, executionError(result.Error)
 	case *pyudfpb.ExecuteResponse_Outputs:
+		if response.GetExecutionVersion() != executionVersion {
+			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "py_udf worker does not acknowledge query-context execution version 2")
+		}
 		return decodeOutputs(ctx, result.Outputs)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("py_udf: missing response result")

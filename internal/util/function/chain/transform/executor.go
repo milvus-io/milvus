@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -32,6 +33,8 @@ import (
 // introducing additional logical groups.
 type Batch struct {
 	Groups []arrow.Table
+	// QueryContext is borrowed, immutable metadata, outside payload projection.
+	QueryContext *types.QueryContext
 }
 
 // SourceRow references an original Executor input row, not an intermediate row.

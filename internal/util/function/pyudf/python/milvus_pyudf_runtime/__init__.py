@@ -18,13 +18,15 @@
 
 from importlib import import_module
 
-RUNTIME_API_VERSION = 1
+RUNTIME_API_VERSION = 2
 
 _EXPORTS = {
     "PyUDFInstance": "instance",
     "PyUDFLoader": "loader",
     "WorkerServer": "worker",
     "PyUDFContext": "context",
+    "PyUDFCallContext": "context",
+    "PyUDFQueryInput": "context",
     "PyUDFExecutionError": "errors",
     "PyUDFLoadError": "errors",
 }

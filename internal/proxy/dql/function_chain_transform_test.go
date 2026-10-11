@@ -69,9 +69,11 @@ func (expr *searchTransformTestExpr) OutputDataTypes() []arrow.DataType {
 	}
 	return []arrow.DataType{arrow.BinaryTypes.String}
 }
+
 func (expr *searchTransformTestExpr) IsRunnable(stage string) bool {
 	return stage == types.StagePreProcess || stage == types.StagePostProcess
 }
+
 func (expr *searchTransformTestExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if expr.fail {
 		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "injected model service unavailable")
@@ -206,8 +208,10 @@ func TestSearchTransformOrdinaryFunctionScoreCoexistence(t *testing.T) {
 	request := &milvuspb.SearchRequest{
 		Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: transformTestPlaceholder(t, "one")},
 		SearchParams: []*commonpb.KeyValuePair{
-			{Key: AnnsFieldKey, Value: "vec"}, {Key: TopKKey, Value: "10"},
-			{Key: common.MetricTypeKey, Value: metric.IP}, {Key: ParamsKey, Value: `{}`},
+			{Key: AnnsFieldKey, Value: "vec"},
+			{Key: TopKKey, Value: "10"},
+			{Key: common.MetricTypeKey, Value: metric.IP},
+			{Key: ParamsKey, Value: `{}`},
 		},
 		FunctionChains: []*schemapb.FunctionChain{pre, post},
 		FunctionScore: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
@@ -283,7 +287,7 @@ func TestSearchPreProcessTextToVectorPlaceholder(t *testing.T) {
 	require.NoError(t, err)
 	meta, err := newSearchTransformMeta(plan, newFunctionChainTestSchema(), "")
 	require.NoError(t, err)
-	encoded, err := meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "one", "two"), 2)
+	encoded, err := meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "one", "two"), 2, nil)
 	require.NoError(t, err)
 	phg := &commonpb.PlaceholderGroup{}
 	require.NoError(t, proto.Unmarshal(encoded, phg))
@@ -438,14 +442,14 @@ func TestSearchTransformFailureClassificationAndCancellation(t *testing.T) {
 	require.NoError(t, err)
 	meta, err := newSearchTransformMeta(plan, newFunctionChainTestSchema(), "")
 	require.NoError(t, err)
-	_, err = meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "query"), 1)
+	_, err = meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "query"), 1, nil)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = meta.processQueryInput(cancelled, transformTestPlaceholder(t, "query"), 1)
+	_, err = meta.processQueryInput(cancelled, transformTestPlaceholder(t, "query"), 1, nil)
 	require.ErrorIs(t, err, context.Canceled)
-	_, err = meta.processQueryInput(context.Background(), []byte{0xff}, 1)
+	_, err = meta.processQueryInput(context.Background(), []byte{0xff}, 1, nil)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.Equal(t, merr.InputError, merr.GetErrorType(err))
 	post, err := transform.PostProcess("projection", transformTestSelect(t, "tag"))
@@ -479,7 +483,7 @@ func TestSearchTransformRejectsMalformedGeneratedPayload(t *testing.T) {
 				require.NoError(t, err)
 				meta, err := newSearchTransformMeta(pre, task.schema, "")
 				require.NoError(t, err)
-				_, err = meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "one", "two"), 2)
+				_, err = meta.processQueryInput(context.Background(), transformTestPlaceholder(t, "one", "two"), 2, nil)
 				require.ErrorIs(t, err, merr.ErrFunctionFailed)
 			}
 		})
@@ -669,8 +673,10 @@ func TestSearchPostProcessDynamicInputsAndPayloadPrivacy(t *testing.T) {
 				for row := range values {
 					values[row] = []byte(`{"color":"red","secret":"needle","unrequested":"private"}`)
 				}
-				result.Results.FieldsData = append(result.Results.FieldsData, &schemapb.FieldData{FieldId: 110, Type: schemapb.DataType_JSON,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: values}}}}})
+				result.Results.FieldsData = append(result.Results.FieldsData, &schemapb.FieldData{
+					FieldId: 110, Type: schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: values}}}},
+				})
 			}
 			require.NoError(t, task.executeSearchPostProcess(context.Background(), result))
 			for _, field := range result.Results.GetFieldsData() {
@@ -722,8 +728,10 @@ func TestSearchPostProcessUntouchedVectorArrayPayload(t *testing.T) {
 			for index := range vectors {
 				vectors[index] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}
 			}
-			result.Results.FieldsData = append(result.Results.FieldsData, &schemapb.FieldData{FieldId: 201, Type: schemapb.DataType_ArrayOfVector,
-				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: vectors}}}}})
+			result.Results.FieldsData = append(result.Results.FieldsData, &schemapb.FieldData{
+				FieldId: 201, Type: schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: vectors}}}},
+			})
 		}
 		require.NoError(t, task.executeSearchPostProcess(context.Background(), result))
 		require.Len(t, result.Results.GetFieldsData(), 2)

@@ -290,6 +290,9 @@ func (t *SearchTask) executeSearchPreProcess(ctx context.Context) error {
 	if t.preProcessed {
 		return nil
 	}
+	if err := t.prepareQueryContext(); err != nil {
+		return err
+	}
 	for index, meta := range t.preProcess {
 		if meta == nil {
 			continue
@@ -301,7 +304,7 @@ func (t *SearchTask) executeSearchPreProcess(ctx context.Context) error {
 		if len(raw) == 0 {
 			return merr.WrapErrParameterInvalidMsg("PRE_PROCESS requires query payloads; search by IDs is not supported")
 		}
-		processed, err := meta.processQueryInput(ctx, raw, t.GetNq())
+		processed, err := meta.processQueryInput(ctx, raw, t.GetNq(), t.queryContext)
 		if err != nil {
 			return merr.Wrapf(err, "PRE_PROCESS[%d]", index)
 		}
@@ -311,11 +314,18 @@ func (t *SearchTask) executeSearchPreProcess(ctx context.Context) error {
 			t.request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: processed}
 		}
 	}
+	if t.queryContext != nil {
+		queries, err := t.snapshotQueryInputs()
+		if err != nil {
+			return searchTransformOutputError(err, "query context after PRE_PROCESS")
+		}
+		t.queryContext = &chaintypes.QueryContext{OriginalQueries: t.queryContext.OriginalQueries, Queries: queries}
+	}
 	t.preProcessed = true
 	return nil
 }
 
-func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []byte, nq int64) ([]byte, error) {
+func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []byte, nq int64, queries *chaintypes.QueryContext) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -338,7 +348,7 @@ func (meta *searchTransformMeta) processQueryInput(ctx context.Context, raw []by
 	// Query inputs are rows of one request group, allowing the function to
 	// batch translation/embedding across NQ. Candidate POST groups remain per
 	// query. Identity lineage still protects every original query row.
-	input := transform.Batch{Groups: []arrow.Table{table}}
+	input := transform.Batch{Groups: []arrow.Table{table}, QueryContext: queries}
 	result, err := meta.executor.Execute(ctx, meta.plan, input)
 	if err != nil {
 		return nil, err
@@ -753,6 +763,7 @@ func (t *SearchTask) executeSearchPostProcess(ctx context.Context, result *milvu
 		return err
 	}
 	defer releaseSearchTransformBatch(input)
+	input.QueryContext = t.queryContext
 	processed, err := t.postProcess.executor.Execute(ctx, t.postProcess.plan, input)
 	if err != nil {
 		return merr.Wrap(err, "POST_PROCESS")
@@ -816,8 +827,10 @@ func (t *SearchTask) postProcessFields(data *schemapb.SearchResultData, rows int
 		if parent, child := postStructChild(t.schema.CollectionSchema, name); child != nil {
 			root := byName[parent.GetName()]
 			if root == nil && rows == 0 {
-				root = &schemapb.FieldData{FieldName: parent.GetName(), FieldId: parent.GetFieldID(), Type: schemapb.DataType_ArrayOfStruct,
-					Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{}}}
+				root = &schemapb.FieldData{
+					FieldName: parent.GetName(), FieldId: parent.GetFieldID(), Type: schemapb.DataType_ArrayOfStruct,
+					Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{}},
+				}
 				fields = append(fields, root)
 				byName[parent.GetName()] = root
 			}
@@ -906,8 +919,10 @@ func (t *SearchTask) emptyPostSourceFieldData(name string) (*schemapb.FieldData,
 			}
 			children = append(children, data)
 		}
-		return &schemapb.FieldData{FieldName: name, FieldId: parent.GetFieldID(), Type: schemapb.DataType_ArrayOfStruct,
-			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}}}, nil
+		return &schemapb.FieldData{
+			FieldName: name, FieldId: parent.GetFieldID(), Type: schemapb.DataType_ArrayOfStruct,
+			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}},
+		}, nil
 	}
 	field, err := t.schema.SchemaHelper.GetFieldFromName(name)
 	if err != nil {

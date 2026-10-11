@@ -139,6 +139,7 @@ func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]
 	}
 	outputs, err := client.Execute(ctx.Context(), pyudf.ExecuteRequest{
 		ResourceName: e.resourceName, UDFPath: path, Stage: ctx.Stage(), Params: e.udfParams, Inputs: inputs,
+		QueryContext: ctx.QueryContext(),
 	})
 	if err != nil {
 		if merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
