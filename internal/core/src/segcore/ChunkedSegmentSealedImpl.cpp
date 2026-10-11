@@ -1437,6 +1437,64 @@ ChunkedSegmentSealedImpl::CaptureRuntimeResourceState() const {
     return state->runtime;
 }
 
+std::shared_ptr<const IStructElementOffsets>
+ChunkedSegmentSealedImpl::GetStructElementOffsets(
+    FieldId field_id, milvus::OpContext* op_ctx) const {
+    return GetStructElementOffsetsFromState(
+        *CapturePublishedState(), field_id, op_ctx);
+}
+
+std::shared_ptr<const IStructElementOffsets>
+ChunkedSegmentSealedImpl::GetStructElementOffsetsFromState(
+    const PublishedSegmentState& state,
+    FieldId field_id,
+    milvus::OpContext* op_ctx) {
+    if (state.runtime == nullptr) {
+        return nullptr;
+    }
+    const auto& runtime = *state.runtime;
+    auto it = runtime.struct_element_offsets_map.find(field_id);
+    if (it == runtime.struct_element_offsets_map.end()) {
+        return nullptr;
+    }
+    const auto& entry = it->second;
+    return entry->GetOrBuild(op_ctx, [&] {
+        const FieldMeta* source_meta = nullptr;
+        const ChunkedColumnInterface* source_column = nullptr;
+        // All aliases reference the same struct generation. Select from this
+        // read snapshot, preferring scalar arrays, then the lowest field ID;
+        // loading/commit order cannot choose a cold vector column for us.
+        for (const auto& [candidate_id, candidate_entry] :
+             runtime.struct_element_offsets_map) {
+            if (candidate_entry != entry ||
+                !state.schema->has_field(candidate_id)) {
+                continue;
+            }
+            auto column = runtime.fields.find(candidate_id);
+            if (column == runtime.fields.end() || column->second == nullptr) {
+                continue;
+            }
+            const auto& meta = state.schema->operator[](candidate_id);
+            const bool vector = meta.get_data_type() == DataType::VECTOR_ARRAY;
+            const bool source_vector =
+                source_meta &&
+                source_meta->get_data_type() == DataType::VECTOR_ARRAY;
+            if (!source_meta || (source_vector && !vector) ||
+                (source_vector == vector &&
+                 candidate_id.get() < source_meta->get_id().get())) {
+                source_meta = &meta;
+                source_column = column->second.get();
+            }
+        }
+        AssertInfo(source_column != nullptr,
+                   "no column available to build struct element offsets for "
+                   "field {}",
+                   field_id.get());
+        return StructElementOffsetsSealed::BuildFromColumn(
+            *source_column, *source_meta, runtime.row_count, op_ctx);
+    });
+}
+
 // State-only read view: every access derives purely from the captured
 // PublishedSegmentState. No segment pointer is held — the immutable state
 // carries the field columns, readiness bitsets, and row count that the exec
@@ -1512,6 +1570,17 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     const ChunkedColumnInterface*
     GetColumn(FieldId field_id) const override {
         return Column(field_id);
+    }
+
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id,
+                            milvus::OpContext* op_ctx) const override {
+        return GetStructElementOffsetsFromState(*state_, field_id, op_ctx);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return state_->schema;
     }
 
     // Plain (non-virtual) accessor so the enclosing segment's ToPublishedState
@@ -2584,6 +2653,8 @@ ChunkedSegmentSealedImpl::LoadLazyColumnGroup(
                          PublishedSegmentState& staged_state) {
         std::unique_lock lck(mutex_);
         for (const auto& [field_id, column] : columns) {
+            RegisterStructElementOffsetsForField(
+                field_metas.at(field_id), target_runtime, is_replace);
             if (is_replace) {
                 auto old = target_runtime.fields.find(field_id);
                 if (!use_mmap &&
@@ -7909,9 +7980,6 @@ ChunkedSegmentSealedImpl::CanUseLazyManifestField(
         segcore_config_.get_enable_geometry_cache()) {
         return false;
     }
-    if (GetStructNameForArrayField(field_meta).has_value()) {
-        return false;
-    }
     if (field_meta.enable_match() &&
         !segment_load_info.HasTextStatsLog(field_id.get()) &&
         !segment_load_info.HasTextIndexCreated(field_id)) {
@@ -8241,35 +8309,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             BuildGeometryCacheDetached(op_ctx, field_id, column);
     }
     auto& field_meta = schema_snapshot->operator[](field_id);
-    auto prepare_struct_element_offsets =
-        [&](RuntimeResourceState& target_runtime) {
-            if (auto parsed_struct_name =
-                    GetStructNameForArrayField(field_meta);
-                parsed_struct_name.has_value()) {
-                auto& struct_name = *parsed_struct_name;
-                auto it =
-                    target_runtime.struct_to_element_offsets.find(struct_name);
-                if (it != target_runtime.struct_to_element_offsets.end()) {
-                    target_runtime.struct_element_offsets_map[field_id] =
-                        it->second;
-                    return;
-                }
-
-                auto new_offsets = StructElementOffsetsSealed::BuildFromColumn(
-                    *column, field_meta, num_rows);
-                target_runtime.struct_to_element_offsets[struct_name] =
-                    new_offsets;
-                target_runtime.struct_element_offsets_map[field_id] =
-                    new_offsets;
-            }
-        };
-
     auto apply_loaded_column =
         [&](RuntimeResourceState& target_runtime,
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) -> int64_t {
         int64_t memory_size_delta = 0;
-        prepare_struct_element_offsets(target_runtime);
+        RegisterStructElementOffsetsForField(
+            field_meta, target_runtime, is_replace);
 
         if (data_type == DataType::GEOMETRY) {
             if (staged_geometry_cache != nullptr) {
@@ -9101,6 +9147,32 @@ ChunkedSegmentSealedImpl::fill_empty_field(
 }
 
 void
+ChunkedSegmentSealedImpl::RegisterStructElementOffsetsForField(
+    const FieldMeta& field_meta,
+    RuntimeResourceState& runtime,
+    bool is_replace) {
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value()) {
+        return;
+    }
+    auto& entry = runtime.struct_to_element_offsets[*struct_name];
+    if (!entry || is_replace) {
+        auto previous = std::move(entry);
+        entry = std::make_shared<LazyStructElementOffsets>();
+        // Retire the old generation only in the staged/new runtime. Existing
+        // read snapshots still own its entry and column resources.
+        if (previous) {
+            for (auto& [field_id, alias] : runtime.struct_element_offsets_map) {
+                if (alias == previous) {
+                    alias = entry;
+                }
+            }
+        }
+    }
+    runtime.struct_element_offsets_map[field_meta.get_id()] = entry;
+}
+
+void
 ChunkedSegmentSealedImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta,
     int64_t row_count,
@@ -9112,10 +9184,12 @@ ChunkedSegmentSealedImpl::EnsureStructElementOffsetsForField(
 
     auto it = runtime.struct_to_element_offsets.find(*struct_name);
     if (it == runtime.struct_to_element_offsets.end()) {
-        auto struct_element_offsets =
-            StructElementOffsetsSealed::BuildAllZeros(row_count);
+        auto struct_element_offsets = StructElementOffsetsSealed::BuildAllZeros(
+            row_count, !field_meta.is_nullable());
         it = runtime.struct_to_element_offsets
-                 .emplace(*struct_name, struct_element_offsets)
+                 .emplace(*struct_name,
+                          std::make_shared<LazyStructElementOffsets>(
+                              std::move(struct_element_offsets)))
                  .first;
     }
 

@@ -614,10 +614,191 @@ TEST(test_chunk_segment, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_FALSE(offsets->IsRowValid(i));
+    }
     for (int64_t i = 0; i <= row_count; ++i) {
         auto [start, end] = offsets->ElementIDRangeOfRow(i);
         EXPECT_EQ(start, 0);
         EXPECT_EQ(end, 0);
+    }
+}
+
+TEST(test_chunk_segment, ColdStructOffsetsPreferScalarAndRetainNormalCache) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    // The vector's ID and registration order must not select it over scalar
+    // siblings. Among scalars, the lower ID is the deterministic source.
+    auto vector = schema->AddDebugVectorArrayField(
+        "items[vector]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto label =
+        schema->AddDebugArrayField("items[label]", DataType::INT64, false);
+    auto score =
+        schema->AddDebugArrayField("items[score]", DataType::INT32, false);
+    auto unrelated = schema->AddDebugVectorArrayField(
+        "other[vector]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto schema_proto = schema->ToProto();
+    auto* warmup = schema_proto.add_properties();
+    warmup->set_key("warmup.vectorIndex");
+    warmup->set_value("disable");
+    schema = Schema::ParseFrom(schema_proto);
+    constexpr int64_t rows = 5;
+    constexpr int64_t elements_per_row = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, elements_per_row);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    for (auto field : {vector, label, score, unrelated}) {
+        load_info.field_infos.at(field.get()).warmup_policy = "disable";
+    }
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(load_info);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    auto entry = state->runtime->struct_element_offsets_map.at(vector);
+    EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(label));
+    EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(score));
+    EXPECT_EQ(entry->GetIfReady(), nullptr);
+    const int64_t first_row = 0;
+    for (auto field : {vector, label, score, unrelated}) {
+        EXPECT_FALSE(
+            state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
+    }
+
+    auto offsets =
+        segment->CaptureReadSnapshot()->GetStructElementOffsets(score, nullptr);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), rows * elements_per_row);
+    EXPECT_EQ(offsets, segment->GetStructElementOffsets(vector));
+    EXPECT_TRUE(state->runtime->fields.at(label)->CellsLoaded(&first_row, 1));
+    for (auto field : {vector, score, unrelated}) {
+        EXPECT_FALSE(
+            state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
+    }
+    EXPECT_EQ(
+        state->runtime->struct_element_offsets_map.at(unrelated)->GetIfReady(),
+        nullptr);
+
+    // The metadata owns offsets/validity, so normal cache eviction does not
+    // force another raw read when an indexed query requests the mapping.
+    state->runtime->fields.at(label)->ManualEvictCache();
+    EXPECT_FALSE(state->runtime->fields.at(label)->CellsLoaded(&first_row, 1));
+    EXPECT_EQ(offsets, segment->GetStructElementOffsets(label));
+    EXPECT_FALSE(state->runtime->fields.at(label)->CellsLoaded(&first_row, 1));
+
+    // A vector-only struct also stays cold at load time and uses the same
+    // normal cache path when its mapping is first requested.
+    auto vector_only_offsets = segment->GetStructElementOffsets(unrelated);
+    ASSERT_NE(vector_only_offsets, nullptr);
+    EXPECT_EQ(vector_only_offsets->GetTotalElementCount(),
+              rows * elements_per_row);
+    EXPECT_TRUE(
+        state->runtime->fields.at(unrelated)->CellsLoaded(&first_row, 1));
+
+    auto read = segment->CaptureReadSnapshot();
+    segment->ClearData();
+    EXPECT_EQ(segment->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(read->GetStructElementOffsets(label, nullptr), offsets);
+}
+
+TEST(test_chunk_segment, StructOffsetsFromNullableVectorChunks) {
+    auto schema = std::make_shared<Schema>();
+    auto vector = schema->AddDebugVectorArrayField(
+        "items[vector]", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2, true);
+    const auto& meta = (*schema)[vector];
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(
+        meta,
+        2,
+        {{{false, {}}, {false, {}}},
+         {{true, {}}, {true, {1, 2, 3, 4}}, {true, {5, 6}}}},
+        buffers);
+    OpContext ctx;
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(*column, meta, 5, &ctx);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 3);
+    EXPECT_EQ(offsets->ElementIDToRowID(0), std::make_pair(3, 0));
+    EXPECT_EQ(offsets->ElementIDToRowID(2), std::make_pair(4, 0));
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(2), std::make_pair(0, 0));
+    ASSERT_TRUE(offsets->HasRowValidity());
+    EXPECT_FALSE(offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(1));
+    EXPECT_TRUE(offsets->IsRowValid(2));  // empty, rather than null
+    EXPECT_TRUE(offsets->IsRowValid(3));
+    EXPECT_TRUE(offsets->IsRowValid(4));
+}
+
+TEST(test_chunk_segment, LazyStructOffsetsUseCapturedColumnGeneration) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto label =
+        schema->AddDebugArrayField("items[label]", DataType::INT64, true);
+    constexpr int64_t rows = 5;
+    auto old_dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, old_dataset);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto old_read = segment->CaptureReadSnapshot();
+    auto old_entry = current->runtime->struct_element_offsets_map.at(label);
+    ASSERT_EQ(old_entry->GetIfReady(), nullptr);
+    // The test binlog helper reuses file names. Keep the old chunk pinned
+    // before writing replacement data, while leaving its mapping unbuilt.
+    auto old_chunk = current->runtime->fields.at(label)->GetChunk(nullptr, 0);
+
+    auto replacement_dataset = segcore::DataGen(schema, rows, 43, 0, 1, 4);
+    auto replacement =
+        CreateSealedWithFieldDataLoaded(schema, replacement_dataset);
+    auto* replacement_sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(replacement.get());
+    auto replacement_column =
+        replacement_sealed->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            label);
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+    initial.schema = current->schema;
+    initial.load_info = current->load_info;
+    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial);
+    segcore::ChunkedSegmentSealedImpl::StateDelta final;
+    final.schema = current->schema;
+    final.load_info = current->load_info;
+    final.commit_ts = current->commit_ts;
+    sealed->TestStageLoadFieldDataThenPublish(
+        label,
+        replacement_column,
+        rows,
+        DataType::ARRAY,
+        schema,
+        runtime,
+        staged.get(),
+        current,
+        final,
+        [&] {
+            EXPECT_NE(runtime->struct_element_offsets_map.at(label), old_entry);
+            EXPECT_EQ(old_entry->GetIfReady(), nullptr);
+        });
+
+    // Build the old mapping only after the replacement has been published.
+    auto old_offsets = old_read->GetStructElementOffsets(label, nullptr);
+    auto new_offsets = segment->GetStructElementOffsets(label);
+    ASSERT_NE(old_offsets, nullptr);
+    ASSERT_NE(new_offsets, nullptr);
+    EXPECT_NE(old_offsets, new_offsets);
+    EXPECT_EQ(old_offsets->GetTotalElementCount(), 6);
+    EXPECT_EQ(new_offsets->GetTotalElementCount(), 12);
+    ASSERT_TRUE(old_offsets->HasRowValidity());
+    for (int64_t i = 0; i < rows; ++i) {
+        EXPECT_EQ(old_offsets->IsRowValid(i), i % 2 == 0);
+        EXPECT_EQ(new_offsets->IsRowValid(i), i % 2 == 0);
     }
 }
 

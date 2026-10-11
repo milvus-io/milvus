@@ -179,6 +179,22 @@ class SegmentChunkReader {
         snapshot_ = snapshot;
     }
 
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id, op_ctx_)
+                         : segment_->GetStructElementOffsets(field_id, op_ctx_);
+    }
+
+    SchemaPtr
+    GetSchemaSnapshot() const {
+        if (snapshot_) {
+            if (auto schema = snapshot_->get_schema_snapshot()) {
+                return schema;
+            }
+        }
+        return segment_->get_schema_snapshot();
+    }
+
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
     // read the column from the frozen published state (same generation as the
     // chunk boundaries above); otherwise fall back to the segment.

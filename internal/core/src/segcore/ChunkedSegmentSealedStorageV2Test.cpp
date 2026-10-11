@@ -850,6 +850,73 @@ TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
     }
 }
 
+TEST_P(TestLazyManifest, LazyManifestStructOffsetsStayColdUntilFirstUse) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = GenChunkedSegmentTestSchema(GetParam());
+    auto label =
+        schema->AddDebugArrayField("items[label]", DataType::INT32, true);
+    auto score =
+        schema->AddDebugArrayField("items[score]", DataType::INT64, true);
+    constexpr int64_t rows = 64;
+    auto path = UniqueManifestTestPath(std::string("lazy_struct_offsets_") +
+                                       (GetParam() ? "varchar" : "int64"));
+    auto fs = GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, path);
+    milvus::test::V3SegmentTestData data(schema,
+                                         1,
+                                         rows,
+                                         128,
+                                         TestLocalPath,
+                                         path,
+                                         LazyManifestTestGroupPattern(schema));
+    auto segment =
+        CreateV3ManifestSegment(data, 3192 + (GetParam() ? 100 : 0), 0, schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        state->runtime->fields.at(label));
+    ASSERT_NE(proxy, nullptr);
+    EXPECT_TRUE(proxy->IsLazy());
+    EXPECT_FALSE(proxy->IsMaterialized());
+    auto entry = state->runtime->struct_element_offsets_map.at(label);
+    EXPECT_EQ(entry, state->runtime->struct_element_offsets_map.at(score));
+    EXPECT_EQ(entry->GetIfReady(), nullptr);
+
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    OpContext cancelled_ctx(cancelled.getToken());
+    try {
+        segment->CaptureReadSnapshot()->GetStructElementOffsets(label,
+                                                                &cancelled_ctx);
+        FAIL() << "expected cancellation before materializing the struct";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_FALSE(proxy->IsMaterialized());
+    EXPECT_EQ(entry->GetIfReady(), nullptr);
+
+    OpContext ctx;
+    ctx.runtime_load_priority =
+        static_cast<int32_t>(proto::common::LoadPriority::HIGH);
+    auto offsets =
+        segment->CaptureReadSnapshot()->GetStructElementOffsets(score, &ctx);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_TRUE(proxy->IsMaterialized());
+    EXPECT_EQ(offsets, segment->GetStructElementOffsets(label));
+    EXPECT_EQ(offsets->GetRowCount(), rows);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    for (int64_t i = 0; i < rows; ++i) {
+        EXPECT_EQ(offsets->IsRowValid(i), i % 2 == 0);
+        auto [start, end] = offsets->ElementIDRangeOfRow(i);
+        EXPECT_EQ(end - start, i % 2 == 0 ? 10 : 0);
+    }
+}
+
 TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto warmup_policies =

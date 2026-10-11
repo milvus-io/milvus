@@ -237,14 +237,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     HasJsonStats(FieldId field_id) const override;
 
     std::shared_ptr<const IStructElementOffsets>
-    GetStructElementOffsets(FieldId field_id) const override {
-        auto runtime = CaptureRuntimeResourceState();
-        auto it = runtime->struct_element_offsets_map.find(field_id);
-        if (it != runtime->struct_element_offsets_map.end()) {
-            return it->second;
-        }
-        return nullptr;
-    }
+    GetStructElementOffsets(FieldId field_id,
+                            OpContext* op_ctx = nullptr) const override;
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -297,9 +291,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
         std::unordered_map<std::string,
-                           std::shared_ptr<StructElementOffsetsSealed>>
+                           std::shared_ptr<LazyStructElementOffsets>>
             struct_to_element_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
+        std::unordered_map<FieldId, std::shared_ptr<LazyStructElementOffsets>>
             struct_element_offsets_map;
         IndexInventory indexes;
         uint64_t next_local_index_registration_id{0};
@@ -361,6 +355,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Defined out-of-line in ChunkedSegmentSealedImpl.cpp; reads derive purely
     // from the state (no segment pointer). See CaptureReadSnapshot().
     class SealedReadSnapshot;
+
+    static std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsetsFromState(const PublishedSegmentState& state,
+                                     FieldId field_id,
+                                     milvus::OpContext* op_ctx);
 
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
@@ -1873,6 +1872,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     InvalidateStaleStructElementOffsets(const SchemaPtr& current_schema,
                                         const SchemaPtr& target_schema,
                                         RuntimeResourceState& runtime);
+
+    void
+    RegisterStructElementOffsetsForField(const FieldMeta& field_meta,
+                                         RuntimeResourceState& runtime,
+                                         bool is_replace = false);
 
     void
     EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
