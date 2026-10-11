@@ -5365,6 +5365,7 @@ func TestAlterCollectionForReplicateProperty(t *testing.T) {
 	defer func() { globalMetaCache = cache }()
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		schema:      &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "test"}},
 		replicateID: "local-mac-1",
 	}, nil).Maybe()
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Maybe()
