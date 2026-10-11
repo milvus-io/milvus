@@ -5652,8 +5652,11 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 			{Name: "bm25_output", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 			{Name: "other_output", FieldID: 102, DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
 			{Name: "regular_field", FieldID: 103, DataType: schemapb.DataType_Int64},
+			{Name: "minhash_output", FieldID: 104, DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+			{Name: "binary_vector", FieldID: 105, DataType: schemapb.DataType_BinaryVector},
 		},
 		Functions: []*schemapb.FunctionSchema{
+			{Name: "minhash_func", Type: schemapb.FunctionType_MinHash, InputFieldIds: []int64{100}, OutputFieldIds: []int64{104}},
 			{
 				Name:           "bm25_func",
 				Type:           schemapb.FunctionType_BM25,
@@ -5662,7 +5665,7 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 			},
 			{
 				Name:           "other_func",
-				Type:           schemapb.FunctionType_Unknown,
+				Type:           schemapb.FunctionType_TextEmbedding,
 				InputFieldIds:  []int64{100},
 				OutputFieldIds: []int64{102},
 			},
@@ -5676,6 +5679,10 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[0]))
 	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[3]))
 
+	// MinHash outputs are hidden, but ordinary binary vectors remain retrievable.
+	assert.False(t, helper.CanRetrieveRawFieldData(schema.Fields[4]))
+	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[5]))
+
 	// BM25 function output field should NOT be retrievable
 	assert.False(t, helper.CanRetrieveRawFieldData(schema.Fields[1]))
 
@@ -5685,7 +5692,7 @@ func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
 	// Test with field that has IsFunctionOutput=true but no corresponding function
 	orphanField := &schemapb.FieldSchema{
 		Name:             "orphan_field",
-		FieldID:          104,
+		FieldID:          106,
 		DataType:         schemapb.DataType_FloatVector,
 		IsFunctionOutput: true,
 	}

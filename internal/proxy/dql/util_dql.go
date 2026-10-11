@@ -170,7 +170,8 @@ func ValidateCollectionName(collName string) error {
 	return ValidateCollectionNameOrAlias(collName, "name")
 }
 
-// return value.
+// translateOutputFields expands "*" to all retrievable fields. BM25 and MinHash
+// function outputs are omitted from wildcards and rejected when explicitly requested.
 func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, []agg.AggregateBase, bool, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)

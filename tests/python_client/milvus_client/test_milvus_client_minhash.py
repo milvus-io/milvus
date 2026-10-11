@@ -76,6 +76,98 @@ class TestMilvusClientMinHashBasic(TestMilvusClientV2Base):
     """Test case of MinHash DIDO basic function"""
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_minhash_output_not_retrievable(self):
+        """MinHash outputs follow BM25 retrieval rules in growing, flushed and reloaded data."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("text", DataType.VARCHAR, max_length=1024)
+        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field("binary", DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_function(
+            Function(
+                name="text_to_minhash",
+                function_type=FunctionType.MINHASH,
+                input_field_names=["text"],
+                output_field_names=[default_minhash_field_name],
+                params={"num_hashes": default_num_hashes, "shingle_size": default_shingle_size},
+            )
+        )
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index(
+            field_name=default_minhash_field_name,
+            index_type="MINHASH_LSH",
+            metric_type="MHJACCARD",
+            params={"mh_lsh_band": 8},
+        )
+        indexes.add_index(field_name="binary", index_type="BIN_FLAT", metric_type="HAMMING")
+        self.create_collection(client, collection_name, schema=schema, index_params=indexes)
+        text = "the quick brown fox jumps over the lazy dog"
+        binary = b"\x01" * (default_dim // 8)
+        self.insert(client, collection_name, [{"id": 1, "text": text, "binary": binary}])
+
+        for state in ("growing", "flushed", "reloaded"):
+            if state == "flushed":
+                self.flush(client, collection_name)
+            elif state == "reloaded":
+                self.release_collection(client, collection_name)
+                self.load_collection(client, collection_name)
+
+            for output_fields in ([default_minhash_field_name], ["*", default_minhash_field_name]):
+                error = {
+                    "err_code": 1100,
+                    "err_msg": "not allowed to retrieve raw data of field " + default_minhash_field_name,
+                }
+                self.query(
+                    client,
+                    collection_name,
+                    filter="id == 1",
+                    output_fields=output_fields,
+                    check_task=CheckTasks.err_res,
+                    check_items=error,
+                )
+                self.search(
+                    client,
+                    collection_name,
+                    [text],
+                    anns_field=default_minhash_field_name,
+                    search_params={"metric_type": "MHJACCARD", "params": {}},
+                    limit=1,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.err_res,
+                    check_items=error,
+                )
+
+            for output_fields in (["*"], ["id", "text", "binary"]):
+                rows = self.query(
+                    client,
+                    collection_name,
+                    filter="id == 1",
+                    output_fields=output_fields,
+                    consistency_level="Strong",
+                )[0]
+                hits = self.search(
+                    client,
+                    collection_name,
+                    [text],
+                    anns_field=default_minhash_field_name,
+                    search_params={"metric_type": "MHJACCARD", "params": {}},
+                    limit=1,
+                    output_fields=output_fields,
+                    consistency_level="Strong",
+                )[0]
+                assert len(rows) == 1 and rows[0]["id"] == 1, state
+                assert [hit["id"] for hit in hits[0]] == [1], state
+                for entity in (rows[0], hits[0][0]["entity"]):
+                    assert default_minhash_field_name not in entity, state
+                    assert entity["text"] == text, state
+                    actual_binary = entity["binary"]
+                    if isinstance(actual_binary, list):
+                        actual_binary = actual_binary[0]
+                    assert actual_binary == binary, state
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_minhash_create_collection_basic(self):
         """
         target: test creating collection with basic MinHash function
@@ -2588,232 +2680,8 @@ def compute_minhash(text, num_hashes, shingle_size, seed, use_char_level=True, u
     return compute_minhash_signature(base_hashes, perm_a, perm_b)
 
 
-# ---- Conversion helpers ----
-
-
-def signature_to_binary_vector(signature):
-    """Convert MinHash signature to binary vector (little-endian)."""
-    return b"".join(struct.pack("<I", s) for s in signature)
-
-
-def binary_vector_to_signature(binary_vector):
-    """Convert binary vector back to signature (little-endian)."""
-    if isinstance(binary_vector, list):
-        binary_vector = binary_vector[0]
-    num_hashes = len(binary_vector) // 4
-    return list(struct.unpack(f"<{num_hashes}I", binary_vector))
-
-
 class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
-    """Test case of MinHash function correctness"""
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_signature_deterministic(self):
-        """
-        target: verify MinHash signature generation is deterministic
-        method: insert same text multiple times, verify all signatures are identical
-        expected: same text with same parameters produces identical signature
-
-        Note: Due to potential xxhash implementation differences between Python and C++,
-        we verify determinism and correctness properties rather than exact values.
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={
-                    "num_hashes": num_hashes,
-                    "shingle_size": shingle_size,
-                    "seed": seed,
-                    "token_level": "char",
-                },
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Insert same text with different IDs
-        test_text = "hello world test document for determinism verification"
-        rows = [{default_primary_key_field_name: i, default_text_field_name: test_text} for i in range(5)]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Query all signatures
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_minhash_field_name],
-        )[0]
-
-        # All signatures should be identical
-        signatures = [binary_vector_to_signature(r[default_minhash_field_name]) for r in results]
-        first_sig = signatures[0]
-        for i, sig in enumerate(signatures[1:], 1):
-            assert sig == first_sig, f"Signature {i} differs from signature 0: {sig} != {first_sig}"
-
-        # Verify signature format
-        assert len(first_sig) == num_hashes, f"Signature should have {num_hashes} values"
-        assert all(0 <= s <= 0xFFFFFFFF for s in first_sig), "All values should be 32-bit"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_signature_reproducible_across_collections(self):
-        """
-        target: verify MinHash signatures are reproducible across different collections
-        method: create two collections with same parameters, insert same text, compare signatures
-        expected: identical configuration produces identical signatures
-        """
-        client = self._client()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-        test_text = "reproducibility test text"
-
-        signatures = []
-
-        for i in range(2):
-            collection_name = cf.gen_collection_name_by_testcase_name() + f"_coll{i}"
-
-            schema = self.create_schema(client, enable_dynamic_field=False)[0]
-            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-            schema.add_function(
-                Function(
-                    name="text_to_minhash",
-                    function_type=FunctionType.MINHASH,
-                    input_field_names=[default_text_field_name],
-                    output_field_names=[default_minhash_field_name],
-                    params={
-                        "num_hashes": num_hashes,
-                        "shingle_size": shingle_size,
-                        "seed": seed,
-                        "token_level": "char",
-                    },
-                )
-            )
-
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(
-                field_name=default_minhash_field_name,
-                index_type="MINHASH_LSH",
-                metric_type="MHJACCARD",
-                params={"mh_lsh_band": 8},
-            )
-            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            self.load_collection(client, collection_name)
-
-            results = self.query(
-                client,
-                collection_name,
-                filter=f"{default_primary_key_field_name} == 1",
-                output_fields=[default_minhash_field_name],
-            )[0]
-
-            sig = binary_vector_to_signature(results[0][default_minhash_field_name])
-            signatures.append(sig)
-
-        assert signatures[0] == signatures[1], (
-            "Same configuration should produce identical signatures across collections"
-        )
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_permutation_generation_consistency(self):
-        """
-        target: verify permutation generation consistency across multiple seeds
-        method: create collections with different seeds, verify signatures differ
-        expected: different seeds produce different signatures for same text
-        """
-        client = self._client()
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-        test_text = "consistent test text for permutation verification"
-
-        signatures_by_seed = {}
-
-        for seed in [1234, 42, 0, 999999]:
-            collection_name = cf.gen_collection_name_by_testcase_name() + f"_seed{seed}"
-
-            schema = self.create_schema(client, enable_dynamic_field=False)[0]
-            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-            schema.add_function(
-                Function(
-                    name="text_to_minhash",
-                    function_type=FunctionType.MINHASH,
-                    input_field_names=[default_text_field_name],
-                    output_field_names=[default_minhash_field_name],
-                    params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
-                )
-            )
-
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(
-                field_name=default_minhash_field_name,
-                index_type="MINHASH_LSH",
-                metric_type="MHJACCARD",
-                params={"mh_lsh_band": 8},
-            )
-            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-            # Insert same text
-            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            self.load_collection(client, collection_name)
-
-            # Query signature
-            results = self.query(
-                client,
-                collection_name,
-                filter=f"{default_primary_key_field_name} == 1",
-                output_fields=[default_minhash_field_name],
-            )[0]
-
-            actual_binary = results[0][default_minhash_field_name]
-            actual_sig = tuple(binary_vector_to_signature(actual_binary))
-            signatures_by_seed[seed] = actual_sig
-
-            # Verify signature format
-            assert len(actual_sig) == num_hashes, f"Signature should have {num_hashes} values"
-            assert all(0 <= s <= 0xFFFFFFFF for s in actual_sig), "All values should be 32-bit"
-
-        # Verify different seeds produce different signatures
-        unique_signatures = set(signatures_by_seed.values())
-        assert len(unique_signatures) == len(signatures_by_seed), "Different seeds should produce different signatures"
+    """Public search checks; raw signature properties are tested in minhash_function_test.go."""
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_shingle_hash_correctness(self):
@@ -2847,159 +2715,6 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         h1 = hash_shingles_xxhash(text, 3)
         h2 = hash_shingles_xxhash(text, 3)
         assert h1 == h2, "Same text should produce same hashes"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_binary_vector_format(self):
-        """
-        target: verify binary vector format (little-endian encoding)
-        method: convert signature to binary and back, verify roundtrip
-        expected: signature survives roundtrip conversion
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 12345
-        num_hashes = 8  # Smaller for easier verification
-        shingle_size = 3
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 4},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        test_text = "binary vector format test"
-        rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Get actual binary vector from Milvus
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} == 1",
-            output_fields=[default_minhash_field_name],
-        )[0]
-
-        actual_binary = results[0][default_minhash_field_name]
-        # Handle Milvus return format: [b'...'] (list containing bytes)
-        if isinstance(actual_binary, list):
-            actual_binary = actual_binary[0]
-
-        # Verify binary vector size: num_hashes * 4 bytes (32 bits each)
-        expected_byte_size = num_hashes * 4
-        assert len(actual_binary) == expected_byte_size, (
-            f"Binary vector should be {expected_byte_size} bytes, got {len(actual_binary)}"
-        )
-
-        # Roundtrip test
-        sig = binary_vector_to_signature(actual_binary)
-        roundtrip_binary = signature_to_binary_vector(sig)
-        assert actual_binary == roundtrip_binary, "Binary vector should survive roundtrip conversion"
-
-        # Verify signature format
-        assert len(sig) == num_hashes, f"Signature should have {num_hashes} values"
-        assert all(0 <= s <= 0xFFFFFFFF for s in sig), "All values should be 32-bit"
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_minhash_empty_and_short_text_handling(self):
-        """
-        target: verify MinHash handles edge cases (empty and very short text)
-        method: insert empty and single-char texts
-        expected: MinHash generates valid signatures for all inputs
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={"num_hashes": num_hashes, "shingle_size": shingle_size, "seed": seed},
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Edge case texts
-        edge_cases = [
-            (1, "a"),  # Single char
-            (2, "ab"),  # Two chars (less than shingle_size)
-            (3, "abc"),  # Exactly shingle_size
-            (4, " "),  # Single space
-            (5, "  "),  # Multiple spaces
-        ]
-
-        rows = [{default_primary_key_field_name: pk, default_text_field_name: text} for pk, text in edge_cases]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Verify all texts get valid signatures
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_text_field_name, default_minhash_field_name],
-        )[0]
-
-        assert len(results) == len(edge_cases), "All edge cases should be inserted"
-
-        for result in results:
-            binary_vec = result[default_minhash_field_name]
-            # Handle Milvus return format: [b'...'] (list containing bytes)
-            if isinstance(binary_vec, list):
-                binary_vec = binary_vec[0]
-            text = result[default_text_field_name]
-
-            # Binary vector should have correct size
-            assert len(binary_vec) == num_hashes * 4, f"Invalid binary vector size for '{text}'"
-
-            sig = binary_vector_to_signature(binary_vec)
-
-            # All signature values should be valid 32-bit
-            assert len(sig) == num_hashes, f"Signature should have {num_hashes} values for '{text}'"
-            for s in sig:
-                assert 0 <= s <= 0xFFFFFFFF, f"Invalid signature value for '{text}'"
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(
@@ -3087,433 +2802,6 @@ class TestMinHashFunctionCorrectness(TestMilvusClientV2Base):
         assert last_hit["distance"] < 0.9, (
             f"Very different text should have lower similarity, got {last_hit['distance']}"
         )
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_sha1_hash_function_correctness(self):
-        """
-        target: verify MinHash signature correctness with SHA1 hash function
-        method: compute expected signature using SHA1 in Python, compare with Milvus
-        expected: signatures should match exactly
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={
-                    "num_hashes": num_hashes,
-                    "shingle_size": shingle_size,
-                    "seed": seed,
-                    "hash_function": "sha1",  # Use SHA1 instead of xxhash
-                },
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        test_texts = ["hello world", "test document", "abc"]
-
-        # Insert data
-        rows = [
-            {default_primary_key_field_name: i, default_text_field_name: test_texts[i]} for i in range(len(test_texts))
-        ]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        # Query actual signatures
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_text_field_name, default_minhash_field_name],
-        )[0]
-        results.sort(key=lambda x: x[default_primary_key_field_name])
-
-        # Verify SHA1 signatures are valid and deterministic
-        signatures = []
-        for result in results:
-            actual_binary = result[default_minhash_field_name]
-            actual_sig = binary_vector_to_signature(actual_binary)
-
-            # Verify format
-            assert len(actual_sig) == num_hashes, f"Signature should have {num_hashes} values"
-            assert all(0 <= s <= 0xFFFFFFFF for s in actual_sig), "All values should be 32-bit"
-
-            signatures.append(actual_sig)
-
-        # Verify same text in same collection produces same signature (determinism)
-        # Insert same text again
-        self.insert(
-            client, collection_name, [{default_primary_key_field_name: 100, default_text_field_name: test_texts[0]}]
-        )
-        self.flush(client, collection_name)
-
-        result2 = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} == 100",
-            output_fields=[default_minhash_field_name],
-        )[0]
-        sig2 = binary_vector_to_signature(result2[0][default_minhash_field_name])
-        assert sig2 == signatures[0], "SHA1 should be deterministic"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_token_level_char_correctness(self):
-        """
-        target: verify MinHash signature correctness with token_level='char'
-        method: compute expected signature for char-level shingles, compare with Milvus
-        expected: signatures should match exactly
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={
-                    "num_hashes": num_hashes,
-                    "shingle_size": shingle_size,
-                    "seed": seed,
-                    "token_level": "char",  # Explicit char-level
-                },
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        test_texts = ["hello world", "abcdefg"]
-
-        # Compute expected signatures (char-level uses xxhash on char shingles)
-        perm_a, perm_b = init_permutations_like_milvus(num_hashes, seed)
-        expected_signatures = []
-        for text in test_texts:
-            base_hashes = hash_shingles_xxhash(text, shingle_size)
-            sig = compute_minhash_signature(base_hashes, perm_a, perm_b)
-            expected_signatures.append(sig)
-
-        # Insert and query
-        rows = [
-            {default_primary_key_field_name: i, default_text_field_name: test_texts[i]} for i in range(len(test_texts))
-        ]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_minhash_field_name],
-        )[0]
-        results.sort(key=lambda x: x[default_primary_key_field_name])
-
-        for i, result in enumerate(results):
-            actual_sig = binary_vector_to_signature(result[default_minhash_field_name])
-            expected_sig = expected_signatures[i]
-            assert actual_sig == expected_sig, f"Char-level signature mismatch for '{test_texts[i]}'"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_token_level_word_consistency(self):
-        """
-        target: verify MinHash with token_level='word' produces consistent results
-        method: insert same text twice, verify signatures are identical
-        expected: same text with same parameters produces identical signature
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 2  # Word-level typically uses smaller n-gram
-        dim = num_hashes * 32
-
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-        schema.add_function(
-            Function(
-                name="text_to_minhash",
-                function_type=FunctionType.MINHASH,
-                input_field_names=[default_text_field_name],
-                output_field_names=[default_minhash_field_name],
-                params={
-                    "num_hashes": num_hashes,
-                    "shingle_size": shingle_size,
-                    "seed": seed,
-                    "token_level": "word",  # Word-level tokenization
-                },
-            )
-        )
-
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(
-            field_name=default_minhash_field_name,
-            index_type="MINHASH_LSH",
-            metric_type="MHJACCARD",
-            params={"mh_lsh_band": 8},
-        )
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-        # Same text inserted with different IDs
-        test_text = "The quick brown fox jumps over the lazy dog"
-        rows = [
-            {default_primary_key_field_name: 1, default_text_field_name: test_text},
-            {default_primary_key_field_name: 2, default_text_field_name: test_text},
-        ]
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-        self.load_collection(client, collection_name)
-
-        results = self.query(
-            client,
-            collection_name,
-            filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_minhash_field_name],
-        )[0]
-
-        sig1 = binary_vector_to_signature(results[0][default_minhash_field_name])
-        sig2 = binary_vector_to_signature(results[1][default_minhash_field_name])
-
-        assert sig1 == sig2, "Same text should produce identical signatures with word-level tokenization"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_token_level_word_vs_char_difference(self):
-        """
-        target: verify word-level and char-level produce different signatures
-        method: create collections with different token_level, compare signatures
-        expected: same text with different token_level should produce different signatures
-        """
-        client = self._client()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-        test_text = "hello world test"
-
-        signatures = {}
-
-        for token_level in ["word", "char"]:
-            collection_name = cf.gen_collection_name_by_testcase_name() + f"_{token_level}"
-
-            schema = self.create_schema(client, enable_dynamic_field=False)[0]
-            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-            schema.add_function(
-                Function(
-                    name="text_to_minhash",
-                    function_type=FunctionType.MINHASH,
-                    input_field_names=[default_text_field_name],
-                    output_field_names=[default_minhash_field_name],
-                    params={
-                        "num_hashes": num_hashes,
-                        "shingle_size": shingle_size,
-                        "seed": seed,
-                        "token_level": token_level,
-                    },
-                )
-            )
-
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(
-                field_name=default_minhash_field_name,
-                index_type="MINHASH_LSH",
-                metric_type="MHJACCARD",
-                params={"mh_lsh_band": 8},
-            )
-            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            self.load_collection(client, collection_name)
-
-            results = self.query(
-                client,
-                collection_name,
-                filter=f"{default_primary_key_field_name} == 1",
-                output_fields=[default_minhash_field_name],
-            )[0]
-
-            signatures[token_level] = tuple(binary_vector_to_signature(results[0][default_minhash_field_name]))
-
-        # Word-level and char-level should produce different signatures
-        assert signatures["word"] != signatures["char"], (
-            "Word-level and char-level tokenization should produce different signatures"
-        )
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_default_seed_value(self):
-        """
-        target: verify default seed value is 1234
-        method: create collection without seed, compare with explicit seed=1234
-        expected: both should produce identical signatures
-        """
-        client = self._client()
-
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-        test_text = "default seed test"
-
-        signatures = {}
-
-        for config_name, params in [("default", {}), ("explicit_1234", {"seed": 1234})]:
-            collection_name = cf.gen_collection_name_by_testcase_name() + f"_{config_name}"
-
-            base_params = {"num_hashes": num_hashes, "shingle_size": shingle_size}
-            base_params.update(params)
-
-            schema = self.create_schema(client, enable_dynamic_field=False)[0]
-            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-            schema.add_function(
-                Function(
-                    name="text_to_minhash",
-                    function_type=FunctionType.MINHASH,
-                    input_field_names=[default_text_field_name],
-                    output_field_names=[default_minhash_field_name],
-                    params=base_params,
-                )
-            )
-
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(
-                field_name=default_minhash_field_name,
-                index_type="MINHASH_LSH",
-                metric_type="MHJACCARD",
-                params={"mh_lsh_band": 8},
-            )
-            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            self.load_collection(client, collection_name)
-
-            results = self.query(
-                client,
-                collection_name,
-                filter=f"{default_primary_key_field_name} == 1",
-                output_fields=[default_minhash_field_name],
-            )[0]
-
-            signatures[config_name] = tuple(binary_vector_to_signature(results[0][default_minhash_field_name]))
-
-        assert signatures["default"] == signatures["explicit_1234"], "Default seed should be 1234"
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_minhash_xxhash_vs_sha1_difference(self):
-        """
-        target: verify xxhash and sha1 produce different signatures
-        method: create collections with different hash_function, compare signatures
-        expected: same text with different hash_function should produce different signatures
-        """
-        client = self._client()
-
-        seed = 42
-        num_hashes = 16
-        shingle_size = 3
-        dim = num_hashes * 32
-        test_text = "hash function comparison test"
-
-        signatures = {}
-
-        for hash_func in ["xxhash64", "sha1"]:
-            collection_name = cf.gen_collection_name_by_testcase_name() + f"_{hash_func}"
-
-            schema = self.create_schema(client, enable_dynamic_field=False)[0]
-            schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-            schema.add_field(default_text_field_name, DataType.VARCHAR, max_length=65535)
-            schema.add_field(default_minhash_field_name, DataType.BINARY_VECTOR, dim=dim)
-
-            schema.add_function(
-                Function(
-                    name="text_to_minhash",
-                    function_type=FunctionType.MINHASH,
-                    input_field_names=[default_text_field_name],
-                    output_field_names=[default_minhash_field_name],
-                    params={
-                        "num_hashes": num_hashes,
-                        "shingle_size": shingle_size,
-                        "seed": seed,
-                        "hash_function": hash_func,
-                    },
-                )
-            )
-
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(
-                field_name=default_minhash_field_name,
-                index_type="MINHASH_LSH",
-                metric_type="MHJACCARD",
-                params={"mh_lsh_band": 8},
-            )
-            self.create_collection(client, collection_name, schema=schema, index_params=index_params)
-
-            rows = [{default_primary_key_field_name: 1, default_text_field_name: test_text}]
-            self.insert(client, collection_name, rows)
-            self.flush(client, collection_name)
-            self.load_collection(client, collection_name)
-
-            results = self.query(
-                client,
-                collection_name,
-                filter=f"{default_primary_key_field_name} == 1",
-                output_fields=[default_minhash_field_name],
-            )[0]
-
-            signatures[hash_func] = tuple(binary_vector_to_signature(results[0][default_minhash_field_name]))
-
-        assert signatures["xxhash64"] != signatures["sha1"], "xxhash64 and sha1 should produce different signatures"
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_minhash_lsh_recall(self):
@@ -4566,12 +3854,11 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
         method:
             1. Create collection with nullable=True VARCHAR input field
             2. Insert rows with normal text, empty string, and NULL text
-            3. Verify NULL text produces all-0xFFFFFFFF signature
+            3. Verify original text and NULL values can be retrieved
             4. Verify normal text search does not recall NULL rows
-            5. Verify same text produces identical signatures
+            5. Verify both rows with identical text are recalled
         expected:
             - Insert succeeds for all rows including NULL
-            - NULL text generates max-value signature (0xFFFFFFFF)
             - Search with normal text returns correct matches, NULL rows excluded
         """
         client = self._client()
@@ -4616,31 +3903,17 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
 
-        # Verify signatures via query
+        # Raw function outputs are hidden; verify source values through Query.
         query_results = self.query(
             client,
             collection_name,
             filter=f"{default_primary_key_field_name} >= 0",
-            output_fields=[default_primary_key_field_name, default_minhash_field_name],
+            output_fields=[default_primary_key_field_name, default_text_field_name],
+            consistency_level="Strong",
         )[0]
-        sigs = {}
-        for r in query_results:
-            raw = r[default_minhash_field_name]
-            if isinstance(raw, list):
-                raw = raw[0]
-            sigs[r[default_primary_key_field_name]] = raw
-
-        # NULL rows should have all-0xFF signature (every uint32 == 0xFFFFFFFF)
-        null_expected = b"\xff" * (default_dim // 8)
-        assert sigs[1] == null_expected, "NULL text should produce all-0xFF signature"
-        assert sigs[3] == null_expected, "NULL text should produce all-0xFF signature"
-
-        # Same text should produce identical signatures
-        assert sigs[0] == sigs[4], "Same text should produce identical signatures"
-
-        # Normal text signatures should differ from NULL signature
-        assert sigs[0] != null_expected
-        assert sigs[2] != null_expected
+        assert {row[default_primary_key_field_name]: row[default_text_field_name] for row in query_results} == {
+            row[default_primary_key_field_name]: row[default_text_field_name] for row in rows
+        }
 
         # Search with normal text should not recall NULL rows
         results = self.search(
@@ -4657,6 +3930,7 @@ class TestMilvusClientMinHashNullable(TestMilvusClientV2Base):
         # Exact matches (id=0, id=4) should be present
         assert 0 in result_ids, "Exact match id=0 should be in results"
         assert 4 in result_ids, "Exact match id=4 should be in results"
+        assert 1 not in result_ids and 3 not in result_ids, "Normal text must not recall NULL rows"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_minhash_non_nullable_input_field_accepted(self):

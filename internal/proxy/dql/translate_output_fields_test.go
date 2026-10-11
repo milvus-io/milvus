@@ -18,6 +18,7 @@ package dql
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -987,4 +988,57 @@ func TestResolveTimezone(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, common.DefaultTimezone, tz)
 	})
+}
+
+func TestTranslateOutputFields_FunctionOutputs(t *testing.T) {
+	for _, dynamic := range []bool{false, true} {
+		for _, removePK := range []bool{false, true} {
+			t.Run(fmt.Sprintf("dynamic=%t/removePK=%t", dynamic, removePK), func(t *testing.T) {
+				collSchema := &schemapb.CollectionSchema{
+					EnableDynamicField: dynamic,
+					Fields: []*schemapb.FieldSchema{
+						{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{Name: "text", FieldID: 101, DataType: schemapb.DataType_VarChar},
+						{Name: "minhash", FieldID: 102, DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true},
+						{Name: "bm25", FieldID: 103, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+						{Name: "binary", FieldID: 104, DataType: schemapb.DataType_BinaryVector},
+						{Name: "embedding", FieldID: 105, DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+					},
+					Functions: []*schemapb.FunctionSchema{
+						{Type: schemapb.FunctionType_MinHash, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}},
+						{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{103}},
+						{Type: schemapb.FunctionType_TextEmbedding, InputFieldIds: []int64{101}, OutputFieldIds: []int64{105}},
+					},
+				}
+				expected := []string{"text", "binary", "embedding"}
+				if !removePK {
+					expected = append(expected, "id")
+				}
+				if dynamic {
+					collSchema.Fields = append(collSchema.Fields, &schemapb.FieldSchema{
+						Name: "$meta", FieldID: 106, DataType: schemapb.DataType_JSON, IsDynamic: true,
+					})
+					expected = append(expected, "$meta")
+				}
+				schema := mustNewSchemaInfo(collSchema)
+				for _, requested := range [][]string{{"*"}, {" * ", "binary"}} {
+					fields, userFields, _, _, _, err := translateOutputFields(requested, schema, removePK)
+					assert.NoError(t, err)
+					assert.ElementsMatch(t, expected, fields)
+					assert.ElementsMatch(t, expected, userFields)
+				}
+				for _, hidden := range []string{"minhash", "bm25"} {
+					for _, requested := range [][]string{{hidden}, {"*", hidden}, {hidden, "*"}, {" " + hidden + " "}} {
+						_, _, _, _, _, err := translateOutputFields(requested, schema, removePK)
+						assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+						assert.ErrorContains(t, err, "not allowed to retrieve raw data of field "+hidden)
+					}
+				}
+				fields, userFields, _, _, _, err := translateOutputFields([]string{"binary", "embedding"}, schema, removePK)
+				assert.NoError(t, err)
+				assert.ElementsMatch(t, []string{"binary", "embedding"}, fields)
+				assert.ElementsMatch(t, fields, userFields)
+			})
+		}
+	}
 }

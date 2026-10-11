@@ -613,7 +613,8 @@ func (helper *SchemaHelper) GetFunctionByOutputField(field *schemapb.FieldSchema
 	return nil, merr.WrapErrParameterInvalidMsg("function not exist")
 }
 
-// As of now, only BM25 function output field is not supported to retrieve raw field data
+// CanRetrieveRawFieldData excludes BM25 and MinHash function outputs from raw retrieval.
+// Their generated vectors remain available for indexing and search.
 func (helper *SchemaHelper) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
 	if !field.IsFunctionOutput {
 		return true
@@ -624,7 +625,7 @@ func (helper *SchemaHelper) CanRetrieveRawFieldData(field *schemapb.FieldSchema)
 		return false
 	}
 
-	return f.GetType() != schemapb.FunctionType_BM25
+	return f.GetType() != schemapb.FunctionType_BM25 && f.GetType() != schemapb.FunctionType_MinHash
 }
 
 func (helper *SchemaHelper) GetCollectionName() string {
