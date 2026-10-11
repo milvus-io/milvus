@@ -29,6 +29,7 @@
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
 #include "expr/ITypeExpr.h"
+#include "exec/QueryContext.h"
 #include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
 #include "knowhere/comp/index_param.h"
@@ -362,9 +363,9 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
 
 class ReaderStringSnapshot : public SegmentReadSnapshot {
  public:
-    explicit ReaderStringSnapshot(
-        std::shared_ptr<ChunkedColumnInterface> column)
-        : column_(std::move(column)) {
+    ReaderStringSnapshot(std::shared_ptr<ChunkedColumnInterface> column,
+                         SchemaPtr schema)
+        : column_(std::move(column)), schema_(std::move(schema)) {
     }
     int64_t
     chunk_size(FieldId, int64_t chunk) const override {
@@ -391,10 +392,20 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         ++column_reads;
         return {column_, FieldSkipMetricsView{}};
     }
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId, OpContext*) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "string test snapshot does not support struct offsets");
+    }
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return schema_;
+    }
     mutable int64_t column_reads = 0;
 
  private:
     std::shared_ptr<ChunkedColumnInterface> column_;
+    SchemaPtr schema_;
 };
 
 class SegmentChunkReaderStringTest
@@ -541,7 +552,7 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
-    ReaderStringSnapshot snapshot(column_);
+    ReaderStringSnapshot snapshot(column_, schema_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
@@ -568,6 +579,46 @@ TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     EXPECT_EQ(stats_->scans, 1);
 }
 
+TEST_P(SegmentChunkReaderStringTest, SchemaUsesBoundSnapshot) {
+    auto captured_schema = std::make_shared<Schema>(*schema_);
+    auto snapshot =
+        std::make_shared<ReaderStringSnapshot>(column_, captured_schema);
+    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
+    exec::QueryContext query_context(
+        "schema_snapshot", segment_.get(), expected_.size(), MAX_TIMESTAMP);
+
+    EXPECT_EQ(reader.GetSchemaSnapshot(), schema_);
+    EXPECT_EQ(query_context.get_schema_snapshot(), schema_);
+
+    reader.SetSnapshot(snapshot.get());
+    query_context.set_read_snapshot(snapshot);
+    EXPECT_EQ(reader.GetSchemaSnapshot(), captured_schema);
+    EXPECT_EQ(query_context.get_schema_snapshot(), captured_schema);
+}
+
+TEST_P(SegmentChunkReaderStringTest,
+       MissingSnapshotSchemaDoesNotUseLiveSchema) {
+    // The live segment has a valid schema. A broken snapshot must fail rather
+    // than combine that schema with columns from a different published state.
+    auto snapshot = std::make_shared<ReaderStringSnapshot>(column_, nullptr);
+    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
+    reader.SetSnapshot(snapshot.get());
+    exec::QueryContext query_context(
+        "missing_schema", segment_.get(), expected_.size(), MAX_TIMESTAMP);
+    query_context.set_read_snapshot(snapshot);
+
+    auto expect_missing_schema = [](auto&& get_schema) {
+        try {
+            get_schema();
+            FAIL() << "expected missing snapshot schema to fail";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+        }
+    };
+    expect_missing_schema([&] { return reader.GetSchemaSnapshot(); });
+    expect_missing_schema([&] { return query_context.get_schema_snapshot(); });
+}
+
 // The pinned ApplyFieldValidData path must read the validity bitmap from the
 // frozen snapshot column, not from the live segment. A NULL row (row 16 in
 // chunk 0) must be cleared while valid rows stay set; if the write went to the
@@ -577,7 +628,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
         // Non-nullable columns short-circuit inside ApplyValidDataInChunk.
         return;
     }
-    ReaderStringSnapshot snapshot(column_);
+    ReaderStringSnapshot snapshot(column_, schema_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);

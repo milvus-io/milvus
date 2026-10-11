@@ -188,9 +188,10 @@ class SegmentChunkReader {
     SchemaPtr
     GetSchemaSnapshot() const {
         if (snapshot_) {
-            if (auto schema = snapshot_->get_schema_snapshot()) {
-                return schema;
-            }
+            auto schema = snapshot_->get_schema_snapshot();
+            AssertInfo(schema != nullptr,
+                       "chunk reader snapshot must provide a non-null schema");
+            return schema;
         }
         return segment_->get_schema_snapshot();
     }

@@ -307,9 +307,10 @@ class QueryContext : public Context {
     SchemaPtr
     get_schema_snapshot() const {
         if (read_snapshot_) {
-            if (auto schema = read_snapshot_->get_schema_snapshot()) {
-                return schema;
-            }
+            auto schema = read_snapshot_->get_schema_snapshot();
+            AssertInfo(schema != nullptr,
+                       "query read snapshot must provide a non-null schema");
+            return schema;
         }
         return segment_->get_schema_snapshot();
     }
