@@ -176,3 +176,47 @@ func hasDeltalogSeries(vec *prometheus.GaugeVec, collectionID, level string) boo
 	}
 	return false
 }
+
+// TestDeltalogAggregateObserveUsesStats covers the StorageV3 post-restart
+// state: Stats carries the cumulative deltalog values while the in-memory
+// Deltalogs array is empty. The metrics must follow Stats, as
+// hasTooManyDeletions does, for both the non-L0 distributions and the L0
+// file count.
+func TestDeltalogAggregateObserveUsesStats(t *testing.T) {
+	withStats := func(level datapb.SegmentLevel, numRows, count, deleted, size int64) *SegmentInfo {
+		return &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				Level:     level,
+				State:     commonpb.SegmentState_Flushed,
+				NumOfRows: numRows,
+				Stats: &datapb.Statistics{
+					DeltaBinlogCount: count,
+					DeleteNumRows:    deleted,
+					DeltaBinlogSize:  size,
+				},
+			},
+		}
+	}
+
+	agg := &deltalogAggregate{dbName: "db1"}
+	agg.observe(withStats(datapb.SegmentLevel_L0, 0, 7, 700, 7*1024))
+	agg.observe(withStats(datapb.SegmentLevel_L2, 1000, 180, 150, 180*1024))
+	// a segment carrying both: Stats wins over a stale Deltalogs array
+	both := withStats(datapb.SegmentLevel_L2, 1000, 190, 160, 190*1024)
+	both.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, MemorySize: 1}}}}
+	agg.observe(both)
+
+	assert.Equal(t, int64(7), agg.l0FileCount)
+	l2 := agg.byLevel[datapb.SegmentLevel_L2]
+	if assert.NotNil(t, l2) {
+		assert.Equal(t, []float64{180, 190}, l2.fileCounts)
+		assert.Equal(t, []float64{180 * 1024, 190 * 1024}, l2.sizes)
+		assert.InDeltaSlice(t, []float64{0.15, 0.16}, l2.deletedRatios, 1e-9)
+	}
+
+	// and the published gauges match the trigger's view
+	reportDeltalogMetrics(map[string]*deltalogAggregate{"300": agg})
+	defer reportDeltalogMetrics(map[string]*deltalogAggregate{})
+	assert.Equal(t, 7.0, testutil.ToFloat64(metrics.DataCoordL0DeltalogFileNum.WithLabelValues("db1", "300")))
+	assert.Equal(t, 190.0, testutil.ToFloat64(metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues("db1", "300", "L2", "1.0")))
+}

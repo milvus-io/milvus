@@ -71,30 +71,26 @@ type deltalogAggregate struct {
 }
 
 func (a *deltalogAggregate) observe(segment *SegmentInfo) {
-	// L0 uses only the deltalog file count (l0_delete_entries_num companion);
-	// skip the size/deleted-row accumulation the non-L0 path needs.
+	// Read the same source hasTooManyDeletions reads: EnsureStats() is the
+	// persisted Statistics (an O(1) read when populated) and only falls back
+	// to rebuilding from the log metadata when Stats is nil. The in-memory
+	// Deltalogs array is not a valid source: for StorageV3 segments the
+	// catalog does not persist the per-FieldBinlog KVs, so after a DataCoord
+	// restart the array is empty while the cumulative values live in Stats.
+	stats := segment.EnsureStats()
 	if segment.GetLevel() == datapb.SegmentLevel_L0 {
-		fileCount := 0
-		for _, deltaLogs := range segment.GetDeltalogs() {
-			fileCount += len(deltaLogs.GetBinlogs())
-		}
-		a.l0FileCount += int64(fileCount)
+		// L0 contributes only its deltalog file count (l0_delete_entries_num
+		// companion).
+		a.l0FileCount += stats.GetDeltaBinlogCount()
 		return
 	}
 	if !isFlushed(segment) {
 		return
 	}
 
-	fileCount := 0
-	size := int64(0)
-	deletedRows := int64(0)
-	for _, deltaLogs := range segment.GetDeltalogs() {
-		for _, l := range deltaLogs.GetBinlogs() {
-			deletedRows += l.GetEntriesNum()
-			size += l.GetMemorySize()
-		}
-		fileCount += len(deltaLogs.GetBinlogs())
-	}
+	fileCount := stats.GetDeltaBinlogCount()
+	size := stats.GetDeltaBinlogSize()
+	deletedRows := stats.GetDeleteNumRows()
 
 	if a.byLevel == nil {
 		a.byLevel = make(map[datapb.SegmentLevel]*levelDist)
