@@ -901,6 +901,8 @@ func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 			},
 		}
 
+		task.req.PartialUpdate = true
+
 		err := task.queryPreExecute(context.Background())
 
 		// Verify results
@@ -917,6 +919,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldSchemaError(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 
@@ -939,6 +942,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldDataError(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 
@@ -968,6 +972,10 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
+		task.req.PartialUpdate = true
+		task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{
+			InsertRequest: &msgpb.InsertRequest{FieldsData: task.req.GetFieldsData()},
+		}}
 
 		err := task.queryPreExecute(context.Background())
 
@@ -1188,6 +1196,8 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
+	task.req.PartialUpdate = true
+
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -1277,6 +1287,8 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
+	task.req.PartialUpdate = true
+
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -1364,6 +1376,8 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
+
+	task.req.PartialUpdate = true
 
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
@@ -2666,6 +2680,8 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
+	task.req.PartialUpdate = true
+
 	err := task.queryPreExecute(context.Background())
 	assert.NoError(t, err)
 
@@ -2755,6 +2771,8 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
+
+	task.req.PartialUpdate = true
 
 	err := task.queryPreExecute(context.Background())
 	assert.Error(t, err)
@@ -2850,6 +2868,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
+		task.req.PartialUpdate = true
+
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
 
@@ -2936,6 +2956,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
+
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
@@ -3041,6 +3063,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
+
+		task.req.PartialUpdate = true
 
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err, "queryPreExecute should not fail for 2.5-style non-nullable $meta")
@@ -3174,6 +3198,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 		}
 		mock := mockey.Mock(retrieveByPKs).Return(mockResult, segcore.StorageCost{}, nil).Build()
 		defer mock.UnPatch()
+		task.req.PartialUpdate = true
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
 		return task
