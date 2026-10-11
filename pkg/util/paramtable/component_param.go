@@ -6420,6 +6420,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionGlobalIndexEnable      ParamItem `refreshable:"true"`
+	ClusteringCompactionTrainSampleRatio       ParamItem `refreshable:"true"`
+	ClusteringCompactionChunkSizePerCentroid   ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -7360,6 +7363,33 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
+
+	p.ClusteringCompactionGlobalIndexEnable = ParamItem{
+		Key:          "dataCoord.compaction.clustering.globalIndex.enable",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc:          "Enable snapshot-owned global index layouts once the build and query consumers support them; declarations alone do not activate the pipeline",
+		Export:       true,
+	}
+	p.ClusteringCompactionGlobalIndexEnable.Init(base.mgr)
+
+	p.ClusteringCompactionTrainSampleRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.trainSampleRatio",
+		Version:      "3.1.0",
+		DefaultValue: "0",
+		Doc:          "Fraction of input vector rows sampled for clustering; 0 means unset, and a value in (0,1] must be explicitly configured before enabling global index builds",
+		Export:       true,
+	}
+	p.ClusteringCompactionTrainSampleRatio.Init(base.mgr)
+
+	p.ClusteringCompactionChunkSizePerCentroid = ParamItem{
+		Key:          "dataCoord.compaction.clustering.chunkSizePerCentroid",
+		Version:      "3.1.0",
+		DefaultValue: "8MB",
+		Doc:          "Target raw vector bytes per centroid; must be positive and is independent of segment size",
+		Export:       true,
+	}
+	p.ClusteringCompactionChunkSizePerCentroid.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

@@ -170,6 +170,12 @@ message AnalyzeRequest {
   int64 max_cluster_size = 17;
   int64 task_slot = 18;
   repeated common.KeyValuePair plugin_context = 19;
+  reserved 20;
+  reserved "centroid_id_range";
+  // Exact sample row count; do not replace it with a worker-memory heuristic.
+  int64 train_rows = 21;
+  string cluster_type = 22;
+  map<string, string> cluster_params = 23;
 }
 
 message CreateStatsRequest {
@@ -257,6 +263,8 @@ message AnalyzeResult {
   index.JobState state = 2;
   string fail_reason = 3;
   string centroids_file = 4;
+  reserved 5;
+  reserved "cluster_stats_source";
 }
 
 message AnalyzeResults {

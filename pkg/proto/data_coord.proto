@@ -494,6 +494,8 @@ message SegmentInfo {
   // First growing-to-sealed DataView publication. Written with the flush snapshot
   // and retained across compaction/drop so a retried commit returns the same version.
   view.DataVersion sealed_at_data_version = 41;
+  reserved 42;
+  reserved "cluster_stats";
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -773,6 +775,8 @@ enum CompactionType {
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
   BumpSchemaVersionCompaction = 12;
+  reserved 13;
+  reserved "ClusterSortCompaction";
 }
 
 message CompactionStateRequest {
@@ -826,6 +830,8 @@ message CompactionSegmentBinlogs {
   // expiry during compaction: isEntityExpired uses max(row_ts, commit_ts)
   // so stale row timestamps never cause rows to be silently dropped.
   uint64 commit_timestamp = 14;
+  reserved 15;
+  reserved "cluster_stats";
 }
 
 message CompactionPlan {
@@ -860,6 +866,12 @@ message CompactionPlan {
   // The requesting DataCoord can commit schema-bump manifest deltas. Absent
   // or false preserves the legacy worker-produced complete manifest response.
   bool enable_manifest_delta = 32;
+  reserved 33, 34;
+  reserved "cluster_stats_source", "pre_allocated_centroid_group_ids";
+  // Zero selects the legacy contract; one selects snapshot-owned ranges.
+  uint32 clustering_stats_format_version = 35;
+  // Zero only for initial construction; never silently replace a missing base.
+  int64 base_partition_stats_version = 36;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
@@ -947,6 +959,8 @@ message CompactionSegment {
   // (ManifestMutationCommitUpdates), rebasing the column-group / stats adds
   // onto the segment's current manifest instead of a datanode-pinned base.
   SegmentManifestDelta manifest_delta = 17;
+  reserved 18;
+  reserved "cluster_stats";
 }
 
 message CompactionPlanResult {
@@ -959,6 +973,11 @@ message CompactionPlanResult {
   // classifies the original error (merr.Status), so DataCoord can persist the
   // code/reason and decide retryability instead of seeing a bare `failed`.
   common.Status fail_status = 6;
+  reserved 7;
+  reserved "cluster_stats_source";
+  // Equals planID for a successful new-format result, including empty outputs.
+  // The complete snapshot must already exist before returning this receipt.
+  int64 partition_stats_version = 8;
 }
 
 message CompactionStateResponse {
@@ -1647,6 +1666,16 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  reserved 31 to 35;
+  reserved "cluster_sort_completed", "cluster_sort_group_id",
+           "cluster_sort_pending_result", "cluster_stats_source",
+           "pre_allocated_centroid_group_ids";
+  uint32 clustering_stats_format_version = 36;
+  int64 base_partition_stats_version = 37;
+  map<string, string> clustering_plan_params = 38;
+  // Persist before adopting any output metadata. Presence also records an
+  // empty successful result. Resume this receipt instead of rerunning mapping.
+  CompactionPlanResult clustering_pending_result = 39;
 }
 
 message PartitionStatsInfo {
@@ -1654,9 +1683,12 @@ message PartitionStatsInfo {
   int64 partitionID = 2;
   string vChannel = 3;
   int64 version = 4;
+  // Complete snapshot coverage, including retained segments from the base.
   repeated int64 segmentIDs = 5;
   int64 analyzeTaskID = 6;
   int64 commitTime = 7;
+  reserved 8;
+  reserved "cluster_stats_source";
 }
 
 message DropCompactionPlanRequest {

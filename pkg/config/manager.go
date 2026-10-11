@@ -46,7 +46,7 @@ func WithSubstr(substring string) Filter {
 }
 
 func WithPrefix(prefix string) Filter {
-	prefix = strings.ToLower(prefix)
+	prefix = lowerKey(prefix)
 	return func(key string) (string, bool) {
 		return key, strings.HasPrefix(key, prefix)
 	}
@@ -54,7 +54,7 @@ func WithPrefix(prefix string) Filter {
 
 func WithOneOfPrefixs(prefixs ...string) Filter {
 	for id, prefix := range prefixs {
-		prefixs[id] = strings.ToLower(prefix)
+		prefixs[id] = lowerKey(prefix)
 	}
 	return func(key string) (string, bool) {
 		for _, prefix := range prefixs {
@@ -67,7 +67,7 @@ func WithOneOfPrefixs(prefixs ...string) Filter {
 }
 
 func RemovePrefix(prefix string) Filter {
-	prefix = strings.ToLower(prefix)
+	prefix = lowerKey(prefix)
 	return func(key string) (string, bool) {
 		return strings.Replace(key, prefix, "", 1), true
 	}

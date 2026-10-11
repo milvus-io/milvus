@@ -21,11 +21,15 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type SegmentStats struct {
 	FieldStats []FieldStats `json:"fieldStats"`
 	NumRows    int
+	// Ranges use the centroid table of the enclosing snapshot.
+	CentroidRanges []*clusteringpb.ClusteringCentroidRange `json:"centroidRanges,omitempty"`
 }
 
 func NewSegmentStats(fieldStats []FieldStats, rows int) *SegmentStats {
@@ -36,8 +40,9 @@ func NewSegmentStats(fieldStats []FieldStats, rows int) *SegmentStats {
 }
 
 type PartitionStatsSnapshot struct {
-	SegmentStats map[UniqueID]SegmentStats `json:"segmentStats"`
-	Version      int64
+	SegmentStats    map[UniqueID]SegmentStats `json:"segmentStats"`
+	Version         int64
+	ClusteringStats *clusteringpb.PartitionClusteringStats `json:"clusteringStats,omitempty"`
 }
 
 func NewPartitionStatsSnapshot() *PartitionStatsSnapshot {
@@ -62,26 +67,29 @@ func (ps *PartitionStatsSnapshot) UpdateSegmentStats(segmentID UniqueID, segment
 }
 
 func DeserializePartitionsStatsSnapshot(data []byte) (*PartitionStatsSnapshot, error) {
-	var messageMap map[string]*json.RawMessage
-	err := json.Unmarshal(data, &messageMap)
-	if err != nil {
-		return nil, err
+	partitionStats := &PartitionStatsSnapshot{}
+	if err := json.Unmarshal(data, partitionStats); err != nil {
+		return nil, wrapPartitionStatsDecodeError(err, "deserialize partition stats snapshot")
 	}
-
-	partitionStats := &PartitionStatsSnapshot{
-		SegmentStats: make(map[UniqueID]SegmentStats),
-	}
-	err = json.Unmarshal(*messageMap["segmentStats"], &partitionStats.SegmentStats)
-	if err != nil {
+	if err := partitionStats.ValidateClusteringStats(); err != nil {
 		return nil, err
 	}
 	return partitionStats, nil
 }
 
 func SerializePartitionStatsSnapshot(partStats *PartitionStatsSnapshot) ([]byte, error) {
+	if partStats == nil {
+		return nil, merr.WrapErrServiceInternalMsg("nil partition stats snapshot")
+	}
+	if err := partStats.ValidateClusteringStats(); err != nil {
+		return nil, err
+	}
 	partData, err := json.Marshal(partStats)
 	if err != nil {
-		return nil, err
+		if merr.IsMilvusError(err) {
+			return nil, merr.Wrap(err, "serialize partition stats snapshot")
+		}
+		return nil, merr.WrapErrSerializationFailed(err, "serialize partition stats snapshot")
 	}
 	return partData, nil
 }

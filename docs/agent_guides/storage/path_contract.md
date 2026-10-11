@@ -120,3 +120,14 @@ directory from the output manifest base.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+## Global index snapshot contract
+
+The optional global index centroid table and segment ranges belong to the
+existing complete partition stats snapshot. There is no new centroid sidecar,
+per-segment authority, or persisted delta path. Future writers use the existing
+`part_stats/<collection>/<partition>/<vchannel>/<version>` layout and must not
+rewrite published versions. See
+[the global index contract](../../design-docs/global-index-cluster-compaction.md)
+for ownership, query binding and the required retention rules. PR1 adds only
+messages and codecs; publication and GC integration remain follow-up work.

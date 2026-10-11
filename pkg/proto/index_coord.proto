@@ -311,6 +311,13 @@ message AnalyzeTask {
     string fail_reason = 11;
     int64 dim = 12;
     string centroids_file = 13;
+    reserved 14, 15;
+    reserved "cluster_stats_source", "centroid_id_range";
+    // Resolved once from the fixed data sampling ratio; zero means legacy.
+    int64 train_rows = 16;
+    int64 num_clusters = 17;
+    string cluster_type = 18;
+    map<string, string> cluster_params = 19;
 }
 
 message SegmentStats {
