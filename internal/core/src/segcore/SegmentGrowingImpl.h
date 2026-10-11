@@ -639,7 +639,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::shared_ptr<const IStructElementOffsets>
-    GetStructElementOffsets(FieldId field_id) const override {
+    GetStructElementOffsets(FieldId field_id,
+                            OpContext* op_ctx = nullptr) const override {
         std::shared_lock lock(struct_element_offsets_map_mutex_);
         auto it = struct_element_offsets_map_.find(field_id);
         if (it != struct_element_offsets_map_.end()) {

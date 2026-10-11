@@ -132,6 +132,16 @@ class SegmentReadSnapshot {
     GetColumn(FieldId field_id) const {
         return GetDataScanResources(field_id).first.get();
     }
+
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id, OpContext* op_ctx) const {
+        return nullptr;
+    }
+
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return nullptr;
+    }
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -374,8 +384,11 @@ class SegmentInterface {
 
     // Get the shared struct-element mapping for a struct sub-field.
     // Returns nullptr if the field has no struct-element mapping.
+    // Sealed segments build it on first use, using the caller's cancellation
+    // token and normal column cache; later calls reuse the immutable metadata.
     virtual std::shared_ptr<const IStructElementOffsets>
-    GetStructElementOffsets(FieldId field_id) const = 0;
+    GetStructElementOffsets(FieldId field_id,
+                            OpContext* op_ctx = nullptr) const = 0;
 };
 
 // internal API for DSL calculation

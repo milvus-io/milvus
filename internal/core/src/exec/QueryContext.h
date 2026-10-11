@@ -296,6 +296,24 @@ class QueryContext : public Context {
         return struct_element_offsets_;
     }
 
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets(FieldId field_id) const {
+        return read_snapshot_
+                   ? read_snapshot_->GetStructElementOffsets(field_id,
+                                                             op_context_)
+                   : segment_->GetStructElementOffsets(field_id, op_context_);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const {
+        if (read_snapshot_) {
+            if (auto schema = read_snapshot_->get_schema_snapshot()) {
+                return schema;
+            }
+        }
+        return segment_->get_schema_snapshot();
+    }
+
     void
     set_active_element_count(int64_t count) {
         active_element_count_ = count;
