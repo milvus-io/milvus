@@ -57,6 +57,19 @@ func rejectIgnoredRESTChainFields(c *gin.Context, allowCamel bool) error {
 		if _, exists := object["functionChains"]; exists && !allowCamel {
 			return true
 		}
+		if raw, exists := object["functionChains"]; exists && allowCamel {
+			var chains []map[string]json.RawMessage
+			if json.Unmarshal(raw, &chains) == nil {
+				for _, chain := range chains {
+					if _, exists := chain["post_process_options"]; exists {
+						return true
+					}
+					if _, exists := chain["postProcessOptions"]; exists {
+						return true
+					}
+				}
+			}
+		}
 		if schema, exists := object["schema"]; exists {
 			var nested map[string]json.RawMessage
 			if json.Unmarshal(schema, &nested) == nil && inspect(nested) {

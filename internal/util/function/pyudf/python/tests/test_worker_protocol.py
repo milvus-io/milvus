@@ -93,6 +93,8 @@ else:
                 "input_column_indices": 7,
                 "query_context": 8,
                 "execution_version": 9,
+                "table_result": 10,
+                "reduction": 11,
             },
         )
         request.params.fields["large"].int64_value = -(1 << 63)

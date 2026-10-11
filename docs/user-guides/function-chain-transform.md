@@ -78,7 +78,7 @@ From the Milvus checkout:
   --wheel-dir ./dist/transform-demo
 ```
 
-Upload `milvus_transform_demo-0.2.0-py3-none-any.whl` to the object storage
+Upload `milvus_transform_demo-0.3.0-py3-none-any.whl` to the object storage
 available to Milvus FileResource, using your storage client. Register its
 storage object path, not a client-local filesystem path:
 
@@ -88,7 +88,7 @@ from pymilvus import MilvusClient
 client = MilvusClient("http://127.0.0.1:19530")
 client.add_file_resource(
     name="transform_demo",
-    path="udf/milvus_transform_demo-0.2.0-py3-none-any.whl",
+    path="udf/milvus_transform_demo-0.3.0-py3-none-any.whl",
 )
 ```
 
@@ -425,13 +425,94 @@ timeout may be resolved by waiting on the same future, without issuing a new
 INSERT. WAL recovery uses materialized rows and does not run the model again;
 this does not guarantee exactly-once model execution across new requests.
 
+## 8. Return independent POST tables
+
+Use the matching PyMilvus checkout with its `arrow` extra and worker runtime
+0.3 for this mode. Ordinary HITS searches do not require the Arrow extra.
+
+```python
+from pymilvus.function_chain import agg
+
+post_table = (
+    FunctionChain(FunctionChainStage.POST_PROCESS, result_mode="table")
+    .concat()
+    .group_by("text")
+    .aggregate({
+        "matches": agg.count(),
+        "queries": agg.collect_list(col("$query_index")),
+        "best_score": agg.max(col("$score")),
+    })
+)
+table_result = client.search(
+    "chunks", [[1.0, 0.0], [0.0, 1.0]], anns_field="vector",
+    search_params={"metric_type": "COSINE"}, limit=3,
+    function_chains=post_table,
+)
+print(table_result.schema)
+print(table_result.rows)
+arrow_table = table_result.to_arrow()
+```
+
+`concat()` combines all current groups in order. Without it, aggregates run
+independently for each current query/ANN group. Group keys follow first
+occurrence, including a null-key group. Aggregates include `count`, `sum`,
+`avg`, `min`, `max`, `first`, `last` and `collect_list`. `count()` counts rows;
+`count(col(...))` counts non-null values. FIRST/LAST and COLLECT_LIST retain
+nulls and can carry supported nested values.
+
+For Hybrid Search, use `input="ann_inputs"` to handle the separate ANN branches
+before top-level fusion. Each AnnSearchRequest's limit bounds its own inputs;
+the final Hybrid limit is not an input cutoff in this mode. Use `$query_index`
+and `$ann_index` to preserve source identity, and optionally group by `$id` to
+combine repeated documents. This mode replaces top-level fusion, so do not
+also supply a top-level L2 chain or ranker. FUSED mode instead receives normal
+post-rerank candidates and honors the normal search limit.
+
+Custom many-to-one summaries use a reducer:
+
+```python
+summary = (
+    FunctionChain(FunctionChainStage.POST_PROCESS, result_mode="table")
+    .concat()
+    .reduce("summary", fn.py_udf(
+        col("text"), resource_name="transform_demo",
+        udf_params={"mode": "summary"},
+    ))
+)
+query_table = client.query(
+    "chunks", filter="id >= 0", limit=100,
+    function_chains=summary,
+)
+```
+
+A TABLE reducer implements `transform_batch` and returns one row per supplied
+group; `context.table_result` and `context.reduction` are true. MAP still
+preserves each group's rows. `context.query_count` and query snapshots describe
+the original search, independently of current grouping; Query has query_count
+zero. Pass source index columns explicitly when the function needs them.
+`.group_by(...).reduce(...)` supplies one input group per distinct key. If all
+keyed groups are empty, the UDF is invoked once with typed empty columns to
+obtain its output schema, and its output row is discarded. Reducers must handle
+empty input without assuming a first row.
+
+TABLE output carries its own Arrow schema, including Struct/List outputs and
+typed empty results. It has no mandatory hit ID or score. A global native
+aggregate of empty input emits COUNT zero; a keyed aggregate emits no rows.
+Query input still follows the normal filter, limit and offset; this does not
+aggregate rows outside the retrieved candidate set. The matching PyMilvus
+`examples/function_chain_post_tables.py` is an executable end-to-end example.
+
 ## Current boundaries and verification
 
-V1 rejects transformations on Query, Search Iterator and search-by-IDs; PRE
+HITS mode rejects transformations on Query. All modes reject Search Iterator
+and search-by-IDs; PRE
 embedding-list input; POST search_aggregation; and new transformation bindings
 or stages through REST. Bound collections reject Upsert/partial update/Import
-and ingestion INSERT idempotency keys. Binding replacement through ALTER and
-multi-row aggregate/reduce are not implemented.
+and ingestion INSERT idempotency keys. Binding replacement through ALTER is
+not implemented. Query POST accepts TABLE/FUSED only and rejects native Query
+aggregation; aggregate inside the chain instead. REST transformation requests
+are rejected explicitly. Nested/group-key type support follows the individual
+operators; TABLE does not promise every Arrow type as a grouping key.
 
 The matching local SDK/server/runtime-0.2/WAL demonstration passed with
 2 inputs → 3 stored rows, aligned CSR, two PRE-prepared queries, query-aware

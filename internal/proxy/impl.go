@@ -3068,7 +3068,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(qt.Result().GetResults().GetNumQueries()))
+		Add(float64(qt.ResultQueryCount()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3112,7 +3112,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			hookutil.RelatedCntKey:      qt.AllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
@@ -3347,7 +3347,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
 			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
-			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
+			hookutil.RelatedCntKey:      qt.AllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
 		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())

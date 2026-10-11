@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Stable initialization context passed to a PyUDF factory."""
+"""Immutable initialization and per-call context for PyUDF implementations."""
 
 from __future__ import annotations
 
@@ -68,6 +68,8 @@ class PyUDFCallContext:
     queries/original_queries contain one entry per ANN input, each with NQ
     values. Rerank receives query_index. POST receives every candidate group
     once, with query_index=None; result_offsets also describe a flattened view.
+    TABLE groups follow the current operator: they may combine queries or
+    partition by keys. Query metadata still describes the original request.
     """
 
     stage: str
@@ -76,3 +78,7 @@ class PyUDFCallContext:
     queries: tuple[PyUDFQueryInput, ...] = ()
     original_queries: tuple[PyUDFQueryInput, ...] = ()
     result_offsets: tuple[int, ...] = ()
+    # Table groups describe the current operator inputs, independently of NQ.
+    table_result: bool = False
+    # A reducer returns one row per group; a map preserves each group's rows.
+    reduction: bool = False

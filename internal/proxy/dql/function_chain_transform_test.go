@@ -61,6 +61,9 @@ type searchTransformTestExpr struct {
 
 func (expr *searchTransformTestExpr) Name() string { return searchTransformTestFunction }
 func (expr *searchTransformTestExpr) OutputDataTypes() []arrow.DataType {
+	if expr.invalid == "struct_duplicate" {
+		return []arrow.DataType{arrow.StructOf(arrow.Field{Name: "text", Type: arrow.BinaryTypes.String}, arrow.Field{Name: "text", Type: arrow.BinaryTypes.String})}
+	}
 	if expr.invalid == "json" {
 		return []arrow.DataType{arrow.BinaryTypes.Binary}
 	}
@@ -83,6 +86,17 @@ func (expr *searchTransformTestExpr) Execute(ctx *types.FuncContext, inputs []*a
 	}
 	chunks := make([]arrow.Array, len(inputs[0].Chunks()))
 	for index, input := range inputs[0].Chunks() {
+		if expr.invalid == "struct_duplicate" {
+			builder := array.NewStructBuilder(ctx.Pool(), expr.OutputDataTypes()[0].(*arrow.StructType))
+			for row := 0; row < input.Len(); row++ {
+				builder.Append(true)
+				builder.FieldBuilder(0).(*array.StringBuilder).Append("first")
+				builder.FieldBuilder(1).(*array.StringBuilder).Append("second")
+			}
+			chunks[index] = builder.NewArray()
+			builder.Release()
+			continue
+		}
 		if expr.invalid == "json" {
 			builder := array.NewBinaryBuilder(ctx.Pool(), arrow.BinaryTypes.Binary)
 			for row := 0; row < input.Len(); row++ {

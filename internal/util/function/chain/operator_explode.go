@@ -59,7 +59,7 @@ type listArray interface {
 }
 
 func (o *ExplodeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	if ctx.Stage() != types.StageIngestion {
+	if ctx.Stage() != types.StageIngestion && !(ctx.Stage() == types.StagePostProcess && ctx.TableResult()) {
 		return nil, merr.WrapErrParameterInvalidMsg("explode cannot expand rows in stage %q", ctx.Stage())
 	}
 	column, err := input.ResolveColumn(o.inputs[0], ctx.Pool())

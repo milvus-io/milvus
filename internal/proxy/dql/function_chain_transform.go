@@ -102,6 +102,14 @@ func (meta *searchTransformMeta) planPostInputs(schema *schemaInfo) error {
 	jsonRepr := &chain.ChainRepr{Stage: chaintypes.StagePostProcess}
 	for _, name := range meta.repr.Info.RequiredInputs {
 		switch name {
+		case postQueryIndexColumn, postANNIndexColumn:
+			if !transform.IsTablePlan(meta.plan) {
+				return merr.WrapErrParameterInvalidMsg("POST_PROCESS source %q requires TABLE result mode", name)
+			}
+			if err := meta.validatePostSourceHint(name, schemapb.DataType_Int64); err != nil {
+				return err
+			}
+			continue
 		case chaintypes.IDFieldName, chaintypes.ScoreFieldName, chaintypes.ElementIndicesFieldName:
 			if err := meta.validatePostSourceHint(name, schemapb.DataType_None); err != nil {
 				return err
@@ -238,6 +246,9 @@ func (t *SearchTask) prepareSearchTransforms() error {
 	}
 	if hasFunctionChainStage(t.request.GetFunctionChains(), schemapb.FunctionChainStage_FunctionChainStagePostProcess) && t.request.GetSearchAggregation() != nil {
 		return merr.WrapErrParameterInvalidMsg("POST_PROCESS requires candidate results and is not supported with search_aggregation")
+	}
+	if err := validatePostTableSearchOptions(t.request); err != nil {
+		return err
 	}
 	for index, sub := range t.request.GetSubReqs() {
 		if _, _, err := splitFunctionChainsByStage(sub.GetFunctionChains()); err != nil {
@@ -684,6 +695,20 @@ func concatenateSearchTransformGroups(batch transform.Batch) (arrow.Table, error
 
 func (t *SearchTask) executeSearchPostProcess(ctx context.Context, result *milvuspb.SearchResults) error {
 	if t.postProcess == nil {
+		return nil
+	}
+	if t.hasPostTable() {
+		input, err := t.buildPostTableInput(ctx, result, -1, false)
+		if err != nil {
+			return err
+		}
+		defer releaseSearchTransformBatch(input)
+		input.QueryContext = t.queryContext
+		tableResult, err := executePostTable(ctx, t.postProcess, input)
+		if err != nil {
+			return err
+		}
+		result.PostProcessResult, result.Results = tableResult, nil
 		return nil
 	}
 	if err := ctx.Err(); err != nil {

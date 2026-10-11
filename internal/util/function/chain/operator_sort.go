@@ -223,9 +223,6 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 // isComparableType checks if an Arrow data type is comparable for sorting.
 func isComparableType(dt arrow.DataType) bool {
 	switch dt.ID() {
-	// Note: LARGE_STRING is declared here for completeness but compareArrayValues
-	// does not handle *array.LargeString yet. In practice Milvus VARCHAR fields
-	// map to arrow.STRING, so LARGE_STRING columns are not expected.
 	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64,
 		arrow.UINT8, arrow.UINT16, arrow.UINT32, arrow.UINT64,
 		arrow.FLOAT32, arrow.FLOAT64,
@@ -283,6 +280,8 @@ func compareArrayValues(arr arrow.Array, i, j int) int {
 		return compareTyped(a, i, j)
 	case *array.String:
 		return compareTyped(a, i, j)
+	case *array.LargeString:
+		return compareTyped(a, i, j)
 	default:
 		return 0
 	}
@@ -310,6 +309,11 @@ func NewSortOpFromRepr(repr *OperatorRepr) (Operator, error) {
 
 	column := repr.Inputs[0]
 	tieBreakCol := types.IDFieldName
+	if repr.TableResult {
+		// A table may have an entirely new schema. With no explicit tie input,
+		// preserve the current row order rather than requiring hit identity.
+		tieBreakCol = ""
+	}
 	if len(repr.Inputs) > 1 {
 		tieBreakCol = repr.Inputs[1]
 	}

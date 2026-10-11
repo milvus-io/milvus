@@ -1400,6 +1400,7 @@ func Test_NewServer_GetVersion(t *testing.T) {
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Empty(t, resp.GetVersion())
 		assert.Equal(t, common.FunctionChainTransformVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainTransformVersionKey])
+		assert.Equal(t, common.FunctionChainPostTableVersion, resp.GetStatus().GetExtraInfo()[common.FunctionChainPostTableVersionKey])
 		assert.NoError(t, err)
 	})
 

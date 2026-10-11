@@ -38,9 +38,13 @@ message ExecuteRequest {
   repeated uint32 input_column_indices = 7;
   // Per-request query metadata, separate from user-controlled UDF parameters.
   QueryContext query_context = 8;
-  // 0 is the legacy per-group callable; 2 adds query context and batch POST.
-  // A v2 client requires the worker to acknowledge v2 in its success response.
+  // 0 is legacy; 2 adds query context/batch POST; 3 adds relational POST.
+  // The client requires an exact version acknowledgment on success.
   uint32 execution_version = 9;
+  // v3-only: logical groups no longer correspond one-to-one to request NQ.
+  bool table_result = 10;
+  // v3-only: return exactly one row per input group instead of preserving rows.
+  bool reduction = 11;
 }
 
 // Keep raw vector encodings and text values without importing public SDK

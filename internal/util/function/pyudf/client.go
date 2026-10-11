@@ -41,10 +41,14 @@ type ExecuteRequest struct {
 	Params       *schemapb.FunctionParamObject
 	Inputs       []*arrow.Chunked
 	QueryContext *types.QueryContext
+	TableResult  bool
+	Reduction    bool
 }
 
 // executionVersion requires query context and one-call POST batch semantics.
 const executionVersion uint32 = 2
+
+const tableExecutionVersion uint32 = 3
 
 // Client owns the process's fixed worker connections. Concurrent Execute calls
 // share these connections without a queue, admission limit or business retries.
@@ -165,8 +169,8 @@ func (c *Client) Execute(ctx context.Context, request ExecuteRequest) (outputs [
 	case *pyudfpb.ExecuteResponse_Error:
 		return nil, executionError(result.Error)
 	case *pyudfpb.ExecuteResponse_Outputs:
-		if response.GetExecutionVersion() != executionVersion {
-			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "py_udf worker does not acknowledge query-context execution version 2")
+		if response.GetExecutionVersion() != wire.GetExecutionVersion() {
+			return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "py_udf worker does not acknowledge execution version %d", wire.GetExecutionVersion())
 		}
 		return decodeOutputs(ctx, result.Outputs)
 	default:

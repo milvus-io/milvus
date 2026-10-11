@@ -51,10 +51,12 @@ const (
 // FuncContext is the execution context for function chains.
 // The pool is immutable after creation.
 type FuncContext struct {
-	ctx     context.Context // context for cancellation and timeouts
-	pool    memory.Allocator
-	stage   string // execution stage for filtering operators
-	queries *QueryContext
+	ctx         context.Context // context for cancellation and timeouts
+	pool        memory.Allocator
+	stage       string // execution stage for filtering operators
+	queries     *QueryContext
+	tableResult bool
+	reduction   bool
 }
 
 // NewFuncContext creates a new FuncContext with the given allocator.
@@ -106,6 +108,25 @@ func (ctx *FuncContext) Stage() string {
 	return ctx.stage
 }
 
+// WithTableResult selects the POST table contract for this execution only.
+func (ctx *FuncContext) WithTableResult(enabled bool) *FuncContext {
+	result := *ctx
+	result.tableResult = enabled
+	return &result
+}
+
+func (ctx *FuncContext) TableResult() bool { return ctx.tableResult }
+
+// WithReduction selects one output row per logical input group for a reducer.
+// Map expressions continue to preserve rows, including in a POST table chain.
+func (ctx *FuncContext) WithReduction(enabled bool) *FuncContext {
+	result := *ctx
+	result.reduction = enabled
+	return &result
+}
+
+func (ctx *FuncContext) Reduction() bool { return ctx.reduction }
+
 // =============================================================================
 // Interfaces
 // =============================================================================
@@ -132,6 +153,12 @@ type FunctionExpr interface {
 
 	// IsRunnable checks if the function can run in the given stage.
 	IsRunnable(stage string) bool
+}
+
+// ReductionExpr opts a runtime adapter into the one-row-per-group contract.
+// Row-preserving expressions must not be used as reducers implicitly.
+type ReductionExpr interface {
+	SupportsReduction() bool
 }
 
 // FunctionArgValidator validates public expression args for functions that have

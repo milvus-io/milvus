@@ -56,6 +56,23 @@ func PostProcess(name string, ops ...*schemapb.FunctionChainOp) (*schemapb.Funct
 	return newPlan(name, schemapb.FunctionChainStage_FunctionChainStagePostProcess, ops)
 }
 
+// IsTablePlan distinguishes relational POST output from hit enrichment.
+func IsTablePlan(plan *schemapb.FunctionChain) bool {
+	return plan.GetStage() == schemapb.FunctionChainStage_FunctionChainStagePostProcess &&
+		plan.GetPostProcessOptions().GetResultMode() == schemapb.FunctionChainResultMode_FunctionChainResultModeTable
+}
+
+func PostTable(name string, ops ...*schemapb.FunctionChainOp) (*schemapb.FunctionChain, error) {
+	plan := &schemapb.FunctionChain{
+		Name: name, Stage: schemapb.FunctionChainStage_FunctionChainStagePostProcess, Ops: ops,
+		PostProcessOptions: &schemapb.PostProcessOptions{ResultMode: schemapb.FunctionChainResultMode_FunctionChainResultModeTable},
+	}
+	if err := ValidatePlan(plan); err != nil {
+		return nil, err
+	}
+	return proto.Clone(plan).(*schemapb.FunctionChain), nil
+}
+
 func newPlan(name string, stage schemapb.FunctionChainStage, ops []*schemapb.FunctionChainOp) (*schemapb.FunctionChain, error) {
 	plan := &schemapb.FunctionChain{Name: name, Stage: stage, Ops: ops}
 	if err := ValidatePlan(plan); err != nil {
@@ -130,15 +147,71 @@ func ValidatePlan(plan *schemapb.FunctionChain) error {
 	if err := validateStage(plan.Stage); err != nil {
 		return err
 	}
+	if options := plan.GetPostProcessOptions(); options != nil {
+		if plan.Stage != schemapb.FunctionChainStage_FunctionChainStagePostProcess {
+			return merr.WrapErrParameterInvalidMsg("post_process_options requires POST_PROCESS")
+		}
+		if _, ok := schemapb.FunctionChainResultMode_name[int32(options.GetResultMode())]; !ok {
+			return merr.WrapErrParameterInvalidMsg("unknown POST result mode")
+		}
+		if _, ok := schemapb.PostProcessInput_name[int32(options.GetInput())]; !ok {
+			return merr.WrapErrParameterInvalidMsg("unknown POST input mode")
+		}
+		if options.GetInput() == schemapb.PostProcessInput_PostProcessInputAnnInputs && !IsTablePlan(plan) {
+			return merr.WrapErrParameterInvalidMsg("ANN_INPUTS requires POST TABLE")
+		}
+	}
 	if len(plan.Ops) == 0 {
 		return merr.WrapErrParameterMissingMsg("transform: at least one operation is required")
 	}
 	for i, op := range plan.Ops {
+		if IsTablePlan(plan) {
+			if err := validateTableOp(op); err != nil {
+				return merr.Wrapf(err, "POST TABLE op[%d]", i)
+			}
+			continue
+		}
 		if err := validateOp(op); err != nil {
 			return merr.Wrapf(err, "transform op[%d]", i)
 		}
 		if plan.Stage != schemapb.FunctionChainStage_FunctionChainStageIngestion && op.Op != "map" && op.Op != OpSelect {
 			return merr.WrapErrParameterInvalidMsg("transform op[%d]: %s does not preserve rows for stage %s", i, op.Op, plan.Stage)
+		}
+	}
+	return nil
+}
+
+// Operator factories validate their typed parameters before execution. Keep
+// this structural gate independent of chain to avoid an import cycle.
+func validateTableOp(op *schemapb.FunctionChainOp) error {
+	if op == nil {
+		return merr.WrapErrParameterMissingMsg("operation is required")
+	}
+	switch op.Op {
+	case "map", "filter", OpSelect, OpExplode, OpFlatMap:
+		return validateOp(op)
+	case "sort", "limit", "concat", "aggregate", "reduce":
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported POST TABLE operation %q", op.Op)
+	}
+	if err := validateNames(op.Inputs, false); err != nil {
+		return err
+	}
+	if err := validateNames(op.Outputs, true); err != nil {
+		return err
+	}
+	if op.Op == "reduce" {
+		return validateExprOp(op)
+	}
+	if op.Expr != nil {
+		return merr.WrapErrParameterInvalidMsg("%s does not accept an expression", op.Op)
+	}
+	for key, value := range op.Params {
+		if strings.TrimSpace(key) == "" {
+			return merr.WrapErrParameterInvalidMsg("parameter name must not be empty")
+		}
+		if err := validateValue(value, 0); err != nil {
+			return err
 		}
 	}
 	return nil

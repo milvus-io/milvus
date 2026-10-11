@@ -1232,7 +1232,10 @@ func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetri
 func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 	buildTags := os.Getenv(metricsinfo.GitBuildTagsEnvKey)
 	status := merr.Success()
-	status.ExtraInfo = map[string]string{common.FunctionChainTransformVersionKey: common.FunctionChainTransformVersion}
+	status.ExtraInfo = map[string]string{
+		common.FunctionChainTransformVersionKey: common.FunctionChainTransformVersion,
+		common.FunctionChainPostTableVersionKey: common.FunctionChainPostTableVersion,
+	}
 	return &milvuspb.GetVersionResponse{
 		Status:  status,
 		Version: buildTags,

@@ -58,6 +58,37 @@ class Query:
 
 class PostProcess:
     def transform_batch(self, params, batches, *, context):
+        if params.get("mode") == "summary":
+            if not context.table_result or not context.reduction:
+                raise ValueError("summary requires a POST TABLE reduce operator")
+            output_type = pa.struct(
+                [("texts", pa.list_(pa.string())), ("count", pa.int64()), ("query_count", pa.int64())]
+            )
+            return [
+                [
+                    pa.array(
+                        [
+                            {
+                                "texts": columns[0].to_pylist(),
+                                "count": len(columns[0]),
+                                "query_count": context.query_count,
+                            }
+                        ],
+                        type=output_type,
+                    )
+                ]
+                for columns in batches
+            ]
+        if params.get("mode") == "uppercase":
+            return [
+                [
+                    pa.array(
+                        [None if value.as_py() is None else value.as_py().upper() for value in columns[0]],
+                        type=pa.string(),
+                    )
+                ]
+                for columns in batches
+            ]
         total_hits = sum(len(columns[0]) for columns in batches)
         output_type = pa.struct(
             [

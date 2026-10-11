@@ -81,9 +81,15 @@ type DownstreamSpec struct {
 // SystemColumnPolicy controls how pruning treats function-chain system columns.
 type SystemColumnPolicy struct {
 	KeepAllSystemColumns bool
+	// DropUnreferencedSystemColumns makes TABLE payload projection authoritative.
+	DropUnreferencedSystemColumns bool
 }
 
 func normalizeSystemColumnPolicy(policy SystemColumnPolicy) SystemColumnPolicy {
+	if policy.DropUnreferencedSystemColumns {
+		policy.KeepAllSystemColumns = false
+		return policy
+	}
 	// The current conservative default is to retain all existing system columns.
 	if !policy.KeepAllSystemColumns {
 		policy.KeepAllSystemColumns = true
@@ -122,6 +128,9 @@ type functionChainPlanner struct {
 }
 
 func (fc *FuncChain) buildOptimizationPlan(opts ExecuteOptions) (*OptimizationPlan, error) {
+	if fc.tableResult {
+		opts.SystemColumnPolicy.DropUnreferencedSystemColumns = true
+	}
 	planner := functionChainPlanner{
 		operators: fc.operators,
 		opts:      opts,
@@ -184,23 +193,29 @@ func (p functionChainPlanner) analyzeLiveness() *LivenessInfo {
 	liveAfter := make([]ColumnSet, n)
 
 	live := NewColumnSet(p.opts.Downstream.RequiredColumns...)
-	live.RemoveSystemColumns()
+	includeSystem := p.opts.SystemColumnPolicy.DropUnreferencedSystemColumns
+	if !includeSystem {
+		live.RemoveSystemColumns()
+	}
 
 	for i := n - 1; i >= 0; i-- {
 		op := p.operators[i]
 
 		liveAfter[i] = live.Clone()
 		next := live.Clone()
+		if operatorResetsColumnScope(op) {
+			next = NewColumnSet()
+		}
 
 		for _, output := range op.Outputs() {
-			if IsFunctionChainSystemName(output) {
+			if !includeSystem && IsFunctionChainSystemName(output) {
 				continue
 			}
 			next.Remove(output)
 		}
 
 		for _, input := range op.Inputs() {
-			if IsFunctionChainSystemName(input) {
+			if !includeSystem && IsFunctionChainSystemName(input) {
 				continue
 			}
 			next.Add(input)

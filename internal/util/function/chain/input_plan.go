@@ -136,7 +136,7 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 			if producedColumn(produced, name) {
 				continue
 			}
-			if scopeLocked && !IsFunctionChainSystemName(name) {
+			if scopeLocked && (repr.TableResult || !IsFunctionChainSystemName(name)) {
 				return nil, merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", opIdx, name)
 			}
 			hint := op.InputDataTypes[inputIdx]
@@ -169,12 +169,12 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 			plan.Inputs = append(plan.Inputs, input)
 		}
 
-		if op.Type == types.OpTypeSelect {
+		if reprOpResetsColumnScope(op.Type) {
 			produced = make(map[string]struct{}, len(op.Outputs))
 			scopeLocked = true
 		}
 		for _, output := range op.Outputs {
-			if op.Type != types.OpTypeSelect {
+			if op.Type != types.OpTypeSelect && !repr.TableResult {
 				if err := validateChainOutputName(schemaHelper, output); err != nil {
 					return nil, merr.Wrapf(err, "op[%d] output %q", opIdx, output)
 				}
@@ -233,7 +233,7 @@ func normalizeOperatorInputDataTypes(op *OperatorRepr) error {
 
 func isRuntimeFunctionChainInput(name string) bool {
 	switch name {
-	case types.IDFieldName, types.ScoreFieldName:
+	case types.IDFieldName, types.ScoreFieldName, types.ElementIndicesFieldName, types.QueryIndexFieldName, types.ANNIndexFieldName:
 		return true
 	default:
 		return false

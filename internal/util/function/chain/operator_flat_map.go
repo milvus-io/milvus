@@ -59,7 +59,7 @@ func (o *FlatMapOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFram
 // before explode duplicates each remaining parent column. A nil keep set
 // preserves the standalone operator's full-column behavior.
 func (o *FlatMapOp) executeWithProjection(ctx *types.FuncContext, input *DataFrame, keep ColumnSet, policy SystemColumnPolicy) (*DataFrame, error) {
-	if ctx.Stage() != types.StageIngestion {
+	if ctx.Stage() != types.StageIngestion && !(ctx.Stage() == types.StagePostProcess && ctx.TableResult()) {
 		return nil, merr.WrapErrParameterInvalidMsg("flat_map cannot expand rows in stage %q", ctx.Stage())
 	}
 	mapped, err := o.mapping.Execute(ctx, input)

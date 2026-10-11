@@ -504,12 +504,16 @@ func (h *HandlersV1) query(c *gin.Context) {
 		Limit:        100,
 		OutputFields: []string{DefaultOutputFields},
 	}
-	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&httpReq, binding.JSON); err != nil {
 		mlog.Warn(c.Request.Context(), "high level restful api, the parameter of query is incorrect", mlog.Any("request", httpReq), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 		})
+		return
+	}
+	if err := rejectIgnoredRESTChainFields(c, false); err != nil {
+		abortRESTTransform(c, err)
 		return
 	}
 	if httpReq.CollectionName == "" || httpReq.Filter == "" {

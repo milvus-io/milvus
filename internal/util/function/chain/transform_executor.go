@@ -65,6 +65,9 @@ func (e *transformExecutor) Execute(ctx context.Context, plan *schemapb.Function
 		return transform.Result{}, err
 	}
 	if len(input.Groups) == 0 {
+		if transform.IsTablePlan(plan) {
+			return transform.Result{}, merr.WrapErrServiceInternal("POST TABLE requires a typed input group, including for empty results")
+		}
 		return transform.Result{}, nil
 	}
 	frame, err := FromArrowBatch(input, e.allocator)
@@ -93,7 +96,7 @@ func (e *transformExecutor) Execute(ctx context.Context, plan *schemapb.Function
 		return transform.Result{}, err
 	}
 	result := transform.Result{Data: output, Lineage: transformed.Lineage()}
-	if err := transform.ValidateResult(plan.Stage, input, result); err != nil {
+	if err := transform.ValidateResultForPlan(plan, input, result); err != nil {
 		ReleaseArrowBatch(output)
 		return transform.Result{}, err
 	}

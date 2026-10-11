@@ -106,7 +106,7 @@ class PyUDFInstance:
         return self._validate_outputs(result)
 
     def execute_batch(self, params, batches, context) -> tuple[tuple[pa.Array, ...], ...]:
-        """Invoke POST once for every query group, including zero-hit groups."""
+        """Invoke POST once for all current groups, including typed empty groups."""
         if self.callable_name != "transform_batch":
             raise PyUDFExecutionError(
                 "POST_PROCESS execution version 2 requires transform_batch(params, batches, context=...)"
@@ -126,7 +126,10 @@ class PyUDFInstance:
             values = self._validate_outputs(group)
             if not values:
                 raise PyUDFExecutionError("transform_batch must return at least one output column per query")
-            if any(len(value) != len(inputs[index][0]) for value in values):
+            expected_rows = 1 if context.reduction else len(inputs[index][0])
+            if any(len(value) != expected_rows for value in values):
+                if context.reduction:
+                    raise PyUDFExecutionError(f"reducer must return exactly one row for group {index}")
                 raise PyUDFExecutionError(f"transform_batch changed candidate count for query {index}")
             output.append(values)
         return tuple(output)

@@ -109,9 +109,12 @@ def _call_context(request, batches):
         for batch in batches:
             sizes.append(sizes[-1] + batch.num_rows)
         offsets = tuple(sizes)
+    if request.table_result:
+        original_inputs = request.query_context.original_queries
+        nq = len(original_inputs[0].values) if original_inputs else 0
     original = _query_inputs(request.query_context.original_queries, nq)
     queries = _query_inputs(request.query_context.queries, nq)
-    if not queries or len(original) != len(queries):
+    if len(original) != len(queries) or not queries and not request.table_result:
         raise WorkerError("query-context execution requires aligned original and prepared ANN inputs")
     return PyUDFCallContext(
         stage=request.stage,
@@ -119,6 +122,8 @@ def _call_context(request, batches):
         queries=queries,
         original_queries=original,
         result_offsets=offsets,
+        table_result=request.table_result,
+        reduction=request.reduction,
     )
 
 
@@ -133,8 +138,13 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
 
         try:
             check_active()
-            if request.execution_version not in (0, 2):
+            if request.execution_version not in (0, 2, 3):
                 raise WorkerError("unsupported execution version", wire.UNSUPPORTED)
+            if request.execution_version == 3:
+                if not request.table_result or request.stage.lower() != "post_process":
+                    raise WorkerError("execution version 3 requires POST TABLE")
+            elif request.table_result or request.reduction:
+                raise WorkerError("table and reduction flags require execution version 3")
             if not request.resource_name.strip():
                 raise WorkerError("resource_name must be nonblank")
             if (
@@ -149,7 +159,7 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
             indices = tuple(request.input_column_indices)
             if any(index >= batches[0].num_columns for index in indices):
                 raise WorkerError("input column reference is out of range")
-            call_context = _call_context(request, batches) if request.execution_version == 2 else None
+            call_context = _call_context(request, batches) if request.execution_version >= 2 else None
             instance = self.loader.load(request.resource_name, request.udf_path, request.stage, check_active)
             output = OutputIPC()
 
@@ -157,7 +167,7 @@ class PyUDFWorkerService(pyudf_pb2_grpc.PyUDFWorkerServicer):
                 columns = batch.columns
                 return tuple(columns[index] for index in indices) if indices else tuple(columns)
 
-            if request.execution_version == 2 and request.stage.lower() == "post_process":
+            if request.execution_version >= 2 and request.stage.lower() == "post_process":
                 check_active()
                 groups = tuple(arguments(batch) for batch in batches)
                 results = instance.execute_batch(params, groups, call_context)

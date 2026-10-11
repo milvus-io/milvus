@@ -256,6 +256,83 @@ def factory(context): return UDF()
         old_path, _ = self.wheel()
         self.assert_code(self.execute(self.query_request(old_path, batches, "post_process")), wire.UDF_FAILED)
 
+    def test_table_reducer_groups_are_independent_of_original_nq(self):
+        path, package = self.wheel("""
+import pyarrow as pa
+calls=[]
+class UDF:
+ def transform_batch(self, params, batches, *, context):
+  assert context.table_result and context.reduction
+  calls.append((context.query_count, tuple(len(g[0]) for g in batches)))
+  return [[pa.array([{'count':len(g[0]),'texts':g[0].to_pylist()}],
+    type=pa.struct([('count',pa.int64()),('texts',pa.list_(pa.string()))]))] for g in batches]
+def factory(context): return UDF()
+""")
+        batches = [pa.record_batch([pa.array(rows, type=pa.string())], names=["text"]) for rows in (["a", "b"], [])]
+        request = self.query_request(path, batches, "post_process")
+        request.execution_version = 3
+        request.table_result = request.reduction = True
+        result = self.execute(request)
+        self.assertEqual(result.WhichOneof("result"), "outputs", result)
+        self.assertEqual(result.execution_version, 3)
+        self.assertEqual(
+            [b.column(0).to_pylist() for b in decode(result.outputs)],
+            [[{"count": 2, "texts": ["a", "b"]}], [{"count": 0, "texts": []}]],
+        )
+        # A Query has no vector-query snapshots, but retains its table groups.
+        request.ClearField("query_context")
+        result = self.execute(request)
+        self.assertEqual(result.WhichOneof("result"), "outputs", result)
+        self.assertEqual(importlib.import_module(package).calls, [(3, (2, 0)), (0, (2, 0))])
+
+    def test_table_map_preserves_rows_after_concatenating_nq(self):
+        path, _ = self.wheel("""
+class UDF:
+ def transform_batch(self, params, batches, *, context):
+  assert context.query_count==3 and context.table_result and not context.reduction
+  assert context.result_offsets==(0,4)
+  return batches
+def factory(context): return UDF()
+""")
+        batches = [pa.record_batch([pa.array([1, 2, 3, 4])], names=["value"])]
+        request = self.query_request(path, batches, "post_process")
+        request.execution_version = 3
+        request.table_result = True
+        response = self.execute(request)
+        self.assertEqual(response.WhichOneof("result"), "outputs", response)
+        self.assertEqual(decode(response.outputs)[0].column(0).to_pylist(), [1, 2, 3, 4])
+
+    def test_table_contract_rejects_invalid_metadata_and_reducer_shape(self):
+        batches = [pa.record_batch([pa.array([1, 2])], names=["value"])]
+        for mode in ("flag", "stage", "old_version", "ann_pair"):
+            request = self.query_request(self.directory / "not-loaded.whl", batches, "post_process")
+            request.execution_version = 3
+            request.table_result = request.reduction = True
+            if mode == "flag":
+                request.table_result = False
+            elif mode == "stage":
+                request.stage = "ingestion"
+            elif mode == "old_version":
+                request.execution_version = 2
+            else:
+                request.query_context.ClearField("queries")
+            with self.subTest(mode=mode):
+                self.assert_code(self.execute(request), wire.INTERNAL)
+        path, package = self.wheel("""
+calls=0
+class UDF:
+ def transform_batch(self, params, batches, *, context):
+  global calls
+  calls+=1
+  return batches
+def factory(context): return UDF()
+""")
+        request = self.query_request(path, batches, "post_process")
+        request.execution_version = 3
+        request.table_result = request.reduction = True
+        self.assert_code(self.execute(request), wire.UDF_FAILED)
+        self.assertEqual(importlib.import_module(package).calls, 1)
+
     def assert_code(self, response, code):
         self.assertEqual(response.WhichOneof("result"), "error")
         self.assertEqual(response.error.code, code, response.error.message)

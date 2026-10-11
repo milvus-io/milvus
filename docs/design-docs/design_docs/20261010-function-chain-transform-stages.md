@@ -10,6 +10,11 @@
 
 ## Summary
 
+> [POST TABLE](20261011-function-chain-post-tables.md) extends this design with
+> cross-NQ/ANN concatenation, native aggregation, UDF reduction and independent
+> Arrow result schemas, including Query. The row-preserving POST contract below
+> describes the default HITS mode; TABLE is an explicit separate result mode.
+
 Function Chains now execute at three additional boundaries: collection-bound
 INSERT transformation, request-bound query preparation, and final search
 payload transformation. The local implementation includes endpoint adapters,
@@ -18,8 +23,8 @@ SDK binding and response parsing. It reuses `Ingestion`, `PreProcess` and
 `PostProcess` wire stages. `PRE_INSERT` is an SDK alias for `INGESTION`.
 
 The new operators are `select`, `explode` and `flat_map`. INSERT can filter or
-expand rows; PRE/POST preserve count and position. Existing L0/L1/L2 rerank
-policies remain. V1 has no general `aggregate` or `reduce` operator.
+expand rows; PRE and POST HITS preserve count and position. Existing L0/L1/L2
+rerank policies remain. General `aggregate` and `reduce` require POST TABLE.
 
 The [running guide](https://github.com/milvus-io/milvus/blob/master/docs/user-guides/function-chain-transform.md)
 describes the matching SDK, runtime and deterministic wheel. The worker extends
@@ -44,14 +49,16 @@ request instead of accepting a plan that never executes.
 |---|---|---|---|
 | `INGESTION` / `PRE_INSERT` | One named chain in `CollectionSchema.function_chains` | `map`, `filter`, `select`, `explode`, `flat_map` | Single-parent subsets/expansion in original parent order |
 | `PRE_PROCESS` | Ordinary Search or each HybridSearch ANN sub-request | `map`, `select` | One output query per input query, in the same position |
-| `POST_PROCESS` | Ordinary Search or top-level HybridSearch | `map`, `select` | Same candidate count, order, IDs, scores and element identity per query |
+| `POST_PROCESS` HITS | Ordinary Search or top-level HybridSearch | `map`, `select` | Same candidate count, order, IDs, scores and element identity per query |
+| `POST_PROCESS` TABLE | Search, top-level HybridSearch or Query | See POST TABLE extension | Independent result schema/cardinality with source lineage |
 
 PRE/POST may coexist with legacy FunctionScore and HybridSearch rankers. Only
 actual rerank-stage chains trigger rerank conflicts. Hybrid PRE belongs to each
 sub-request; top-level PRE and sub-request POST are rejected. Hybrid POST runs
 after fusion and the configured reranker.
 
-Query and Search Iterator have no transformation adapter. Search by IDs rejects
+Query supports the POST TABLE extension; HITS-mode Query and Search Iterator
+have no transformation adapter. Search by IDs rejects
 PRE/POST before ID lookup, including the all-null early-return path. PRE rejects
 embedding-list placeholders. POST rejects `search_aggregation`. Ingestion-bound
 collections reject Upsert, partial update and Import; DataCoord checks
@@ -340,11 +347,12 @@ sandbox or a dedicated expansion-ratio limit.
 
 ### Multi-row aggregation
 
-V1 has no executing aggregate/reduce. Merge fuses recall paths for candidate
-identities; group_by ranks groups and retains member hits. Neither constructs
-an arbitrary summary row. Future aggregation needs keys, declared outputs and
-multi-source lineage over complete logical groups. Cross-request aggregation
-also requires state, windows and checkpoints.
+The default HITS contract has no aggregate/reduce. Its merge fuses recall paths
+for candidate identities, and rerank group_by retains member hits. The
+[POST TABLE extension](20261011-function-chain-post-tables.md) adds native
+aggregate and UDF reduce with multi-source lineage and independent output
+schemas. Cross-request aggregation with state, windows and checkpoints remains
+outside these finite-request pipelines.
 
 ## Compatibility and rollout
 
@@ -376,8 +384,8 @@ Publication requires coordinated dependency updates:
    matching server/SDK capability contract before activating collection bindings.
 
 The local dependency snapshot is now pinned to protocol commit
-`34423638987194e1e5d7e1c257680c059f2e5058`: all three Milvus Go modules require
-`v3.0.0-20261011003130-344236389871`, and the SDK submodule uses that same commit.
+`7cf29167c3d71b21be220c4f2af09db51f291d76`: all three Milvus Go modules require
+`v3.0.0-20261011152020-7cf29167c3d7`, and the SDK submodule uses that same commit.
 It has not been published remotely. Local checks with `GOWORK=off` resolve the
 versioned module, and a fresh module-cache download from the delivery package's
 file proxy matches the recorded checksums. See the Milvus

@@ -115,12 +115,13 @@ type SearchTask struct {
 	rerankMeta rerankMeta
 	rankParams *rankParams
 
-	preProcess         []*searchTransformMeta
-	postProcess        *searchTransformMeta
-	postOutputFields   []string
-	transformsPrepared bool
-	preProcessed       bool
-	queryContext       *chaintypes.QueryContext
+	preProcess          []*searchTransformMeta
+	postProcess         *searchTransformMeta
+	postOutputFields    []string
+	transformsPrepared  bool
+	preProcessed        bool
+	queryContext        *chaintypes.QueryContext
+	tableAllSearchCount int64
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -240,6 +241,24 @@ func (t *SearchTask) IsTopkReduce() bool {
 // IsRecallEvaluation reports whether the search ran in recall-evaluation mode.
 func (t *SearchTask) IsRecallEvaluation() bool {
 	return t.isRecallEvaluation
+}
+
+// AllSearchCount preserves the node-reported count independently of a TABLE
+// response, whose row count need not represent search candidates.
+func (t *SearchTask) AllSearchCount() int64 {
+	if t.hasPostTable() {
+		return t.tableAllSearchCount
+	}
+	return t.result.GetResults().GetAllSearchCount()
+}
+
+// ResultQueryCount reports the original NQ for TABLE and the ordinary result's
+// NQ for hit responses, preserving the existing search-vector metric contract.
+func (t *SearchTask) ResultQueryCount() int64 {
+	if t.hasPostTable() {
+		return t.GetNq()
+	}
+	return t.result.GetResults().GetNumQueries()
 }
 
 func (t *SearchTask) CanSkipAllocTimestamp() bool {
@@ -372,6 +391,12 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "translate output fields",
 		mlog.Strings("output fields", t.translatedOutputFields))
+	if t.hasPostTable() {
+		// TABLE output columns are declared by its operators. Keep ordinary
+		// output_fields validation but fetch only actual chain dependencies.
+		t.translatedOutputFields = nil
+		t.userDynamicFields = postTableDynamicFields(t.postProcess)
+	}
 
 	if t.GetIsAdvanced() {
 		if len(t.request.GetSubReqs()) > defaultMaxSearchRequest {
@@ -651,7 +676,16 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
 	})
 
-	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
+	if t.hasANNInputTable() {
+		// No top-level hit window exists in this mode. Each ANN request must
+		// provide its own candidate budget rather than inherit a fusion limit.
+		if _, hasLimit := funcutil.TryGetAttrByKeyFromRepeatedKV(LimitKey, t.request.GetSearchParams()); hasLimit {
+			if _, err := parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
+				return err
+			}
+		}
+		t.rankParams = &rankParams{roundDecimal: -1}
+	} else if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
 		log.Error(ctx, "parseRankParams failed", mlog.Err(err))
 		return err
 	}
@@ -1661,6 +1695,17 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	}
 	if t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost); err != nil {
 		return err
+	}
+	if t.hasPostTable() {
+		if t.result.GetPostProcessResult() == nil || t.result.GetResults() != nil {
+			return merr.WrapErrServiceInternalMsg("POST TABLE pipeline did not return an independent table")
+		}
+		t.result.CollectionName = t.collectionName
+		// A table row count is unrelated to the requested hit count. Neither
+		// insufficient-hit retries nor recall comparison may reinterpret it.
+		t.resultSizeInsufficient, t.isRecallEvaluation = false, false
+		metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
+		return nil
 	}
 	t.fillResult()
 	if t.postProcess == nil {

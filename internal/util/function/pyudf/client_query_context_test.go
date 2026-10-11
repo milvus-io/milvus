@@ -72,3 +72,37 @@ func TestClientRejectsWorkerWithoutQueryContextContract(t *testing.T) {
 	require.Nil(t, outputs)
 	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 }
+
+func TestClientTableContextPreservesOriginalNQAfterGrouping(t *testing.T) {
+	request := clientRequest(t)
+	request.Stage, request.TableResult, request.Reduction = types.StagePostProcess, true, true
+	request.Inputs = clientInput(t, 4)
+	query := &commonpb.PlaceholderValue{Type: commonpb.PlaceholderType_VarChar, Values: [][]byte{[]byte("a"), []byte("b"), []byte("c")}}
+	request.QueryContext = &types.QueryContext{OriginalQueries: []*commonpb.PlaceholderValue{query}, Queries: []*commonpb.PlaceholderValue{query}}
+	wire, err := encodeExecuteRequest(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, tableExecutionVersion, wire.GetExecutionVersion())
+	require.True(t, wire.GetTableResult())
+	require.True(t, wire.GetReduction())
+	require.Len(t, wire.GetQueryContext().GetQueries()[0].GetValues(), 3)
+	request.QueryContext = nil // Query TABLE has no ANN input.
+	_, err = encodeExecuteRequest(context.Background(), request)
+	require.NoError(t, err)
+	request.TableResult = false
+	_, err = encodeExecuteRequest(context.Background(), request)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	request.TableResult, request.Stage = true, types.StageIngestion
+	_, err = encodeExecuteRequest(context.Background(), request)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestClientRejectsHitWorkerSuccessForTableRequest(t *testing.T) {
+	cfg, _ := startClientTestServer(t, echoExecute) // Fixture acknowledges only v2.
+	client := newTestClient(t, cfg)
+	request := clientRequest(t)
+	request.Stage, request.TableResult = types.StagePostProcess, true
+	outputs, err := client.Execute(context.Background(), request)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+	require.Nil(t, outputs)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+}

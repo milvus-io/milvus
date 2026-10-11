@@ -10,6 +10,9 @@
 > with nested Arrow outputs, native select/explode/flat_map and endpoint binding.
 > Runtime 0.2 adds per-request query context and one-call POST batching; its
 > execution-version-2 contract supersedes the original per-group POST callable.
+> Runtime 0.3 also supports [POST TABLE](20261011-function-chain-post-tables.md):
+> execution version 3 separates original NQ from current groups and permits
+> explicitly declared one-row-per-group reducers.
 > See [the transformation design](20261010-function-chain-transform-stages.md)
 > and [running guide](../../user-guides/function-chain-transform.md) for the
 > current stage/type/cardinality contract. The L2/scalar scope below records

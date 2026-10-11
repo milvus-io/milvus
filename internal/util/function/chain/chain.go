@@ -56,11 +56,12 @@ type Operator interface {
 
 // FuncChain is a function chain that contains a list of operators.
 type FuncChain struct {
-	name       string
-	stage      string // execution stage for validating function compatibility
-	operators  []Operator
-	alloc      memory.Allocator
-	buildError error // stores error from fluent API calls
+	name        string
+	stage       string // execution stage for validating function compatibility
+	operators   []Operator
+	alloc       memory.Allocator
+	buildError  error // stores error from fluent API calls
+	tableResult bool
 }
 
 // NewFuncChainWithAllocator creates a new FuncChain with the given allocator.
@@ -91,6 +92,10 @@ func (fc *FuncChain) SetStage(stage string) *FuncChain {
 func (fc *FuncChain) Stage() string {
 	return fc.stage
 }
+
+// SetTableResult selects the explicit POST table contract. Other stages reject it.
+func (fc *FuncChain) SetTableResult(enabled bool) *FuncChain { fc.tableResult = enabled; return fc }
+func (fc *FuncChain) TableResult() bool                      { return fc.tableResult }
 
 // Add adds an operator to the chain.
 func (fc *FuncChain) Add(op Operator) *FuncChain {
@@ -133,6 +138,9 @@ func (fc *FuncChain) Validate() error {
 // validateOperators is an internal helper that validates all operators in a single pass.
 // It checks that operators are not nil, have valid functions, and support the given stage.
 func (fc *FuncChain) validateOperators(stage string) error {
+	if fc.tableResult && stage != types.StagePostProcess {
+		return merr.WrapErrParameterInvalidMsg("TABLE result mode is only supported by POST")
+	}
 	produced := make(map[string]struct{})
 	scopeLocked := false
 	for i, op := range fc.operators {
@@ -149,15 +157,15 @@ func (fc *FuncChain) validateOperators(stage string) error {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] function %q does not support stage %q", i, function.Name(), stage)
 			}
 		}
-		if err := validateOperatorStage(op, stage); err != nil {
+		if err := validateOperatorStageWithMode(op, stage, fc.tableResult); err != nil {
 			return merr.Wrapf(err, "operator[%d]", i)
 		}
 		for _, name := range op.Inputs() {
-			if scopeLocked && !IsFunctionChainSystemName(name) && !producedColumn(produced, name) {
+			if scopeLocked && (fc.tableResult || !IsFunctionChainSystemName(name)) && !producedColumn(produced, name) {
 				return merr.WrapErrParameterInvalidMsg("operator[%d] input %q is unavailable after select", i, name)
 			}
 		}
-		if _, ok := op.(*SelectOp); ok {
+		if operatorResetsColumnScope(op) {
 			produced = make(map[string]struct{}, len(op.Outputs()))
 			scopeLocked = true
 		}
@@ -178,7 +186,47 @@ func isTransformStage(stage string) bool {
 }
 
 func validateOperatorStage(op Operator, stage string) error {
+	return validateOperatorStageWithMode(op, stage, false)
+}
+
+func operatorResetsColumnScope(op Operator) bool {
 	switch op.(type) {
+	case *SelectOp, *AggregateOp, *ReduceOp:
+		return true
+	}
+	return false
+}
+
+func validateOperatorStageWithMode(op Operator, stage string, tableResult bool) error {
+	if tableResult {
+		if stage != types.StagePostProcess {
+			return merr.WrapErrParameterInvalidMsg("TABLE operators require POST stage")
+		}
+		switch op.(type) {
+		case *MapOp, *FilterOp, *SelectOp, *ExplodeOp, *FlatMapOp, *SortOp, *LimitOp, *ConcatOp, *AggregateOp, *ReduceOp:
+		default:
+			return merr.WrapErrParameterInvalidMsg("%s is not supported by POST TABLE", op.Name())
+		}
+		for index, output := range op.Outputs() {
+			if !strings.HasPrefix(output, "$") {
+				continue
+			}
+			if selection, ok := op.(*SelectOp); ok && output == selection.inputs[index] {
+				continue
+			}
+			if aggregation, ok := op.(*AggregateOp); ok && index < len(aggregation.keys) && output == aggregation.keys[index] {
+				continue
+			}
+			if reduction, ok := op.(*ReduceOp); ok && index < len(reduction.keys) && output == reduction.keys[index] {
+				continue
+			}
+			return merr.WrapErrParameterInvalidMsg("TABLE cannot rewrite system output %q", output)
+		}
+		return nil
+	}
+	switch op.(type) {
+	case *ConcatOp, *AggregateOp, *ReduceOp:
+		return merr.WrapErrParameterInvalidMsg("%s requires POST TABLE mode", op.Name())
 	case *ExplodeOp, *FlatMapOp:
 		if stage != types.StageIngestion {
 			return merr.WrapErrParameterInvalidMsg("%s cannot expand rows in stage %q", op.Name(), stage)
@@ -241,7 +289,7 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 		return nil, err
 	}
 
-	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage).WithQueryContext(opts.QueryContext)
+	funcCtx := types.NewFuncContextFull(ctx, fc.alloc, fc.stage).WithQueryContext(opts.QueryContext).WithTableResult(fc.tableResult)
 
 	var result *DataFrame
 	startIdx := 0

@@ -102,7 +102,7 @@ func (o *SelectOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame
 	// Search identity and internal provenance survive projection. Schema/dynamic
 	// $meta is deliberately not a system column under this predicate.
 	for _, name := range input.ColumnNames() {
-		if _, exists := kept[name]; exists || !IsFunctionChainSystemName(name) {
+		if _, exists := kept[name]; exists || ctx.TableResult() || !IsFunctionChainSystemName(name) {
 			continue
 		}
 		if err := builder.AddColumnFrom(input, name); err != nil {

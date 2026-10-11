@@ -92,6 +92,14 @@ func selectHybridRerankMeta(request *milvuspb.SearchRequest, schema *schemaInfo)
 	if err := validateFunctionChainSearchRequest(request, true); err != nil {
 		return nil, err
 	}
+	for _, plan := range request.GetFunctionChains() {
+		if transform.IsTablePlan(plan) && plan.GetPostProcessOptions().GetInput() == schemapb.PostProcessInput_PostProcessInputAnnInputs {
+			if err := validatePostTableSearchOptions(request); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
+	}
 	functionChains := functionChainsAtStage(request.GetFunctionChains(), schemapb.FunctionChainStage_FunctionChainStageL2Rerank)
 	if len(functionChains) > 0 {
 		if request.GetFunctionScore() != nil {

@@ -54,6 +54,20 @@ func source(group int, row int64) RowLineage {
 	return RowLineage{{Group: group, Row: row}}
 }
 
+func TestPostTablePermitsCrossQuerySourcesAndEmptyAggregate(t *testing.T) {
+	plan, err := PostTable("summary", &schemapb.FunctionChainOp{Op: "concat"})
+	require.NoError(t, err)
+	input := Batch{Groups: []arrow.Table{testTable(t, []int64{1, 2}), testTable(t, []int64{3})}}
+	result := Result{Data: Batch{Groups: []arrow.Table{testTable(t, []int64{6})}}, Lineage: [][]RowLineage{{{{Group: 0, Row: 0}, {Group: 0, Row: 1}, {Group: 1, Row: 0}}}}}
+	require.NoError(t, ValidateResultForPlan(plan, input, result))
+	require.ErrorIs(t, ValidateResult(plan.Stage, input, result), merr.ErrFunctionFailed)
+	result.Lineage[0][0][2].Row = 1
+	require.ErrorIs(t, ValidateResultForPlan(plan, input, result), merr.ErrFunctionFailed)
+	input = Batch{Groups: []arrow.Table{testTable(t, []int64{})}}
+	result.Lineage = [][]RowLineage{{nil}}
+	require.NoError(t, ValidateResultForPlan(plan, input, result))
+}
+
 func TestExpansionAndLogicalGroups(t *testing.T) {
 	// Arrow chunking does not create a logical query/request boundary.
 	input := Batch{Groups: []arrow.Table{testTable(t, []int64{10}, []int64{20}), testTable(t, []int64{30})}}

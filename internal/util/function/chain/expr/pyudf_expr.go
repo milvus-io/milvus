@@ -105,6 +105,8 @@ func (e *PyUDFExpr) OutputDataTypes() []arrow.DataType {
 	return nil
 }
 
+func (e *PyUDFExpr) SupportsReduction() bool { return true }
+
 func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if ctx == nil {
 		return nil, merr.WrapErrServiceInternalMsg("py_udf: function context is nil")
@@ -140,12 +142,18 @@ func (e *PyUDFExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]
 	outputs, err := client.Execute(ctx.Context(), pyudf.ExecuteRequest{
 		ResourceName: e.resourceName, UDFPath: path, Stage: ctx.Stage(), Params: e.udfParams, Inputs: inputs,
 		QueryContext: ctx.QueryContext(),
+		TableResult:  ctx.TableResult(), Reduction: ctx.Reduction(),
 	})
 	if err != nil {
 		if merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
 			return nil, merr.Wrap(err, "py_udf: Execute")
 		}
 		return nil, merr.WrapErrServiceInternalErr(err, "py_udf: Execute")
+	}
+	if ctx.Reduction() {
+		for index := range chunkSizes {
+			chunkSizes[index] = 1
+		}
 	}
 	if err := validatePyUDFOutputs(outputs, chunkSizes); err != nil {
 		releasePyUDFOutputs(outputs)

@@ -3596,6 +3596,9 @@ func newBuiltInPipeline(t *SearchTask) (*pipeline, error) {
 }
 
 func newSearchPipeline(t *SearchTask) (*pipeline, error) {
+	if t.hasANNInputTable() {
+		return newANNInputTablePipeline(t)
+	}
 	p, err := newBuiltInPipeline(t)
 	if err != nil {
 		return nil, err
@@ -3612,10 +3615,19 @@ func newSearchPipeline(t *SearchTask) (*pipeline, error) {
 		}
 	}
 	if t.postProcess != nil {
+		inputs := []string{"result"}
+		outputs := []string{"result"}
+		if t.hasPostTable() {
+			inputs = append(inputs, "reduced")
+			outputs = []string{pipelineOutput}
+		}
 		if err := p.AddNodes(t, &nodeDef{
-			name: "post_process", inputs: []string{"result"}, outputs: []string{"result"}, opName: lambdaOp,
+			name: "post_process", inputs: inputs, outputs: outputs, opName: lambdaOp,
 			params: map[string]any{lambdaParamKey: func(ctx context.Context, _ trace.Span, inputs ...any) ([]any, error) {
 				result := inputs[0].(*milvuspb.SearchResults)
+				if t.hasPostTable() {
+					t.tableAllSearchCount = aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
+				}
 				if err := t.executeSearchPostProcess(ctx, result); err != nil {
 					return nil, err
 				}
@@ -3624,6 +3636,9 @@ func newSearchPipeline(t *SearchTask) (*pipeline, error) {
 		}); err != nil {
 			return nil, err
 		}
+	}
+	if t.hasPostTable() {
+		return p, nil
 	}
 	if err := p.AddNodes(t, endNode); err != nil {
 		return nil, err

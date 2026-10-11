@@ -23,15 +23,18 @@ package types
 // =============================================================================
 
 const (
-	OpTypeMap     = "map"
-	OpTypeFilter  = "filter"
-	OpTypeSort    = "sort"
-	OpTypeLimit   = "limit"
-	OpTypeGroupBy = "group_by"
-	OpTypeMerge   = "merge"
-	OpTypeSelect  = "select"
-	OpTypeExplode = "explode"
-	OpTypeFlatMap = "flat_map"
+	OpTypeMap       = "map"
+	OpTypeFilter    = "filter"
+	OpTypeSort      = "sort"
+	OpTypeLimit     = "limit"
+	OpTypeGroupBy   = "group_by"
+	OpTypeMerge     = "merge"
+	OpTypeSelect    = "select"
+	OpTypeExplode   = "explode"
+	OpTypeFlatMap   = "flat_map"
+	OpTypeConcat    = "concat"
+	OpTypeAggregate = "aggregate"
+	OpTypeReduce    = "reduce"
 )
 
 // =============================================================================
@@ -81,6 +84,8 @@ const (
 	GroupByFieldName   = "$group_by"
 	// ElementIndicesFieldName stores one Int32 element index per result row.
 	ElementIndicesFieldName = "$element_indices"
+	QueryIndexFieldName     = "$query_index"
+	ANNIndexFieldName       = "$ann_index"
 )
 
 // Function Chain framework parameter keys.

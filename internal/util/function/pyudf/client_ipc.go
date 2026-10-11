@@ -263,6 +263,16 @@ func outputValueBufferSize(values arrow.Array) int64 {
 
 func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb.ExecuteRequest, error) {
 	wire := &pyudfpb.ExecuteRequest{ResourceName: request.ResourceName, UdfPath: request.UDFPath, Stage: request.Stage, Params: encodeParams(request.Params), ExecutionVersion: executionVersion}
+	if request.TableResult {
+		if !strings.EqualFold(request.Stage, "post_process") {
+			return nil, merr.WrapErrServiceInternal("py_udf: TABLE execution requires POST_PROCESS")
+		}
+		wire.ExecutionVersion = tableExecutionVersion
+		wire.TableResult = true
+		wire.Reduction = request.Reduction
+	} else if request.Reduction {
+		return nil, merr.WrapErrServiceInternal("py_udf: reduction requires TABLE execution")
+	}
 	// BaseOp resolves repeated field references to the same Chunked object.
 	// Deduplicate by identity, not equal values: distinct columns stay distinct.
 	unique := make([]*arrow.Chunked, 0, len(request.Inputs))
@@ -284,7 +294,12 @@ func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb
 	wire.Inputs = payload
 	if request.QueryContext != nil {
 		nq := len(request.Inputs[0].Chunks())
-		if strings.EqualFold(request.Stage, "pre_process") {
+		if request.TableResult {
+			nq = 0
+			if len(request.QueryContext.OriginalQueries) != 0 {
+				nq = len(request.QueryContext.OriginalQueries[0].GetValues())
+			}
+		} else if strings.EqualFold(request.Stage, "pre_process") {
 			if nq != 1 {
 				return nil, merr.WrapErrServiceInternal("py_udf: PRE requires one query-row group")
 			}
@@ -298,7 +313,7 @@ func encodeExecuteRequest(ctx context.Context, request ExecuteRequest) (*pyudfpb
 		if err != nil {
 			return nil, err
 		}
-		if len(original) == 0 || len(original) != len(prepared) {
+		if len(original) != len(prepared) || len(original) == 0 && !request.TableResult {
 			return nil, merr.WrapErrServiceInternal("py_udf: query context ANN inputs do not align")
 		}
 		wire.QueryContext = &pyudfpb.QueryContext{OriginalQueries: original, Queries: prepared}

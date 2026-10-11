@@ -30,10 +30,11 @@ import (
 
 // ChainRepr is the internal representation of a FuncChain.
 type ChainRepr struct {
-	Name      string
-	Stage     string
-	Operators []OperatorRepr
-	Info      ChainReprInfo
+	Name        string
+	Stage       string
+	Operators   []OperatorRepr
+	Info        ChainReprInfo
+	TableResult bool
 }
 
 // OperatorRepr is the internal representation of an Operator.
@@ -44,6 +45,7 @@ type OperatorRepr struct {
 	Inputs         []string      // input column names, preserving occurrence order
 	InputDataTypes []schemapb.DataType
 	Outputs        []string // output column names
+	TableResult    bool     // inherited from ChainRepr, never read from operator params
 }
 
 // FunctionRepr is the internal representation of a FunctionExpr.
@@ -92,9 +94,10 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 	}
 
 	repr := &ChainRepr{
-		Name:      pb.GetName(),
-		Stage:     stage,
-		Operators: make([]OperatorRepr, 0, len(pb.GetOps())),
+		Name:        pb.GetName(),
+		Stage:       stage,
+		TableResult: pb.GetPostProcessOptions().GetResultMode() == schemapb.FunctionChainResultMode_FunctionChainResultModeTable,
+		Operators:   make([]OperatorRepr, 0, len(pb.GetOps())),
 	}
 
 	for i, opPB := range pb.GetOps() {
@@ -102,6 +105,7 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
 		}
+		opRepr.TableResult = repr.TableResult
 		repr.Operators = append(repr.Operators, *opRepr)
 	}
 
@@ -146,6 +150,13 @@ func ProtoOpToRepr(pb *schemapb.FunctionChainOp) (*OperatorRepr, error) {
 		}
 		repr.Function = expr
 		repr.Inputs = exprInputs
+		if opType == types.OpTypeReduce {
+			keys, err := types.NewParamReader("reduce", repr.Params).StringSlice("keys", false)
+			if err != nil {
+				return nil, err
+			}
+			repr.Inputs = append(append([]string(nil), keys...), exprInputs...)
+		}
 	}
 	if opType == types.OpTypeSelect && len(repr.Outputs) == 0 {
 		repr.Outputs = append([]string(nil), repr.Inputs...)
@@ -284,6 +295,7 @@ func (repr *ChainRepr) RefreshInfo() error {
 		repr.Operators[i].Type = opType
 		repr.Operators[i].Inputs = inputs
 		repr.Operators[i].Outputs = outputs
+		repr.Operators[i].TableResult = repr.TableResult
 		if repr.Operators[i].InputDataTypes == nil {
 			repr.Operators[i].InputDataTypes = make([]schemapb.DataType, len(inputs))
 		} else if len(repr.Operators[i].InputDataTypes) != len(inputs) {
@@ -306,7 +318,7 @@ func (repr *ChainRepr) RefreshInfo() error {
 			if producedColumn(produced, input) {
 				continue
 			}
-			if scopeLocked && !IsFunctionChainSystemName(input) {
+			if scopeLocked && (repr.TableResult || !IsFunctionChainSystemName(input)) {
 				return merr.WrapErrParameterInvalidMsg("op[%d] input %q is unavailable after select", i, input)
 			}
 			if _, ok := seenRequiredInputs[input]; !ok {
@@ -315,7 +327,7 @@ func (repr *ChainRepr) RefreshInfo() error {
 			}
 		}
 
-		if opType == types.OpTypeSelect {
+		if reprOpResetsColumnScope(opType) {
 			produced = make(map[string]struct{}, len(outputs))
 			scopeLocked = true
 		}
@@ -373,8 +385,10 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 		chain.SetName(repr.Name)
 	}
 	chain.SetStage(repr.Stage)
+	chain.SetTableResult(repr.TableResult)
 
 	for i, opRepr := range repr.Operators {
+		opRepr.TableResult = repr.TableResult
 		op, err := operatorFromReprWithContext(&opRepr, buildCtx)
 		if err != nil {
 			return nil, merr.Wrapf(err, "operator[%d]", i)
@@ -505,4 +519,8 @@ func parseInputDataTypes(params map[string]*schemapb.FunctionParamValue, inputCo
 // inputs, not system columns, despite using the '$' prefix.
 func IsFunctionChainSystemName(name string) bool {
 	return strings.HasPrefix(name, "$") && !isExplicitMetaInput(name)
+}
+
+func reprOpResetsColumnScope(name string) bool {
+	return name == types.OpTypeSelect || name == types.OpTypeAggregate || name == types.OpTypeReduce
 }

@@ -69,6 +69,10 @@ type Executor interface {
 // multi-source representation reserved for aggregate/reduce. It does not grant
 // an operation or stage permission to use that representation.
 func ValidateLineage(input Batch, result Result) error {
+	return validateLineage(input, result, false)
+}
+
+func validateLineage(input Batch, result Result, allowEmptySources bool) error {
 	if err := validateBatch(input); err != nil {
 		return merr.Wrap(err, "transform input")
 	}
@@ -83,7 +87,7 @@ func ValidateLineage(input Batch, result Result) error {
 			return merr.WrapErrFunctionFailedMsg("transform: lineage row count does not match output group %d", group)
 		}
 		for row, sources := range result.Lineage[group] {
-			if len(sources) == 0 {
+			if len(sources) == 0 && !allowEmptySources {
 				return merr.WrapErrFunctionFailedMsg("transform: output group %d row %d has no source", group, row)
 			}
 			for _, source := range sources {
@@ -94,6 +98,18 @@ func ValidateLineage(input Batch, result Result) error {
 		}
 	}
 	return nil
+}
+
+// ValidateResultForPlan permits arbitrary table shape only when explicitly
+// requested. Every source reference still belongs to the original input.
+func ValidateResultForPlan(plan *schemapb.FunctionChain, input Batch, result Result) error {
+	if err := ValidatePlan(plan); err != nil {
+		return err
+	}
+	if IsTablePlan(plan) {
+		return validateLineage(input, result, true)
+	}
+	return ValidateResult(plan.GetStage(), input, result)
 }
 
 // ValidateResult adds the v1 stage policy to ValidateLineage. All stages preserve
