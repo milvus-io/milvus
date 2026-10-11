@@ -231,6 +231,73 @@ TEST_F(VectorArrayBuildSessionTest, HnswValidEmptyListsFromBinlog) {
                        1);
 }
 
+// A plain metric on VECTOR_ARRAY builds an element-level index, which
+// knowhere serializes without embedding-list sidecars.
+TEST_F(VectorArrayBuildSessionTest, HnswElementLevelListsFromBinlog) {
+    constexpr int64_t rows = 50;
+    constexpr int64_t topk = 4;
+    const Config params{{knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
+                        {knowhere::indexparam::HNSW_M, 16},
+                        {knowhere::indexparam::EFCONSTRUCTION, 200}};
+    auto prepared = Prepare(DataType::VECTOR_ARRAY,
+                            DataType::VECTOR_FLOAT,
+                            false,
+                            knowhere::IndexEnum::INDEX_HNSW,
+                            rows,
+                            kDim,
+                            params);
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    std::vector<VectorArray> arrays;
+    arrays.reserve(rows);
+    int64_t physical_rows = 0;
+    for (int64_t row = 0; row < rows; ++row) {
+        const auto count = row % 3 + 1;
+        std::vector<float> values(count * kDim);
+        for (auto& value : values) {
+            value = distribution(rng);
+        }
+        arrays.emplace_back(values.data(), count, kDim, DataType::VECTOR_FLOAT);
+        physical_rows += count;
+    }
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, kDim);
+    data->FillFieldData(arrays.data(), arrays.size());
+    WriteInsert(prepared, data);
+    const auto stats = Publish(prepared);
+    ASSERT_FALSE(stats.Files().empty());
+
+    std::vector<float> query_values(2 * kDim);
+    for (auto& value : query_values) {
+        value = distribution(rng);
+    }
+    const auto queries = knowhere::GenDataSet(2, kDim, query_values.data());
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap ? "mmap" : "heap");
+        auto owner = Open(prepared, stats, mmap);
+        ASSERT_EQ(owner->Count(), physical_rows);
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(owner.get());
+        ASSERT_NE(reader, nullptr);
+        index::VectorSearchParams search;
+        search.topk_ = topk;
+        search.metric_type_ = knowhere::metric::COSINE;
+        search.search_params_ =
+            Config{{knowhere::meta::METRIC_TYPE, search.metric_type_},
+                   {knowhere::indexparam::EF, 16}};
+        SearchResult result;
+        reader->Search(queries, search, nullptr, nullptr, result);
+        EXPECT_EQ(result.total_nq_, 2);
+        ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
+        EXPECT_TRUE(std::all_of(result.seg_offsets_.begin(),
+                                result.seg_offsets_.end(),
+                                [&](int64_t offset) {
+                                    return offset >= 0 &&
+                                           offset < physical_rows;
+                                }));
+    }
+}
+
 #ifdef BUILD_DISK_ANN
 TEST_F(VectorArrayBuildSessionTest, DiskAnnNonemptyListsFromBinlog) {
     constexpr int64_t rows = 100;
