@@ -58,6 +58,67 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestCollectionAvailability(t *testing.T) {
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
+		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
+		2: {CollectionID: 2, State: pb.CollectionState_CollectionCreating},
+		3: {CollectionID: 3, State: pb.CollectionState_CollectionDropping},
+		4: nil,
+	}}
+	core := &Core{ctx: context.Background(), meta: mt}
+	core.UpdateStateCode(commonpb.StateCode_Healthy)
+	require.True(t, core.IsCollectionAvailable(1))
+	for _, id := range []int64{2, 3, 4, 5} {
+		require.False(t, core.IsCollectionAvailable(id))
+	}
+	// No scheduler, catalog or schema is needed on either cache outcome.
+	core.UpdateStateCode(commonpb.StateCode_Abnormal)
+	require.False(t, core.IsCollectionAvailable(1))
+	core.UpdateStateCode(commonpb.StateCode_Healthy)
+	mt.ddLock.Lock()
+	mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionDropping}
+	mt.ddLock.Unlock()
+	require.False(t, core.IsCollectionAvailable(1))
+	core.meta = nil
+	require.False(t, core.IsCollectionAvailable(1))
+
+	require.Zero(t, testing.AllocsPerRun(100, func() { mt.IsCollectionAvailable(1) }))
+}
+
+func BenchmarkCollectionAvailability(b *testing.B) {
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
+		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
+	}}
+	b.ReportAllocs()
+	for b.Loop() {
+		if !mt.IsCollectionAvailable(1) {
+			b.Fatal("available collection not found")
+		}
+	}
+}
+
+func TestCollectionAvailabilityConcurrent(t *testing.T) {
+	mt := &MetaTable{collID2Meta: make(map[int64]*model.Collection)}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := 0; i < 100; i++ {
+			mt.ddLock.Lock()
+			mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionCreated}
+			mt.ddLock.Unlock()
+			mt.ddLock.Lock()
+			delete(mt.collID2Meta, 1)
+			mt.ddLock.Unlock()
+		}
+	})
+	wg.Go(func() {
+		for i := 0; i < 100; i++ {
+			mt.IsCollectionAvailable(1)
+		}
+	})
+	wg.Wait()
+	require.False(t, mt.IsCollectionAvailable(1))
+}
+
 func TestMetaTable_DescribeAliasAllowsConcurrentReaders(t *testing.T) {
 	const (
 		collectionID   = int64(100)
