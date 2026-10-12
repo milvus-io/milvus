@@ -68,7 +68,7 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
-	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
+	ProxyPathReplaceParentOperations = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -76,7 +76,7 @@ var (
 			Help:      "number of successfully resolved positional partial-update parent operations by category",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
 
-	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
+	ProxyPathReplaceMergeLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -104,7 +104,7 @@ var (
 	// every stock milvus an extra, permanently empty dimension on a metric its
 	// dashboards and recording rules already read. Nothing scopes a query in a
 	// binary with no provider installed, so it exposes no series here at all.
-	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
+	ProxyResourceGroupSQLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
