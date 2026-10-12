@@ -432,7 +432,7 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("with_bm25", [False, True])
     @pytest.mark.parametrize("protocol", ["python", "rest"])
-    def test_field_analyzer_without_query_resources(self, request, with_bm25, protocol):
+    def test_field_analyzer_without_query_resources(self, with_bm25, protocol):
         """Field analyzers are WAL resources, available before load and after release."""
         client = self._client()
         name = cf.gen_collection_name_by_testcase_name()
@@ -461,7 +461,7 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
                 )
                 tokens = result.tokens
             else:
-                endpoint = f"http://{request.config.getoption('host')}:{request.config.getoption('http_port')}"
+                endpoint = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
                 response = requests.post(
                     endpoint + "/v2/vectordb/common/run_analyzer",
                     json={
