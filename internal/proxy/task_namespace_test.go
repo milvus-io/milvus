@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -28,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -46,9 +48,10 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name    string
-		schema  *schemapb.CollectionSchema
-		wantErr bool
+		name      string
+		schema    *schemapb.CollectionSchema
+		namespace string
+		wantErr   bool
 	}{
 		{
 			name: "namespace disabled",
@@ -73,6 +76,12 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 			name:   "partition mode",
 			schema: namespacePartitionModeSchema(),
 		},
+		{
+			name:      "invalid namespace name",
+			schema:    namespacePartitionModeSchema(),
+			namespace: "bad name",
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -84,7 +93,7 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 				baseTask: baseTask{MetaCache: mockCache},
 				CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
 					CollectionName: "coll",
-					NamespaceName:  "tenant_1",
+					NamespaceName:  lo.Ternary(tt.namespace == "", "tenant_1", tt.namespace),
 				},
 			}
 			err := task.PreExecute(ctx)
@@ -97,38 +106,30 @@ func TestCreateNamespaceTaskPreExecuteModeValidation(t *testing.T) {
 	}
 }
 
-func TestCreateNamespaceTaskPreExecuteRejectsInvalidName(t *testing.T) {
+func TestDropNamespaceTaskPreExecuteRejectsLoadedNamespace(t *testing.T) {
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "coll").Return(mustNewSchemaInfo(namespacePartitionModeSchema()), nil)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "coll").Return(int64(100), nil)
+	mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, "coll", "tenant_1").Return(int64(200), nil)
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:        merr.Success(),
+		CollectionIDs: []int64{100},
+	}, nil)
+	mixCoord.EXPECT().ShowLoadPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status:       merr.Success(),
+		PartitionIDs: []int64{200},
+	}, nil)
 
-	task := &createNamespaceTask{
+	task := &dropNamespaceTask{
 		baseTask: baseTask{MetaCache: mockCache},
-		CreateNamespaceRequest: &milvuspb.CreateNamespaceRequest{
+		mixCoord: mixCoord,
+		DropNamespaceRequest: &milvuspb.DropNamespaceRequest{
 			CollectionName: "coll",
-			NamespaceName:  "bad name",
+			NamespaceName:  "tenant_1",
 		},
 	}
 	require.ErrorIs(t, task.PreExecute(context.Background()), merr.ErrParameterInvalid)
-}
-
-func TestDropNamespaceTaskPreExecuteRejectsLoadedNamespace(t *testing.T) {
-	mockey.PatchConvey("drop namespace loaded rejection", t, func() {
-		mockCache := NewMockCache(t)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "coll").Return(mustNewSchemaInfo(namespacePartitionModeSchema()), nil)
-		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "coll").Return(int64(100), nil)
-		mockCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, "coll", "tenant_1").Return(int64(200), nil)
-		mockey.Mock(isCollectionLoaded).Return(true, nil).Build()
-		mockey.Mock(isPartitionLoaded).Return(true, nil).Build()
-
-		task := &dropNamespaceTask{
-			baseTask: baseTask{MetaCache: mockCache},
-			DropNamespaceRequest: &milvuspb.DropNamespaceRequest{
-				CollectionName: "coll",
-				NamespaceName:  "tenant_1",
-			},
-		}
-		require.ErrorIs(t, task.PreExecute(context.Background()), merr.ErrParameterInvalid)
-	})
 }
 
 func TestGetNamespaceStatsTaskPreExecuteRejectsExact(t *testing.T) {

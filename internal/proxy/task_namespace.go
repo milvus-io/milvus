@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -358,8 +357,7 @@ func validateNamespaceCollection(ctx context.Context, metaCache Cache, dbName, c
 	if err != nil {
 		return err
 	}
-	schema := collSchema.CollectionSchema
-	if !schema.GetEnableNamespace() || !common.IsNamespaceModePartition(schema.GetProperties()...) {
+	if !namespacePartitionModeEnabled(collSchema.CollectionSchema) {
 		return merr.WrapErrParameterInvalidMsg("namespace APIs require collection with namespace enabled and namespace.mode=partition")
 	}
 	return nil
