@@ -444,8 +444,9 @@ func (task *baseTask) Name() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID    typeutil.UniqueID
-	loadPriority commonpb.LoadPriority
+	segmentID       typeutil.UniqueID
+	loadPriority    commonpb.LoadPriority
+	forceSyncWarmup bool
 	// for balance segment task, expected load and release execution on the same shard leader
 	shardLeaderID int64
 }
@@ -492,6 +493,14 @@ func NewSegmentTask(ctx context.Context,
 
 func (task *SegmentTask) LoadPriority() commonpb.LoadPriority {
 	return task.loadPriority
+}
+
+func (task *SegmentTask) SetForceSyncWarmup(force bool) {
+	task.forceSyncWarmup = force
+}
+
+func (task *SegmentTask) ForceSyncWarmup() bool {
+	return task.forceSyncWarmup
 }
 
 func (task *SegmentTask) SegmentID() typeutil.UniqueID {

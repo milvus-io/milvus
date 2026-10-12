@@ -10651,4 +10651,55 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         this->prefetch_chunks_locked(op_ctx, field_id);
     }
 }
+
+void
+ChunkedSegmentSealedImpl::Prewarm(
+    milvus::OpContext* op_ctx,
+    const std::vector<FieldId>& requested_field_ids) const {
+    std::vector<FieldId> field_ids = requested_field_ids;
+    if (field_ids.empty()) {
+        auto schema_snapshot = CaptureSchemaSnapshot();
+        field_ids.reserve(schema_snapshot->get_fields().size());
+        for (const auto& field : schema_snapshot->get_fields()) {
+            field_ids.push_back(field.first);
+        }
+    }
+
+    for (auto field_id : field_ids) {
+        prefetch_chunks(op_ctx, field_id);
+
+        // Capture the runtime state per field and release it before pinning,
+        // so an index replaced or dropped meanwhile is neither kept alive nor
+        // loaded for nothing; the copied slots stay alive while pinned.
+        auto runtime = CaptureRuntimeResourceState();
+        std::vector<index::CacheIndexBasePtr> index_slots;
+        if (auto vector_entry = GetVectorIndexing(runtime, field_id);
+            vector_entry != nullptr) {
+            index_slots.push_back(vector_entry->indexing_);
+        }
+        if (auto iter = runtime->scalar_indexings.find(field_id);
+            iter != runtime->scalar_indexings.end()) {
+            index_slots.push_back(iter->second);
+        }
+        if (auto iter = runtime->ngram_indexings.find(field_id);
+            iter != runtime->ngram_indexings.end()) {
+            for (const auto& slot_entry : iter->second) {
+                index_slots.push_back(slot_entry.second);
+            }
+        }
+        for (const auto& index : runtime->json_indices) {
+            if (index.field_id == field_id) {
+                index_slots.push_back(index.index);
+            }
+        }
+        runtime.reset();
+
+        for (const auto& slot : index_slots) {
+            if (slot == nullptr) {
+                continue;
+            }
+            cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
+        }
+    }
+}
 }  // namespace milvus::segcore

@@ -300,6 +300,13 @@ func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
 }
 
+func getLoadFieldWarmupPolicy(loadInfo *querypb.SegmentLoadInfo, fieldSchema *schemapb.FieldSchema) string {
+	if loadInfo.GetForceSyncWarmup() {
+		return common.WarmupSync
+	}
+	return getFieldWarmupPolicy(fieldSchema)
+}
+
 // isExternalCollectionLazyLoad checks if all external fields in the schema can
 // avoid eager loading during segment load.
 func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {

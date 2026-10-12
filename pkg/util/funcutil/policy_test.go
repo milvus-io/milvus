@@ -26,6 +26,20 @@ func Test_GetPrivilegeExtObj(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func Test_GetPrivilegeExtObjPrewarm(t *testing.T) {
+	namespace := "tenant-a"
+	request := &milvuspb.PrewarmRequest{
+		DbName:         "test",
+		CollectionName: "col1",
+		Namespace:      &namespace,
+	}
+	privilegeExt, err := GetPrivilegeExtObj(request)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectType_Collection, privilegeExt.ObjectType)
+	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeLoad, privilegeExt.ObjectPrivilege)
+	assert.Equal(t, int32(3), privilegeExt.ObjectNameIndex)
+}
+
 func Test_GetPrivilegeExtObjAlterRole(t *testing.T) {
 	createRolePrivilege, err := GetPrivilegeExtObj(&milvuspb.CreateRoleRequest{})
 	assert.NoError(t, err)
