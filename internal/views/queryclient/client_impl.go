@@ -24,7 +24,7 @@ type ViewQueryClientConfig struct {
 	LoadInfoClient         LoadInfoClient
 	MaxRetries             int  // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
 	EnableReduceStream     bool // Route supported requests through Streaming Reduce.
-	ReduceStreamChunkBytes int  // Chunk reducible-payload byte threshold. 0 uses 256 KiB.
+	ReduceStreamChunkBytes int  // Chunk reducible-payload byte threshold; must be positive when enabled.
 }
 
 // viewQueryClientImpl implements ViewQueryClient.

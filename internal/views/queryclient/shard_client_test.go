@@ -270,7 +270,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 		},
 	)
 
-	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultStreamChunkBytes)
+	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, 32)
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())
 
@@ -300,7 +300,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultStreamChunkBytes)
+	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, 32)
 
 	require.ErrorContains(t, err, "open failed")
 	require.Equal(t, 1, openedStream.closeCount())

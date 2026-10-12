@@ -24,8 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const defaultStreamChunkBytes = 256 * 1024
-
 // shardViewQueryClient executes two-phase queries at the shard granularity.
 // It owns replica resolution, consistency routing, Phase 1 (GetQueryPlan),
 // Phase 2 (SearchOnView/QueryOnView) dispatch, and shard-level retry.

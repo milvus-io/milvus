@@ -278,7 +278,8 @@ func TestQueryOnViewStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
 			QueryVersion: 3,
 		},
-		Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkBytes: 32,
 	})
 	require.NoError(t, err)
 
@@ -343,7 +344,8 @@ func streamTestRequest() *viewpb.SearchOnViewRequest {
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
 			QueryVersion: 3,
 		},
-		Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9},
+		StreamChunkBytes: 1024,
 	}
 }
 
