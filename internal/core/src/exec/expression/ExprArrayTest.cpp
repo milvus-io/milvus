@@ -1114,7 +1114,7 @@ TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
                 segment.LoadFieldData(load_info);
                 ASSERT_EQ(segment.num_chunk_data(field), 2);
                 if (nested) {
-                    ASSERT_NE(segment.GetArrayOffsets(field), nullptr);
+                    ASSERT_NE(segment.GetStructElementOffsets(field), nullptr);
                 }
                 proto::schema::FieldSchema field_schema;
                 field_schema.set_name(field_name);
