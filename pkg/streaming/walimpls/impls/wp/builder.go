@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,6 +183,9 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 		mlog.Warn(context.TODO(), "invalid woodpecker directRead maxFetchThreads, keeping woodpecker built-in default",
 			mlog.String("value", cfg.DirectReadMaxFetchThreads.GetValue()))
 	}
+
+	// client operational bounds
+	setClientOperationalConfig(wpConfig, cfg)
 
 	// quorum configuration
 	setQuorumConfig(wpConfig, cfg)
@@ -401,10 +406,46 @@ func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
-		etcdConfig.ClientOptions()...)
+		etcdConfig.ClientOptions()...,
+	)
 	if err != nil {
 		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", mlog.Err(err))
 		return nil, err
 	}
 	return etcdCli, nil
+}
+
+// setClientOperationalConfig preserves the validated library defaults when overrides
+// cannot represent a positive bound. Read bounds and backoff are coupled settings.
+func setClientOperationalConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
+	c := &wpConfig.Woodpecker.Client
+	setMilliseconds := func(dst *config.DurationMilliseconds, item *paramtable.ParamItem) {
+		if v := item.GetAsDurationByParse().Milliseconds(); v > 0 {
+			*dst = config.NewDurationMillisecondsFromInt(int(v))
+		}
+	}
+	setMilliseconds(&c.SegmentAppend.SendTimeout, &cfg.AppendSendTimeout)
+	setMilliseconds(&c.Quorum.SelectNodesTimeout, &cfg.QuorumSelectNodesTimeout)
+	setMilliseconds(&c.GRPC.DialTimeout, &cfg.ClientGRPCDialTimeout)
+	active := cfg.ClientReadActiveTimeout.GetAsDurationByParse().Milliseconds()
+	settled := cfg.ClientReadSettledTimeout.GetAsDurationByParse().Milliseconds()
+	if active > 0 && settled >= active {
+		c.SegmentRead.ActiveTimeout = config.NewDurationMillisecondsFromInt(int(active))
+		c.SegmentRead.SettledTimeout = config.NewDurationMillisecondsFromInt(int(settled))
+	}
+	base := cfg.ClientGRPCBackoffBaseDelay.GetAsDurationByParse().Milliseconds()
+	max := cfg.ClientGRPCBackoffMaxDelay.GetAsDurationByParse().Milliseconds()
+	multiplier := cfg.ClientGRPCBackoffMultiplier.GetAsFloat()
+	// Parse explicitly: GetAsFloat maps malformed input to zero, which is legal jitter.
+	parsedJitter, jitterErr := strconv.ParseFloat(cfg.ClientGRPCBackoffJitter.GetValue(), 64)
+	if base > 0 && max >= base && multiplier >= 1 && !math.IsInf(multiplier, 0) && jitterErr == nil && parsedJitter >= 0 && parsedJitter <= 1 {
+		c.GRPC.ConnectBackoff = config.GRPCBackoffConfig{
+			BaseDelay:  config.NewDurationMillisecondsFromInt(int(base)),
+			MaxDelay:   config.NewDurationMillisecondsFromInt(int(max)),
+			Multiplier: multiplier, Jitter: parsedJitter,
+		}
+	}
+	if v := cfg.SkipRangeRefreshInterval.GetAsDurationByParse().Seconds(); v >= 1 {
+		c.SkipRangeRefreshInterval = config.NewDurationSecondsFromInt(int(v))
+	}
 }
