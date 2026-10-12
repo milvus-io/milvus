@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
@@ -360,6 +362,13 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 3)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
@@ -399,6 +408,13 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 0)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
@@ -439,6 +455,13 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
+	// This test exercises the write-before materialization failure path, so the
+	// version gate must be activated (otherwise materialization is skipped and
+	// the append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
@@ -582,7 +605,7 @@ func TestShardInterceptor(t *testing.T) {
 			PartitionId:  1,
 		}).
 		WithBody(&msgpb.DropPartitionRequest{}).
-		MustBuildMutable()
+		MustBuildMutable().WithTimeTick(1)
 	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything).Return(nil)
 	shardManager.EXPECT().DropPartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
@@ -780,4 +803,72 @@ func TestShardInterceptor(t *testing.T) {
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
+}
+
+func TestCreateSnapshotSealsSegmentsBeforeAppend(t *testing.T) {
+	manager := &mock_shards.MockShardManager{}
+	sealed := false
+	patch := mockey.Mock(mockey.GetMethod(manager, "FlushAndFenceSegmentAllocUntil")).To(func(collectionID int64, tt uint64) ([]int64, error) {
+		assert.Equal(t, int64(100), collectionID)
+		assert.Equal(t, uint64(200), tt)
+		sealed = true
+		return []int64{1, 2}, nil
+	}).Build()
+	defer patch.UnPatch()
+	impl := &shardInterceptor{shardManager: manager}
+	impl.initOpTable()
+	msg := message.NewCreateSnapshotMessageBuilderV2().WithVChannel("p1_100v0").
+		WithHeader(&message.CreateSnapshotMessageHeader{CollectionId: 100}).
+		WithBody(&message.CreateSnapshotMessageBody{}).MustBuildMutable().WithTimeTick(200)
+	assert.True(t, msg.MessageType().IsExclusiveRequired())
+	_, err := impl.DoAppend(context.Background(), msg, func(_ context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		assert.True(t, sealed)
+		return rmq.NewRmqID(1), nil
+	})
+	assert.NoError(t, err)
+}
+
+func TestDropPartitionUpdatesManagerAfterAppend(t *testing.T) {
+	for _, failAt := range []string{"none", "append"} {
+		t.Run(failAt, func(t *testing.T) {
+			manager := &mock_shards.MockShardManager{}
+			check := mockey.Mock(mockey.GetMethod(manager, "CheckIfPartitionExists")).Return(nil).Build()
+			defer check.UnPatch()
+			var events []string
+			drop := mockey.Mock(mockey.GetMethod(manager, "DropPartition")).To(func(msg message.ImmutableDropPartitionMessageV1) {
+				require.Equal(t, int64(10), msg.Header().GetPartitionId())
+				events = append(events, "drop")
+			}).Build()
+			defer drop.UnPatch()
+			impl := &shardInterceptor{shardManager: manager}
+			impl.initOpTable()
+			newMessage := func() message.MutableMessage {
+				return message.NewDropPartitionMessageBuilderV1().WithVChannel("p1_100v0").
+					WithHeader(&messagespb.DropPartitionMessageHeader{CollectionId: 100, PartitionId: 10}).
+					WithBody(&msgpb.DropPartitionRequest{}).MustBuildMutable().WithTimeTick(200)
+			}
+			require.True(t, newMessage().MessageType().IsExclusiveRequired())
+			appendMessage := func(_ context.Context, _ message.MutableMessage) (message.MessageID, error) {
+				events = append(events, "append")
+				if failAt == "append" {
+					return nil, context.DeadlineExceeded
+				}
+				return rmq.NewRmqID(1), nil
+			}
+			_, err := impl.DoAppend(context.Background(), newMessage(), appendMessage)
+			if failAt == "none" {
+				require.NoError(t, err)
+				require.Equal(t, []string{"append", "drop"}, events)
+				return
+			}
+			require.Error(t, err)
+			require.NotContains(t, events, "drop", "a failed append must not remove the partition")
+			// Retry updates the manager only after a successful append.
+			failAt = "none"
+			events = nil
+			_, err = impl.DoAppend(context.Background(), newMessage(), appendMessage)
+			require.NoError(t, err)
+			require.Equal(t, []string{"append", "drop"}, events)
+		})
+	}
 }

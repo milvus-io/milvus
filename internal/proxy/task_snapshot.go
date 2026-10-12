@@ -123,7 +123,7 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must not exceed %d", maxCompactionProtectionSeconds)
 	}
 
-	collectionID, err := cst.getMetaCache().GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
+	collectionID, err := cst.GetMetaCache().GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (dst *dropSnapshotTask) PreExecute(ctx context.Context) error {
 	if dst.req.GetCollectionName() == "" {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for drop snapshot")
 	}
-	collectionID, err := dst.getMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	collectionID, err := dst.GetMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func (dst *describeSnapshotTask) PreExecute(ctx context.Context) error {
 	if dst.req.GetCollectionName() == "" {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for describe snapshot")
 	}
-	collectionID, err := dst.getMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
+	collectionID, err := dst.GetMetaCache().GetCollectionID(ctx, dst.req.GetDbName(), dst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 
 	snapshotInfo := result.GetSnapshotInfo()
 
-	collectionName, err := dst.getMetaCache().GetCollectionName(ctx, "", snapshotInfo.GetCollectionId())
+	collectionName, err := dst.GetMetaCache().GetCollectionName(ctx, "", snapshotInfo.GetCollectionId())
 	if err != nil {
 		mlog.Warn(ctx, "DescribeSnapshot fail to get collection name",
 			mlog.Err(err))
@@ -354,7 +354,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 	}
 	var partitionNames []string
 	for _, partitionID := range snapshotInfo.GetPartitionIds() {
-		partitionName, err := dst.getMetaCache().GetPartitionName(ctx, "", collectionName, partitionID)
+		partitionName, err := dst.GetMetaCache().GetPartitionName(ctx, "", collectionName, partitionID)
 		if err != nil {
 			mlog.Warn(ctx, "DescribeSnapshot fail to get partition name",
 				mlog.FieldPartitionID(partitionID),
@@ -436,7 +436,7 @@ func (lst *listSnapshotsTask) OnEnqueue() error {
 func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lst.req.GetDbName() != "" {
-		dbInfo, err := lst.getMetaCache().GetDatabaseInfo(ctx, lst.req.GetDbName())
+		dbInfo, err := lst.GetMetaCache().GetDatabaseInfo(ctx, lst.req.GetDbName())
 		if err != nil {
 			return err
 		}
@@ -447,7 +447,7 @@ func (lst *listSnapshotsTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterMissingMsg("collection_name is required for ListSnapshots")
 	}
 
-	collectionID, err := lst.getMetaCache().GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
+	collectionID, err := lst.GetMetaCache().GetCollectionID(ctx, lst.req.GetDbName(), lst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -560,7 +560,7 @@ func (rst *restoreSnapshotTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Resolve source collection ID for per-collection snapshot lookup (RPC call)
-	collectionID, err := rst.getMetaCache().GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
+	collectionID, err := rst.GetMetaCache().GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -682,7 +682,7 @@ func (grst *getRestoreSnapshotStateTask) Execute(ctx context.Context) error {
 	info := result.GetInfo()
 	var milvusInfo *milvuspb.RestoreSnapshotInfo
 	if info != nil {
-		dbName, collectionName := resolveCollectionNames(ctx, grst.getMetaCache(), info.GetCollectionId())
+		dbName, collectionName := resolveCollectionNames(ctx, grst.GetMetaCache(), info.GetCollectionId())
 		milvusInfo = &milvuspb.RestoreSnapshotInfo{
 			JobId:          info.GetJobId(),
 			SnapshotName:   info.GetSnapshotName(),
@@ -764,7 +764,7 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 	// Resolve database ID for db-level filtering
 	if lrst.req.GetDbName() != "" {
-		dbInfo, err := lrst.getMetaCache().GetDatabaseInfo(ctx, lrst.req.GetDbName())
+		dbInfo, err := lrst.GetMetaCache().GetDatabaseInfo(ctx, lrst.req.GetDbName())
 		if err != nil {
 			return err
 		}
@@ -772,7 +772,7 @@ func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
 	}
 
 	if lrst.req.GetCollectionName() != "" {
-		collectionID, err := lrst.getMetaCache().GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
+		collectionID, err := lrst.GetMetaCache().GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
 		if err != nil {
 			return err
 		}
@@ -805,7 +805,7 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	jobs := result.GetJobs()
 	milvusJobs := make([]*milvuspb.RestoreSnapshotInfo, 0, len(jobs))
 	for _, job := range jobs {
-		dbName, collectionName := resolveCollectionNames(ctx, lrst.getMetaCache(), job.GetCollectionId())
+		dbName, collectionName := resolveCollectionNames(ctx, lrst.GetMetaCache(), job.GetCollectionId())
 		milvusJobs = append(milvusJobs, &milvuspb.RestoreSnapshotInfo{
 			JobId:          job.GetJobId(),
 			SnapshotName:   job.GetSnapshotName(),
@@ -904,7 +904,7 @@ func (pst *pinSnapshotDataTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("ttl_seconds exceeds maximum of %d (30 days)", maxPinTTLSeconds)
 	}
 
-	collectionID, err := pst.getMetaCache().GetCollectionID(ctx, pst.req.GetDbName(), pst.req.GetCollectionName())
+	collectionID, err := pst.GetMetaCache().GetCollectionID(ctx, pst.req.GetDbName(), pst.req.GetCollectionName())
 	if err != nil {
 		return err
 	}

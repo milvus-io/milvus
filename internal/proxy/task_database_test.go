@@ -80,7 +80,7 @@ func TestDropDatabaseTask(t *testing.T) {
 	).Maybe()
 	task := &dropDatabaseTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		Condition: NewTaskCondition(ctx),
 		DropDatabaseRequest: &milvuspb.DropDatabaseRequest{

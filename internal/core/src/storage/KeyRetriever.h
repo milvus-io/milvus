@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#pragma once
+
 #include "common/type_c.h"
 #include "parquet/encryption/encryption.h"
 #include "parquet/properties.h"
@@ -26,6 +28,22 @@ GetReaderProperties();
 
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();
+
+// Reader properties for a caller that reads a whole file set at once and wants
+// every byte range of a read in flight together.
+//
+// The configured properties read lazily: arrow fetches a coalesced range only
+// when the decoder first touches it, so one file has one request in flight.
+// With eager_prebuffer all ranges are instead submitted to arrow's IO pool
+// when the read starts. How far adjacent ranges are coalesced is left alone,
+// so such a reader issues the same requests as every other one, only together
+// rather than one after another. Arrow's read cache never evicts within a
+// read, lazy or not, so a read ends up holding the raw bytes of all its row
+// groups either way; what bounds that is how many row groups the caller puts
+// into one read (the packed reader's buffer size), not this flag. Without it
+// the configured properties are returned unchanged.
+parquet::ArrowReaderProperties
+GetArrowReaderProperties(bool eager_prebuffer);
 
 void
 ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,

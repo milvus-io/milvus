@@ -18,6 +18,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -35,6 +36,12 @@ import (
 // codes end-to-end, narrow this sentinel to the retryable cases and let other
 // errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
+
+// ErrLoonPermanent marks a loon FFI failure whose err_code the producer
+// itself reports as non-retryable (loon_ffi_is_retryable_errcode == 0):
+// access denied, malformed input, corrupt data. Retrying cannot succeed;
+// callers' retry guards must terminate on it.
+var ErrLoonPermanent = errors.New("loon FFI permanent error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
@@ -76,10 +83,9 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
 }
 
-// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
-// This function converts a StorageConfig structure into a Properties object by
-// calling the FFI properties_create function. All configuration fields from
-// StorageConfig are mapped to corresponding key-value pairs in Properties.
+// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
+// All configuration fields are mapped to corresponding property key-value pairs,
+// with the local filesystem root normalized separately from the key prefix.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
@@ -106,9 +112,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSAccessKeyValue)
 		values = append(values, storageConfig.GetSecretAccessKey())
 	}
-	if storageConfig.GetRootPath() != "" {
+	if fsRoot := storagev2.LoonFSRootPath(storageConfig); fsRoot != "" {
 		keys = append(keys, PropertyFSRootPath)
-		values = append(values, storageConfig.GetRootPath())
+		values = append(values, fsRoot)
 	}
 	if storageConfig.GetStorageType() != "" {
 		keys = append(keys, PropertyFSStorageType)
@@ -197,9 +203,38 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -282,7 +317,7 @@ func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
 
 // ExternalSpecContext carries the raw external-table inputs that C++
 // InjectExternalSpecProperties needs to derive both extfs.{collectionID}.*
-// (storage layer) and format-layer properties (e.g. iceberg.snapshot_id)
+// (storage layer) and format-layer properties (e.g. reader.exttable.snapshot_id)
 // from a single external_spec JSON. Zero value (CollectionID=0, Source="")
 // signals an internal (non-external) collection — injectExternalSpecProperties
 // treats it as a no-op.
@@ -341,8 +376,17 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		// Classify by the err_code the FFI already carries instead of
+		// flattening every failure to transient: the producer's own
+		// loon_ffi_is_retryable_errcode decides, so a 404/access-denied/
+		// corrupt-data failure stops retry loops instead of spinning them.
+		code := int32(ffiResult.err_code)
+		if C.loon_ffi_is_retryable_errcode(C.int(code)) != 0 {
+			return merr.Wrapf(ErrLoonTransient,
+				"FFI operation failed (code=%d): %s", code, errStr)
+		}
+		return merr.Wrapf(ErrLoonPermanent,
+			"FFI operation failed (code=%d): %s", code, errStr)
 	}
 	return nil
 }

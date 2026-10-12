@@ -57,8 +57,8 @@ TEST(ParallelDegreeSplitStrategy, LargerThanInput) {
     auto strategy = std::make_unique<ParallelDegreeSplitStrategy>(10);
     auto blocks = strategy->split(input);
 
-    EXPECT_EQ(blocks.size(), 1);
-    EXPECT_EQ(blocks[0], (RowGroupBlock{0, 5}));
+    EXPECT_EQ(blocks.size(), 5);
+    EXPECT_EQ(blocks[0], (RowGroupBlock{0, 1}));
 }
 
 TEST(ParallelDegreeSplitStrategy, Empty) {
@@ -90,8 +90,7 @@ TEST(ParallelDegreeSplitStrategy, ContinuousExceedingAvgSize) {
 }
 
 TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -104,8 +103,7 @@ TEST(FieldDataLoadBatchSplitTargetBytes, UsesBatchTargetByDefault) {
 
 TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
     constexpr int64_t MB = 1 << 20;
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -117,26 +115,27 @@ TEST(FieldDataLoadBatchSplitTargetBytes, CapsTargetByConfiguredBudget) {
 
 TEST(LoadMemoryOverheadControllerTest, KeepsHandleAcrossPolicySwitches) {
     auto& owner = milvus::storage::LoadMemoryOverheadController::GetInstance();
-    auto workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto& admission = milvus::storage::LoadAdmissionController::GetInstance();
+    const auto slots = admission.CapacitySlots();
     auto budget_bytes =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget()
-            .CapacityBytes();
-    auto cleanup = folly::makeGuard([&owner, workers, budget_bytes]() {
-        EXPECT_TRUE(owner.UpdateBudgetBytes(budget_bytes));
-        EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
-    });
+        milvus::storage::LoadAdmissionController::GetInstance().CapacityBytes();
+    auto cleanup =
+        folly::makeGuard([&owner, &admission, slots, budget_bytes]() {
+            EXPECT_TRUE(owner.UpdateBudgetBytes(budget_bytes));
+            admission.SetCapacitySlots(slots);
+        });
 
-    EXPECT_TRUE(owner.UpdateExecutorWorkers(workers));
+    admission.SetCapacitySlots(slots);
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/512));
-    auto group = owner.GetOrCreate(workers);
+    auto group = owner.GetOrCreate();
     ASSERT_NE(group, nullptr);
 
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/0));
-    EXPECT_TRUE(owner.UpdateExecutorWorkers(/*workers=*/8));
-    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
+    admission.SetCapacitySlots(8);
+    EXPECT_EQ(group, owner.GetOrCreate());
 
     EXPECT_TRUE(owner.UpdateBudgetBytes(/*bytes=*/1024));
-    EXPECT_EQ(group, owner.GetOrCreate(/*executor_workers=*/8));
+    EXPECT_EQ(group, owner.GetOrCreate());
 }
 
 // ---- LoadCellBatchAsync tests ----
@@ -365,12 +364,15 @@ TEST(LoadCellBatchAsync, FinalizesCellsBeforeFutureCompletion) {
 }
 
 TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
+    const auto old_slots = budget.CapacitySlots();
     budget.SetCapacityBytes(2);
-    auto cleanup = folly::makeGuard(
-        [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
+    budget.SetCapacitySlots(1);
+    auto cleanup = folly::makeGuard([&budget, old_capacity, old_slots]() {
+        budget.SetCapacityBytes(old_capacity);
+        budget.SetCapacitySlots(old_slots);
+    });
 
     std::vector<CellSpec> specs = {
         {0, 0, 0, 1, 1},
@@ -402,7 +404,8 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
     folly::CancellationSource cancel_source;
     auto acquire_future = std::async(
         std::launch::async, [&budget, token = cancel_source.getToken()] {
-            return budget.AcquireUntil(2, token);
+            return budget.AcquireUntil(
+                {2, 1}, milvus::storage::LoadAdmissionPriority::High, token);
         });
     bool acquired = false;
     if (acquire_future.wait_for(std::chrono::seconds(2)) ==
@@ -415,7 +418,7 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
         acquired = acquire_future.get();
     }
     if (acquired) {
-        budget.Release(2);
+        budget.Release({2, 1});
     }
 
     auto loaded_cells = futures[0].get();
@@ -424,8 +427,7 @@ TEST(LoadCellBatchAsync, ReleasesBatchBudgetBeforeFutureCompletion) {
 }
 
 TEST(LoadCellBatchAsync, KeepsBudgetWhileSharedBatchTablesRemain) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(2);
     auto budget_cleanup = folly::makeGuard(
@@ -488,11 +490,12 @@ TEST(LoadCellBatchAsync, KeepsBudgetWhileSharedBatchTablesRemain) {
         }));
     }
 
-    auto acquired = budget.TryAcquire(1);
+    auto acquired =
+        budget.TryAcquire({1, 1}, milvus::storage::LoadAdmissionPriority::High);
     EXPECT_FALSE(acquired)
         << "batch budget was released while a shared Arrow buffer remained";
     if (acquired) {
-        budget.Release(1);
+        budget.Release({1, 1});
     }
 
     {
@@ -603,13 +606,12 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchFinalize) {
 }
 
 TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(1);
-    budget.Acquire(1);
+    budget.Acquire({1, 1}, milvus::storage::LoadAdmissionPriority::High);
     auto cleanup = folly::makeGuard([&budget, old_capacity]() {
-        budget.Release(1);
+        budget.Release({1, 1});
         budget.SetCapacityBytes(old_capacity);
     });
 
@@ -673,13 +675,12 @@ TEST(LoadCellBatchAsync, CancellationWhileWaitingForBudgetSkipsRead) {
 }
 
 TEST(LoadCellBatchAsync, WaitingForBudgetDoesNotOccupyLoadPoolWorker) {
-    auto& budget =
-        milvus::storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = milvus::storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     budget.SetCapacityBytes(1);
-    budget.Acquire(1);
+    budget.Acquire({1, 1}, milvus::storage::LoadAdmissionPriority::High);
     auto budget_cleanup = folly::makeGuard([&budget, old_capacity]() {
-        budget.Release(1);
+        budget.Release({1, 1});
         budget.SetCapacityBytes(old_capacity);
     });
 

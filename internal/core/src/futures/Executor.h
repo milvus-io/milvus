@@ -33,4 +33,7 @@ getSearchCPUExecutor();
 folly::CPUThreadPoolExecutor*
 getLoadCPUExecutor();
 
+folly::CPUThreadPoolExecutor*
+getJsonStatsBuildExecutor();
+
 };  // namespace milvus::futures

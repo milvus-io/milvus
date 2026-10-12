@@ -1,6 +1,7 @@
 package qviews
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -136,6 +137,46 @@ func (dv DataVersion) IntoProto() *viewpb.DataVersion {
 		StreamingVersion: dv.StreamingVersion,
 		CompactVersion:   dv.CompactVersion,
 	}
+}
+
+// SegmentStats is the per-segment load footprint published by the DataView
+// Manager for one DataView version. It currently carries only the segment
+// RowNum; future metrics (e.g. MemSize) extend this struct without changing
+// the map shape or the DataViewRef access contract.
+type SegmentStats struct {
+	RowNum int64
+}
+
+// DataViewRef is a read-only reference to one DataView version. The Manager
+// ref-counts the referenced version against collection-scoped GC, so a
+// consumer may safely hold the ref until Deref.
+//
+// PRECONDITION (immutable): the caller must not mutate the returned
+// DataView / SegmentStats data. The referenced structures are shared,
+// read-only snapshots; modification corrupts the Manager's state.
+type DataViewRef interface {
+	// DataView returns the referenced proto DataView snapshot.
+	DataView() *viewpb.DataViewOfCollection
+	// Version returns the DataVersion of the referenced DataView.
+	Version() *viewpb.DataVersion
+	// Stats returns the published SegmentStats of one segment. ok is false
+	// when the segment has no published footprint in this version.
+	Stats(segmentID int64) (SegmentStats, bool)
+	// Deref releases the reference. Idempotent; each acquirer must call it
+	// exactly once when the ref is no longer needed.
+	Deref()
+}
+
+// DataViewRefProvider acquires DataViewRefs for QueryViews. It is implemented
+// by the DataView Manager (internal/dataview.Manager satisfies it directly,
+// so the wiring layer injects the Manager as-is). The QueryView lifecycle
+// holds the acquired ref (lifetime(QueryView) < lifetime(DataView)) and
+// releases it with Deref when the view is durably removed.
+type DataViewRefProvider interface {
+	// Get acquires a ref to the DataView at the exact DataVersion. It
+	// returns (nil, nil) when the version does not exist (e.g. already GC'd),
+	// and a non-nil error on provider failure.
+	Get(ctx context.Context, collectionID int64, version *viewpb.DataVersion) (DataViewRef, error)
 }
 
 // QueryViewKey uniquely identifies a query view by shard and version.

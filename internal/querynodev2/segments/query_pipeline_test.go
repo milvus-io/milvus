@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -167,7 +166,8 @@ func TestRunDelegatorQueryPipeline_GroupBy(t *testing.T) {
 	schema := testQueryPipelineSchema()
 	ctx := context.Background()
 
-	req := buildQueryReqForDelegator(10, nil,
+	req := buildQueryReqForDelegator(
+		10, nil,
 		nil,          // no ORDER BY
 		[]int64{200}, // GROUP BY color
 		[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}},
@@ -264,59 +264,6 @@ func TestRunQNQueryPipeline(t *testing.T) {
 		out, err := RunQNQueryPipeline(ctx, req, schema, plan, segcoreResults, nil, nil, rp)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1, 2, 3}, out.GetIds().GetIntId().GetData())
-		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
-	})
-
-	t.Run("ignore non pk path", func(t *testing.T) {
-		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Limit: 2, OutputFieldsId: []int64{100, 101}}}
-		rp := &segcore.RetrievePlan{}
-		rp.SetIgnoreNonPk(true)
-
-		seg0 := NewMockSegment(t)
-		seg1 := NewMockSegment(t)
-		seg0.EXPECT().DatabaseName().Return("default").Maybe()
-		seg0.EXPECT().ResourceGroup().Return("rg").Maybe()
-		seg1.EXPECT().DatabaseName().Return("default").Maybe()
-		seg1.EXPECT().ResourceGroup().Return("rg").Maybe()
-
-		seg0.EXPECT().RetrieveByOffsets(mock.Anything, mock.AnythingOfType("*segcore.RetrievePlanWithOffsets")).
-			RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-				assert.Equal(t, []int64{10}, plan.Offsets)
-				return &segcorepb.RetrieveResults{
-					FieldsData: []*schemapb.FieldData{
-						makeInt64Field(101, "age", []int64{100}),
-					},
-				}, nil
-			}).Once()
-		seg1.EXPECT().RetrieveByOffsets(mock.Anything, mock.AnythingOfType("*segcore.RetrievePlanWithOffsets")).
-			RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-				assert.Equal(t, []int64{20}, plan.Offsets)
-				return &segcorepb.RetrieveResults{
-					FieldsData: []*schemapb.FieldData{
-						makeInt64Field(101, "age", []int64{200}),
-					},
-				}, nil
-			}).Once()
-
-		segcoreResults := []*segcorepb.RetrieveResults{
-			{
-				Ids:              makeInternalIntIDs([]int64{1}),
-				Offset:           []int64{10},
-				FieldsData:       []*schemapb.FieldData{makeSegcoreTsField([]int64{100})},
-				AllRetrieveCount: 2,
-			},
-			{
-				Ids:              makeInternalIntIDs([]int64{2}),
-				Offset:           []int64{20},
-				FieldsData:       []*schemapb.FieldData{makeSegcoreTsField([]int64{200})},
-				AllRetrieveCount: 3,
-			},
-		}
-
-		out, err := RunQNQueryPipeline(ctx, req, schema, plan, segcoreResults, []Segment{seg0, seg1}, nil, rp)
-		require.NoError(t, err)
-		assert.Equal(t, []int64{1, 2}, out.GetIds().GetIntId().GetData())
-		assert.Equal(t, []int64{100, 200}, out.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 		assert.Equal(t, int64(5), out.GetAllRetrieveCount())
 	})
 

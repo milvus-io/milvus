@@ -255,14 +255,26 @@ BaseEventData::BaseEventData(
     bool is_field_data,
     std::optional<proto::schema::TypeSchema> array_type) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
-    AssertInfo(ast.ok(), "read start timestamp failed");
+    if (!ast.ok()) {
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read start timestamp failed: {}", ast.what()));
+    }
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
-    AssertInfo(ast.ok(), "read end timestamp failed");
+    if (!ast.ok()) {
+        throw SegcoreError(
+            ast.get_error_code(),
+            fmt::format("read end timestamp failed: {}", ast.what()));
+    }
 
     int payload_length =
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
+    }
     payload_reader = std::make_shared<PayloadReader>(res.second.get(),
                                                      payload_length,
                                                      data_type,
@@ -299,8 +311,10 @@ BaseEventData::Serialize() {
         if (data_type == DataType::VECTOR_ARRAY) {
             auto vector_array_field =
                 std::dynamic_pointer_cast<FieldData<VectorArray>>(field_data);
-            AssertInfo(vector_array_field != nullptr,
-                       "Failed to cast to FieldData<VectorArray>");
+            if (!(vector_array_field != nullptr)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Failed to cast to FieldData<VectorArray>");
+            }
             auto element_type = vector_array_field->get_element_type();
             payload_writer =
                 std::make_unique<PayloadWriter>(data_type,
@@ -372,9 +386,15 @@ BaseEventData::Serialize() {
                      ++offset) {
                     auto geo_ptr = static_cast<const std::string*>(
                         field_data->RawValue(offset));
+                    // A negative length is the only way a null reaches Arrow
+                    // (AddOneBinaryToArrowBuilder appends a null iff
+                    // length < 0), so a null row must not be handed its raw
+                    // size -- same as the STRING/ARRAY/JSON branches above.
+                    auto size =
+                        field_data->is_valid(offset) ? geo_ptr->size() : -1;
                     payload_writer->add_one_binary_payload(
                         reinterpret_cast<const uint8_t*>(geo_ptr->data()),
-                        geo_ptr->size());
+                        size);
                 }
                 break;
             }
@@ -547,12 +567,22 @@ LocalInsertEvent::Serialize() {
 
 LocalIndexEvent::LocalIndexEvent(BinlogReaderPtr reader) {
     auto ret = reader->Read(sizeof(index_size), &index_size);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
+    }
     ret = reader->Read(sizeof(degree), &degree);
-    AssertInfo(ret.ok(), "read binlog failed");
+    if (!ret.ok()) {
+        throw SegcoreError(ret.get_error_code(),
+                           fmt::format("read binlog failed: {}", ret.what()));
+    }
 
     auto res = reader->Read(index_size);
-    AssertInfo(res.first.ok(), "read payload failed");
+    if (!res.first.ok()) {
+        throw SegcoreError(
+            res.first.get_error_code(),
+            fmt::format("read payload failed: {}", res.first.what()));
+    }
     auto payload_reader = std::make_shared<PayloadReader>(
         res.second.get(), index_size, DataType::INT8, false);
     field_data = payload_reader->get_field_data();

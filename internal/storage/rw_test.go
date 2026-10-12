@@ -41,8 +41,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -203,6 +206,30 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	s.Equal(err, io.EOF)
 	err = r.Close()
 	s.NoError(err)
+
+	// Fill contract on the packed (StorageV2) path: schema fields absent from the
+	// written files are backfilled by the reader (#52781) — a plain nullable field
+	// comes back all-null, a field with a declared default comes back default-filled.
+	extSchema := typeutil.Clone(s.schema)
+	extSchema.Fields = append(extSchema.Fields,
+		&schemapb.FieldSchema{FieldID: 200, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+		&schemapb.FieldSchema{
+			FieldID: 201, Name: "added_default", DataType: schemapb.DataType_Int64, Nullable: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
+	)
+	fr, err := NewBinlogRecordReader(s.ctx, binlogs, extSchema, rOption...)
+	s.NoError(err)
+	defer fr.Close()
+	frec, err := fr.Next()
+	s.NoError(err)
+	s.Positive(frec.Len())
+	s.Equal(frec.Len(), frec.Column(200).NullN(), "absent nullable column arrives all-null")
+	s.Equal(0, frec.Column(201).NullN(), "absent default-carrying column arrives default-filled (#52781)")
+	col201 := frec.Column(201).(*array.Int64)
+	for i := 0; i < col201.Len(); i++ {
+		s.EqualValues(42, col201.Value(i))
+	}
 }
 
 // TestManifestReadFillsAbsentDefaultField is the StorageV3/manifest analog: an
@@ -492,7 +519,116 @@ func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNullableArrayOfVectorWrite
 		WithStorageConfig(s.storageConfig),
 	)
 	s.Error(err)
+	s.ErrorIs(err, merr.ErrStorage)
 	s.Contains(err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+}
+
+func (s *PackedBinlogRecordSuite) TestStorageV1RejectsElementNullableArrayWriter() {
+	testCases := []struct {
+		name      string
+		mutate    func(*schemapb.CollectionSchema)
+		errString string
+	}{
+		{
+			name: "top level array",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID:         200,
+					Name:            "array",
+					DataType:        schemapb.DataType_Array,
+					ElementType:     schemapb.DataType_Int64,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxCapacityKey, Value: "8"},
+					},
+				})
+			},
+			errString: "element nullable Array is not supported in V1 storage format",
+		},
+		{
+			name: "top level array of vector",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID:         201,
+					Name:            "vector_array",
+					DataType:        schemapb.DataType_ArrayOfVector,
+					ElementType:     schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+						{Key: common.MaxCapacityKey, Value: "8"},
+					},
+				})
+			},
+			errString: "element nullable ArrayOfVector is not supported in V1 storage format",
+		},
+		{
+			name: "struct array",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+					{
+						Name:     "struct_array",
+						Nullable: true,
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:         202,
+								Name:            "array",
+								DataType:        schemapb.DataType_Array,
+								ElementType:     schemapb.DataType_Int64,
+								ElementNullable: true,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.MaxCapacityKey, Value: "8"},
+								},
+							},
+						},
+					},
+				}
+			},
+			errString: "element nullable Array is not supported in V1 storage format",
+		},
+		{
+			name: "struct array of vector",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+					{
+						Name:     "struct_array",
+						Nullable: true,
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:         203,
+								Name:            "embeddings",
+								DataType:        schemapb.DataType_ArrayOfVector,
+								ElementType:     schemapb.DataType_FloatVector,
+								ElementNullable: true,
+								TypeParams: []*commonpb.KeyValuePair{
+									{Key: common.DimKey, Value: "4"},
+									{Key: common.MaxCapacityKey, Value: "8"},
+								},
+							},
+						},
+					},
+				}
+			},
+			errString: "element nullable ArrayOfVector is not supported in V1 storage format",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		s.Run(tc.name, func() {
+			schema := generateTestSchema()
+			tc.mutate(schema)
+
+			_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+				WithVersion(StorageV1),
+				WithUploader(func(context.Context, map[string][]byte) error { return nil }),
+				WithStorageConfig(s.storageConfig),
+			)
+			s.Error(err)
+			s.ErrorIs(err, merr.ErrStorage)
+			s.Contains(err.Error(), tc.errString)
+		})
+	}
 }
 
 func (s *PackedBinlogRecordSuite) TestStorageV1RejectsNestedArrayWriter() {
@@ -678,6 +814,20 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 		assert.NotContains(s.T(), p, "stats_log",
 			"bloom filter stat path must not use legacy stats_log/ layout")
 	}
+
+	// QueryNode resolves V3 bloom-filter paths from SegmentLoadInfo and passes
+	// them unchanged to ChunkManager.MultiRead. Exercise that exact boundary so
+	// a regression to bucket-relative local paths cannot be hidden by the test
+	// joining localStorage.path itself.
+	loadInfo := &querypb.SegmentLoadInfo{ManifestPath: manifestPath}
+	resolvedPaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), bfStat.Paths, resolvedPaths)
+
+	chunkManager := NewLocalChunkManager(objectstorage.RootPath(dir))
+	values, err := chunkManager.MultiRead(s.ctx, resolvedPaths)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), values, len(resolvedPaths))
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {

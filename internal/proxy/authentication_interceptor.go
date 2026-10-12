@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,6 +33,34 @@ func parseMD(rawToken string) (username, password string) {
 	return username, password
 }
 
+// GrpcAuthStreamInterceptor is the streaming counterpart of GrpcAuthInterceptor.
+// The external gRPC server only mounts UnaryInterceptor, so streaming RPCs such as
+// CreateReplicateStream/DumpMessages would otherwise skip the authentication chain
+// entirely. This interceptor authenticates streaming calls with the same logic as
+// unary calls before the handler observes the stream, and propagates the
+// authenticated context (carrying the resolved user/token) to the handler.
+func GrpcAuthStreamInterceptor(authFunc grpc_auth.AuthFunc) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		var newCtx context.Context
+		var err error
+		if overrideSrv, ok := srv.(grpc_auth.ServiceAuthFuncOverride); ok {
+			newCtx, err = overrideSrv.AuthFuncOverride(ss.Context(), info.FullMethod)
+		} else {
+			newCtx, err = authFunc(ss.Context())
+		}
+		if err != nil {
+			hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+				Status: merr.Status(err),
+			}, err, info.FullMethod, hookutil.ActionAuthorize)
+			return err
+		}
+		// Propagate the authenticated context to the handler by wrapping the ServerStream.
+		wrapped := grpc_middleware.WrapServerStream(ss)
+		wrapped.WrappedContext = newCtx
+		return handler(srv, wrapped)
+	}
+}
+
 func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var newCtx context.Context
@@ -56,7 +85,7 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 // as a readiness gate: until the proxy has published its meta cache (in
 // Proxy.Init), all requests are rejected with ServiceUnavailable, mirroring the
 // previous globalMetaCache == nil check that this PR's per-proxy cache removed.
-func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth.AuthFunc {
+func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		// The keys within metadata.MD are normalized to lowercase.
 		// See: https://godoc.org/google.golang.org/grpc/metadata#New
@@ -64,7 +93,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 		if !ok {
 			return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 		}
-		if getMetaCache() == nil {
+		if GetMetaCache() == nil {
 			return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 		}
 		// check rpc call from sdk

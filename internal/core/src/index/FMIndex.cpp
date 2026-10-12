@@ -10,10 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/FMIndex.h"
+#include "index/IndexLoadUtils.h"
+#include "storage/EntryStreamUtils.h"
 
 #include <fcntl.h>
 
 #include <cerrno>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -29,6 +32,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/RegexQuery.h"
 #include "common/Slice.h"
 #include "common/Tracer.h"
 #include "index/Meta.h"
@@ -83,49 +87,31 @@ BuildFMIndexLibrary(fmindex::FMIndex& fm,
                     uint32_t sa_sample_rate,
                     uint32_t block_bytes,
                     int64_t field_id) {
-    try {
-        fm.Build(docs,
-                 sa_sample_rate,
-                 /*case_insensitive=*/false,
-                 /*force_wide=*/false,
-                 block_bytes);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc& e) {
-        ThrowInfo(ErrorCode::MemAllocateFailed,
-                  "failed to build FM index for field {}: {}",
-                  field_id,
-                  e.what());
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::IndexBuildError,
-                  "failed to build FM index for field {}: {}",
-                  field_id,
-                  e.what());
-    }
+    detail::GuardFMIndexLibrary(
+        [&] {
+            fm.Build(docs,
+                     sa_sample_rate,
+                     /*case_insensitive=*/false,
+                     /*force_wide=*/false,
+                     block_bytes);
+        },
+        ErrorCode::IndexBuildError,
+        "build",
+        field_id);
 }
 
-template <typename T>
-T
-ReadRequiredFMIndexMeta(const storage::IndexEntryReader& reader,
-                        const char* key) {
-    if (!reader.HasMeta(key)) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt FM index: required metadata '{}' is missing",
-                  key);
-    }
-    try {
-        return reader.GetMeta<T>(key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt FM index: metadata '{}' has invalid type/value: {}",
-                  key,
-                  e.what());
-    }
-}
+struct FMIndexLoadContext {
+    int64_t total_rows{0};
+    bool nullable{false};
+    bool use_mmap{false};
+    size_t blob_size{0};
+    size_t mmap_size{0};
+    std::shared_ptr<std::vector<uint8_t>> blob;
+    std::shared_ptr<TargetBitmap> null_bitmap;
+    std::shared_ptr<storage::IndexFileTarget> blob_file;
+    std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
+        local_dir_lease;
+};
 
 void
 CreateParentDirectories(const std::string& path) {
@@ -248,7 +234,7 @@ FMIndex::BuildWithFieldData(const std::vector<FieldDataPtr>& datas) {
     // this single-threaded build path, so the concurrent const query path never
     // races on a lazy write.
     ComputeTotalTokens();
-    ComputeByteSize();
+    RefreshResidentSize();
 
     LOG_INFO("FM index build done, field id: {}, total rows: {}",
              field_id_,
@@ -277,20 +263,30 @@ FMIndex::BuildWithRawDataForUT(size_t n,
 
     // total_tokens is derived from the built blob, so compute after Build.
     ComputeTotalTokens();
-    ComputeByteSize();
+    RefreshResidentSize();
 }
 
 void
 FMIndex::ComputeByteSize() {
     // Mmap-backed serialized arrays are accounted as file bytes by the cache,
     // not heap memory. fm_ reports only allocations it owns; the wrapper adds
-    // its row-sized null bitmap.
+    // its row-sized null bitmap. Match does not Extract, so ISA is not
+    // materialized here.
     const size_t bytes =
         fm_.resident_heap_bytes() + null_bitmap_.size_in_bytes();
     cached_byte_size_ =
         bytes > static_cast<size_t>(std::numeric_limits<int64_t>::max())
             ? std::numeric_limits<int64_t>::max()
             : static_cast<int64_t>(bytes);
+}
+
+void
+FMIndex::RefreshResidentSize() {
+    ComputeByteSize();
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+        const auto estimated_cell = CellByteSize();
+        SetCellSize({ByteSize(), estimated_cell.file_bytes});
+    }
 }
 
 TargetBitmap
@@ -312,6 +308,47 @@ FMIndex::DocsToBitmap(const std::vector<uint64_t>& docs) const {
     return bitset;
 }
 
+bool
+FMIndex::MatchGuardAccepts(const std::string& pattern) const {
+    auto parts = split_by_wildcard(pattern);
+    // No literal fragment to seed phase 1 with. Covers the wildcard-only
+    // patterns ("%", "%_%") and, because split_by_wildcard("") is also empty,
+    // the empty pattern: PatternMatch(Match, "") can only answer by handing
+    // every non-null row to the phase-2 recheck, which is the raw scan wearing
+    // an index costume. Decline so the executor runs the scan directly. The
+    // planner never produces Match with an empty pattern (a wildcard-free LIKE
+    // lowers to Equal, see optimizeLikePattern) -- this keeps the direct-API
+    // contract honest, and PatternMatch keeps its all-rows fallback because a
+    // candidate superset is the only safe answer there.
+    if (parts.empty()) {
+        return false;
+    }
+    int64_t occ =
+        static_cast<int64_t>(fm_.Count(bytes(parts[0]), parts[0].size()));
+    for (size_t i = 1; i < parts.size(); ++i) {
+        int64_t c =
+            static_cast<int64_t>(fm_.Count(bytes(parts[i]), parts[i].size()));
+        if (c < occ) {
+            occ = c;
+        }
+    }
+    if (occ == 0) {
+        return true;
+    }
+    const double ratio = static_cast<double>(
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
+    const double tokens = static_cast<double>(TotalTokens());
+    const double sr = static_cast<double>(fm_.sa_sample_rate());
+    // Locate is occ x sr LF steps. Phase 2 reads those candidates back from
+    // sealed VARCHAR via ProcessDataByOffsets (ascending offsets, views
+    // fetched per same-chunk run). Its candidate-byte cost is NOT priced by
+    // this locate-only bound -- a known approximation whose worst case is
+    // long average rows x unselective fragments, where phase 2 approaches a
+    // full column read on top of the locate. Revisit with end-to-end
+    // measurements across row length and selectivity before recalibrating.
+    return static_cast<double>(occ) * sr < ratio * tokens;
+}
+
 const TargetBitmap
 FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
     tracer::AutoSpan span("FMIndex::PatternMatch", tracer::GetRootSpan());
@@ -330,7 +367,7 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
             case proto::plan::OpType::InnerMatch:
                 return IsNotNull();
             default:
-                break;  // fall through so the op switch throws OpTypeInvalid.
+                break;  // Match falls through to candidate plus recheck.
         }
     }
     // The executor passes the RAW literal (PrefixMatch gets "abc" not "abc%"),
@@ -354,6 +391,37 @@ FMIndex::PatternMatch(const std::string& pattern, proto::plan::OpType op) {
                                   pattern.size(),
                                   [&](uint64_t d) { bitset.set(d); });
             return bitset;
+        }
+        case proto::plan::OpType::Match: {
+            // Phase 1 only: rarest literal fragment to candidate rows.
+            // ExecFMMatch rechecks those offsets on sealed VARCHAR.
+            TargetBitmap candidates(total_rows_);
+            auto parts = split_by_wildcard(pattern);
+            if (parts.empty()) {
+                for (int64_t i = 0; i < total_rows_; ++i) {
+                    if (!null_bitmap_[i]) {
+                        candidates.set(i);
+                    }
+                }
+                return candidates;
+            }
+            const std::string* rarest = &parts[0];
+            size_t rarest_occ = fm_.Count(bytes(*rarest), rarest->size());
+            for (size_t i = 1; i < parts.size(); ++i) {
+                size_t occ = fm_.Count(bytes(parts[i]), parts[i].size());
+                if (occ < rarest_occ) {
+                    rarest_occ = occ;
+                    rarest = &parts[i];
+                }
+            }
+            fm_.VisitMatchingDocs(
+                bytes(*rarest), rarest->size(), [&](uint64_t d) {
+                    if (d < static_cast<uint64_t>(total_rows_) &&
+                        !null_bitmap_[d]) {
+                        candidates.set(d);
+                    }
+                });
+            return candidates;
         }
         default:
             // `op` is selected by the executor's index-routing logic, not read
@@ -540,10 +608,10 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   field_id_,
                   schema_.data_type());
     }
-    total_rows_ =
-        ReadRequiredFMIndexMeta<int64_t>(reader, FMINDEX_META_TOTAL_ROWS);
+    total_rows_ = ReadRequiredIndexMeta<int64_t>(reader.IndexMeta(),
+                                                 FMINDEX_META_TOTAL_ROWS);
     bool nullable =
-        ReadRequiredFMIndexMeta<bool>(reader, FMINDEX_META_NULLABLE);
+        ReadRequiredIndexMeta<bool>(reader.IndexMeta(), FMINDEX_META_NULLABLE);
     if (total_rows_ < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -556,7 +624,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   nullable,
                   schema_.nullable());
     }
-    if (!reader.HasEntry(FMINDEX_BLOB_FILE_NAME)) {
+    if (!reader.Directory().HasEntry(FMINDEX_BLOB_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: blob entry '{}' is missing",
                   FMINDEX_BLOB_FILE_NAME);
@@ -634,15 +702,27 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         }
         // The move keeps the views pointing at mmap_data_ (the vector buffers
         // move by address); the mapping is unmapped in the destructor.
-        fm_ = fmindex::FMIndex::LoadView(
-            reinterpret_cast<const uint8_t*>(mmap_data_), blob_size);
+        detail::GuardFMIndexLibrary(
+            [&] {
+                fm_ = fmindex::FMIndex::LoadView(
+                    reinterpret_cast<const uint8_t*>(mmap_data_), blob_size);
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
         mmap_committed = true;  // destructor now owns the mapped file
     } else {
         // Move the reader entry buffer straight into the index's owned backing
         // store (owned_blob_ = std::move) — no intermediate std::string / copy,
         // so the non-mmap load peaks at ~1 blob + directories instead of ~3.
         auto blob_entry = reader.ReadEntry(FMINDEX_BLOB_FILE_NAME);
-        fm_ = fmindex::FMIndex::Deserialize(std::move(blob_entry.data));
+        detail::GuardFMIndexLibrary(
+            [&] {
+                fm_ = fmindex::FMIndex::Deserialize(std::move(blob_entry.data));
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
     }
     if (!fm_.valid()) {
         ThrowInfo(ErrorCode::DataFormatBroken,
@@ -665,7 +745,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
     // a null row and a genuine empty string are the same empty document.
     null_bitmap_ = TargetBitmap(total_rows_);
     if (nullable) {
-        if (!reader.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        if (!reader.Directory().HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "corrupt FM index: nullable field is missing null bitmap "
                       "entry");
@@ -700,23 +780,237 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         }
     }
 
-    // Guard token total, derived from the loaded blob (bwt_size); needs fm_ valid
-    // (asserted above), so compute it here at the end of the load path.
+    // Guard token total, derived from the loaded blob (bwt_size); needs fm_
+    // valid (asserted above), so compute it here at the end of the load path.
     ComputeTotalTokens();
-
-    ComputeByteSize();
-    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
-        // Admission used the conservative pre-load estimate. Once LoadView has
-        // rebuilt its directories, replace only the memory component with the
-        // measured resident heap. Preserve file_bytes: it accounts for the
-        // staged mmap file and is independent of heap residency.
-        const auto estimated_cell = CellByteSize();
-        SetCellSize({ByteSize(), estimated_cell.file_bytes});
-    }
+    RefreshResidentSize();
 
     LOG_INFO("LoadEntries FM index done, field id: {}, total rows: {}",
              field_id_,
              total_rows_);
+}
+
+IndexLoadPlan
+FMIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
+                  const nlohmann::json& metadata,
+                  const Config& config) {
+    if (!IsSupportedFMIndexDataType(schema_.data_type())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: field {} has unsupported persisted data "
+                  "type {}, expected String/VarChar",
+                  field_id_,
+                  schema_.data_type());
+    }
+
+    auto context = std::make_shared<FMIndexLoadContext>();
+    context->total_rows =
+        ReadRequiredIndexMeta<int64_t>(metadata, FMINDEX_META_TOTAL_ROWS);
+    context->nullable =
+        ReadRequiredIndexMeta<bool>(metadata, FMINDEX_META_NULLABLE);
+    if (context->total_rows < 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: total_rows is negative ({})",
+                  context->total_rows);
+    }
+    if (context->nullable != schema_.nullable()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: persisted nullable={} does not match "
+                  "field schema nullable={}",
+                  context->nullable,
+                  schema_.nullable());
+    }
+    if (!directory.HasEntry(FMINDEX_BLOB_FILE_NAME)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: blob entry '{}' is missing",
+                  FMINDEX_BLOB_FILE_NAME);
+    }
+
+    context->blob_size = directory.At(FMINDEX_BLOB_FILE_NAME).plaintext_size;
+    context->use_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
+        disk_file_manager_ != nullptr;
+
+    IndexLoadPlan plan;
+    plan.load_context = context;
+    if (context->use_mmap) {
+        if (context->blob_size >
+            std::numeric_limits<size_t>::max() - kFMIndexMmapPadding) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "corrupt FM index: blob size {} overflows mmap size",
+                      context->blob_size);
+        }
+        context->mmap_size = context->blob_size + kFMIndexMmapPadding;
+        auto local_prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+        context->local_dir_lease.emplace(
+            disk_file_manager_->AcquireLocalDirWriteLease(local_prefix));
+        auto mmap_path =
+            local_prefix + std::string("/") + FMINDEX_BLOB_FILE_NAME;
+        context->blob_file = std::make_shared<storage::IndexFileTarget>(
+            mmap_path, context->mmap_size, true);
+        plan.entries.push_back(storage::EntryLoadPlan{
+            FMINDEX_BLOB_FILE_NAME,
+            storage::FileEntryTarget{
+                context->blob_file, 0, context->blob_file->file_size}});
+    } else {
+        context->blob =
+            std::make_shared<std::vector<uint8_t>>(context->blob_size);
+        plan.entries.push_back(storage::EntryLoadPlan{
+            FMINDEX_BLOB_FILE_NAME,
+            storage::MemoryEntryTarget{
+                context->blob, context->blob->data(), context->blob->size()}});
+    }
+
+    if (!context->nullable) {
+        return plan;
+    }
+    if (!directory.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: nullable field is missing null bitmap "
+                  "entry");
+    }
+    auto total_rows = static_cast<uint64_t>(context->total_rows);
+    auto expected_null_bytes = static_cast<size_t>(
+        total_rows / 8 + static_cast<uint64_t>(total_rows % 8 != 0));
+    auto actual_null_bytes =
+        directory.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size;
+    if (actual_null_bytes != expected_null_bytes) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: null bitmap entry is {} bytes, expected "
+                  "{} (ceil(total_rows {} / 8))",
+                  actual_null_bytes,
+                  expected_null_bytes,
+                  context->total_rows);
+    }
+    static_assert(std::endian::native == std::endian::little,
+                  "Direct packed bitmap reads require little-endian words");
+    context->null_bitmap =
+        std::make_shared<TargetBitmap>(context->total_rows, false);
+    plan.entries.push_back(storage::EntryLoadPlan{
+        FMINDEX_NULL_BITMAP_FILE_NAME,
+        storage::MemoryEntryTarget{
+            context->null_bitmap,
+            reinterpret_cast<uint8_t*>(context->null_bitmap->data()),
+            expected_null_bytes}});
+    return plan;
+}
+
+folly::coro::Task<void>
+FMIndex::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
+    (void)config;
+    auto context = std::any_cast<const std::shared_ptr<FMIndexLoadContext>&>(
+        plan.load_context);
+    AssertInfo(context != nullptr, "FMIndex FinishLoadAsync context is null");
+
+    fmindex::FMIndex new_fm;
+    char* new_mmap_data = nullptr;
+    auto mmap_guard = folly::makeGuard([&]() {
+        if (new_mmap_data != nullptr && new_mmap_data != MAP_FAILED) {
+            munmap(new_mmap_data, context->mmap_size);
+        }
+    });
+    if (context->use_mmap) {
+        AssertInfo(
+            context->blob_file != nullptr && context->blob_file->Prepared(),
+            "FMIndex mmap target is not prepared");
+        int fd = open(context->blob_file->path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open staged FM index file {}: {}",
+                      context->blob_file->path,
+                      strerror(errno));
+        }
+        auto fd_guard = folly::makeGuard([fd]() { close(fd); });
+        new_mmap_data = static_cast<char*>(
+            mmap(nullptr, context->mmap_size, PROT_READ, MAP_PRIVATE, fd, 0));
+        if (new_mmap_data == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to mmap FM index: {}",
+                      strerror(errno));
+        }
+        detail::GuardFMIndexLibrary(
+            [&] {
+                new_fm = fmindex::FMIndex::LoadView(
+                    reinterpret_cast<const uint8_t*>(new_mmap_data),
+                    context->blob_size);
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
+    } else {
+        AssertInfo(context->blob != nullptr, "FMIndex memory target is null");
+        detail::GuardFMIndexLibrary(
+            [&] {
+                new_fm =
+                    fmindex::FMIndex::Deserialize(std::move(*context->blob));
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
+    }
+    if (!new_fm.valid()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt FM index: failed structural validation of blob");
+    }
+    if (new_fm.document_count() != static_cast<size_t>(context->total_rows)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "corrupt FM index: metadata total_rows={} does not match blob "
+            "document count={}",
+            context->total_rows,
+            new_fm.document_count());
+    }
+
+    TargetBitmap new_null_bitmap;
+    if (context->nullable) {
+        AssertInfo(context->null_bitmap != nullptr,
+                   "FMIndex null bitmap target is null");
+        const auto* packed =
+            reinterpret_cast<const uint8_t*>(context->null_bitmap->data());
+        if (context->total_rows % 8 != 0) {
+            uint8_t valid_tail_mask =
+                static_cast<uint8_t>((1u << (context->total_rows % 8)) - 1u);
+            if ((packed[context->total_rows / 8] & ~valid_tail_mask) != 0) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "corrupt FM index: null bitmap has set bits beyond "
+                          "total_rows {}",
+                          context->total_rows);
+            }
+        }
+        new_null_bitmap = std::move(*context->null_bitmap);
+    } else {
+        new_null_bitmap = TargetBitmap(context->total_rows, false);
+    }
+
+    fm_ = std::move(new_fm);
+    null_bitmap_ = std::move(new_null_bitmap);
+    total_rows_ = context->total_rows;
+    is_mmap_ = context->use_mmap;
+    if (context->use_mmap) {
+        mmap_data_ = new_mmap_data;
+        mmap_size_ = context->mmap_size;
+        mmap_filepath_ = context->blob_file->path;
+        mmap_guard.dismiss();
+    } else {
+        mmap_data_ = nullptr;
+        mmap_size_ = 0;
+        mmap_filepath_.clear();
+    }
+
+    ComputeTotalTokens();
+    ComputeByteSize();
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+        const auto estimated_cell = CellByteSize();
+        SetCellSize({ByteSize(), estimated_cell.file_bytes});
+    }
+    LOG_INFO(
+        "FinishLoadAsync FM index done, field id: {}, total rows: "
+        "{}",
+        field_id_,
+        total_rows_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinishLoadAsync");
+    co_return;
 }
 
 }  // namespace milvus::index

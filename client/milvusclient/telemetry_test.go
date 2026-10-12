@@ -313,6 +313,50 @@ func TestClientTelemetryManager(t *testing.T) {
 }
 
 func TestProcessProtoCommands(t *testing.T) {
+	t.Run("equal timestamp stays idempotent after repeated delivery", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		executions := 0
+		manager.RegisterCommandHandler("custom", func(cmd *ClientCommand) *CommandReply {
+			executions++
+			return &CommandReply{CommandId: cmd.CommandId, Success: true}
+		})
+		command := []*commonpb.ClientCommand{{
+			CommandId:   "same-command",
+			CommandType: "custom",
+			CreateTime:  1000,
+		}}
+
+		manager.processProtoCommands(command)
+		manager.processProtoCommands(command)
+		manager.processProtoCommands(command)
+
+		assert.Equal(t, 1, executions)
+	})
+
+	t.Run("custom handler panic becomes a failed reply and batch continues", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		executions := 0
+		manager.RegisterCommandHandler("panic", func(*ClientCommand) *CommandReply {
+			panic("boom")
+		})
+		manager.RegisterCommandHandler("success", func(cmd *ClientCommand) *CommandReply {
+			executions++
+			return &CommandReply{CommandId: cmd.CommandId, Success: true}
+		})
+
+		manager.processProtoCommands([]*commonpb.ClientCommand{
+			{CommandId: "panic-command", CommandType: "panic", CreateTime: 1000},
+			{CommandId: "next-command", CommandType: "success", CreateTime: 1000},
+		})
+
+		replies := manager.getPendingProtoRepliesSnapshot()
+		require.Len(t, replies, 2)
+		assert.False(t, replies[0].GetSuccess())
+		assert.Equal(t, "command handler panicked: boom", replies[0].GetErrorMessage())
+		assert.True(t, replies[1].GetSuccess())
+		assert.Equal(t, 1, executions)
+	})
+
 	t.Run("idempotent ack and timestamp update", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
 
@@ -2291,7 +2335,7 @@ func TestBuildClientInfoEdgeCases(t *testing.T) {
 }
 
 func TestSnapshotTrimming(t *testing.T) {
-	t.Run("trims to 120 snapshots", func(t *testing.T) {
+	t.Run("retains more than the old 120 snapshot limit inside one hour", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, &TelemetryConfig{
 			Enabled:           true,
 			HeartbeatInterval: time.Millisecond,
@@ -2301,13 +2345,41 @@ func TestSnapshotTrimming(t *testing.T) {
 		// Record an operation first
 		manager.RecordOperation("Test", "", time.Now(), nil)
 
-		// Manually add more than 120 snapshots
+		// A count-only cap of 120 retained just two minutes at this interval.
 		for i := 0; i < 130; i++ {
 			manager.createSnapshot()
 		}
 
 		snapshots := manager.GetMetricsSnapshots()
-		assert.Equal(t, 120, len(snapshots))
+		assert.Equal(t, 130, len(snapshots))
+	})
+
+	t.Run("drops snapshots outside the one hour retention window", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		now := time.Now()
+		manager.snapshots = []*MetricsSnapshot{
+			{Timestamp: now.Add(-2 * time.Hour).UnixMilli(), EndTime: now.Add(-90 * time.Minute).UnixMilli()},
+			{Timestamp: now.Add(-time.Hour).UnixMilli(), EndTime: now.Add(-59 * time.Minute).UnixMilli()},
+		}
+
+		manager.createSnapshot()
+
+		snapshots := manager.GetMetricsSnapshots()
+		require.Len(t, snapshots, 2)
+		assert.Equal(t, now.Add(-59*time.Minute).UnixMilli(), snapshots[0].EndTime)
+	})
+
+	t.Run("keeps a hard memory bound for sub-second intervals", func(t *testing.T) {
+		manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+		now := time.Now().UnixMilli()
+		manager.snapshots = make([]*MetricsSnapshot, 0, maxTelemetryHistorySnapshots+1)
+		for i := 0; i < maxTelemetryHistorySnapshots; i++ {
+			manager.snapshots = append(manager.snapshots, &MetricsSnapshot{Timestamp: now, EndTime: now})
+		}
+
+		manager.createSnapshot()
+
+		assert.Len(t, manager.GetMetricsSnapshots(), maxTelemetryHistorySnapshots)
 	})
 }
 
@@ -2425,7 +2497,7 @@ func TestErrorCollectorRingBuffer(t *testing.T) {
 }
 
 func TestSendHeartbeatDisabled(t *testing.T) {
-	t.Run("disabled telemetry skips heartbeat", func(t *testing.T) {
+	t.Run("disabled telemetry with no transport is safe", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, &TelemetryConfig{
 			Enabled: false,
 		})
@@ -2441,6 +2513,160 @@ func TestSendHeartbeatDisabled(t *testing.T) {
 		// This should not panic
 		manager.sendHeartbeat()
 	})
+}
+
+func TestDisabledTelemetryKeepsControlHeartbeatForAckAndReenable(t *testing.T) {
+	lis := bufconn.Listen(bufSize)
+	service := &reconfigTelemetryServer{
+		secondEntered: make(chan struct{}),
+		releaseSecond: make(chan struct{}),
+	}
+	svr := grpc.NewServer()
+	milvuspb.RegisterClientTelemetryServiceServer(svr, service)
+	go func() { _ = svr.Serve(lis) }()
+	defer func() {
+		svr.Stop()
+		_ = lis.Close()
+	}()
+
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufnet",
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+	)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	client := &Client{telemetryService: milvuspb.NewClientTelemetryServiceClient(conn)}
+	optedOutConfig := DefaultTelemetryConfig()
+	optedOutConfig.Enabled = false
+	optedOutConfig.HeartbeatInterval = 5 * time.Millisecond
+	optedOut := NewClientTelemetryManager(client, optedOutConfig)
+	optedOut.Start()
+	time.Sleep(20 * time.Millisecond)
+	optedOut.Stop()
+	assert.Empty(t, service.Captures(), "an initial Enabled=false must not start the heartbeat control plane")
+
+	manager := NewClientTelemetryManager(client, DefaultTelemetryConfig())
+	manager.RecordOperation("Search", "books", time.Now().Add(-time.Millisecond), nil)
+	manager.Start()
+	require.Eventually(t, func() bool {
+		manager.configMu.RLock()
+		disabled := !manager.config.Enabled
+		manager.configMu.RUnlock()
+		return disabled && len(service.Captures()) >= 1
+	}, time.Second, time.Millisecond)
+
+	initial := service.Captures()
+	require.NotEmpty(t, initial)
+	assert.NotEmpty(t, initial[0].metrics)
+	disableHash := manager.GetConfigHash()
+	assert.NotEmpty(t, disableHash)
+	replies := manager.getPendingProtoRepliesSnapshot()
+	require.Len(t, replies, 1)
+	assert.Equal(t, "disable", replies[0].GetCommandId())
+
+	manager.snapshotsMu.RLock()
+	snapshotCount := len(manager.snapshots)
+	manager.snapshotsMu.RUnlock()
+	manager.RecordOperation("Search", "books", time.Now().Add(-time.Millisecond), nil)
+	manager.createSnapshot()
+	manager.snapshotsMu.RLock()
+	assert.Len(t, manager.snapshots, snapshotCount)
+	manager.snapshotsMu.RUnlock()
+
+	select {
+	case <-service.secondEntered:
+	case <-time.After(time.Second):
+		t.Fatal("disabled control heartbeat did not reach the server")
+	}
+	disabled := service.Captures()
+	require.GreaterOrEqual(t, len(disabled), 2)
+	assert.Empty(t, disabled[1].metrics)
+	assert.Equal(t, disableHash, disabled[1].configHash)
+	require.Equal(t, []string{"disable"}, disabled[1].replyIDs)
+	close(service.releaseSecond)
+
+	require.Eventually(t, func() bool {
+		manager.configMu.RLock()
+		enabled := manager.config.Enabled
+		manager.configMu.RUnlock()
+		return enabled && len(service.Captures()) >= 2
+	}, time.Second, time.Millisecond)
+	reenableHash := manager.GetConfigHash()
+	require.NotEmpty(t, reenableHash)
+	require.Eventually(t, func() bool {
+		return len(service.Captures()) >= 3 && len(manager.getPendingProtoRepliesSnapshot()) == 0
+	}, time.Second, time.Millisecond)
+	manager.Stop()
+	captures := service.Captures()
+	require.GreaterOrEqual(t, len(captures), 3)
+	assert.Equal(t, reenableHash, captures[2].configHash)
+	require.Equal(t, []string{"reenable"}, captures[2].replyIDs)
+	assert.Empty(t, manager.getPendingProtoRepliesSnapshot())
+}
+
+type controlHeartbeatCapture struct {
+	metrics    []*commonpb.OperationMetrics
+	replyIDs   []string
+	configHash string
+}
+
+type reconfigTelemetryServer struct {
+	milvuspb.UnimplementedClientTelemetryServiceServer
+	mu            sync.Mutex
+	captures      []controlHeartbeatCapture
+	secondEntered chan struct{}
+	releaseSecond chan struct{}
+}
+
+func (s *reconfigTelemetryServer) ClientHeartbeat(_ context.Context, request *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	s.mu.Lock()
+	replyIDs := make([]string, 0, len(request.GetCommandReplies()))
+	for _, reply := range request.GetCommandReplies() {
+		replyIDs = append(replyIDs, reply.GetCommandId())
+	}
+	s.captures = append(s.captures, controlHeartbeatCapture{
+		metrics:    request.GetMetrics(),
+		replyIDs:   replyIDs,
+		configHash: request.GetConfigHash(),
+	})
+	heartbeatNumber := len(s.captures)
+	s.mu.Unlock()
+
+	command := &commonpb.ClientCommand{
+		CommandType: "push_config",
+		Persistent:  true,
+		TargetScope: "global",
+	}
+	switch heartbeatNumber {
+	case 1:
+		command.CommandId = "disable"
+		command.Payload = []byte(`{"enabled":false,"heartbeat_interval_ms":20}`)
+		command.CreateTime = 1
+	case 2:
+		close(s.secondEntered)
+		<-s.releaseSecond
+		command.CommandId = "reenable"
+		command.Payload = []byte(`{"enabled":true}`)
+		command.CreateTime = 2
+	default:
+		return &milvuspb.ClientHeartbeatResponse{Status: &commonpb.Status{}}, nil
+	}
+	return &milvuspb.ClientHeartbeatResponse{
+		Status:   &commonpb.Status{},
+		Commands: []*commonpb.ClientCommand{command},
+	}, nil
+}
+
+func (s *reconfigTelemetryServer) Captures() []controlHeartbeatCapture {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]controlHeartbeatCapture, len(s.captures))
+	copy(result, s.captures)
+	return result
 }
 
 func TestHeartbeatLoopStop(t *testing.T) {
@@ -2774,6 +3000,35 @@ func TestAggregateSnapshotsEdgeCases(t *testing.T) {
 		// Insert should have 2 requests total (1 success + 1 error)
 		assert.Equal(t, int64(2), result.Aggregated.Metrics["Insert"].RequestCount)
 	})
+}
+
+func TestAggregateSnapshotsP99UsesCombinedLatencyDistribution(t *testing.T) {
+	manager := NewClientTelemetryManager(nil, DefaultTelemetryConfig())
+
+	fastStart := time.Now().Add(-time.Millisecond)
+	for i := 0; i < 100; i++ {
+		manager.RecordOperation("Search", "", fastStart, nil)
+	}
+	manager.createSnapshot()
+
+	slowStart := time.Now().Add(-100 * time.Millisecond)
+	for i := 0; i < 100; i++ {
+		manager.RecordOperation("Search", "", slowStart, nil)
+	}
+	manager.createSnapshot()
+
+	snapshots := manager.GetMetricsSnapshots()
+	require.Len(t, snapshots, 2)
+	require.NotEmpty(t, snapshots[0].historyLatencySamples["Search"])
+	require.NotEmpty(t, snapshots[1].historyLatencySamples["Search"])
+
+	result := manager.aggregateSnapshots(snapshots, snapshots[0].Timestamp, snapshots[1].EndTime)
+	search := result.Aggregated.Metrics["Search"]
+	require.NotNil(t, search)
+	assert.Equal(t, int64(200), search.RequestCount)
+	// Averaging the two per-window P99 values would report roughly 50ms. The P99 of
+	// the combined equal-sized distribution belongs to the slow window.
+	assert.Greater(t, search.P99LatencyMs, 90.0)
 }
 
 // TestCalculateP99FromSamplesBufferWrap tests the buffer wrap scenarios
@@ -3196,7 +3451,7 @@ func TestSendHeartbeatEdgeCases(t *testing.T) {
 		manager.sendHeartbeat()
 	})
 
-	t.Run("sendHeartbeat with telemetry disabled", func(t *testing.T) {
+	t.Run("sendHeartbeat with disabled metrics and nil client", func(t *testing.T) {
 		manager := NewClientTelemetryManager(nil, &TelemetryConfig{
 			Enabled:           false,
 			HeartbeatInterval: 30 * time.Second,
@@ -3204,7 +3459,7 @@ func TestSendHeartbeatEdgeCases(t *testing.T) {
 			ErrorMaxCount:     100,
 		})
 
-		// Should return early because enabled is false
+		// The control plane remains active, but a nil client still makes this a no-op.
 		manager.sendHeartbeat()
 	})
 

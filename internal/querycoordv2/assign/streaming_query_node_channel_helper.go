@@ -59,7 +59,7 @@ func assignChannelToWALLocatedFirstForNodeInfo(
 
 // filterSQNIfStreamingServiceEnabled filter out the non-sqn querynode.
 func filterSQNIfStreamingServiceEnabled(nodes []int64) []int64 {
-	if streamingutil.IsStreamingServiceEnabled() {
+	if streamingutil.UseStreamingQueryNodeAsDelegator() {
 		sqns := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
 		expectedSQNs := make([]int64, 0, len(nodes))
 		unexpectedNodes := make([]int64, 0)

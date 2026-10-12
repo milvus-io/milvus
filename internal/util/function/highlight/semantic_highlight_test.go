@@ -21,6 +21,7 @@ package highlight
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -946,4 +947,101 @@ func (s *SemanticHighlightSuite) TestDynamicFieldID_NoDynamicSchema() {
 	// DynamicFieldID should be -1 when no dynamic field in schema
 	s.Equal(int64(-1), highlight.DynamicFieldID())
 	s.False(highlight.HasDynamicFields())
+}
+
+// batchRecordingProvider records the size of every batch handed to the
+// provider so a test can assert the client batch limit is honored.
+type batchRecordingProvider struct {
+	baseSemanticHighlightProvider
+	batches [][]string
+}
+
+func (p *batchRecordingProvider) highlight(_ context.Context, _ string, texts []string) ([][]string, [][]float32, error) {
+	p.batches = append(p.batches, append([]string(nil), texts...))
+	highlights := make([][]string, 0, len(texts))
+	scores := make([][]float32, 0, len(texts))
+	for _, text := range texts {
+		highlights = append(highlights, []string{text})
+		scores = append(scores, []float32{1})
+	}
+	return highlights, scores, nil
+}
+
+func (s *SemanticHighlightSuite) TestProcessHonorsMaxClientBatchSize() {
+	cases := []struct {
+		name            string
+		maxBatch        int
+		documentCount   int
+		expectedBatches []int
+	}{
+		{name: "below limit", maxBatch: 64, documentCount: 3, expectedBatches: []int{3}},
+		{name: "exactly limit", maxBatch: 4, documentCount: 4, expectedBatches: []int{4}},
+		{name: "default limit exceeded", maxBatch: 64, documentCount: 150, expectedBatches: []int{64, 64, 22}},
+		{name: "exact multiple of limit", maxBatch: 2, documentCount: 6, expectedBatches: []int{2, 2, 2}},
+		{name: "limit of one", maxBatch: 1, documentCount: 3, expectedBatches: []int{1, 1, 1}},
+		{name: "non positive limit falls back to one call", maxBatch: 0, documentCount: 5, expectedBatches: []int{5}},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			provider := &batchRecordingProvider{
+				baseSemanticHighlightProvider: baseSemanticHighlightProvider{batchSize: tc.maxBatch},
+			}
+			documents := make([]string, 0, tc.documentCount)
+			for i := 0; i < tc.documentCount; i++ {
+				documents = append(documents, fmt.Sprintf("doc-%d", i))
+			}
+			highlight := &SemanticHighlight{
+				provider: provider,
+				queries:  []string{"machine learning"},
+			}
+
+			highlights, scores, err := highlight.Process(context.Background(),
+				[]int64{int64(tc.documentCount)}, documents)
+			s.NoError(err)
+
+			batchSizes := make([]int, 0, len(provider.batches))
+			flattened := make([]string, 0, tc.documentCount)
+			for _, batch := range provider.batches {
+				batchSizes = append(batchSizes, len(batch))
+				flattened = append(flattened, batch...)
+			}
+			s.Equal(tc.expectedBatches, batchSizes)
+			// Chunking must not drop, duplicate or reorder documents.
+			s.Equal(documents, flattened)
+			s.Equal(tc.documentCount, len(highlights))
+			s.Equal(tc.documentCount, len(scores))
+			for i, doc := range documents {
+				s.Equal([]string{doc}, highlights[i])
+			}
+		})
+	}
+}
+
+func (s *SemanticHighlightSuite) TestProcessHonorsMaxClientBatchSizeAcrossQueries() {
+	provider := &batchRecordingProvider{
+		baseSemanticHighlightProvider: baseSemanticHighlightProvider{batchSize: 2},
+	}
+	documents := []string{"a", "b", "c", "d", "e"}
+	highlight := &SemanticHighlight{
+		provider: provider,
+		queries:  []string{"q1", "q2"},
+	}
+
+	highlights, scores, err := highlight.Process(context.Background(), []int64{3, 2}, documents)
+	s.NoError(err)
+	s.Equal(5, len(highlights))
+	s.Equal(5, len(scores))
+
+	batchSizes := make([]int, 0, len(provider.batches))
+	for _, batch := range provider.batches {
+		batchSizes = append(batchSizes, len(batch))
+	}
+	// q1 gets 3 documents -> 2 + 1; q2 gets 2 documents -> 2. Batches never
+	// straddle a query boundary.
+	s.Equal([]int{2, 1, 2}, batchSizes)
+	s.Require().Len(provider.batches, 3)
+	s.Equal([]string{"a", "b"}, provider.batches[0])
+	s.Equal([]string{"c"}, provider.batches[1])
+	s.Equal([]string{"d", "e"}, provider.batches[2])
 }

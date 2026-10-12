@@ -15,6 +15,9 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <vector>
 #include <arrow/array.h>
@@ -26,6 +29,7 @@
 #include "common/GroupChunk.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "index/skipindex_stats/SkipIndexStats.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -33,6 +37,7 @@
 #include "storage/Util.h"
 #include "common/ChunkWriter.h"
 #include "common/FieldData.h"
+#include "segcore/Utils.h"
 
 using namespace milvus;
 using namespace milvus::storage;
@@ -143,6 +148,17 @@ class ChunkedColumnGroupTest : public ::testing::Test {
         string_chunk = create_chunk_string(string_data);
     }
 
+    std::unique_ptr<Translator<GroupChunk>>
+    MakeGroupTranslator(const std::string& key) {
+        std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+        chunks[FieldId(1)] = int64_chunk;
+        chunks[FieldId(2)] = string_chunk;
+        std::vector<std::unique_ptr<GroupChunk>> group_chunks;
+        group_chunks.push_back(std::make_unique<GroupChunk>(chunks));
+        return std::make_unique<TestGroupChunkTranslator>(
+            2, std::vector<int64_t>{5}, key, std::move(group_chunks));
+    }
+
     FixedVector<int64_t> int64_data;
     FixedVector<std::string> string_data;
     FieldMeta int64_field_meta;
@@ -192,17 +208,22 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     group_chunks.push_back(std::move(group_chunk));
     auto translator = std::make_unique<TestGroupChunkTranslator>(
         2, std::vector<int64_t>{5}, "test_key", std::move(group_chunks));
+    auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+        translator->meta());
+    meta->chunk_memory_size_ = {128};
     auto column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
     // basic properties
     EXPECT_EQ(column_group->num_chunks(), 1);
     EXPECT_EQ(column_group->NumRows(), 5);
+    EXPECT_EQ(column_group->memory_size(), 128);
 
     // Get group chunk
     auto retrieved_group_chunk = column_group->GetGroupChunk(nullptr, 0);
     EXPECT_NE(retrieved_group_chunk.get(), nullptr);
     EXPECT_EQ(retrieved_group_chunk.get()->RowNums(), 5);
+    EXPECT_EQ(column_group->memory_size(), 128);
 
     // GetNumRowsUntilChunk
     EXPECT_EQ(column_group->GetNumRowsUntilChunk(0), 0);
@@ -217,6 +238,311 @@ TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {
     // boundary conditions
     EXPECT_THROW(column_group->GetNumRowsUntilChunk(100),
                  std::exception);  // Out of range
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredGroupKeepsStateProbesCold) {
+    int factory_calls = 0;
+    auto params = std::make_shared<int>(128);
+    std::weak_ptr<int> captured_params = params;
+    auto factory = [&, params = std::move(params)](OpContext*) {
+        ++factory_calls;
+        auto translator = MakeGroupTranslator("deferred-state-probes");
+        auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            translator->meta());
+        meta->chunk_memory_size_ = {static_cast<size_t>(*params)};
+        return translator;
+    };
+    { auto unused = std::make_shared<ChunkedColumnGroup>(5, 2, factory); }
+    EXPECT_EQ(factory_calls, 0);
+
+    auto group = std::make_shared<ChunkedColumnGroup>(5, 2, std::move(factory));
+    auto column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    int64_t offset = 0;
+    EXPECT_TRUE(column->IsLazy());
+    EXPECT_FALSE(column->IsMaterialized());
+    EXPECT_EQ(column->NumRows(), 5);
+    EXPECT_TRUE(column->IsInMultiFieldColumnGroup());
+    auto skip_metrics = column->GetSkipMetricsList();
+    ASSERT_TRUE(skip_metrics.has_value());
+    EXPECT_EQ(skip_metrics.value(), nullptr);
+    EXPECT_EQ(column->GetSkipMetrics(0), nullptr);
+    EXPECT_FALSE(column->CellsLoaded(&offset, 1));
+    EXPECT_TRUE(column->CellsLoaded(nullptr, 0));
+    EXPECT_FALSE(group->CellsLoaded({0}));
+    EXPECT_TRUE(group->CellsLoaded({}));
+    group->CancelWarmup();
+    group->ManualEvictCache();
+    EXPECT_EQ(factory_calls, 0);
+
+    EXPECT_FALSE(captured_params.expired());
+    EXPECT_EQ(column->DataByteSize(), 128);
+    EXPECT_TRUE(captured_params.expired());
+    EXPECT_EQ(column->GetNumRowsUntilChunk(), (std::vector<int64_t>{0, 5}));
+    EXPECT_TRUE(column->IsMaterialized());
+    EXPECT_TRUE(column->IsLazy());
+    EXPECT_EQ(column->num_chunks(), 1);
+    EXPECT_FALSE(column->CellsLoaded(&offset, 1));
+    EXPECT_EQ(factory_calls, 1);
+
+    EXPECT_NE(column->DataOfChunk(nullptr, 0).get(), nullptr);
+    EXPECT_TRUE(column->CellsLoaded(&offset, 1));
+    EXPECT_EQ(column->DataByteSize(), 128);
+    EXPECT_EQ(column->num_chunks(), 1);
+    EXPECT_EQ(factory_calls, 1);
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredFieldsShareConcurrentInitialization) {
+    std::atomic<int> factory_calls{0};
+    std::promise<void> started;
+    auto started_future = started.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    auto group = std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext*) {
+        if (++factory_calls == 1) {
+            started.set_value();
+        }
+        release_future.wait();
+        auto translator = MakeGroupTranslator("deferred-concurrent");
+        auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            translator->meta());
+        meta->chunk_memory_size_ = {128};
+        return translator;
+    });
+    auto first =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    auto second = std::make_shared<ProxyChunkColumn>(
+        group, FieldId(2), string_field_meta);
+
+    std::vector<std::future<std::pair<int64_t, int64_t>>> reads;
+    for (int i = 0; i < 8; ++i) {
+        reads.push_back(std::async(
+            std::launch::async, [column = i % 2 == 0 ? first : second] {
+                auto num_chunks = column->num_chunks();
+                EXPECT_EQ(column->DataByteSize(), 128);
+                auto rows = column->GetChunk(nullptr, 0).get()->RowNums();
+                return std::make_pair(num_chunks, rows);
+            }));
+    }
+    auto status = started_future.wait_for(std::chrono::seconds(5));
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_FALSE(group->CellsLoaded({0}));
+    EXPECT_EQ(group->GetSkipMetrics(FieldId(1), 0), nullptr);
+    // Always release the builder before joining readers.
+    release.set_value();
+    EXPECT_EQ(status, std::future_status::ready);
+    for (auto& read : reads) {
+        auto [num_chunks, rows] = read.get();
+        EXPECT_EQ(num_chunks, 1);
+        EXPECT_EQ(rows, 5);
+    }
+    EXPECT_EQ(factory_calls.load(), 1);
+    EXPECT_TRUE(first->IsMaterialized());
+    EXPECT_TRUE(second->IsMaterialized());
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredInitializationFailureAllowsRetry) {
+    int factory_calls = 0;
+    auto params = std::make_shared<int>(5);
+    std::weak_ptr<int> captured_params = params;
+    auto group = std::make_shared<ChunkedColumnGroup>(
+        5, 2, [&, params = std::move(params)](OpContext*) {
+            EXPECT_EQ(*params, 5);
+            if (++factory_calls == 1) {
+                ThrowInfo(ErrorCode::Unsupported, "injected factory failure");
+            }
+            return MakeGroupTranslator("deferred-failure-retry");
+        });
+    try {
+        (void)group->num_chunks();
+        FAIL() << "expected factory failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+    }
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_FALSE(captured_params.expired());
+    EXPECT_EQ(factory_calls, 1);
+    EXPECT_EQ(group->num_chunks(), 1);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_TRUE(captured_params.expired());
+    EXPECT_EQ(factory_calls, 2);
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredRowCountMismatchAllowsRetry) {
+    int factory_calls = 0;
+    auto group = std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext*) {
+        auto translator = MakeGroupTranslator("deferred-row-count-retry");
+        if (++factory_calls == 1) {
+            auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+                translator->meta());
+            meta->num_rows_until_chunk_ = {0, 4};
+        }
+        return translator;
+    });
+
+    try {
+        (void)group->num_chunks();
+        FAIL() << "expected row count mismatch";
+    } catch (const SegcoreError& error) {
+        EXPECT_NE(std::string(error.what()).find("row count mismatch"),
+                  std::string::npos);
+    }
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 1);
+
+    EXPECT_EQ(group->num_chunks(), 1);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_EQ(group->NumRows(), 5);
+    EXPECT_EQ(factory_calls, 2);
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredBulkReadPassesContextAndAllowsRetry) {
+    int factory_calls = 0;
+    OpContext* observed_ctx = nullptr;
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext* op_ctx) {
+            observed_ctx = op_ctx;
+            ++factory_calls;
+            segcore::CheckCancellation(
+                op_ctx, 1, "DeferredBulkReadPassesContextAndAllowsRetry");
+            return MakeGroupTranslator("deferred-cancellation-retry");
+        });
+    auto column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    int64_t offset = 0;
+    int64_t value = -1;
+    auto read = [&](OpContext* op_ctx) {
+        column->BulkValueAt(
+            op_ctx,
+            [&](const char* data, size_t) {
+                std::memcpy(&value, data, sizeof(value));
+            },
+            &offset,
+            1);
+    };
+    folly::CancellationSource pre_cancelled;
+    pre_cancelled.requestCancellation();
+    OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+    try {
+        read(&pre_cancelled_ctx);
+        FAIL() << "expected cancelled data access";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_FALSE(column->IsMaterialized());
+    EXPECT_EQ(observed_ctx, &pre_cancelled_ctx);
+    EXPECT_FALSE(column->CellsLoaded(&offset, 1));
+    EXPECT_EQ(value, -1);
+    EXPECT_EQ(factory_calls, 1);
+
+    OpContext fresh_ctx;
+    read(&fresh_ctx);
+    EXPECT_EQ(observed_ctx, &fresh_ctx);
+    EXPECT_TRUE(column->IsMaterialized());
+    EXPECT_TRUE(column->IsLazy());
+    EXPECT_EQ(value, 1);
+    EXPECT_EQ(factory_calls, 2);
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredScanPassesContextAndAllowsRetry) {
+    int factory_calls = 0;
+    OpContext* observed_ctx = nullptr;
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext* op_ctx) {
+            observed_ctx = op_ctx;
+            ++factory_calls;
+            segcore::CheckCancellation(
+                op_ctx, 1, "DeferredScanPassesContextAndAllowsRetry");
+            return MakeGroupTranslator("deferred-scan-cancellation-retry");
+        });
+    std::shared_ptr<ChunkedColumnInterface> column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    const auto options = ChunkedColumnInterface::ScanOptions::ForData(
+        1, ChunkedColumnInterface::TargetType::Int64);
+
+    folly::CancellationSource pre_cancelled;
+    pre_cancelled.requestCancellation();
+    OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+    try {
+        column->Scan(&pre_cancelled_ctx, options);
+        FAIL() << "expected cancelled scan initialization";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(observed_ctx, &pre_cancelled_ctx);
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 1);
+
+    OpContext fresh_ctx;
+    auto cursor = column->Scan(&fresh_ctx, options);
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_EQ(observed_ctx, &fresh_ctx);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 2);
+    EXPECT_EQ(cursor->Position(), 1);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    ASSERT_EQ(batch.size, 4);
+    const auto* values = batch.values.data_as<int64_t>();
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_EQ(values[i], int64_data[i + 1]);
+    }
+    EXPECT_EQ(cursor->Position(), 5);
+    EXPECT_FALSE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(factory_calls, 2);
+}
+
+TEST_F(ChunkedColumnGroupTest, DeferredTakePassesContextAndAllowsRetry) {
+    int factory_calls = 0;
+    OpContext* observed_ctx = nullptr;
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext* op_ctx) {
+            observed_ctx = op_ctx;
+            ++factory_calls;
+            segcore::CheckCancellation(
+                op_ctx, 1, "DeferredTakePassesContextAndAllowsRetry");
+            return MakeGroupTranslator("deferred-take-cancellation-retry");
+        });
+    std::shared_ptr<ChunkedColumnInterface> column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    const std::vector<int64_t> offsets{4, 1, 4, 0};
+    const ChunkedColumnInterface::TakeOptions options{
+        ChunkedColumnInterface::OffsetView::From(
+            offsets.data(), static_cast<int64_t>(offsets.size())),
+        ChunkedColumnInterface::TargetType::Int64};
+
+    folly::CancellationSource pre_cancelled;
+    pre_cancelled.requestCancellation();
+    OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+    try {
+        column->Take(&pre_cancelled_ctx, options);
+        FAIL() << "expected cancelled take initialization";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(observed_ctx, &pre_cancelled_ctx);
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 1);
+
+    OpContext fresh_ctx;
+    auto take = column->Take(&fresh_ctx, options);
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(observed_ctx, &fresh_ctx);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 2);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto item = take->Get<int64_t>(i);
+        EXPECT_TRUE(item.is_valid);
+        EXPECT_FALSE(item.data_skipped);
+        ASSERT_TRUE(item.value.has_value());
+        EXPECT_EQ(*item.value, int64_data[offsets[i]]);
+    }
+    EXPECT_EQ(factory_calls, 2);
 }
 
 TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
@@ -280,4 +606,29 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     EXPECT_EQ(proxy_string->NumRows(), 5);
     EXPECT_EQ(proxy_string->num_chunks(), 1);
     EXPECT_FALSE(proxy_string->IsNullable());
+}
+
+TEST_F(ChunkedColumnGroupTest, ProxyExposesGroupOwnedSkipMetrics) {
+    const FieldId field_id(1);
+    segcore::storagev2translator::SkipMetricsByField metrics_by_field;
+    metrics_by_field[field_id.get()].push_back(
+        std::make_shared<index::IntFieldChunkMetrics<int64_t>>(0, 10, nullptr));
+
+    std::vector<std::unique_ptr<GroupChunk>> group_chunks(1);
+    auto translator =
+        std::make_unique<TestGroupChunkTranslator>(1,
+                                                   std::vector<int64_t>{5},
+                                                   "group_owned_skip_metrics",
+                                                   std::move(group_chunks),
+                                                   std::move(metrics_by_field));
+    auto column_group =
+        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+    ProxyChunkColumn column(column_group, field_id, int64_field_meta);
+
+    auto stored = column.GetSkipMetrics(0);
+    ASSERT_NE(stored, nullptr);
+    EXPECT_TRUE(
+        stored->CanSkipUnaryRange(OpType::Equal, index::Metrics{int64_t(100)}));
+    EXPECT_EQ(column.GetSkipMetrics(-1), nullptr);
+    EXPECT_EQ(column.GetSkipMetrics(1), nullptr);
 }

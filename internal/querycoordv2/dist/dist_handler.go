@@ -310,7 +310,17 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	}
 
 	var newLeaderOnNode []*meta.DmChannel
+	var removedLeaderChannels []*meta.DmChannel
 	if resp.GetIsDelta() {
+		removedByName := make(map[string]struct{}, len(resp.GetRemovedChannelNames()))
+		for _, channelName := range resp.GetRemovedChannelNames() {
+			removedByName[channelName] = struct{}{}
+		}
+		for _, ch := range dh.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(resp.GetNodeID())) {
+			if _, ok := removedByName[ch.GetChannelName()]; ok {
+				removedLeaderChannels = append(removedLeaderChannels, ch)
+			}
+		}
 		newLeaderOnNode = dh.dist.ChannelDistManager.Patch(resp.GetNodeID(), updates, resp.GetRemovedChannelNames())
 	} else {
 		newLeaderOnNode = dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
@@ -318,6 +328,9 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
+			collectionIDs.Insert(ch.CollectionID)
+		}
+		for _, ch := range removedLeaderChannels {
 			collectionIDs.Insert(ch.CollectionID)
 		}
 		dh.notifyFunc(collectionIDs.Collect()...)

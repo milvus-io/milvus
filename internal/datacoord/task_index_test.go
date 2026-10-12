@@ -178,7 +178,13 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
+		// The task must reach a terminal state in meta, otherwise GC keeps the
+		// SegmentIndex forever and every restart re-enqueues it.
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		job, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.True(ok)
+		s.Equal(commonpb.IndexState_Failed, job.IndexState)
+		s.Contains(job.FailReason, "segment")
 	})
 
 	s.Run("index not exist", func() {
@@ -189,7 +195,11 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		}()
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		job, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.True(ok)
+		s.Equal(commonpb.IndexState_Failed, job.IndexState)
+		s.Contains(job.FailReason, "index")
 	})
 
 	s.Run("update version failed", func() {
@@ -811,6 +821,146 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 
 		it.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+	})
+}
+
+// newInProgressTaskWithMeta builds an isolated meta whose only index task is
+// InProgress on worker 1, so tests can drop its index/segment without leaking
+// state into the shared suite meta.
+func (s *indexTaskSuite) newInProgressTaskWithMeta(catalog *catalogmocks.DataCoordCatalog) (*indexBuildTask, *meta) {
+	mt := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				s.segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:           s.segID,
+						CollectionID: s.collID,
+						PartitionID:  s.partID,
+						NumOfRows:    65535,
+						State:        commonpb.SegmentState_Flushed,
+					},
+				},
+			},
+		},
+		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+	}
+	// Mutate the stored record in place: GetIndexJob returns a clone.
+	job, ok := mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Get(s.taskID)
+	s.Require().True(ok)
+	job.IndexState = commonpb.IndexState_InProgress
+	job.NodeID = 1
+	it := newIndexBuildTask(model.CloneSegmentIndex(job), 1, mt, nil, nil, nil)
+	return it, mt
+}
+
+func (s *indexTaskSuite) TestQueryTaskOnWorkerAbortsWhenTargetDropped() {
+	assertMetaState := func(mt *meta, state commonpb.IndexState) *model.SegmentIndex {
+		job, ok := mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		s.Equal(state, job.IndexState)
+		return job
+	}
+
+	s.Run("index dropped", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
+
+		// No QueryIndex expectation: the dropped target is detected before
+		// polling the worker, and the job is canceled before meta is written.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
+		it.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		job := assertMetaState(mt, commonpb.IndexState_Failed)
+		s.Contains(job.FailReason, "index")
+	})
+
+	s.Run("segment dropped", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
+		it.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		job := assertMetaState(mt, commonpb.IndexState_Failed)
+		s.Contains(job.FailReason, "segment")
+	})
+
+	s.Run("segment removed from meta", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		delete(mt.segments.segments, s.segID)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
+		it.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		assertMetaState(mt, commonpb.IndexState_Failed)
+	})
+
+	s.Run("worker node gone counts as dropped", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(merr.ErrNodeNotFound)
+		it.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
+		assertMetaState(mt, commonpb.IndexState_Failed)
+	})
+
+	s.Run("drop on worker failed keeps task retryable", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
+
+		// No AlterSegmentIndexes expectation: nothing may be persisted while
+		// the worker has not acknowledged the cancellation.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(fmt.Errorf("rpc error"))
+		it.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+		assertMetaState(mt, commonpb.IndexState_InProgress)
+	})
+
+	s.Run("meta update failed keeps task in progress", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		it, mt := s.newInProgressTaskWithMeta(catalog)
+		mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
+		it.QueryTaskOnWorker(cluster)
+
+		// Left for the next check round; the drop is idempotent.
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+		assertMetaState(mt, commonpb.IndexState_InProgress)
+	})
+
+	s.Run("live target still polls worker", func() {
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		it, _ := s.newInProgressTaskWithMeta(catalog)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(&workerpb.IndexJobResults{
+			Results: []*workerpb.IndexTaskInfo{{BuildID: s.taskID, State: commonpb.IndexState_InProgress}},
+		}, nil)
+		it.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 }
 

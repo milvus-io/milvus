@@ -147,6 +147,7 @@ const (
 	DefaultOutputFields      = "*"
 	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
 	HTTPHeaderDBName         = "DB-Name"
+	HTTPHeaderIdempotencyKey = "Idempotency-Key"
 	HTTPHeaderRequestTimeout = "Request-Timeout"
 	HTTPHeaderMilvusTraceID  = "X-Milvus-Trace-Id"
 	HTTPReturnCode           = "code"

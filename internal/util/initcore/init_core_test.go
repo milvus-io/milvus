@@ -23,11 +23,90 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+
+	for _, tc := range []struct {
+		name, coefficient, maxCapacity string
+		want                           int
+		wantErr                        bool
+	}{
+		{name: "negative", coefficient: "-1", maxCapacity: "1", wantErr: true},
+		{name: "negative_fraction", coefficient: "-0.5", maxCapacity: "1", wantErr: true},
+		{name: "zero_fixed_default", coefficient: "0", maxCapacity: "0", want: defaultArrowIOThreadPoolCapacity},
+		{name: "zero_ignores_cap", coefficient: "0", maxCapacity: "1", want: defaultArrowIOThreadPoolCapacity},
+		{name: "positive", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
+		{name: "positive_fraction", coefficient: "0.5", maxCapacity: "0", want: max(1, hardware.GetCPUNum()/2)},
+		{name: "positive_capped", coefficient: "2", maxCapacity: "1", want: 1},
+		{name: "positive_minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, tc.maxCapacity))
+			got, err := ResolveArrowIOThreadPoolCapacity()
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestApplyArrowIOThreadPoolCapacityHotReload drives paramtable Save ->
+// watcher -> ApplyArrowIOThreadPoolCapacity -> arrow and reads the capacity
+// back through the core prometheus gauge.
+func TestApplyArrowIOThreadPoolCapacityHotReload(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer func() {
+		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+		ApplyArrowIOThreadPoolCapacity("test", "cleanup")
+	}()
+	RegisterArrowIOThreadPoolWatchers(pt, "test")
+
+	registry := metrics.NewCRegistry()
+	capacity := func() int {
+		families, err := registry.Gather()
+		require.NoError(t, err)
+		for _, mf := range families {
+			if mf.GetName() == "internal_arrow_io_pool_capacity" {
+				require.Len(t, mf.GetMetric(), 1)
+				return int(mf.GetMetric()[0].GetGauge().GetValue())
+			}
+		}
+		require.FailNow(t, "internal_arrow_io_pool_capacity gauge not found")
+		return -1
+	}
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "0"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
+	assert.Equal(t, 2*hardware.GetCPUNum(), capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "0"))
+	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "-1"))
+	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
+	assert.Equal(t, 3, capacity())
+}
 
 func TestTracer(t *testing.T) {
 	paramtable.Init()
@@ -70,12 +149,144 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
 
-	defer func() {
-		assert.NoError(t, pt.Reset(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key))
-		SyncTakeForOutputResultCountLimit(pt)
+	previousReadWindow := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		pt.Reset(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key)
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previousReadWindow)
+	})
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "0"))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.Key, "1048576"))
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterConfigWatcherWithCatchUpSerializesInitialSyncAndUpdates(t *testing.T) {
+	var current atomic.Bool
+	var applied atomic.Bool
+	var syncCalls atomic.Int32
+	callbackRegistered := make(chan func(), 1)
+	firstRead := make(chan struct{})
+	secondSyncStarted := make(chan struct{})
+	secondSyncApplied := make(chan struct{})
+	releaseFirstSync := make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+			callbackRegistered <- syncConfig
+		}, func() {
+			value := current.Load()
+			call := syncCalls.Add(1)
+			switch call {
+			case 1:
+				close(firstRead)
+				<-releaseFirstSync
+			case 2:
+				close(secondSyncStarted)
+			}
+			applied.Store(value)
+			if call == 2 {
+				close(secondSyncApplied)
+			}
+		})
+		close(done)
 	}()
-	assert.NoError(t, pt.Save(pt.QueryNodeCfg.TakeForOutputResultCountLimit.Key, "2048"))
-	assert.Equal(t, int64(2048), getTakeForOutputResultCountLimit())
+
+	callback := <-callbackRegistered
+	<-firstRead
+	current.Store(true)
+	callbackInvoked := make(chan struct{})
+	callbackDone := make(chan struct{})
+	go func() {
+		close(callbackInvoked)
+		callback()
+		close(callbackDone)
+	}()
+	<-callbackInvoked
+
+	overlapped := false
+	select {
+	case <-secondSyncStarted:
+		overlapped = true
+		<-secondSyncApplied
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstSync)
+	<-done
+	<-callbackDone
+	assert.False(t, overlapped, "config update ran concurrently with the initial catch-up")
+	assert.True(t, applied.Load(), "the concurrent update must be applied after the stale catch-up")
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	updateStorageV2AsyncLoadReadWindowSizeBytes(32 * 1024 * 1024)
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterStorageV2AsyncLoadReadWindowConfigHandlesDelete(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	assert.NoError(t, pt.Save(item.Key, "1048576"))
+	registerStorageV2AsyncLoadReadWindowConfig(pt)
+	assert.EqualValues(t, 1048576, getStorageV2AsyncLoadReadWindowSizeBytes())
+
+	assert.NoError(t, pt.Remove(item.Key))
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	item := &pt.QueryNodeCfg.StorageV2EnableAsyncLoad
+	assert.NoError(t, pt.Save(item.Key, "true"))
+
+	var applied atomic.Bool
+	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
+		applied.Store(enabled)
+		if enabled {
+			assert.EqualValues(t, 2*1024*1024*1024, budgetBytes)
+			assert.Positive(t, slots)
+		} else {
+			assert.Zero(t, budgetBytes)
+			assert.Zero(t, slots)
+		}
+
+		return nil
+	})
+	assert.True(t, applied.Load())
+
+	assert.NoError(t, pt.Save(item.Key, "false"))
+	assert.False(t, applied.Load())
+}
+
+func TestLazyColumnGroupHotUpdate(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	SetupCoreConfigChangelCallback()
+	key := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.Key
+	previous := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetValue()
+	t.Cleanup(func() { assert.NoError(t, pt.Save(key, previous)) })
+	for _, value := range []string{"false", "true", "false"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
+	}
 }
 
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
@@ -157,6 +368,29 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 	assert.NoError(t, InitArrowReaderConfig(pt))
+}
+
+func TestInitExternalVectorNullPolicy(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key)
+	defer func() {
+		_ = pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "error")
+		assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	}()
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "error"))
+	assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	assert.False(t, externalVectorPartialNullAsRowNullEnabled())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, " NULL "))
+	assert.NoError(t, InitExternalVectorNullPolicy(pt))
+	assert.True(t, externalVectorPartialNullAsRowNullEnabled())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ExternalVectorPartialNullPolicy.Key, "zero"))
+	err := InitExternalVectorNullPolicy(pt)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 func TestInitLoonReaderConfig(t *testing.T) {
@@ -302,6 +536,39 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 	assert.NotPanics(t, func() {
 		UpdateLoadTransientBudgetBytes(0)
 		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
+	})
+}
+
+func TestUpdateLoadAdmissionSlots(t *testing.T) {
+	defer UpdateLoadAdmissionSlots(0)
+	assert.NotPanics(t, func() {
+		UpdateLoadAdmissionSlots(0)
+		UpdateLoadAdmissionSlots(16)
+		UpdateLoadAdmissionSlots(-1)
+	})
+}
+
+func TestUpdateStorageV2AsyncLoadReadWindowSizeBytes(t *testing.T) {
+	previous := getStorageV2AsyncLoadReadWindowSizeBytes()
+	t.Cleanup(func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(previous)
+	})
+
+	updateStorageV2AsyncLoadReadWindowSizeBytes(0)
+	assert.EqualValues(t, paramtable.DefaultStorageV2AsyncLoadReadWindowSizeBytes, getStorageV2AsyncLoadReadWindowSizeBytes())
+	updateStorageV2AsyncLoadReadWindowSizeBytes(16 * 1024 * 1024)
+	assert.EqualValues(t, 16*1024*1024, getStorageV2AsyncLoadReadWindowSizeBytes())
+}
+
+func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+	assert.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "3"))
+	// Invalid values supplied by the caller must be rejected, even when the
+	// global configuration has a valid default. This fails before entering C++.
+	assert.PanicsWithValue(t, `invalid common.storage.talon.mode: "3"`, func() {
+		_ = InitStorageV2FileSystem(params)
 	})
 }
 

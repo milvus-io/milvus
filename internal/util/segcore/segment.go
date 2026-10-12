@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
@@ -30,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -485,8 +485,9 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 		}
 	}
 
-	// V2: compute basePaths from rootPath + stats metadata.
-	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	// Legacy non-manifest stats use the primary storage root: an absolute
+	// localStorage.path for local storage, minio.rootPath for object storage.
+	rootPath := binlog.GetRootPath()
 
 	textBasePaths := make(map[int64]string, len(textStats))
 	for fieldID, stats := range textStats {
@@ -608,14 +609,16 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			}
 			files = stripped
 		}
-		mlog.Info(context.TODO(), "convertTextIndexStats",
-			mlog.Int64("fieldID", v.GetFieldID()),
-			mlog.Int64("buildID", v.GetBuildID()),
-			mlog.Int64("version", v.GetVersion()),
-			mlog.String("basePath", basePath),
-			mlog.Int("fileCount", len(files)),
-			mlog.Strings("files", files),
-		)
+		if mlog.LevelEnabled(mlog.DebugLevel) {
+			mlog.Debug(context.TODO(), "convertTextIndexStats",
+				mlog.Int64("fieldID", v.GetFieldID()),
+				mlog.Int64("buildID", v.GetBuildID()),
+				mlog.Int64("version", v.GetVersion()),
+				mlog.String("basePath", basePath),
+				mlog.Int("fileCount", len(files)),
+				mlog.Strings("files", files),
+			)
+		}
 
 		result[k] = &segcorepb.TextIndexStats{
 			FieldID:                   v.GetFieldID(),

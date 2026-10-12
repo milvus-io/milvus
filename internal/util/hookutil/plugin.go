@@ -21,7 +21,7 @@ func LoadPlugin[T any](path string, symbol string) (T, error) {
 		return zero, merr.WrapErrParameterInvalidMsg("empty plugin path for symbol %q", symbol)
 	}
 
-	mlog.Info(context.TODO(), "loading plugin", mlog.String("path", path), mlog.String("symbol", symbol))
+	mlog.Info(context.TODO(), "loading plugin", mlog.String("symbol", symbol))
 
 	pluginMutex.Lock()
 	defer pluginMutex.Unlock()

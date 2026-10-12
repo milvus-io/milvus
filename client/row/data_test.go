@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 )
 
 type ValidStruct struct {
@@ -37,6 +39,52 @@ type ValidStructWithNamedTag struct {
 
 type RowsSuite struct {
 	suite.Suite
+}
+
+func (s *RowsSuite) TestColumnCreatorsRejectInvalidSchemas() {
+	for _, dataType := range []entity.FieldType{
+		entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
+		entity.FieldTypeFloat16Vector, entity.FieldTypeBFloat16Vector, entity.FieldTypeInt8Vector,
+	} {
+		for _, dim := range []string{"", "not-a-number"} {
+			s.Run(fmt.Sprintf("%s/dim=%s", dataType, dim), func() {
+				field := entity.NewField().WithName("vector").WithDataType(dataType)
+				if dim != "" {
+					field.TypeParams = map[string]string{entity.TypeParamDim: dim}
+				}
+				creator := getColumnCreators(entity.NewSchema().WithField(field))["vector"]
+				col, err := creator(1)
+				s.Nil(col)
+				s.Error(err)
+			})
+		}
+	}
+	for _, field := range []*entity.Field{
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeJSON),
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct),
+	} {
+		col, err := getColumnCreators(entity.NewSchema().WithField(field))["array"](1)
+		s.Nil(col)
+		s.Error(err)
+	}
+}
+
+func (s *RowsSuite) TestColumnCreatorsStructAndSparseArray() {
+	fields := []*entity.Field{
+		entity.NewField().WithName("json").WithDataType(entity.FieldTypeJSON),
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64),
+		entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector),
+		entity.NewField().WithName("profile").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithStructSchema(entity.NewStructSchema().WithField(
+			entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64))),
+	}
+	for _, field := range fields {
+		col, err := getColumnCreators(entity.NewSchema().WithField(field))[field.Name](2)
+		s.Require().NoError(err)
+		s.Equal(field.Name, col.Name())
+		s.Zero(col.Len())
+		s.Equal(field.DataType, col.Type())
+	}
 }
 
 func (s *RowsSuite) TestRowsToColumns() {
@@ -138,7 +186,7 @@ func (s *RowsSuite) TestDynamicSchema() {
 	})
 }
 
-func (s *RowsSuite) TestReflectValueCandi() {
+func (s *RowsSuite) TestParseFields() {
 	type DynamicRows struct {
 		Float float32 `json:"float" milvus:"name:float"`
 	}
@@ -146,7 +194,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 	cases := []struct {
 		tag       string
 		v         reflect.Value
-		expect    map[string]fieldCandi
+		expect    map[string]any
 		expectErr bool
 	}{
 		{
@@ -154,15 +202,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			v: reflect.ValueOf(map[string]interface{}{
 				"A": "abd", "B": int64(8),
 			}),
-			expect: map[string]fieldCandi{
-				"A": {
-					name: "A",
-					v:    reflect.ValueOf("abd"),
-				},
-				"B": {
-					name: "B",
-					v:    reflect.ValueOf(int64(8)),
-				},
+			expect: map[string]any{
+				"A": "abd",
+				"B": int64(8),
 			},
 			expectErr: false,
 		},
@@ -172,15 +214,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 				A string
 				B int64
 			}{A: "abc", B: 16}),
-			expect: map[string]fieldCandi{
-				"A": {
-					name: "A",
-					v:    reflect.ValueOf("abc"),
-				},
-				"B": {
-					name: "B",
-					v:    reflect.ValueOf(int64(16)),
-				},
+			expect: map[string]any{
+				"A": "abc",
+				"B": int64(16),
 			},
 			expectErr: false,
 		},
@@ -198,15 +234,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 				A string `milvus:"name:a"`
 				DynamicRows
 			}{A: "emb", DynamicRows: DynamicRows{Float: 0.1}}),
-			expect: map[string]fieldCandi{
-				"a": {
-					name: "a",
-					v:    reflect.ValueOf("emb"),
-				},
-				"float": {
-					name: "float",
-					v:    reflect.ValueOf(float32(0.1)),
-				},
+			expect: map[string]any{
+				"a":     "emb",
+				"float": float32(0.1),
 			},
 			expectErr: false,
 		},
@@ -229,7 +259,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 
 	for _, c := range cases {
 		s.Run(c.tag, func() {
-			r, err := reflectValueCandi(c.v)
+			r, err := rowutil.ParseFields(c.v)
 			if c.expectErr {
 				s.Error(err)
 				return
@@ -239,7 +269,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			for k, v := range c.expect {
 				rv, has := r[k]
 				s.Require().True(has, fmt.Sprintf("candidate with key(%s) must provided", k))
-				s.Equal(v.name, rv.name)
+				s.Equal(v, rv.Value.Interface())
 			}
 		})
 	}
@@ -345,6 +375,186 @@ func (s *RowsSuite) TestNullablePointerColumns() {
 	})
 }
 
+func (s *RowsSuite) TestRowsToTimestamptzColumn() {
+	s.Run("plain_time", func() {
+		type TimestamptzRow struct {
+			ID        int64     `milvus:"primary_key"`
+			CreatedAt time.Time `milvus:"name:created_at"`
+		}
+
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz))
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		rows := []any{
+			&TimestamptzRow{ID: 1, CreatedAt: now},
+			&TimestamptzRow{ID: 2, CreatedAt: now.Add(time.Hour)},
+		}
+
+		columns, err := AnyToColumns(rows, false, schema)
+		s.Require().NoError(err)
+		s.Require().Len(columns, 2)
+
+		for _, col := range columns {
+			if col.Name() != "created_at" {
+				continue
+			}
+			s.Equal(entity.FieldTypeTimestamptz, col.Type())
+			s.Equal([]string{
+				now.Format(time.RFC3339Nano),
+				now.Add(time.Hour).Format(time.RFC3339Nano),
+			}, col.FieldData().GetScalars().GetStringData().GetData())
+		}
+	})
+
+	s.Run("nullable_pointer", func() {
+		type TimestamptzRow struct {
+			ID        int64      `milvus:"primary_key"`
+			CreatedAt *time.Time `milvus:"name:created_at"`
+		}
+
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz).WithNullable(true))
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		rows := []any{
+			&TimestamptzRow{ID: 1, CreatedAt: &now},
+			&TimestamptzRow{ID: 2, CreatedAt: nil},
+		}
+
+		columns, err := AnyToColumns(rows, false, schema)
+		s.Require().NoError(err)
+		s.Require().Len(columns, 2)
+
+		for _, col := range columns {
+			if col.Name() != "created_at" {
+				continue
+			}
+			s.Equal(entity.FieldTypeTimestamptz, col.Type())
+			s.True(col.Nullable())
+			isNull0, err := col.IsNull(0)
+			s.NoError(err)
+			s.False(isNull0)
+			isNull1, err := col.IsNull(1)
+			s.NoError(err)
+			s.True(isNull1)
+			s.Equal([]string{now.Format(time.RFC3339Nano)},
+				col.FieldData().GetScalars().GetStringData().GetData())
+		}
+	})
+}
+
+func (s *RowsSuite) TestColumnCreatorsAllScalarTypes() {
+	// Every scalar field type must yield a non-nil column from getColumnCreators.
+	// A missing case silently leaves the column nil and panics later in
+	// AnyToColumns' AppendValue, so enumerate all supported scalar types here.
+	scalarTypes := []entity.FieldType{
+		entity.FieldTypeBool,
+		entity.FieldTypeInt8,
+		entity.FieldTypeInt16,
+		entity.FieldTypeInt32,
+		entity.FieldTypeInt64,
+		entity.FieldTypeFloat,
+		entity.FieldTypeDouble,
+		entity.FieldTypeString,
+		entity.FieldTypeVarChar,
+		entity.FieldTypeText,
+		entity.FieldTypeJSON,
+		entity.FieldTypeTimestamptz,
+		entity.FieldTypeGeometry,
+	}
+	for _, dataType := range scalarTypes {
+		s.Run(dataType.Name(), func() {
+			field := entity.NewField().WithName("f").WithDataType(dataType)
+			creator := getColumnCreators(entity.NewSchema().WithField(field))["f"]
+			s.Require().NotNil(creator)
+			col, err := creator(1)
+			s.Require().NoError(err)
+			s.Require().NotNil(col, "field type %s must have a column creator", dataType.Name())
+			// FieldTypeString is normalized to a VarChar column by design.
+			if dataType == entity.FieldTypeString {
+				s.Equal(entity.FieldTypeVarChar, col.Type())
+			} else {
+				s.Equal(dataType, col.Type())
+			}
+			s.Zero(col.Len())
+		})
+	}
+}
+
+func (s *RowsSuite) TestRowsToGeometryColumn() {
+	type GeometryRow struct {
+		ID       int64  `milvus:"primary_key"`
+		Location string `milvus:"name:location"`
+	}
+
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("location").WithDataType(entity.FieldTypeGeometry))
+
+	rows := []any{
+		&GeometryRow{ID: 1, Location: "POINT (1 1)"},
+		&GeometryRow{ID: 2, Location: "POINT (2 2)"},
+	}
+
+	columns, err := AnyToColumns(rows, false, schema)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 2)
+
+	for _, col := range columns {
+		if col.Name() != "location" {
+			continue
+		}
+		s.Equal(entity.FieldTypeGeometry, col.Type())
+		s.Equal([]string{"POINT (1 1)", "POINT (2 2)"},
+			col.FieldData().GetScalars().GetGeometryWktData().GetData())
+	}
+}
+
+func (s *RowsSuite) TestSetFieldTimestamptz() {
+	s.Run("time_value", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), row.Ts)
+	})
+
+	s.Run("pointer_value", func() {
+		type Row struct {
+			Ts *time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Require().NotNil(row.Ts)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), *row.Ts)
+	})
+
+	s.Run("string_target_kept", func() {
+		type Row struct {
+			Ts string
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal("2024-01-01T00:00:00Z", row.Ts)
+	})
+
+	s.Run("parse_failure", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "not-a-timestamp")
+		s.Error(err)
+	})
+}
+
 func (s *RowsSuite) TestRowsToTextColumnWithSchema() {
 	type TextRow struct {
 		ID      int64
@@ -409,7 +619,7 @@ func (s *RowsSuite) TestSetFieldPointer() {
 	})
 }
 
-func (s *RowsSuite) TestReflectValueCandiPointer() {
+func (s *RowsSuite) TestParseFieldsPointer() {
 	s.Run("pointer_field_isPtr", func() {
 		type PtrStruct struct {
 			Name  *string
@@ -417,17 +627,81 @@ func (s *RowsSuite) TestReflectValueCandiPointer() {
 		}
 		name := "test"
 		v := reflect.ValueOf(PtrStruct{Name: &name, Value: 42})
-		result, err := reflectValueCandi(v)
+		result, err := rowutil.ParseFields(v)
 		s.NoError(err)
 
 		nameCandi, ok := result["Name"]
 		s.True(ok)
-		s.True(nameCandi.isPtr)
+		s.True(nameCandi.IsPtr)
 
 		valueCandi, ok := result["Value"]
 		s.True(ok)
-		s.False(valueCandi.isPtr)
+		s.False(valueCandi.IsPtr)
 	})
+}
+
+func (s *RowsSuite) TestParseFieldsBoundaries() {
+	type namedKey string
+	name := "kept"
+	for _, input := range []any{nil, (*ValidStruct)(nil), map[int]any{1: "value"}} {
+		_, err := rowutil.ParseFields(reflect.ValueOf(input))
+		s.Error(err)
+	}
+	for _, input := range []any{
+		map[string]*string{"name": &name},
+		map[namedKey]*string{"name": &name},
+	} {
+		fields, err := rowutil.ParseFields(reflect.ValueOf(input))
+		s.Require().NoError(err)
+		s.Equal(&name, fields["name"].Value.Interface())
+		s.False(fields["name"].IsPtr, "map values must retain their representation")
+	}
+	fields, err := rowutil.ParseFields(reflect.ValueOf(map[string]any(nil)))
+	s.NoError(err)
+	s.Empty(fields)
+
+	input := &struct {
+		ID      int64      `milvus:"primary_key;name:id"`
+		Vector  [2]float32 `milvus:"name:vector"`
+		Ignored int        `milvus:"-"`
+	}{ID: 1, Vector: [2]float32{2, 3}}
+	fields, err = rowutil.ParseFields(reflect.ValueOf(&input))
+	s.Require().NoError(err)
+	s.Len(fields, 2)
+	s.Equal(int64(1), fields["id"].Value.Interface())
+	s.Equal([]float32{2, 3}, fields["vector"].Value.Interface())
+	s.True(fields["id"].Value.CanSet())
+}
+
+func (s *RowsSuite) TestParseTagSettingCompatibility() {
+	for _, tc := range []struct {
+		tag  string
+		want map[string]string
+	}{
+		{"", map[string]string{}},
+		{";name:profile;;", map[string]string{"NAME": "profile"}},
+		{"primary_key; name:profile;dim:2", map[string]string{"PRIMARY_KEY": "PRIMARY_KEY", "NAME": "profile", "DIM": "2"}},
+		{`name:a\;b\;c:tail;auto_id`, map[string]string{"NAME": "a;b;c:tail", "AUTO_ID": "AUTO_ID"}},
+	} {
+		s.Equal(tc.want, ParseTagSetting(tc.tag, MilvusTagSep))
+	}
+}
+
+func (s *RowsSuite) TestSetFieldEmbeddedName() {
+	type identity struct {
+		ID *int64 `milvus:"name:id"`
+	}
+	input := &struct {
+		identity
+		Ignored int64 `milvus:"-"`
+	}{}
+	s.NoError(SetField(&input, "id", int64(42)))
+	s.Require().NotNil(input.ID)
+	s.Equal(int64(42), *input.ID)
+	s.NoError(SetField(input, "Ignored", int64(7)))
+	s.Zero(input.Ignored)
+	s.NoError(SetField(input, "id", nil))
+	s.Nil(input.ID)
 }
 
 func TestRows(t *testing.T) {

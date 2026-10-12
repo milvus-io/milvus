@@ -45,8 +45,11 @@ typedef struct CValidateResult {
 CValidateResult
 validate_tokenizer(const char* params, const char* extra_info);
 
-CTokenStream
-create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len);
+CStatus
+create_token_stream(CTokenizer tokenizer,
+                    const char* text,
+                    uint32_t text_len,
+                    CTokenStream* token_stream);
 
 #ifdef __cplusplus
 }

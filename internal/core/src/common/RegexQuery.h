@@ -59,8 +59,10 @@ struct RegexMatcher {
         // codepoints — consistent with Tantivy's Unicode regex engine.
         options.set_encoding(RE2::Options::EncodingUTF8);
         re2_ = std::make_unique<RE2>(pattern, options);
-        AssertInfo(re2_->ok(),
-                   "Failed to compile regex pattern: " + re2_->error());
+        if (!(re2_->ok())) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "Failed to compile regex pattern: " + re2_->error());
+        }
     }
 
  private:
@@ -97,8 +99,10 @@ struct PartialRegexMatcher {
         // codepoints — consistent with Tantivy's Unicode regex engine.
         options.set_encoding(RE2::Options::EncodingUTF8);
         re2_ = std::make_unique<RE2>(pattern, options);
-        AssertInfo(re2_->ok(),
-                   "Failed to compile regex pattern: " + re2_->error());
+        if (!(re2_->ok())) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "Failed to compile regex pattern: " + re2_->error());
+        }
     }
 
  private:
@@ -122,6 +126,11 @@ PartialRegexMatcher::operator()(const std::string_view& operand) const {
 // Examples: "abc%def" -> "abc", "ab_cd%" -> "ab", "%abc" -> ""
 std::string
 extract_fixed_prefix_from_pattern(const std::string& pattern);
+
+// Maximal literal runs between unescaped LIKE wildcards (`%` and `_`).
+// Shared by NGRAM and FMINDEX Match candidate generation.
+std::vector<std::string>
+split_by_wildcard(const std::string& literal);
 
 // Get the byte length of a UTF-8 character from its first byte
 // Returns 1-4 for valid UTF-8 lead bytes, 1 for invalid/continuation bytes

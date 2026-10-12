@@ -303,6 +303,24 @@ func getSegmentJSON(node *QueryNode, collectionID int64) string {
 	return string(ret)
 }
 
+func getLocalStorageMetrics(loader segments.Loader) *metricsinfo.QueryNodeLocalStorageMetrics {
+	if loader == nil {
+		return nil
+	}
+	diskUsed, err := loader.GetLocalDiskUsage()
+	if err != nil || diskUsed < 0 {
+		return nil
+	}
+	capacity := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+	if capacity <= 0 {
+		return nil
+	}
+	return &metricsinfo.QueryNodeLocalStorageMetrics{
+		CapacityBytes: capacity,
+		UsedBytes:     diskUsed,
+	}
+}
+
 // getSystemInfoMetrics returns metrics info of QueryNode
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (string, error) {
 	usedMem := hardware.GetUsedMemoryCount()
@@ -341,6 +359,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		JemallocOverhead:      jemallocStats.Overhead,
 		JemallocSuccess:       jemallocStats.Success,
 	}
+	localStorage := getLocalStorageMetrics(node.loader)
 
 	quotaMetrics, err := getQuotaMetrics(node)
 	if err != nil {
@@ -369,6 +388,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		},
 		QuotaMetrics:      quotaMetrics,
 		CollectionMetrics: collectionMetrics,
+		LocalStorage:      localStorage,
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 

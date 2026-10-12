@@ -259,13 +259,28 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 	replica *meta.Replica,
 	delegatorList []*meta.DmChannel,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+	if len(delegatorList) == 0 {
+		return toLoad, toRelease
+	}
+
 	log := mlog.With(
 		mlog.FieldCollectionID(collectionID),
 		mlog.Int64("replicaID", replica.GetID()))
 
+	// Hoisted out of the loop: all five depend only on collectionID. The two
+	// GetGrowingSegmentsByCollection calls rebuild a UniqueSet over every DM
+	// channel of the target, so an N-shard collection paid that N times per
+	// replica per check round. Trade-off: all five now run even when every
+	// delegator fails the version gate below, where the per-iteration form ran
+	// only the first.
+	targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
+	nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+	currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+
 	for _, d := range delegatorList {
 		view := d.View
-		targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(ctx, rate.Limit(20), "before shard delegator update it's readable version, skip release segment",
@@ -276,11 +291,6 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 			)
 			continue
 		}
-
-		nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
-		nextTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.NextTarget)
-		currentTargetSegmentIDs := c.targetMgr.GetGrowingSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
-		currentTargetChannelMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 		// get segment which exist on leader view, but not on current target and next target
 		for _, segment := range view.GrowingSegments {
@@ -362,6 +372,13 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	currentTargetExist := c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
 
+	// Hoisted out of the loop below, where it was resolved once per segment on
+	// the refresh/import path and each call read-locks the collection manager's
+	// coordinator-wide RWMutex. The pointer only: IsRefreshed() still reads live
+	// state under the collection's own lock, so a refresh landing mid-loop is
+	// still observed.
+	collection := c.meta.GetCollection(ctx, collectionID)
+
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
@@ -372,7 +389,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 					loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
 				} else {
 					// Segment not in current target -> check if refresh in progress
-					collection := c.meta.GetCollection(ctx, collectionID)
 					if collection != nil && !collection.IsRefreshed() {
 						// Refresh scenario (import) -> Use user's configured priority
 						loadPriorities = append(loadPriorities, replica.LoadPriority())

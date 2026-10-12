@@ -28,6 +28,7 @@ from chaos.checker import (
     SnapshotRestoreChecker,
     TextMatchChecker,
     UpsertChecker,
+    configure_heavy_operation_schedules,
 )
 from common import common_func as cf
 from common.common_type import CaseLabel
@@ -122,6 +123,7 @@ class TestOperations(TestBase):
             Op.null_vector_query: NullVectorQueryChecker(collection_name=c_name),
             Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
         }
+        configure_heavy_operation_schedules(checkers)
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 
@@ -143,22 +145,29 @@ class TestOperations(TestBase):
         # event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
         # event_records.insert("init_health_checkers", "finished")
-        cc.start_monitor_threads(self.health_checkers)
-        log.info("*********************Load Start**********************")
-        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
-        if request_duration[-1] == "+":
-            request_duration = request_duration[:-1]
-        request_duration = eval(request_duration)
-        for i in range(10):
-            sleep(request_duration // 10)
-            for k, v in self.health_checkers.items():
-                v.check_result()
-                # log.info(v.check_result())
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
-        time.sleep(60)
-        ra = ResultAnalyzer()
-        ra.get_stage_success_rate()
-        if is_check:
-            assert_statistic(self.health_checkers)
-            assert_expectations()
+        with cc.monitor_threads(self.health_checkers):
+            log.info("*********************Load Start**********************")
+            request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+            if request_duration[-1] == "+":
+                request_duration = request_duration[:-1]
+            request_duration = eval(request_duration)
+            for i in range(10):
+                sleep(request_duration // 10)
+                for checker in self.health_checkers.values():
+                    checker.check_result()
+            # The pod-failure experiment can still have most of its seven-minute
+            # window remaining when the request loop ends. Keep the recovery
+            # wait bounded, but allow the fault to expire and Milvus to restart.
+            pods_ready = wait_pods_ready(
+                self.milvus_ns,
+                f"app.kubernetes.io/instance={self.release_name}",
+                timeout=600,
+            )
+            assert pods_ready, f"Milvus pods for {self.release_name} did not become ready"
+            time.sleep(60)
+            ra = ResultAnalyzer()
+            ra.get_stage_success_rate()
+            if is_check:
+                assert_statistic(self.health_checkers)
+                assert_expectations()
         log.info("*********************Chaos Test Completed**********************")

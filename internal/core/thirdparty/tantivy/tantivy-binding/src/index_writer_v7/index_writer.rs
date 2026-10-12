@@ -98,7 +98,6 @@ pub struct IndexWriterWrapperImpl {
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
     pub(crate) enable_user_specified_doc_id: bool,
-    pub(crate) enable_background_merge: bool,
 }
 
 impl IndexWriterWrapperImpl {
@@ -128,9 +127,9 @@ impl IndexWriterWrapperImpl {
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         if !enable_background_merge {
-            // Sealed index builds end with an explicit merge-all in finish();
-            // background policy-driven merges would only waste IO and race
-            // with it, so disable them entirely for build-mode writers.
+            // Sealed index builds keep the segments produced by the writer's
+            // memory-budget flushes. Disable policy-driven background merges to
+            // avoid additional write amplification during the build.
             index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
         }
         Ok(IndexWriterWrapperImpl {
@@ -139,7 +138,6 @@ impl IndexWriterWrapperImpl {
             index: Arc::new(index),
             id_field,
             enable_user_specified_doc_id,
-            enable_background_merge,
         })
     }
 
@@ -277,18 +275,6 @@ impl IndexWriterWrapperImpl {
 
     pub fn finish(mut self) -> Result<()> {
         self.index_writer.commit()?;
-
-        if !self.enable_background_merge {
-            // Build-mode writers use NoMergePolicy (set in new()), so no
-            // background merge can race this explicit merge-all. Collapse the
-            // auto-flushed segments into a single one. Background-merge writers
-            // (e.g. growing segments) are left to their own policy and are not
-            // forced to a single segment here.
-            let segment_ids = self.index.searchable_segment_ids()?;
-            if segment_ids.len() > 1 {
-                self.index_writer.merge(&segment_ids).wait()?;
-            }
-        }
         block_on(self.index_writer.garbage_collect_files())?;
         self.index_writer.wait_merging_threads()?;
 
@@ -316,8 +302,8 @@ mod tests {
 
     // tantivy's smallest per-thread arena (MEMORY_BUDGET_NUM_BYTES_MIN = 15 MB).
     // With a single indexing thread this is tight enough that the doc count below
-    // spills into several auto-flushed segments before the finish-time commit,
-    // which is exactly the multi-segment build this test needs to exercise.
+    // spills into several auto-flushed segments, which is exactly the
+    // multi-segment build this test needs to exercise.
     const MIN_MEMORY_BUDGET: usize = 15_000_000;
     const NUM_DOCS: i64 = 1_000_000;
 
@@ -334,16 +320,12 @@ mod tests {
         .unwrap()
     }
 
-    /// A build-mode (enable_background_merge == false) V7 writer must collapse the
-    /// auto-flushed segments into exactly one searchable segment in finish().
-    ///
-    /// Regression guard for the finish-time merge-all (issue #51054): the V7 writer
-    /// previously shipped sealed indexes as many ~15 MB segments, and if the merge
-    /// is ever dropped again the index silently regresses to multi-segment with only
-    /// perf/logs to reveal it. The precondition assert keeps the test honest — it
-    /// proves the workload really produced >1 segment before finish() merged them.
+    /// A build-mode (enable_background_merge == false) V7 writer must preserve the
+    /// segments produced by memory-budget flushes instead of merging them all in
+    /// finish(). The production budget is large enough to keep the segment count
+    /// low, while avoiding a full-index rewrite at the end of the build.
     #[test]
-    fn test_sealed_build_finishes_single_segment() {
+    fn test_sealed_build_finish_preserves_segments() {
         let dir = TempDir::new().unwrap();
         let mut writer = build_i64_writer(dir.path().to_str().unwrap(), false);
         for i in 0..NUM_DOCS {
@@ -351,8 +333,8 @@ mod tests {
         }
         writer.commit().unwrap();
 
-        // Precondition: the build workload genuinely auto-flushes multiple segments,
-        // so the single-segment assertion after finish() is meaningful.
+        // Precondition: the build workload genuinely auto-flushes multiple
+        // segments, so the post-finish assertion exercises the no-merge path.
         let before = writer.index.searchable_segment_metas().unwrap();
         assert!(
             before.len() > 1,
@@ -360,15 +342,16 @@ mod tests {
             before.len()
         );
 
-        // finish() on a build-mode writer must merge them down to exactly one.
+        let segment_count_before_finish = before.len();
         writer.finish().unwrap();
 
         let index = Index::open_in_dir(dir.path()).unwrap();
         let after = index.searchable_segment_metas().unwrap();
         assert_eq!(
             after.len(),
-            1,
-            "sealed build must produce exactly one tantivy segment, got {}",
+            segment_count_before_finish,
+            "finish must preserve the flushed tantivy segments: before {}, after {}",
+            segment_count_before_finish,
             after.len()
         );
     }

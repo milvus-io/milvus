@@ -2,6 +2,7 @@ package fastpb
 
 import (
 	"math"
+	"slices"
 
 	"google.golang.org/protobuf/proto"
 
@@ -98,133 +99,29 @@ func decodeScalarFallback(num int, v []byte, sf *schemapb.ScalarField) (bool, er
 
 // --- array-message decoders: b is the *Array submessage; field 1 holds the data ---
 
-func decodePackedBool(b []byte, dst *[]bool, m proto.Message) error {
-	full := b
-	for len(b) > 0 {
-		num, wtype, n := consumeTag(b)
-		if n <= 0 {
-			return errMalformed
-		}
-		b = b[n:]
-		if isProto2Group(wtype) {
-			return errProto2
-		}
-		if num != 1 {
-			return fallbackUnmarshal(full, m) // unknown field → official codec, preserves it
-		}
-		switch wtype {
-		case 2: // packed
-			v, n := consumeBytes(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			for len(v) > 0 {
-				x, m := consumeVarint(v)
-				if m <= 0 {
-					return errMalformed
-				}
-				*dst = append(*dst, x != 0)
-				v = v[m:]
-			}
-			b = b[n:]
-		case 0: // single varint
-			x, n := consumeVarint(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			*dst = append(*dst, x != 0)
-			b = b[n:]
-		default:
-			return fallbackUnmarshal(full, m) // field 1 with unexpected wire type → official
-		}
-	}
-	return nil
+// protobuf-go already has specialized packed-scalar decoders that preallocate
+// once and fast-path common varint lengths. Keep these arrays on that decoder
+// rather than the slower hand-written element-by-element path.
+func decodePackedBool(b []byte, _ *[]bool, m proto.Message) error {
+	return fallbackUnmarshal(b, m)
 }
 
-func decodePackedI32(b []byte, dst *[]int32, m proto.Message) error {
-	full := b
-	for len(b) > 0 {
-		num, wtype, n := consumeTag(b)
-		if n <= 0 {
-			return errMalformed
-		}
-		b = b[n:]
-		if isProto2Group(wtype) {
-			return errProto2
-		}
-		if num != 1 {
-			return fallbackUnmarshal(full, m) // unknown field → official codec, preserves it
-		}
-		switch wtype {
-		case 2: // packed
-			v, n := consumeBytes(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			for len(v) > 0 {
-				x, m := consumeVarint(v)
-				if m <= 0 {
-					return errMalformed
-				}
-				*dst = append(*dst, int32(x))
-				v = v[m:]
-			}
-			b = b[n:]
-		case 0: // single varint
-			x, n := consumeVarint(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			*dst = append(*dst, int32(x))
-			b = b[n:]
-		default:
-			return fallbackUnmarshal(full, m) // field 1 with unexpected wire type → official
-		}
-	}
-	return nil
+func decodePackedI32(b []byte, _ *[]int32, m proto.Message) error {
+	return fallbackUnmarshal(b, m)
 }
 
-func decodePackedI64(b []byte, dst *[]int64, m proto.Message) error {
-	full := b
-	for len(b) > 0 {
-		num, wtype, n := consumeTag(b)
-		if n <= 0 {
-			return errMalformed
-		}
-		b = b[n:]
-		if isProto2Group(wtype) {
-			return errProto2
-		}
-		if num != 1 {
-			return fallbackUnmarshal(full, m) // unknown field → official codec, preserves it
-		}
-		switch wtype {
-		case 2: // packed
-			v, n := consumeBytes(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			for len(v) > 0 {
-				x, m := consumeVarint(v)
-				if m <= 0 {
-					return errMalformed
-				}
-				*dst = append(*dst, int64(x))
-				v = v[m:]
-			}
-			b = b[n:]
-		case 0: // single varint
-			x, n := consumeVarint(b)
-			if n <= 0 {
-				return errMalformed
-			}
-			*dst = append(*dst, int64(x))
-			b = b[n:]
-		default:
-			return fallbackUnmarshal(full, m) // field 1 with unexpected wire type → official
+func decodePackedI64(b []byte, _ *[]int64, m proto.Message) error {
+	return fallbackUnmarshal(b, m)
+}
+
+func countPackedVarints(b []byte) int {
+	count := 0
+	for _, c := range b {
+		if c < 0x80 {
+			count++
 		}
 	}
-	return nil
+	return count
 }
 
 func decodePackedF32(b []byte, dst *[]float32, m proto.Message) error {
@@ -330,40 +227,76 @@ func appendPackedF32(v []byte, dst *[]float32) error {
 
 // appendPackedBool appends a raw packed-varint bool payload to dst.
 func appendPackedBool(v []byte, dst *[]bool) error {
+	*dst = slices.Grow(*dst, countPackedVarints(v))
+	s := *dst
 	for len(v) > 0 {
-		x, m := consumeVarint(v)
+		var x uint64
+		var m int
+		if len(v) >= 1 && v[0] < 0x80 {
+			x, m = uint64(v[0]), 1
+		} else if len(v) >= 2 && v[1] < 0x80 {
+			x, m = uint64(v[0]&0x7f)|uint64(v[1])<<7, 2
+		} else {
+			x, m = consumeVarint(v)
+		}
 		if m <= 0 {
+			*dst = s
 			return errMalformed
 		}
-		*dst = append(*dst, x != 0)
+		s = append(s, x != 0)
 		v = v[m:]
 	}
+	*dst = s
 	return nil
 }
 
 // appendPackedU32 appends a raw packed-varint payload to dst ([]uint32).
 func appendPackedU32(v []byte, dst *[]uint32) error {
+	*dst = slices.Grow(*dst, countPackedVarints(v))
+	s := *dst
 	for len(v) > 0 {
-		x, m := consumeVarint(v)
+		var x uint64
+		var m int
+		if len(v) >= 1 && v[0] < 0x80 {
+			x, m = uint64(v[0]), 1
+		} else if len(v) >= 2 && v[1] < 0x80 {
+			x, m = uint64(v[0]&0x7f)|uint64(v[1])<<7, 2
+		} else {
+			x, m = consumeVarint(v)
+		}
 		if m <= 0 {
+			*dst = s
 			return errMalformed
 		}
-		*dst = append(*dst, uint32(x))
+		s = append(s, uint32(x))
 		v = v[m:]
 	}
+	*dst = s
 	return nil
 }
 
 // appendPackedI64 appends a raw packed-varint payload to dst.
 func appendPackedI64(v []byte, dst *[]int64) error {
+	*dst = slices.Grow(*dst, countPackedVarints(v))
+	s := *dst
 	for len(v) > 0 {
-		x, m := consumeVarint(v)
+		var x uint64
+		var m int
+		if len(v) >= 1 && v[0] < 0x80 {
+			x, m = uint64(v[0]), 1
+		} else if len(v) >= 2 && v[1] < 0x80 {
+			x, m = uint64(v[0]&0x7f)|uint64(v[1])<<7, 2
+		} else {
+			x, m = consumeVarint(v)
+		}
 		if m <= 0 {
+			*dst = s
 			return errMalformed
 		}
-		*dst = append(*dst, int64(x))
+		s = append(s, int64(x))
 		v = v[m:]
 	}
+	*dst = s
 	return nil
 }
 

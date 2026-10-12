@@ -8,6 +8,8 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
   - Uses global configuration from `paramtable.Get().CommonCfg.EnabledOptimizeExpr`
 - `RewriteExprWithConfig(*planpb.Expr, bool) *planpb.Expr` (in `entry.go`)
   - Same as `RewriteExpr` but allows custom configuration for testing or special cases.
+- `MergeNormalizedAnd(*planpb.Expr, *planpb.Expr) *planpb.Expr` (in `entry.go`)
+  - Combines already-rewritten user and RLS predicates using the same AND rules, without revisiting or mutating the input trees.
 
 ### Configuration
 
@@ -24,18 +26,24 @@ The rewriter can be configured via the following parameter (refreshable at runti
 1) IN / NOT IN normalization and merges (`term_in.go`)
 - OR-equals to IN (same column):
   - `a == v1 OR a == v2 ...` → `a IN (v1, v2, ...)`
-  - Numeric columns only merge when count > threshold (default 150); others when count > 1.
+  - Merge two or more compatible equalities.
 - AND-not-equals to NOT IN (same column):
   - `a != v1 AND a != v2 ...` → `NOT (a IN (v1, v2, ...))`
-  - Same thresholds as above.
+  - Merge two or more compatible inequalities when `!=` is equivalent to `NOT (==)` for that column.
 - IN vs Equal redundancy elimination (same column):
   - AND: `(a ∈ S) AND (a = v)`:
     - if `v ∈ S` → `a = v`
     - if `v ∉ S` → contradiction → constant `false`
   - OR:  `(a ∈ S) OR (a = v)` → `a ∈ (S ∪ {v})` (always union)
+  - AND simplification requires exactly one remaining IN in the group. If an empty intersection cannot safely become a constant (nullable fields or missing paths), retain all remaining IN constraints.
 - IN with IN union:
   - OR: `(a ∈ S1) OR (a ∈ S2)` → `a ∈ (S1 ∪ S2)` with sorting/dedup
   - AND: `(a ∈ S1) AND (a ∈ S2)` → `a ∈ (S1 ∩ S2)`; empty intersection → constant `false`
+- IN with NotEqual (`in_not_equal.go`):
+  - AND: `(a ∈ S) AND a != d1 AND ...` → remove the excluded values from S.
+  - OR: `(a ∈ S) OR a != d1 OR ...` → `true` if an excluded value belongs to S; otherwise drop the redundant IN.
+  - Build a typed exclusion set once and scan S once: expected O(M+K) membership work for M IN values and K inequalities. A single inequality uses direct comparisons without hashing. Sorting/normalization costs are separate.
+  - Preserve NULL/missing-path semantics when folding to constants. Skip FLOAT scalar/element-level narrowing, NaN, non-JSON nested access, reverse membership, mixed literal kinds, and groups with multiple remaining IN constraints.
 - Sort and deduplicate `IN` / `NOT IN` value lists (supported types: bool, int64, float64, string).
 
 2) TEXT_MATCH OR merge (`text_match.go`)
@@ -102,9 +110,9 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
-- Optional visitor rewrites do not descend into `MatchExpr` or `ElementFilterExpr` predicates.
+- Same-operator chains are flattened once, their operand subtrees are rewritten, and the result is rebuilt as a balanced binary tree. Parser balancing also runs before template filling.
+- Optional visitor rewrites do not descend into `MatchExpr` predicates.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
-- Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.
 
 ### Pass Ordering (current)
@@ -115,8 +123,8 @@ The rewriter can be configured via the following parameter (refreshable at runti
   4. TEXT_MATCH merge (no options)
   5. Range weaken (same-direction bounds)
   6. BinaryRangeExpr merge (overlapping/adjacent intervals)
-  7. IN with `!=` short-circuiting
-  8. IN ∪ IN union
+  7. IN ∪ IN union
+  8. IN vs NotEqual simplification
   9. IN vs Equal redundancy elimination
   10. Fold back to BinaryExpr
 - AND branch:
@@ -124,20 +132,21 @@ The rewriter can be configured via the following parameter (refreshable at runti
   2. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
   3. Range tighten / interval construction
   4. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
-  5. IN ∪ IN intersection (if any)
-  6. IN with `!=` filtering
+  5. IN ∩ IN intersection (if any)
+  6. IN vs NotEqual simplification
   7. IN ∩ range filtering
   8. IN vs Equal redundancy elimination
   9. AND `!=` → NOT IN
   10. Fold back to BinaryExpr
 
-Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
+Multiple `!=` predicates not consumed by the cross-rule may still combine into NOT IN under AND. Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
 ### File Structure
 - `entry.go`      — rewrite entry and visitor orchestration
 - `util.go`       — shared helpers (column keying, value classification, sorting/dedup, constructors)
 - `array_contains.go` — physical ARRAY contains Any/All merges
 - `term_in.go`    — IN/NOT IN normalization and conversions
+- `in_not_equal.go` — typed-set IN/NotEqual cross-rewrites
 - `text_match.go` — TEXT_MATCH OR merge (no options)
 - `range.go`      — range tightening/weakening and interval construction
 

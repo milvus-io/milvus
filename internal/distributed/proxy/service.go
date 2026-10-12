@@ -126,11 +126,25 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
+// metricsPortAuthMiddleware protects the console API on the metrics port.
+// The retired non-underscore REST API is no longer mounted on this router.
+func metricsPortAuthMiddleware() gin.HandlerFunc {
+	consoleAuth := mhttp.GinAdminAuthMiddleware(true)
+	legacyEnabled := proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+	return func(c *gin.Context) {
+		if mhttp.AdminAuthEnabled() {
+			consoleAuth(c)
+		} else if legacyEnabled {
+			authenticate(c)
+		}
+	}
+}
+
 func authenticate(c *gin.Context) {
 	username, password, ok := httpserver.ParseUsernamePassword(c)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
-			mlog.Debug(context.TODO(), "auth successful", mlog.String("username", username))
+			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -144,10 +158,10 @@ func authenticate(c *gin.Context) {
 			c.Set(httpserver.ContextToken, rawToken)
 			return
 		}
-		mlog.Warn(context.TODO(), "fail to verify apikey", mlog.Err(err))
+		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
 	}
 
-	hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+	hookutil.GetExtension().ReportAction(c.Request.Context(), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
 	}, nil, c.FullPath(), hookutil.ActionAuthorize)
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
@@ -165,24 +179,41 @@ func (s *Server) registerHTTPServer() {
 	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	metricsGinHandler := gin.Default()
-	apiv1 := metricsGinHandler.Group(apiPathPrefix)
-	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		apiv1.Use(authenticate)
-	}
-	handlers := httpserver.NewHandlers(s.proxy)
-	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
-	}
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
-		Handler:     metricsGinHandler.Handler(),
+		Handler:     newMetricsPortEngine(gin.Default(), s.proxy).Handler(),
 	})
+}
+
+// newMetricsPortEngine mounts everything the proxy serves on the metrics port.
+//
+// One group, one auth middleware, passed to Group rather than Use'd after it,
+// so the handler slice the routes inherit is the one this builds. Tests drive
+// this function rather than repeating its shape, because a test that
+// reassembles the tree by hand cannot notice the assembly changing under it —
+// and the assembly is exactly what makes the gate apply.
+func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	if !proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		return engine
+	}
+	apiv1 := engine.Group(apiPathPrefix,
+		httpserver.RequestHandlerFunc, metricsPortAuthMiddleware())
+	if p, ok := proxyComponent.(consoleRouterRegistrar); ok {
+		// The web console API — cluster info and configs, database and
+		// collection listings, slow queries, coordinator and node distribution,
+		// plus the telemetry routes that push commands to connected clients.
+		p.RegisterRestRouter(apiv1)
+	}
+	return engine
+}
+
+// consoleRouterRegistrar is what *proxy.Proxy satisfies. Asserting on the
+// behavior rather than the concrete type is what lets a test put the console
+// routes on this tree; with a concrete assertion the whole console surface is
+// unreachable from any test and silently uncovered.
+type consoleRouterRegistrar interface {
+	RegisterRestRouter(router gin.IRouter)
 }
 
 func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {
@@ -215,14 +246,17 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	ginHandler.Use(accesslog.AccessLogMiddleware)
 	ginHandler.Use(httpserver.LoggerHandlerFunc(), gin.Recovery())
 	ginHandler.Use(httpserver.RequestHandlerFunc)
+	ginHandler.Use(httpserver.IdempotencyKeyHandlerFunc)
 	ginHandler.Use(func(c *gin.Context) {
 		c.Set(httpserver.ContextUsername, "")
 	})
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
-	app := ginHandler.Group("/v1")
-	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	if proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		app := ginHandler.Group("/v1")
+		httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	}
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}
@@ -305,6 +339,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 
 	var unaryServerOption grpc.ServerOption
+	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
@@ -320,8 +355,16 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			proxy.TraceLogInterceptor,
 			connection.KeepActiveInterceptor,
 		))
+		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
+		// unary chain, so they must be authenticated and authorized through a
+		// dedicated stream interceptor chain. Without this the external server
+		// would accept unauthenticated/unauthorized streaming calls on the
+		// client port. The order mirrors the unary chain: first authenticate
+		// (resolve the user into ctx), then enforce authorization on that user.
+		streamServerOption = newStreamInterceptorOption(getMetaCache)
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
+		streamServerOption = grpc.EmptyServerOption{}
 	}
 
 	grpcOpts := []grpc.ServerOption{
@@ -330,6 +373,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		unaryServerOption,
+		streamServerOption,
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
 		grpc.StatsHandler(metrics.NewGRPCSizeStatsHandler().
 			// both inbound and outbound
@@ -406,6 +450,23 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
+}
+
+// newStreamInterceptorOption builds the security-critical stream interceptor
+// chain for the external gRPC server: authentication, then RBAC (fail-closed).
+// It mirrors the unary chain's auth-before-RBAC ordering; streaming RPCs carry
+// no request object at the interceptor layer, so the required authorization is
+// resolved per full-method name by StreamPrivilegeInterceptor and unregistered
+// stream methods are denied by default. It is extracted so the wiring is
+// testable independently of the full Server lifecycle — a regression here would
+// silently reopen the stream auth bypass (#52387), so the chain is covered by a
+// dedicated test.
+func newStreamInterceptorOption(getMetaCache func() proxy.Cache) grpc.ServerOption {
+	return grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+		proxy.GrpcAuthStreamInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
+		proxy.PrivilegeStreamInterceptor(proxy.StreamPrivilegeInterceptor),
+		mlog.StreamServerInterceptor(typeutil.ProxyRole),
+	))
 }
 
 func (s *Server) startInternalGrpc(errChan chan error) {
@@ -1119,6 +1180,38 @@ func (s *Server) ListPrivilegeGroups(ctx context.Context, req *milvuspb.ListPriv
 
 func (s *Server) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return s.proxy.OperatePrivilegeGroup(ctx, req)
+}
+
+func (s *Server) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateRowPolicy(ctx, req)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateRowPolicy(ctx, req)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.DropRowPolicy(ctx, req)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.proxy.ListRowPolicies(ctx, req)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.proxy.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.proxy.ListRLSPrincipals(ctx, req)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.DeleteRLSPrincipalTags(ctx, req)
 }
 
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {

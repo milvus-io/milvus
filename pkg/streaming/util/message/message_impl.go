@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type messageImpl struct {
@@ -49,21 +48,6 @@ func (m *messageImpl) Payload() []byte {
 		panic(fmt.Sprintf("can not decode message payload: %s", err))
 	}
 	return payload
-}
-
-// DecodePayload returns the message payload without converting decryption
-// failures into a process-wide panic. It is intended for append-path callers
-// that must reject one message when its encrypted body cannot be read.
-func DecodePayload(ctx context.Context, msg BasicMessage) ([]byte, error) {
-	if msg == nil {
-		return nil, merr.WrapErrServiceInternalMsg("message is nil")
-	}
-	if decoder, ok := msg.(interface {
-		decodePayload(context.Context) ([]byte, error)
-	}); ok {
-		return decoder.decodePayload(ctx)
-	}
-	return msg.Payload(), nil
 }
 
 func (m *messageImpl) decodePayload(ctx context.Context) ([]byte, error) {

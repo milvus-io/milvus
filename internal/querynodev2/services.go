@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -593,10 +592,6 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	log.Info(ctx, "load segments done...",
 		mlog.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
-
-	// Publish filesystem metrics after load task completion
-	// Use default filesystem (empty path) for load tasks
-	storagev2.PublishDefaultFilesystemMetrics()
 
 	return merr.Success(), nil
 }
@@ -1688,7 +1683,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 	// maybe it shall be lower in case of heavy CPU usage may impacting search/query
 	pool := segments.GetDeletePool()
 	futures := make([]*conc.Future[struct{}], 0, len(segs))
-	errSet := typeutil.NewConcurrentSet[int64]()
+	errMap := typeutil.NewConcurrentMap[int64, error]()
 
 	for _, segment := range segs {
 		segment := segment
@@ -1697,7 +1692,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 			// current implementation still copys pks into protobuf(or arrow) struct
 			err := segment.Delete(ctx, pks, req.GetTimestamps())
 			if err != nil {
-				errSet.Insert(segment.ID())
+				errMap.Insert(segment.ID(), err)
 				log.Warn(ctx, "segment delete failed",
 					mlog.Int64("segmentID", segment.ID()),
 					mlog.Err(err))
@@ -1707,13 +1702,24 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 		}))
 	}
 
-	// ignore error returned, since error segment is recorded into error set
+	// ignore error returned, since error segment is recorded into error map
 	_ = conc.AwaitAll(futures...)
 
-	// return merr.Success(), nil
+	// Carry the typed per-segment failure (index-aligned with failed_ids) so
+	// the delegator can distinguish a retryable failure (OOM, transient IO --
+	// retry) from a permanent one (offline the segment) instead of offlining
+	// on every failure.
+	failedIds := make([]int64, 0, errMap.Len())
+	failedStatuses := make([]*commonpb.Status, 0, errMap.Len())
+	errMap.Range(func(segmentID int64, segErr error) bool {
+		failedIds = append(failedIds, segmentID)
+		failedStatuses = append(failedStatuses, merr.Status(segErr))
+		return true
+	})
 	return &querypb.DeleteBatchResponse{
-		Status:    merr.Success(),
-		FailedIds: errSet.Collect(),
+		Status:         merr.Success(),
+		FailedIds:      failedIds,
+		FailedStatuses: failedStatuses,
 	}, nil
 }
 
@@ -1727,7 +1733,10 @@ func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb
 
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
 	for i, text := range req.GetPlaceholder() {
-		stream := tokenizer.NewTokenStream(string(text))
+		stream, err := tokenizer.NewTokenStream(string(text))
+		if err != nil {
+			return nil, err
+		}
 
 		results[i] = &milvuspb.AnalyzerResult{
 			Tokens: make([]*milvuspb.AnalyzerToken, 0),

@@ -14,7 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
+	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -1399,6 +1399,12 @@ func TestExpr_IsNull(t *testing.T) {
 		`VarCharField IS NULL`,
 		`ArrayField is null`,
 		`StringArrayField IS NULL`,
+		`FloatVectorField is null`,
+		`BinaryVectorField is null`,
+		`Float16VectorField is null`,
+		`BFloat16VectorField is null`,
+		`SparseFloatVectorField is null`,
+		`Int8VectorField is null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1406,12 +1412,6 @@ func TestExpr_IsNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is null`,
-		`FloatVectorField is null`,
-		`BinaryVectorField is null`,
-		`Float16VectorField is null`,
-		`BFloat16VectorField is null`,
-		`SparseFloatVectorField is null`,
-		`Int8VectorField is null`,
 		// issue #48904: array element access with IS NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.
@@ -1501,6 +1501,12 @@ func TestExpr_IsNotNull(t *testing.T) {
 		`VarCharField IS NOT NULL`,
 		`ArrayField is not null`,
 		`StringArrayField IS NOT NULL`,
+		`FloatVectorField is not null`,
+		`BinaryVectorField is not null`,
+		`Float16VectorField is not null`,
+		`BFloat16VectorField is not null`,
+		`SparseFloatVectorField is not null`,
+		`Int8VectorField is not null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1508,12 +1514,6 @@ func TestExpr_IsNotNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is not null`,
-		`FloatVectorField is not null`,
-		`BinaryVectorField is not null`,
-		`Float16VectorField is not null`,
-		`BFloat16VectorField is not null`,
-		`SparseFloatVectorField is not null`,
-		`Int8VectorField is not null`,
 		// issue #48904: array element access with IS NOT NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.
@@ -3170,14 +3170,14 @@ func Test_SegmentScorers(t *testing.T) {
 			kind   string
 		}{
 			{
-				name:   "bloom_match",
-				filter: "bloom_match(Int64Field, {bf})",
+				name:   "bloom",
+				filter: "membership_match(Int64Field, {bf}, type=bloom)",
 				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
 				kind:   "bloom",
 			},
 			{
-				name:   "roaring_match",
-				filter: "roaring_match(Int64Field, {rb})",
+				name:   "roaring",
+				filter: "membership_match(Int64Field, {rb}, type=roaring)",
 				values: map[string]*schemapb.TemplateValue{
 					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
 				},

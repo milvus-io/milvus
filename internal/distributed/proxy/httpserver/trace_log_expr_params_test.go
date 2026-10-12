@@ -58,19 +58,19 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 	t.Run("query", func(t *testing.T) {
 		out := redact(&QueryReqV2{
 			CollectionName: "c",
-			Filter:         "roaring_match(id, {ids})",
+			Filter:         "membership_match(id, {ids}, type=roaring)",
 			ExprParams:     map[string]json.RawMessage{"ids": secretJSON},
 		}).(*QueryReqV2)
 		assertAllRedacted(t, out.ExprParams)
 		// The placeholder name and the expression text stay visible.
 		assert.Contains(t, out.ExprParams, "ids")
-		assert.Equal(t, "roaring_match(id, {ids})", out.Filter)
+		assert.Equal(t, "membership_match(id, {ids}, type=roaring)", out.Filter)
 	})
 
 	t.Run("delete by filter", func(t *testing.T) {
 		out := redact(&CollectionFilterReq{
 			CollectionName: "c",
-			Filter:         "roaring_match(id, {ids})",
+			Filter:         "membership_match(id, {ids}, type=roaring)",
 			ExprParams:     map[string]json.RawMessage{"ids": secretJSON},
 		}).(*CollectionFilterReq)
 		assertAllRedacted(t, out.ExprParams)
@@ -79,7 +79,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 	t.Run("search", func(t *testing.T) {
 		out := redact(&SearchReqV2{
 			CollectionName: "c",
-			Filter:         "roaring_match(id, {ids})",
+			Filter:         "membership_match(id, {ids}, type=roaring)",
 			ExprParams:     map[string]json.RawMessage{"ids": secretJSON},
 		}).(*SearchReqV2)
 		assertAllRedacted(t, out.ExprParams)
@@ -89,7 +89,7 @@ func TestTraceLogRedactsExprParams(t *testing.T) {
 		out := redact(&HybridSearchReq{
 			CollectionName: "c",
 			Search: []SubSearchReq{
-				{Filter: "roaring_match(id, {ids})", ExprParams: map[string]json.RawMessage{"ids": secretJSON}},
+				{Filter: "membership_match(id, {ids}, type=roaring)", ExprParams: map[string]json.RawMessage{"ids": secretJSON}},
 				{Filter: "id > 0"},
 			},
 		}).(*HybridSearchReq)

@@ -2,11 +2,14 @@ import glob
 import os
 import threading
 import time
+from contextlib import contextmanager
 
 import pytest
 from chaos import constants
 from utils.util_log import test_log as log
 from yaml import full_load
+
+DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS = 180
 
 
 def check_config(chaos_config):
@@ -21,9 +24,9 @@ def check_config(chaos_config):
     return True
 
 
-def reset_counting(checkers={}):
+def reset_counting(checkers=None):
     """reset checker counts for all checker threads"""
-    for ch in checkers.values():
+    for ch in (checkers or {}).values():
         ch.reset()
 
 
@@ -35,15 +38,52 @@ def gen_experiment_config(yaml):
     return _config
 
 
-def start_monitor_threads(checkers={}):
+def start_monitor_threads(checkers=None):
     """start the threads by checkers"""
+    checkers = checkers or {}
     tasks = []
     for k, ch in checkers.items():
         ch._keep_running = True
-        t = threading.Thread(target=ch.keep_running, args=(), name=k, daemon=True)
+        thread_name = getattr(k, "value", str(k))
+        t = threading.Thread(target=ch.keep_running, args=(), name=thread_name, daemon=True)
         t.start()
         tasks.append(t)
     return tasks
+
+
+def stop_monitor_threads(checkers=None, tasks=None, join_timeout=DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS):
+    """Stop checker loops and wait for in-flight operations to return."""
+    checkers = checkers or {}
+    tasks = tasks or []
+
+    for checker in checkers.values():
+        checker._keep_running = False
+
+    deadline = time.monotonic() + max(0, join_timeout)
+    for task in tasks:
+        task.join(timeout=max(0, deadline - time.monotonic()))
+
+    alive_tasks = [task.name for task in tasks if task.is_alive()]
+    if alive_tasks:
+        log.warning(f"monitor threads did not stop within {join_timeout}s: {alive_tasks}")
+    return alive_tasks
+
+
+@contextmanager
+def monitor_threads(checkers=None, join_timeout=DEFAULT_MONITOR_JOIN_TIMEOUT_SECONDS):
+    """Run checker threads and always stop them when the test scope exits."""
+    checkers = checkers or {}
+    tasks = start_monitor_threads(checkers)
+    body_failed = False
+    try:
+        yield tasks
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        alive_tasks = stop_monitor_threads(checkers, tasks, join_timeout=join_timeout)
+        if alive_tasks and not body_failed:
+            raise AssertionError(f"chaos checker threads did not stop within {join_timeout}s: {', '.join(alive_tasks)}")
 
 
 def check_thread_status(tasks):

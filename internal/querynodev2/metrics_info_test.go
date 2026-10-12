@@ -261,3 +261,24 @@ func TestGetQuotaMetricsAggregatesCollectionGauges(t *testing.T) {
 	assert.Equal(t, float64(999), testutil.ToFloat64(metrics.QueryNodeNumEntities.WithLabelValues(
 		"", metrics.AllLabel, "8", metrics.AllLabel, segments.SegmentTypeGrowing.String())))
 }
+
+func TestGetLocalStorageMetrics(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.DiskCapacityLimit.Key, "1600"))
+	t.Cleanup(func() {
+		params.Reset(params.QueryNodeCfg.DiskCapacityLimit.Key)
+	})
+
+	const gib = int64(1024 * 1024 * 1024)
+	loader := segments.NewMockLoader(t)
+	loader.EXPECT().GetLocalDiskUsage().Return(2*gib, nil).Once()
+	metrics := getLocalStorageMetrics(loader)
+	require.NotNil(t, metrics)
+	require.Equal(t, int64(1600)*gib, metrics.CapacityBytes)
+	require.Equal(t, int64(2)*gib, metrics.UsedBytes)
+
+	missingLoader := segments.NewMockLoader(t)
+	missingLoader.EXPECT().GetLocalDiskUsage().Return(0, errors.New("disk usage unavailable")).Once()
+	require.Nil(t, getLocalStorageMetrics(missingLoader))
+}

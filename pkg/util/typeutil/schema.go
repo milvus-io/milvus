@@ -488,6 +488,11 @@ func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone
 }
 
+// GetVersion returns the version of the collection schema used to build this helper.
+func (helper *SchemaHelper) GetVersion() int32 {
+	return helper.schema.GetVersion()
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
@@ -931,6 +936,14 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				vectors.Vectors.Data = &schemapb.VectorField_Int8Vector{
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
+			case *schemapb.VectorField_VectorArray:
+				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         vectorField.GetVectorArray().GetDim(),
+						ElementType: vectorField.GetVectorArray().GetElementType(),
+						Data:        make([]*schemapb.VectorField, 0, topK),
+					},
+				}
 			}
 			fd.Field = vectors
 		case *schemapb.FieldData_StructArrays:
@@ -1021,6 +1034,281 @@ func (c *FieldDataIdxComputer) Compute(rowIdx int64) []int64 {
 
 	c.lastRowIdx = rowIdx
 	return c.resultBuffer
+}
+
+// CreateFieldDataRangeView creates FieldData views for the logical row range
+// [rowStart, rowEnd). The returned values share their backing data with src;
+// only protobuf wrapper objects and slice headers are newly allocated. It
+// returns false when the range or field variant cannot safely use a view.
+//
+// dataStarts and dataEnds are the physical row bounds returned by
+// FieldDataIdxComputer. They differ from the logical bounds for compact
+// nullable vector payloads.
+func CreateFieldDataRangeView(
+	src []*schemapb.FieldData,
+	rowStart, rowEnd int64,
+	dataStarts, dataEnds []int64,
+) ([]*schemapb.FieldData, bool) {
+	if rowStart < 0 || rowEnd <= rowStart {
+		return nil, false
+	}
+
+	result := make([]*schemapb.FieldData, len(src))
+	for i, fieldData := range src {
+		if fieldData == nil {
+			return nil, false
+		}
+
+		validData := GetFieldDataValidData(fieldData)
+		var validDataView []bool
+		if len(validData) > 0 {
+			var ok bool
+			validDataView, ok = fieldDataRangeView(validData, rowStart, rowEnd)
+			if !ok {
+				return nil, false
+			}
+		}
+
+		view := &schemapb.FieldData{
+			Type:      fieldData.GetType(),
+			FieldName: fieldData.GetFieldName(),
+			FieldId:   fieldData.GetFieldId(),
+			IsDynamic: fieldData.GetIsDynamic(),
+		}
+
+		switch field := fieldData.GetField().(type) {
+		case *schemapb.FieldData_Scalars:
+			scalars, ok := createScalarFieldRangeView(field.Scalars, rowStart, rowEnd)
+			if !ok {
+				return nil, false
+			}
+			view.Field = &schemapb.FieldData_Scalars{Scalars: scalars}
+		case *schemapb.FieldData_Vectors:
+			dataStart, dataEnd := rowStart, rowEnd
+			if IsSupportedNullableVectorType(fieldData.GetType()) && len(validData) > 0 {
+				if i >= len(dataStarts) || i >= len(dataEnds) {
+					return nil, false
+				}
+				dataStart, dataEnd = dataStarts[i], dataEnds[i]
+			}
+			vectors, ok := createVectorFieldRangeView(field.Vectors, rowStart, rowEnd, dataStart, dataEnd)
+			if !ok {
+				return nil, false
+			}
+			view.Field = &schemapb.FieldData_Vectors{Vectors: vectors}
+		default:
+			// Keep the fast path behavior identical to AppendFieldData. Do not
+			// forward field variants that the row-wise implementation does not
+			// currently handle.
+			return nil, false
+		}
+		if len(validDataView) > 0 {
+			SetFieldDataValidData(view, validDataView)
+		}
+
+		result[i] = view
+	}
+
+	return result, true
+}
+
+func fieldDataRangeView[T any](data []T, start, end int64) ([]T, bool) {
+	if start < 0 || end < start || end > int64(len(data)) {
+		return nil, false
+	}
+	return data[int(start):int(end):int(end)], true
+}
+
+func fieldDataVectorRange(start, end, width int64, dataLen int) (int, int, bool) {
+	if start < 0 || end < start || width < 0 {
+		return 0, 0, false
+	}
+	if width == 0 {
+		return 0, 0, true
+	}
+	if end > int64(dataLen)/width {
+		return 0, 0, false
+	}
+	return int(start * width), int(end * width), true
+}
+
+func createScalarFieldRangeView(src *schemapb.ScalarField, start, end int64) (*schemapb.ScalarField, bool) {
+	if src == nil {
+		return nil, false
+	}
+
+	result := &schemapb.ScalarField{}
+	switch data := src.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		view, ok := fieldDataRangeView(data.BoolData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: view}}
+	case *schemapb.ScalarField_IntData:
+		view, ok := fieldDataRangeView(data.IntData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: view}}
+	case *schemapb.ScalarField_LongData:
+		view, ok := fieldDataRangeView(data.LongData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: view}}
+	case *schemapb.ScalarField_FloatData:
+		view, ok := fieldDataRangeView(data.FloatData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: view}}
+	case *schemapb.ScalarField_DoubleData:
+		view, ok := fieldDataRangeView(data.DoubleData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: view}}
+	case *schemapb.ScalarField_StringData:
+		view, ok := fieldDataRangeView(data.StringData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: view}}
+	case *schemapb.ScalarField_ArrayData:
+		view, ok := fieldDataRangeView(data.ArrayData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			Data:        view,
+			ElementType: data.ArrayData.GetElementType(),
+		}}
+	case *schemapb.ScalarField_JsonData:
+		view, ok := fieldDataRangeView(data.JsonData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: view}}
+	case *schemapb.ScalarField_TimestamptzData:
+		view, ok := fieldDataRangeView(data.TimestamptzData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: view}}
+	case *schemapb.ScalarField_GeometryData:
+		view, ok := fieldDataRangeView(data.GeometryData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: view}}
+	case *schemapb.ScalarField_GeometryWktData:
+		view, ok := fieldDataRangeView(data.GeometryWktData.GetData(), start, end)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{Data: view}}
+	case nil:
+		// AppendFieldData creates an empty ScalarField for an unset oneof.
+	default:
+		return nil, false
+	}
+
+	return result, true
+}
+
+func createVectorFieldRangeView(
+	src *schemapb.VectorField,
+	rowStart, rowEnd, dataStart, dataEnd int64,
+) (*schemapb.VectorField, bool) {
+	if src == nil || src.GetDim() < 0 || dataStart < 0 || dataEnd < dataStart {
+		return nil, false
+	}
+
+	result := &schemapb.VectorField{Dim: src.GetDim()}
+	physicalRows := dataEnd - dataStart
+	if physicalRows == 0 {
+		// AppendFieldData leaves the vector oneof unset when every selected
+		// row is null.
+		return result, true
+	}
+
+	dim := src.GetDim()
+	switch data := src.GetData().(type) {
+	case *schemapb.VectorField_BinaryVector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim/8, len(data.BinaryVector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_BinaryVector{BinaryVector: data.BinaryVector[start:end:end]}
+	case *schemapb.VectorField_FloatVector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim, len(data.FloatVector.GetData()))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: data.FloatVector.GetData()[start:end:end]},
+		}
+	case *schemapb.VectorField_Float16Vector:
+		if dim > math.MaxInt64/2 {
+			return nil, false
+		}
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim*2, len(data.Float16Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Float16Vector{Float16Vector: data.Float16Vector[start:end:end]}
+	case *schemapb.VectorField_Bfloat16Vector:
+		if dim > math.MaxInt64/2 {
+			return nil, false
+		}
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim*2, len(data.Bfloat16Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: data.Bfloat16Vector[start:end:end]}
+	case *schemapb.VectorField_SparseFloatVector:
+		contents, ok := fieldDataRangeView(data.SparseFloatVector.GetContents(), dataStart, dataEnd)
+		if !ok {
+			return nil, false
+		}
+		var selectedDim int64
+		for _, row := range contents {
+			rowDim := SparseFloatRowDim(row)
+			if rowDim > selectedDim {
+				selectedDim = rowDim
+			}
+		}
+		result.Dim = data.SparseFloatVector.GetDim()
+		result.Data = &schemapb.VectorField_SparseFloatVector{
+			SparseFloatVector: &schemapb.SparseFloatArray{
+				Contents: contents,
+				Dim:      selectedDim,
+			},
+		}
+	case *schemapb.VectorField_Int8Vector:
+		start, end, ok := fieldDataVectorRange(dataStart, dataEnd, dim, len(data.Int8Vector))
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_Int8Vector{Int8Vector: data.Int8Vector[start:end:end]}
+	case *schemapb.VectorField_VectorArray:
+		view, ok := fieldDataRangeView(data.VectorArray.GetData(), rowStart, rowEnd)
+		if !ok {
+			return nil, false
+		}
+		result.Data = &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+			Dim:         data.VectorArray.GetDim(),
+			Data:        view,
+			ElementType: data.VectorArray.GetElementType(),
+		}}
+	case nil:
+		// AppendFieldData leaves the vector oneof unset for an unset source.
+	default:
+		return nil, false
+	}
+
+	return result, true
 }
 
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int64) (appendSize int64) {
@@ -1656,6 +1944,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetDoubleData().Data = dstScalar.GetDoubleData().Data[:len(dstScalar.GetDoubleData().Data)-1]
 			case *schemapb.ScalarField_StringData:
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
+			case *schemapb.ScalarField_ArrayData:
+				dstScalar.GetArrayData().Data = dstScalar.GetArrayData().Data[:len(dstScalar.GetArrayData().Data)-1]
 			case *schemapb.ScalarField_JsonData:
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
@@ -1684,6 +1974,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.VectorField_Int8Vector:
 				dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
 				dstInt8Vector.Int8Vector = dstInt8Vector.Int8Vector[:len(dstInt8Vector.Int8Vector)-int(dim)]
+			case *schemapb.VectorField_VectorArray:
+				dstVector.GetVectorArray().Data = dstVector.GetVectorArray().Data[:len(dstVector.GetVectorArray().Data)-1]
 			}
 		}
 	}
@@ -1900,17 +2192,24 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 	return nil
 }
 
-// UpdateArrayFieldByColumnWithOp merges an Array field's update rows into
-// the base rows while applying a FieldPartialUpdateOp. Non-Array field
-// types or a REPLACE op fall back to UpdateFieldDataByColumn's behavior.
+// UpdateArrayFieldByColumnWithOp merges mapped Array rows in place. REPLACE
+// delegates whole-field replacement, including field-level nulls, to
+// UpdateFieldDataByColumn. The other ops share row traversal, not null semantics:
+//   - APPEND/REMOVE skip a null operand row without changing the base or its
+//     validity. A successful merge marks the base row valid.
+//   - PATH_REPLACE requires non-null base and operand rows. It replaces one
+//     existing element; it never creates a parent, extends an array, or skips
+//     a null operand. A null Array row is distinct from an Array element null.
 //
-// maxCapacity caps ARRAY_APPEND's post-merge length; pass -1 to skip the
-// check (proxy should pass the schema-declared max_capacity).
+// maxCapacity only caps APPEND's result (-1 disables that check). PATH_REPLACE
+// requires exactly one zero-based pathIndex, shared by all mapped rows. Other
+// ops omit pathIndex, preserving their existing call form.
 func UpdateArrayFieldByColumnWithOp(
 	base, update *schemapb.FieldData,
 	baseIndices, updateIndices []int64,
 	op schemapb.FieldPartialUpdateOp_OpType,
 	maxCapacity int,
+	pathIndex ...int,
 ) error {
 	if op == schemapb.FieldPartialUpdateOp_REPLACE {
 		return UpdateFieldDataByColumn(base, update, baseIndices, updateIndices)
@@ -1932,24 +2231,51 @@ func UpdateArrayFieldByColumnWithOp(
 	baseData := baseScalar.GetArrayData().Data
 	updateData := updateScalar.GetArrayData().Data
 	elementType := baseScalar.GetArrayData().GetElementType()
+	isPathReplace := op == schemapb.FieldPartialUpdateOp_PATH_REPLACE
+	if isPathReplace {
+		if update.GetType() != schemapb.DataType_Array {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires Array field data")
+		}
+		// REST omits operand ElementType until insertPreExecute, after this
+		// merge. Use the schema-validated base type without changing the operand;
+		// ApplyArrayRowOp still checks the concrete row payload.
+		if got := updateScalar.GetArrayData().GetElementType(); got != schemapb.DataType_None && got != elementType {
+			return merr.WrapErrParameterInvalidMsg("PATH_REPLACE element type mismatch: %s vs %s", elementType.String(), got.String())
+		}
+	}
+	baseValidData := GetFieldDataValidData(base)
+	updateValidData := GetFieldDataValidData(update)
 	for i, baseIdx := range baseIndices {
 		updateIdx := updateIndices[i]
-		// If the upsert payload row is explicitly null, there is nothing to
-		// append/remove; leave the existing base row untouched.
-		updateValidData := GetFieldDataValidData(update)
+		if isPathReplace {
+			if baseIdx < 0 || baseIdx >= int64(len(baseData)) || updateIdx < 0 || updateIdx >= int64(len(updateData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE row index is out of range")
+			}
+			if len(baseValidData) > 0 && baseIdx >= int64(len(baseValidData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE base valid_data is shorter than its row mapping")
+			}
+			if len(updateValidData) > 0 && updateIdx >= int64(len(updateValidData)) {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand valid_data is shorter than its row mapping")
+			}
+			if len(baseValidData) > 0 && !baseValidData[baseIdx] {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE cannot target a null parent Array row")
+			}
+		}
 		if len(updateValidData) > 0 && !updateValidData[updateIdx] {
+			if isPathReplace {
+				return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand Array row must not be null")
+			}
+			// APPEND/REMOVE retain their existing null-operand no-op semantics.
 			continue
 		}
-		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity)
+		merged, err := ApplyArrayRowOp(baseData[baseIdx], updateData[updateIdx], op, elementType, maxCapacity, pathIndex...)
 		if err != nil {
 			return err
 		}
 		baseData[baseIdx] = merged
-		// After a successful merge the base row carries concrete data and
-		// must be marked valid, otherwise downstream readers keep treating
-		// it as null and drop the merged payload silently.
-		baseValidData := GetFieldDataValidData(base)
-		if len(baseValidData) > 0 {
+		// APPEND/REMOVE can materialize a previously-null row. PATH_REPLACE
+		// requires a valid parent and leaves its validity representation untouched.
+		if !isPathReplace && len(baseValidData) > 0 {
 			baseValidData[baseIdx] = true
 			SetFieldDataValidData(base, baseValidData)
 		}
@@ -3552,7 +3878,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if validData := GetFieldDataValidData(field); validData != nil {
+	if validData := GetFieldDataValidData(field); len(validData) > 0 {
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {
@@ -3852,7 +4178,7 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return merr.WrapErrParameterInvalidMsg("nil sparse float vector")
 		}
 		if len(row)%8 != 0 {
-			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d", len(row))
+			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d (must be 8-byte aligned)", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
 			idx := SparseFloatRowIndexAt(row, i)
@@ -4027,9 +4353,13 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 	} else if !ok1 && !ok2 {
 		// try format2
 		for k, v := range input {
-			idx, err := strconv.ParseUint(k, 0, 32)
+			// Base 10 is mandatory: the accepted format documents the key as a
+			// decimal index. With base 0 strconv infers the base from the
+			// prefix, so "010" silently became index 8 and "0x10" index 16,
+			// while "08"/"09" were rejected as invalid octal.
+			idx, err := strconv.ParseUint(k, 10, 32)
 			if err != nil {
-				return nil, err
+				return nil, merr.WrapErrParameterInvalidMsg("invalid index in JSON: %s must be a decimal index in [0, 2^32-1)", k)
 			}
 
 			val, err := getValue(v)
@@ -4230,19 +4560,24 @@ func ExtractStructFieldName(fieldName string) (string, error) {
 
 // ApplyArrayRowOp applies a FieldPartialUpdateOp to a single Array-field row.
 //
-// base and update are per-row ScalarField values (as stored in
-// ArrayArray.Data[i]). elementType is the Array field's declared element type,
-// used to dispatch the concrete typed-array handling. maxCapacity caps the
-// resulting array length for ARRAY_APPEND; pass -1 to skip the check (the
-// proxy is expected to enforce the schema-declared max_capacity).
+// base and update are per-row values from ArrayArray.Data. elementType is the
+// schema-validated base element type. This helper does not modify either input:
+//   - REPLACE returns update as-is, replacing the entire row (it may alias update).
+//   - APPEND concatenates elements and checks maxCapacity (-1 disables the check).
+//   - REMOVE removes all matching values; it may return base unchanged.
+//   - PATH_REPLACE copies base and overwrites exactly one existing element with
+//     the singleton update. It preserves length and order and ignores maxCapacity.
 //
-// Returned ScalarField is a newly constructed value; base/update are not
-// mutated. Nil base or update is treated as an empty row for that side.
+// APPEND/REMOVE treat nil payloads as empty arrays; PATH_REPLACE rejects them and
+// element valid_data. Field-level null bits belong to FieldData and are handled
+// by UpdateArrayFieldByColumnWithOp, not by this per-row primitive.
+// Only PATH_REPLACE consumes pathIndex and requires exactly one index.
 func ApplyArrayRowOp(
 	base, update *schemapb.ScalarField,
 	op schemapb.FieldPartialUpdateOp_OpType,
 	elementType schemapb.DataType,
 	maxCapacity int,
+	pathIndex ...int,
 ) (*schemapb.ScalarField, error) {
 	switch op {
 	case schemapb.FieldPartialUpdateOp_REPLACE:
@@ -4251,9 +4586,77 @@ func ApplyArrayRowOp(
 		return appendArrayRow(base, update, elementType, maxCapacity)
 	case schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
 		return removeArrayRow(base, update, elementType)
+	case schemapb.FieldPartialUpdateOp_PATH_REPLACE:
+		if len(pathIndex) != 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires exactly one array index")
+		}
+		return replaceArrayRowElement(base, update, elementType, pathIndex[0])
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported FieldPartialUpdateOp: %s", op.String())
 	}
+}
+
+func replaceArrayRowElement(base, update *schemapb.ScalarField, elementType schemapb.DataType, index int) (*schemapb.ScalarField, error) {
+	if base == nil || update == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires non-nil Array rows")
+	}
+	if len(GetArrayElementValidData(base)) != 0 || len(GetArrayElementValidData(update)) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
+	}
+
+	// Keep row metadata and unknown protobuf fields, and never mutate request
+	// operands or a query result that still shares the original base payload.
+	out := proto.Clone(base).(*schemapb.ScalarField)
+	var err error
+	switch elementType {
+	case schemapb.DataType_Bool:
+		if out.GetBoolData() == nil || update.GetBoolData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetBoolData().GetData(), update.GetBoolData().GetData(), index)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		if out.GetIntData() == nil || update.GetIntData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetIntData().GetData(), update.GetIntData().GetData(), index)
+	case schemapb.DataType_Int64:
+		if out.GetLongData() == nil || update.GetLongData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetLongData().GetData(), update.GetLongData().GetData(), index)
+	case schemapb.DataType_Float:
+		if out.GetFloatData() == nil || update.GetFloatData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetFloatData().GetData(), update.GetFloatData().GetData(), index)
+	case schemapb.DataType_Double:
+		if out.GetDoubleData() == nil || update.GetDoubleData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetDoubleData().GetData(), update.GetDoubleData().GetData(), index)
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		if out.GetStringData() == nil || update.GetStringData() == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("Array row payload does not match element type %s", elementType.String())
+		}
+		err = replaceArrayElement(out.GetStringData().GetData(), update.GetStringData().GetData(), index)
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element type %s", elementType.String())
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func replaceArrayElement[T any](dst, update []T, index int) error {
+	if index < 0 || index >= len(dst) {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE index %d is out of range for Array length %d", index, len(dst))
+	}
+	if len(update) != 1 {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand must contain exactly one Array element")
+	}
+	dst[index] = update[0]
+	return nil
 }
 
 func appendArrayRow(

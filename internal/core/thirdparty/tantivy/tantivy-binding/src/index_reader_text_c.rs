@@ -74,6 +74,6 @@ pub extern "C" fn tantivy_register_tokenizer(
             (*real).register_tokenizer(String::from(tokenizer_name), text_analyzer);
             Ok(()).into()
         },
-        Err(err) => RustResult::from_error(err.to_string()),
+        Err(err) => RustResult::from_binding_error(&err),
     }
 }

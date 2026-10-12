@@ -66,16 +66,6 @@ class LoonFFIPropertiesSingleton {
     }
 
     void
-    Init(const char* root_path) {
-        std::unique_lock lck(mutex_);
-
-        if (properties_ == nullptr) {
-            properties_ = MakeInternalLocalProperies(root_path);
-            ApplyArrowReaderConfig(*properties_);
-        }
-    }
-
-    void
     SetArrowReaderConfig(int64_t hole_size_limit_bytes,
                          int64_t range_size_limit_bytes) {
         // Publish both limits as one snapshot. They are validated against

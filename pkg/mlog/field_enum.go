@@ -194,11 +194,11 @@ func FieldTaskID(val int64, opts ...FieldOption) Field {
 }
 
 // FieldBroadcastID creates a field for broadcast ID.
-func FieldBroadcastID(val int64, opts ...FieldOption) Field {
+func FieldBroadcastID(val uint64, opts ...FieldOption) Field {
 	if hasPropagated(opts) {
-		return propagatedInt64Field(keyBroadcastID, val)
+		return propagatedUint64Field(keyBroadcastID, val)
 	}
-	return Int64(keyBroadcastID, val)
+	return Uint64(keyBroadcastID, val)
 }
 
 // FieldJobID creates a field for job ID.

@@ -46,6 +46,7 @@ func TestCatalog_Update_CreateCollection(t *testing.T) {
 func TestCatalog_Update_DropCollection(t *testing.T) {
 	txnkv := mocks.NewTxnKV(t)
 	txnkv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	txnkv.EXPECT().RemoveWithPrefix(mock.Anything, BuildRLSPrincipalPrefix(1)).Return(nil).Once()
 	var gotSaves map[string]string
 	var gotRemovals []string
 	txnkv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).

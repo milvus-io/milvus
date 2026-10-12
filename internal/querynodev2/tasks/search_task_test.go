@@ -19,18 +19,96 @@ package tasks
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"math/rand"
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
+
+func TestTakeForOutputRequestDecision(t *testing.T) {
+	t.Run("request limit", func(t *testing.T) {
+		assert.True(t, takeForOutputAllowed(10000, 10000))
+		assert.False(t, takeForOutputAllowed(10001, 10000))
+		assert.False(t, takeForOutputAllowed(unknownTakeForOutputResultCount, 10000))
+		assert.True(t, takeForOutputAllowed(unknownTakeForOutputResultCount, 0))
+	})
+
+	t.Run("search count", func(t *testing.T) {
+		assert.Equal(t, int64(600), searchTakeForOutputResultCount(10, 20, 3))
+		assert.Equal(t, int64(200), searchTakeForOutputResultCount(10, 20, 0))
+		assert.Equal(t, int64(0), searchTakeForOutputResultCount(0, 20, 1))
+		assert.Equal(t, unknownTakeForOutputResultCount, searchTakeForOutputResultCount(-1, 20, 1))
+		assert.Equal(t, int64(math.MaxInt64), searchTakeForOutputResultCount(math.MaxInt64, 2, 1))
+	})
+
+	t.Run("retrieve primary key term", func(t *testing.T) {
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates: &planpb.Expr{
+						Expr: &planpb.Expr_TermExpr{
+							TermExpr: &planpb.TermExpr{
+								ColumnInfo: &planpb.ColumnInfo{IsPrimaryKey: true},
+								Values: []*planpb.GenericValue{
+									{}, {}, {},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		req := &internalpb.RetrieveRequest{Limit: -1}
+		assert.Equal(t, int64(3), retrieveTakeForOutputResultCount(req, plan))
+		req.Limit = 0
+		assert.Equal(t, int64(3), retrieveTakeForOutputResultCount(req, plan))
+		req.Limit = 2
+		assert.Equal(t, int64(2), retrieveTakeForOutputResultCount(req, plan))
+	})
+
+	t.Run("retrieve limit and unknown", func(t *testing.T) {
+		assert.Equal(t, int64(128), retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 128},
+			&planpb.PlanNode{},
+		))
+		nonPrimaryKeyPlan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates: &planpb.Expr{
+						Expr: &planpb.Expr_TermExpr{
+							TermExpr: &planpb.TermExpr{
+								ColumnInfo: &planpb.ColumnInfo{},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, int64(128), retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 128},
+			nonPrimaryKeyPlan,
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: -1},
+			&planpb.PlanNode{},
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(
+			&internalpb.RetrieveRequest{Limit: 0},
+			&planpb.PlanNode{},
+		))
+		assert.Equal(t, unknownTakeForOutputResultCount, retrieveTakeForOutputResultCount(nil, nil))
+	})
+}
 
 type SearchTaskSuite struct {
 	suite.Suite

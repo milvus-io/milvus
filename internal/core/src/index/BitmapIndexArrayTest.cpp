@@ -43,7 +43,7 @@
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -223,8 +223,8 @@ class ArrayBitmapIndexTest : public testing::Test {
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    TestLocalPath,
+        auto log_path = fmt::format("{}/{}/{}/{}/{}/{}",
+                                    root_path_,
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -301,7 +301,11 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = TestLocalPath;
+        auto root_path = TestLocalPath + boost::filesystem::unique_path(
+                                             "array_bitmap-%%%%-%%%%-%%%%-%%%%")
+                                             .string();
+        ASSERT_TRUE(boost::filesystem::create_directory(root_path));
+        root_path_ = root_path;
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";
@@ -317,8 +321,15 @@ class ArrayBitmapIndexTest : public testing::Test {
              index_version_);
     }
 
-    virtual ~ArrayBitmapIndexTest() override {
-        boost::filesystem::remove_all(chunk_manager_->GetRootPath());
+    void
+    TearDown() override {
+        // Release the loaded index and its reader before deleting fixture files.
+        index_.reset();
+        fs_.reset();
+        chunk_manager_.reset();
+        if (!root_path_.empty()) {
+            boost::filesystem::remove_all(root_path_);
+        }
     }
 
  public:
@@ -332,7 +343,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         for (size_t i = 0; i < data_.size() && s.size() < max_vals; i++) {
             auto& array = data_[i];
             for (size_t j = 0; j < array.length() && s.size() < max_vals; ++j) {
-                auto val = array.template get_data<T>(j);
+                auto val = array.template get_data_unchecked<T>(j);
                 if (s.insert(val).second) {
                     test_data.push_back(val);
                 }
@@ -362,7 +373,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         return true;
                     }
@@ -395,7 +406,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         // contains a queried value -> excluded from NotIn
                         return false;
@@ -408,6 +419,7 @@ class ArrayBitmapIndexTest : public testing::Test {
     }
 
  private:
+    std::string root_path_;
     std::shared_ptr<storage::ChunkManager> chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
 
@@ -1314,7 +1326,8 @@ TEST(BitmapIndexArrayNestedTest, NullableNullsBeforeValidUnifiedLoad) {
     boost::filesystem::remove_all(root_path);
 }
 
-// Bug #2: int8/int16 elements are physically stored as int32. get_data<T> must
+// Bug #2: int8/int16 elements are physically stored as int32.
+// get_data_unchecked<T> must
 // take the 4-byte-stride-then-narrow branch; the old code fell through to a
 // 1-byte reinterpret for int8_t/int16_t and produced garbage values during the
 // nested build. Build a typed nested bitmap and confirm element values index
@@ -1500,7 +1513,7 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
 
 TEST(BitmapIndexLoadResourceTest,
      EncryptedNonMmapIncludesTargetAndStreamMemory) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto& plugin_loader = storage::PluginLoader::GetInstance();
     auto cleanup = folly::makeGuard([&]() {
@@ -1524,14 +1537,15 @@ TEST(BitmapIndexLoadResourceTest,
     EXPECT_EQ(request.max_disk_cost, 0);
 }
 
-// Bug #4: ArrayOffsetsSealed::BuildAllZeros is used in the add-field /
+// Bug #4: StructElementOffsetsSealed::BuildAllZeros is used in the add-field /
 // schema-evolution path to materialize empty (all-zeros) offsets for old rows.
 // It must charge the caching layer so the destructor's refund is balanced, and
 // must present every old row as an empty array (so MATCH/element_filter treats
 // them as zero-element rows rather than crashing on missing offsets).
-TEST(ArrayOffsetsSealedTest, BuildAllZerosEmptyArraysAndBalancedResource) {
+TEST(StructElementOffsetsSealedTest,
+     BuildAllZerosEmptyArraysAndBalancedResource) {
     constexpr int64_t kRowCount = 1000;
-    auto offsets = milvus::ArrayOffsetsSealed::BuildAllZeros(kRowCount);
+    auto offsets = milvus::StructElementOffsetsSealed::BuildAllZeros(kRowCount);
     ASSERT_NE(offsets, nullptr);
 
     EXPECT_EQ(offsets->GetRowCount(), kRowCount);
@@ -1550,7 +1564,7 @@ TEST(ArrayOffsetsSealedTest, BuildAllZerosEmptyArraysAndBalancedResource) {
     // left this memory untracked); an underflowing refund would assert/crash in
     // the caching layer dlist. Surviving the loop guards the charge/refund pair.
     for (int i = 0; i < 256; ++i) {
-        auto tmp = milvus::ArrayOffsetsSealed::BuildAllZeros(500);
+        auto tmp = milvus::StructElementOffsetsSealed::BuildAllZeros(500);
         ASSERT_EQ(tmp->GetRowCount(), 500);
         ASSERT_EQ(tmp->GetTotalElementCount(), 0);
     }
@@ -1643,9 +1657,9 @@ TEST(BitmapIndexArrayNestedTest,
         ASSERT_NE(input, nullptr);
         auto reader = storage::IndexEntryReader::Open(input, input->Size());
         ASSERT_NE(reader, nullptr);
-        EXPECT_FALSE(reader->HasMeta(INDEX_TYPE));
-        EXPECT_TRUE(reader->HasMeta("version"));
-        EXPECT_TRUE(reader->HasMeta("num_rows"));
+        EXPECT_FALSE(reader->IndexMeta().contains(INDEX_TYPE));
+        EXPECT_TRUE(reader->IndexMeta().contains("version"));
+        EXPECT_TRUE(reader->IndexMeta().contains("num_rows"));
     }
 
     // Now load that STLSORT file through the HYBRID (nested) index path.
@@ -1808,9 +1822,10 @@ MakeStringArrayFieldData(const std::vector<ScalarFieldProto>& scalar_arrays) {
 
 // Nested (struct sub-field) HYBRID indexes flatten scalar elements, so the
 // sort index can serve high-cardinality data: STL_SORT must replace INVERTED
-// once distinct values reach the bitmap cardinality limit (default 100).
-// Regular array fields keep INVERTED because the sort index cannot handle
-// array values.
+// once distinct values reach the bitmap cardinality limit (default 100) AND
+// scalar_index_version_ >= kNestedHybridStlSortMinVersion. Regular array
+// fields keep INVERTED regardless of version because the sort index cannot
+// handle array values.
 TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
     auto root_path =
         fmt::format("{}/hybrid_nested_high_card_stlsort", TestLocalPath);
@@ -1822,13 +1837,15 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
         MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
 
     TestHybridScalarIndexString nested(7, ctx, true);
+    nested.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(nested.SelectIndexBuildTypePublic(
                   std::vector<FieldDataPtr>{high_card_field_data}),
               ScalarIndexType::STLSORT);
 
     // Regular (non-nested) array fields must stay on INVERTED at high
-    // cardinality.
+    // cardinality, even at/above the nested STL_SORT version threshold.
     TestHybridScalarIndexString regular(7, ctx, false);
+    regular.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(regular.SelectIndexBuildTypePublic(
                   std::vector<FieldDataPtr>{high_card_field_data}),
               ScalarIndexType::INVERTED);
@@ -1837,13 +1854,44 @@ TEST(BitmapIndexArrayNestedTest, HybridNestedHighCardinalitySelectsStlsort) {
     auto low_card_field_data =
         MakeStringArrayFieldData(MakeStringScalarArrays(10, 1));
     TestHybridScalarIndexString nested_low(7, ctx, true);
+    nested_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(nested_low.SelectIndexBuildTypePublic(
                   std::vector<FieldDataPtr>{low_card_field_data}),
               ScalarIndexType::BITMAP);
     TestHybridScalarIndexString regular_low(7, ctx, false);
+    regular_low.scalar_index_version_ = kNestedHybridStlSortMinVersion;
     EXPECT_EQ(regular_low.SelectIndexBuildTypePublic(
                   std::vector<FieldDataPtr>{low_card_field_data}),
               ScalarIndexType::BITMAP);
+
+    boost::filesystem::remove_all(root_path);
+}
+
+// Below kNestedHybridStlSortMinVersion (e.g. the default v3 used by 3.0.x),
+// nested high-cardinality HYBRID indexes must keep selecting INVERTED so
+// that an older reader (e.g. 2.6, whose ScalarIndexSort predates nested-index
+// support) can still load the index after a rollback. Regression test for
+// https://github.com/milvus-io/milvus/issues/52893.
+TEST(BitmapIndexArrayNestedTest,
+     HybridNestedHighCardinalityBelowVersionKeepsInverted) {
+    auto root_path =
+        fmt::format("{}/hybrid_nested_high_card_legacy_version", TestLocalPath);
+    auto ctx =
+        MakeNestedCtx(root_path, proto::schema::DataType::VarChar, false, 3141);
+
+    // 120 distinct elements spread over 240 rows -> high cardinality.
+    auto high_card_field_data =
+        MakeStringArrayFieldData(MakeStringScalarArrays(240, 120));
+
+    for (int32_t version :
+         {0, kHybridIndexConfigVersion, kNestedHybridStlSortMinVersion - 1}) {
+        TestHybridScalarIndexString nested(7, ctx, true);
+        nested.scalar_index_version_ = version;
+        EXPECT_EQ(nested.SelectIndexBuildTypePublic(
+                      std::vector<FieldDataPtr>{high_card_field_data}),
+                  ScalarIndexType::INVERTED)
+            << "scalar_index_version_=" << version;
+    }
 
     boost::filesystem::remove_all(root_path);
 }

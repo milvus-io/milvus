@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -110,6 +111,30 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
+	// RLS property values are validated before looking up the collection.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.enabled delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Enabled"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.force delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Force"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
@@ -133,6 +158,15 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	// Existing collections can enable RLS through the normal property path.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	alterErr := merr.CheckRPCCall(resp, err)
+	require.NoError(t, alterErr)
 
 	for _, tc := range []struct {
 		name       string
@@ -408,6 +442,7 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
+		withTsoAllocator(newMockTsoAllocator()),
 		withBroker(&mockBroker{
 			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
 				return nil
@@ -415,13 +450,23 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		}),
 	)
 	cb := &DDLCallback{Core: c}
+	notifyErr := merr.WrapErrServiceUnavailableMsg("proxy temporarily unavailable")
+	var notifications []*proxypb.InvalidateCollMetaCacheRequest
+	proxy := newMockProxy()
+	proxy.InvalidateCollectionMetaCacheFunc = func(_ context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		notifications = append(notifications, req)
+		return merr.Status(notifyErr), nil
+	}
+	c.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
 
 	raw := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			CollectionId: 1,
+			CollectionId:     1,
+			CacheExpirations: newRLSCacheExpirations("db", "coll", 1, commonpb.MsgType_AlterCollection),
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
 				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
 					ReplicaNumber:  1,
 					ResourceGroups: []string{"rg_not_exist"},
@@ -436,7 +481,18 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		Message: msg,
 		Results: map[string]*message.AppendResult{},
 	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Len(t, notifications, 1)
+	require.Equal(t, int64(1), notifications[0].GetCollectionID())
+	require.Equal(t, commonpb.MsgType_AlterCollection, notifications[0].GetBase().GetMsgType())
+
+	notifyErr = nil
+	err = cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
 	require.NoError(t, err)
+	require.Len(t, notifications, 2)
 }
 
 func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
@@ -907,7 +963,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
 }
 
-func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
+func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -926,9 +982,11 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: append([]*commonpb.KeyValuePair{
+			{Key: common.CollectionReplicaNumber, Value: "1"},
+		}, properties...),
 		Schema:           schemaBytes,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	})

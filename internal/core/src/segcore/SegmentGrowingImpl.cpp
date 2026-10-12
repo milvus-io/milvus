@@ -39,7 +39,7 @@
 #include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/Common.h"
@@ -92,12 +92,28 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/lob_column/lob_column_reader.h"
 #include "segcore/TextColumnCache.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::segcore {
 
-using namespace milvus::cachinglayer;
-
 namespace {
+
+// Call only after selecting raw storage: index APIs must keep logical IDs even
+// if an interim index takes over between NULL filtering and vector retrieval.
+std::vector<int64_t>
+MapValidVectorOffsets(const VectorBase& vec,
+                      const int64_t* logical_offsets,
+                      int64_t count) {
+    std::vector<int64_t> physical_offsets;
+    if (vec.is_mapping_storage()) {
+        auto valid_data = std::make_unique<bool[]>(count);
+        vec.get_offset_mapping().FilterValidLogicalOffsets(
+            logical_offsets, count, valid_data.get(), physical_offsets);
+        AssertInfo(physical_offsets.size() == count,
+                   "Valid vector offsets must map to stored rows");
+    }
+    return physical_offsets;
+}
 
 int64_t
 GetLoadedFieldRows(
@@ -130,13 +146,15 @@ AssertLoadedFieldRows(
         return;
     }
     auto rows = GetLoadedFieldRows(column_group_results, field_id);
-    AssertInfo(rows == expected_rows,
-               "growing segment StorageV3 manifest loads {} rows for {} "
-               "field {}, but SegmentLoadInfo expects {} rows",
-               rows,
-               field_name,
-               field_id.get(),
-               expected_rows);
+    if (!(rows == expected_rows)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "growing segment StorageV3 manifest loads {} rows for {} "
+                  "field {}, but SegmentLoadInfo expects {} rows",
+                  rows,
+                  field_name,
+                  field_id.get(),
+                  expected_rows);
+    }
 }
 
 void
@@ -159,12 +177,14 @@ AssertAllLoadedFieldRows(
     }
 
     for (const auto& [field_id, rows] : loaded_rows) {
-        AssertInfo(rows == expected_rows,
-                   "growing segment StorageV3 manifest loads {} rows for "
-                   "field {}, but SegmentLoadInfo expects {} rows",
-                   rows,
-                   field_id.get(),
-                   expected_rows);
+        if (!(rows == expected_rows)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "growing segment StorageV3 manifest loads {} rows for "
+                      "field {}, but SegmentLoadInfo expects {} rows",
+                      rows,
+                      field_id.get(),
+                      expected_rows);
+        }
     }
 }
 
@@ -210,7 +230,8 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] = raw_data[source_index].length();
+                array_lengths[offset + i] =
+                    raw_data[source_index].physical_length();
             }
         } else {
             if (field_meta.is_nested_array()) {
@@ -389,21 +410,29 @@ ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
     }
 }
 
+// A StorageV2 column-group load only carries fields that were written to
+// binlogs. A TEXT field added to the schema after the segment was written
+// (AddField) has no binlog column, so the schema alone must not reject the
+// load: the empty column is backfilled by FillAbsentFields. Only a load info
+// that actually carries TEXT field data is invalid, because TEXT cannot be
+// persisted without a StorageV3 manifest (LOB spillover / query path).
 bool
-SchemaHasTextField(const Schema& schema) {
-    return std::any_of(schema.get_fields().begin(),
-                       schema.get_fields().end(),
-                       [](const auto& field) {
-                           return field.second.get_data_type() ==
-                                  DataType::TEXT;
-                       });
+LoadInfoHasTextField(const LoadFieldDataInfo& load_info, const Schema& schema) {
+    for (const auto& [_, info] : load_info.field_infos) {
+        auto fid = FieldId(info.field_id);
+        if (schema.has_field(fid) &&
+            schema.operator[](fid).get_data_type() == DataType::TEXT) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // anonymous namespace
 
 void
-SegmentGrowingImpl::InitializeArrayOffsets() {
-    std::unique_lock lock(array_offsets_map_mutex_);
+SegmentGrowingImpl::InitializeStructElementOffsets() {
+    std::unique_lock lock(struct_element_offsets_map_mutex_);
     auto schema = get_schema_snapshot();
 
     // Group fields by struct_name
@@ -416,23 +445,25 @@ SegmentGrowingImpl::InitializeArrayOffsets() {
         }
     }
 
-    // Create one ArrayOffsetsGrowing per struct, shared by all its fields
+    // Create one StructElementOffsetsGrowing per struct, shared by all its fields
     for (const auto& [struct_name, field_ids] : struct_fields) {
-        auto array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+        auto struct_element_offsets =
+            std::make_shared<StructElementOffsetsGrowing>();
 
         // Pick the first field as representative (any field works since array lengths are identical)
         FieldId representative_field = field_ids[0];
 
-        // Map all field_ids from this struct to the same ArrayOffsetsGrowing
+        // Map all field_ids from this struct to the same StructElementOffsetsGrowing
         for (auto field_id : field_ids) {
-            array_offsets_map_[field_id] = array_offsets;
+            struct_element_offsets_map_[field_id] = struct_element_offsets;
         }
 
         // Record representative field for Insert-time updates
         struct_representative_fields_.insert(representative_field);
 
         LOG_INFO(
-            "Created ArrayOffsetsGrowing for struct '{}' with {} fields, "
+            "Created StructElementOffsetsGrowing for struct '{}' with {} "
+            "fields, "
             "representative field_id={}",
             struct_name,
             field_ids.size(),
@@ -475,17 +506,17 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     }
 }
 
-ResourceUsage
+cachinglayer::ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
     auto schema = get_schema_snapshot();
     return EstimateSegmentResourceUsage(*schema);
 }
 
-ResourceUsage
+cachinglayer::ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
     int64_t num_rows = get_row_count();
     if (num_rows == 0) {
-        return ResourceUsage{0, 0};
+        return cachinglayer::ResourceUsage{0, 0};
     }
 
     bool growing_mmap_enabled = storage::MmapManager::GetInstance()
@@ -672,7 +703,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
     memory_bytes = static_cast<int64_t>(memory_bytes * kResourceSafetyMargin);
     disk_bytes = static_cast<int64_t>(disk_bytes * kResourceSafetyMargin);
 
-    return ResourceUsage{memory_bytes, disk_bytes};
+    return cachinglayer::ResourceUsage{memory_bytes, disk_bytes};
 }
 
 void
@@ -691,12 +722,12 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
     auto old_resource = tracked_resource_;
 
     if (old_resource.AnyGTZero()) {
-        Manager::GetInstance().RefundLoadedResource(
+        cachinglayer::Manager::GetInstance().RefundLoadedResource(
             old_resource, fmt::format("growing_segment_{}_refund", id_));
     }
 
     if (new_resource.AnyGTZero()) {
-        Manager::GetInstance().ChargeLoadedResource(
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
             new_resource, fmt::format("growing_segment_{}_charge", id_));
     }
 
@@ -881,17 +912,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
 
-        std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+        std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
         {
-            std::shared_lock lock(array_offsets_map_mutex_);
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
             if (struct_representative_fields_.count(field_id) > 0) {
-                auto offsets_it = array_offsets_map_.find(field_id);
-                if (offsets_it != array_offsets_map_.end()) {
-                    array_offsets = offsets_it->second;
+                auto offsets_it = struct_element_offsets_map_.find(field_id);
+                if (offsets_it != struct_element_offsets_map_.end()) {
+                    struct_element_offsets = offsets_it->second;
                 }
             }
         }
-        if (array_offsets != nullptr) {
+        if (struct_element_offsets != nullptr) {
             const auto& field_data =
                 insert_record_proto->fields_data(data_offset);
 
@@ -899,7 +930,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             ExtractArrayLengths(
                 field_data, field_meta, num_rows, array_lengths.data());
 
-            array_offsets->Insert(
+            struct_element_offsets->Insert(
                 reserved_offset, array_lengths.data(), num_rows);
         }
 
@@ -1041,7 +1072,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
                        "binlog number should less than or equal row_count");
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
@@ -1050,14 +1081,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                 field_meta.is_nested_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
-            auto field_data =
-                storage::CreateFieldData(field_meta.get_data_type(),
-                                         field_meta.get_element_type(),
-                                         true,
-                                         1,
-                                         lack_num,
-                                         std::move(array_type));
-            field_data->FillFieldData(field_meta.default_value(), lack_num);
+            auto field_data = storage::CreateFieldDataFromDefaultValue(
+                field_meta.get_data_type(),
+                true,
+                lack_num,
+                field_meta.default_value(),
+                std::move(array_type));
             channel->push(field_data);
         }
 
@@ -1141,10 +1170,11 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
-    auto field_meta = (*schema)[field_id];
+    const auto& field_meta = (*schema)[field_id];
 
     if (insert_record_.is_valid_data_exist(field_id)) {
-        insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
+        insert_record_.get_valid_data(field_id)->set_data_raw(reserved_offset,
+                                                              field_data);
     }
     // Keep the load path aligned with Insert: once a vector interim index owns
     // raw data, append the loaded batch to the index without rebuilding raw
@@ -1168,7 +1198,7 @@ SegmentGrowingImpl::load_field_data_common(
     try_remove_chunks(field_id, *schema);
 
     if (field_id == primary_field_id) {
-        insert_record_.insert_pks(field_data);
+        insert_record_.insert_pks(reserved_offset, field_data);
     }
 
     // update average row data size
@@ -1186,34 +1216,36 @@ SegmentGrowingImpl::load_field_data_common(
         } else {
             auto pinned = GetTextIndex(nullptr, field_id);
             auto index = pinned.get();
-            index->BuildIndexFromFieldData(field_data,
-                                           field_meta.is_nullable());
+            index->BuildIndexFromFieldData(
+                field_data, field_meta.is_nullable(), reserved_offset);
             index->Commit();
             // Reload reader so that the index can be read immediately
             index->Reload();
         }
     }
 
-    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
     {
-        std::shared_lock lock(array_offsets_map_mutex_);
+        std::shared_lock lock(struct_element_offsets_map_mutex_);
         if (struct_representative_fields_.count(field_id) > 0) {
-            auto offsets_it = array_offsets_map_.find(field_id);
-            if (offsets_it != array_offsets_map_.end()) {
-                array_offsets = offsets_it->second;
+            auto offsets_it = struct_element_offsets_map_.find(field_id);
+            if (offsets_it != struct_element_offsets_map_.end()) {
+                struct_element_offsets = offsets_it->second;
             }
         }
     }
-    if (array_offsets != nullptr) {
+    if (struct_element_offsets != nullptr) {
         std::vector<int32_t> array_lengths(num_rows);
         ExtractArrayLengthsFromFieldData(
             field_data, field_meta, array_lengths.data());
 
-        array_offsets->Insert(reserved_offset, array_lengths.data(), num_rows);
+        struct_element_offsets->Insert(
+            reserved_offset, array_lengths.data(), num_rows);
 
-        LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
-                 field_id.get(),
-                 num_rows);
+        LOG_INFO(
+            "Updated StructElementOffsetsGrowing for field {} with {} rows",
+            field_id.get(),
+            num_rows);
     }
 
     // update the mem size
@@ -1228,7 +1260,7 @@ void
 SegmentGrowingImpl::load_column_group_data_internal(
     const LoadFieldDataInfo& infos) {
     auto schema = get_schema_snapshot();
-    AssertInfo(!SchemaHasTextField(*schema),
+    AssertInfo(!LoadInfoHasTextField(infos, *schema),
                "TEXT growing segment cannot be loaded from StorageV2 column "
                "groups; StorageV3 manifest is required");
 
@@ -1270,9 +1302,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
             auto reader = result.ValueOrDie();
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1280,12 +1315,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
             auto status = reader->Close();
-            AssertInfo(
-                status.ok(),
-                "[StorageV2] failed to close file reader when get row group "
-                "metadata from file {} with error {}",
-                file,
-                status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] failed to close file reader when get "
+                          "row group "
+                          "metadata from file {} with error {}",
+                          file,
+                          status.ToString());
+            }
         }
 
         // create parallel degree split strategy
@@ -1473,7 +1510,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.LoadPush(pks, timestamps);
 }
 
-PinWrapper<SpanBase>
+cachinglayer::PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
@@ -1484,7 +1521,7 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                   "Span API does not support nested ARRAY field {}",
                   field_id.get());
     }
-    return PinWrapper<SpanBase>(
+    return cachinglayer::PinWrapper<SpanBase>(
         get_insert_record().get_span_base(field_id, chunk_id));
 }
 
@@ -1517,6 +1554,46 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
 }
 
 void
+SegmentGrowingImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    (void)op_ctx;
+    if (count == 0) {
+        return;
+    }
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            vec_index->ApplyValidDataByRange(
+                logical_offset, count, valid_result);
+            return;
+        }
+    }
+
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid_range(logical_offset, count, valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (!valid_data[i]) {
+            valid_result[i] = false;
+        }
+    }
+}
+
+void
 SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1533,15 +1610,29 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
         return;
     }
 
+    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
+        indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            vec_index->ApplyValidDataByOffsets(offsets, count, valid_result);
+            return;
+        }
+    }
+
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid(offsets, count, valid_data.get());
     for (int64_t i = 0; i < count; ++i) {
-        if (!valid_vec_ptr->is_valid(offsets[i])) {
+        if (!valid_data[i]) {
             valid_result[i] = false;
         }
     }
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
 SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1551,7 +1642,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
               "chunk string view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1561,7 +1652,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
               "chunk array view impl not implement for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
 SegmentGrowingImpl::chunk_array_value_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1632,7 +1723,8 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
         }
         std::pair<std::vector<ArrayValueView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(row_valid)};
-        return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+        return cachinglayer::PinWrapper<
+            std::pair<std::vector<ArrayValueView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
 
@@ -1641,11 +1733,12 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     }
     std::pair<std::vector<ArrayValueView>, ValidityView> content{
         std::move(views), ValidityView{}};
-    return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<ArrayValueView>, ValidityView>>(
         std::move(content));
 }
 
-PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
+cachinglayer::PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1727,7 +1820,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                    logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
-                           vector_array->length(),
+                           vector_array->physical_length(),
                            vector_array->byte_size(),
                            vector_array->get_element_type());
     };
@@ -1745,7 +1838,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         }
         std::pair<std::vector<VectorArrayView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(valid_data->data())};
-        return PinWrapper<
+        return cachinglayer::PinWrapper<
             std::pair<std::vector<VectorArrayView>, ValidityView>>(
             std::move(valid_data), std::move(content));
     }
@@ -1759,11 +1852,13 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
     }
     std::pair<std::vector<VectorArrayView>, ValidityView> content{
         std::move(views), ValidityView{}};
-    return PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>(
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<VectorArrayView>, ValidityView>>(
         std::move(content));
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+cachinglayer::PinWrapper<
+    std::pair<std::vector<std::string_view>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_string_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1773,7 +1868,7 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
               "chunk view by offsets not implemented for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1784,7 +1879,8 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
         "chunk array views by offsets not implemented for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+cachinglayer::PinWrapper<
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
 SegmentGrowingImpl::chunk_array_value_views_by_offsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1840,7 +1936,7 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> content{
         std::move(views), std::move(valid_data)};
-    return PinWrapper<
+    return cachinglayer::PinWrapper<
         std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
         std::move(content));
 }
@@ -2009,7 +2105,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     if (field_meta.is_vector()) {
         int64_t valid_count = count;
         const bool* valid_data = nullptr;
-        const int64_t* valid_offsets = seg_offsets;
+        const int64_t* valid_logical_offsets = seg_offsets;
         ValidResult filter_result;
 
         if (field_meta.is_nullable()) {
@@ -2017,7 +2113,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
             valid_count = filter_result.valid_count;
             valid_data = filter_result.valid_data.get();
-            valid_offsets = filter_result.valid_offsets.data();
+            valid_logical_offsets = filter_result.valid_logical_offsets.data();
         }
 
         auto result = CreateEmptyVectorDataArray(
@@ -2030,7 +2126,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              field_id,
                                              field_meta.get_sizeof(),
                                              vec_ptr,
-                                             valid_offsets,
+                                             valid_logical_offsets,
                                              valid_count,
                                              result->mutable_vectors()
                                                  ->mutable_float_vector()
@@ -2042,7 +2138,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_binary_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
@@ -2051,7 +2147,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_float16_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
@@ -2060,7 +2156,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
@@ -2069,7 +2165,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
@@ -2080,7 +2176,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                valid_offsets,
+                valid_logical_offsets,
                 valid_count,
                 result->mutable_vectors()->mutable_int8_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
@@ -2285,10 +2381,13 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     // concurrent retrieves against each other for a read-only operation.
     auto chunks = vec_raw->acquire_chunks();
     if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
-        // copy from raw data
+        const auto physical_offsets =
+            MapValidVectorOffsets(*vec_raw, seg_offsets, count);
+        const auto* raw_offsets =
+            physical_offsets.empty() ? seg_offsets : physical_offsets.data();
         SparseRowsToProto(
             [&](size_t i) {
-                auto offset = seg_offsets[i];
+                auto offset = raw_offsets[i];
                 return offset != INVALID_SEG_OFFSET
                            ? vec_raw->get_physical_element(chunks, offset)
                            : nullptr;
@@ -2363,10 +2462,14 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     // for why the snapshot replaces the chunk lock here.
     auto chunks = vec.acquire_chunks();
     if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+        const auto physical_offsets =
+            MapValidVectorOffsets(vec, seg_offsets, count);
+        const auto* raw_offsets =
+            physical_offsets.empty() ? seg_offsets : physical_offsets.data();
         auto output_base = reinterpret_cast<char*>(output_raw);
         for (int i = 0; i < count; ++i) {
             auto dst = output_base + i * element_sizeof;
-            auto offset = seg_offsets[i];
+            auto offset = raw_offsets[i];
             auto src = (const uint8_t*)vec.get_physical_element(chunks, offset);
             milvus::fastmem::FastMemcpy(dst, src, element_sizeof);
         }
@@ -3008,7 +3111,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
             }
-            EnsureArrayOffsetsForStructField(field_meta, row_count, *sch);
+            EnsureStructElementOffsetsForField(field_meta, row_count, *sch);
         }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
@@ -3121,7 +3224,7 @@ SegmentGrowingImpl::FillAbsentFields() {
                 insert_record_.is_valid_data_exist(field_id) &&
                 insert_record_.get_valid_data(field_id)->empty()) {
                 fill_empty_field(field_meta);
-                EnsureArrayOffsetsForStructField(
+                EnsureStructElementOffsetsForField(
                     field_meta, insert_record_.row_count(), *schema);
             }
             continue;
@@ -3130,7 +3233,7 @@ SegmentGrowingImpl::FillAbsentFields() {
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
-            EnsureArrayOffsetsForStructField(
+            EnsureStructElementOffsetsForField(
                 field_meta, insert_record_.row_count(), *schema);
         }
     }
@@ -3460,6 +3563,15 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
         // Offset-addressed write: idempotent when `filled` is 0 for a
         // non-mapping column being refilled, unlike the appending overload,
         // which would double the validity length on a Reopen retry.
+        //
+        // This is one of the two rewrites ThreadSafeValidData's contract
+        // permits (see the borrow discussion on the class in
+        // ConcurrentVector.h). It is safe only because Reopen holds sch_mutex_
+        // unique and publishes schema_ last, so no reader can name this field
+        // yet, let alone hold a get_chunk_data() borrow into it. Anything that
+        // changes when Reopen publishes -- or that lets a reader reach a
+        // not-yet-published field -- invalidates that argument and this call
+        // with it.
         insert_record_.get_valid_data(field_id)->set_data_raw(
             filled, missing, data.get(), field_meta);
     }
@@ -3495,24 +3607,24 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count) {
     auto schema = get_schema_snapshot();
-    EnsureArrayOffsetsForStructField(field_meta, row_count, *schema);
+    EnsureStructElementOffsetsForField(field_meta, row_count, *schema);
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
         return;
     }
 
-    std::unique_lock lock(array_offsets_map_mutex_);
+    std::unique_lock lock(struct_element_offsets_map_mutex_);
 
-    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
-    for (const auto& [field_id, offsets] : array_offsets_map_) {
+    std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
+    for (const auto& [field_id, offsets] : struct_element_offsets_map_) {
         auto field_it = schema.get_fields().find(field_id);
         if (field_it == schema.get_fields().end()) {
             continue;
@@ -3521,19 +3633,20 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
         auto existing_struct_name =
             GetStructNameForArrayField(field_it->second);
         if (existing_struct_name == struct_name) {
-            array_offsets = offsets;
+            struct_element_offsets = offsets;
             break;
         }
     }
 
-    if (!array_offsets) {
-        array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+    if (!struct_element_offsets) {
+        struct_element_offsets =
+            std::make_shared<StructElementOffsetsGrowing>();
         struct_representative_fields_.insert(field_meta.get_id());
     }
 
-    auto current_row_count = array_offsets->GetRowCount();
+    auto current_row_count = struct_element_offsets->GetRowCount();
     AssertInfo(current_row_count <= row_count,
-               "struct array offsets row count {} exceeds segment row count "
+               "struct element offsets row count {} exceeds segment row count "
                "{} for field {}",
                current_row_count,
                row_count,
@@ -3541,11 +3654,11 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     if (current_row_count < row_count) {
         auto missing_row_count = row_count - current_row_count;
         std::vector<int32_t> empty_lengths(missing_row_count, 0);
-        array_offsets->Insert(
+        struct_element_offsets->Insert(
             current_row_count, empty_lengths.data(), missing_row_count);
     }
 
-    array_offsets_map_[field_meta.get_id()] = array_offsets;
+    struct_element_offsets_map_[field_meta.get_id()] = struct_element_offsets;
 }
 
 void
@@ -3555,11 +3668,12 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 int64_t num_rows) {
     // Rows are written at their reserved ABSOLUTE offsets
     // (SimpleGeometryCache::AppendDataAt), matching how readers address the
-    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // cache (GetByOffset) and how the R-Tree index path's AddGeometry
     // works. This makes the write idempotent: a batch retried after a
     // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
-    // overwrites its own slots instead of re-appending after the partial
-    // prefix and shifting every later row to the wrong offset. It also
+    // addresses its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset (the slots it
+    // already published are simply skipped -- first writer wins). It also
     // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
     // in-order Insert() batches.
     try {
@@ -3642,7 +3756,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     segment_instance_uid(), get_segment_id(), field_id);
 
         // Process each field data chunk, writing rows at their reserved
-        // absolute offsets so a retried load overwrites in place (see
+        // absolute offsets so a retried load lands on the same slots (see
         // BuildGeometryCacheForInsert).
         int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
@@ -3702,60 +3816,22 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                                              FieldId field_id,
                                              const int64_t* seg_offsets,
                                              int64_t count) const {
+    AssertInfo(count >= 0, "Vector offset count must be nonnegative");
     ValidResult result;
-    result.valid_count = count;
+    result.valid_data = std::make_unique<bool[]>(count);
+    result.valid_logical_offsets.reserve(count);
 
-    if (indexing_record_.SyncDataWithIndex(field_id)) {
-        const auto& field_indexing =
-            indexing_record_.get_vec_field_indexing(field_id);
-        auto indexing = field_indexing.get_segment_indexing();
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-
-        if (vec_index != nullptr && vec_index->HasValidData()) {
-            result.valid_data = std::make_unique<bool[]>(count);
-            result.valid_offsets.reserve(count);
-            for (int64_t i = 0; i < count; ++i) {
-                result.valid_data[i] = vec_index->IsRowValid(seg_offsets[i]);
-                if (result.valid_data[i]) {
-                    result.valid_offsets.push_back(seg_offsets[i]);
-                }
-            }
-            result.valid_count = result.valid_offsets.size();
-        }
-    } else {
-        auto vec_base = insert_record_.get_data_base(field_id);
-        if (vec_base != nullptr) {
-            // Avoid vec_base->get_valid_data(): it materializes a flat copy of
-            // the WHOLE validity bitmap (O(segment rows)) while this path only
-            // needs `count` offsets (and, on the mapping-storage branch, only
-            // an emptiness check).
-            auto valid_data_ptr = insert_record_.is_valid_data_exist(field_id)
-                                      ? insert_record_.get_valid_data(field_id)
-                                      : nullptr;
-            bool is_mapping_storage = vec_base->is_mapping_storage();
-            if (valid_data_ptr != nullptr && !valid_data_ptr->empty()) {
-                result.valid_data = std::make_unique<bool[]>(count);
-
-                if (is_mapping_storage) {
-                    vec_base->get_offset_mapping().FilterValidLogicalOffsets(
-                        seg_offsets,
-                        count,
-                        result.valid_data.get(),
-                        result.valid_offsets);
-                } else {
-                    result.valid_offsets.reserve(count);
-                    valid_data_ptr->bulk_is_valid(
-                        seg_offsets, count, result.valid_data.get());
-                    for (int64_t i = 0; i < count; ++i) {
-                        if (result.valid_data[i]) {
-                            result.valid_offsets.push_back(seg_offsets[i]);
-                        }
-                    }
-                }
-                result.valid_count = result.valid_offsets.size();
-            }
+    // Insert/Load maintain this bitmap even after a raw-owning index takes
+    // over and the raw chunks are reclaimed. Filtering must not depend on
+    // index state or change the coordinate space of the offsets it returns.
+    const auto valid_data = insert_record_.get_valid_data(field_id);
+    valid_data->bulk_is_valid(seg_offsets, count, result.valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (result.valid_data[i]) {
+            result.valid_logical_offsets.push_back(seg_offsets[i]);
         }
     }
+    result.valid_count = result.valid_logical_offsets.size();
     return result;
 }
 

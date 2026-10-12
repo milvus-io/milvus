@@ -10,6 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <arrow/filesystem/localfs.h>
+#include "test_utils/AsyncLoadTestUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "folly/system/ThreadName.h"
 #include <nlohmann/detail/iterators/iteration_proxy.hpp>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
@@ -30,11 +35,13 @@
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
+#include "common/Slice.h"
 #include "common/Types.h"
 #include "common/common_type_c.h"
 #include "common/protobuf_utils.h"
@@ -42,6 +49,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/TextMatchIndex.h"
@@ -63,6 +71,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/default_fs.h"
 #include "segcore/segment_c.h"
+#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
@@ -75,6 +84,14 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 namespace {
+
+TEST(TextMatch, WriterMemoryBudgets) {
+    EXPECT_EQ(milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+              500UL * 1024 * 1024);
+    EXPECT_EQ(milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES,
+              15UL * 1024 * 1024);
+}
+
 SchemaPtr
 GenTestSchema(std::map<std::string, std::string> params = {},
               bool nullable = false) {
@@ -128,6 +145,21 @@ CreateTextMatchTestFileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
 }
 
+class FileSliceSizeGuard {
+ public:
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+ private:
+    int64_t old_slice_size_;
+};
+
 std::unique_ptr<index::TextMatchIndex>
 BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
     auto index = std::make_unique<index::TextMatchIndex>(
@@ -139,7 +171,7 @@ BuildTextMatchIndexForUpload(const storage::FileManagerContext& ctx) {
         storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    index->BuildIndexFromFieldData({field_data}, false);
+    index->BuildIndexFromFieldData({field_data}, false, 0);
     return index;
 }
 
@@ -154,6 +186,19 @@ AssertTextMatchUploadReturnsRelativePaths(
         ASSERT_EQ(file.file_name.find(TEXT_LOG_ROOT_PATH), std::string::npos)
             << file.file_name;
         ASSERT_GT(file.file_size, 0);
+    }
+}
+
+void
+ExpectOnlyTextMatchHit(index::TextMatchIndex& index,
+                       const std::string& term,
+                       int64_t expected,
+                       int64_t row_count) {
+    auto result = index.MatchQuery(term, 1);
+    ASSERT_EQ(result.size(), static_cast<size_t>(row_count)) << term;
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(static_cast<bool>(result[i]), i == expected)
+            << term << " unexpected at offset " << i;
     }
 }
 
@@ -413,6 +458,479 @@ TEST(TextMatch, UploadUnifiedReturnsRelativeTextLogPaths) {
               std::string::npos);
 }
 
+TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
+    using Index = index::TextMatchIndex;
+
+    auto with_null =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_with_null",
+                                "milvus_tokenizer",
+                                "{}",
+                                /*enable_background_merge=*/false);
+    with_null->AddTextSealed("alpha", true, 0);
+    with_null->AddNullSealed(1);
+    with_null->AddTextSealed("beta", true, 2);
+    with_null->CreateReader(milvus::index::SetBitsetSealed);
+    with_null->Finish();
+    with_null->Reload();
+    with_null->FinalizeSealed();
+    with_null->FinalizeSealed();  // Idempotent for converging sealed paths.
+
+    auto nulls = with_null->IsNull();
+    ASSERT_EQ(nulls.size(), 3);
+    EXPECT_FALSE(nulls[0]);
+    EXPECT_TRUE(nulls[1]);
+    EXPECT_FALSE(nulls[2]);
+    EXPECT_EQ(with_null->ValidityBitmapByteSize(), sizeof(uint64_t));
+
+    auto all_valid =
+        std::make_unique<Index>(std::numeric_limits<int64_t>::max(),
+                                "raw_sealed_all_valid",
+                                "milvus_tokenizer",
+                                "{}",
+                                /*enable_background_merge=*/false);
+    all_valid->AddTextSealed("alpha", true, 0);
+    all_valid->AddTextSealed("beta", true, 1);
+    all_valid->CreateReader(milvus::index::SetBitsetSealed);
+    all_valid->Finish();
+    all_valid->Reload();
+    all_valid->FinalizeSealed();
+
+    EXPECT_EQ(all_valid->ValidityBitmapByteSize(), 0);
+    auto valid = all_valid->IsNotNull();
+    ASSERT_EQ(valid.size(), 2);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_TRUE(valid[1]);
+    auto no_nulls = all_valid->IsNull();
+    EXPECT_EQ(no_nulls.count(), 0);
+}
+
+TEST(TextMatch, V2LoadFinalizesValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1003);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = builder->Upload({});
+
+    std::vector<std::string> files;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+    }
+    storage::DiskFileManagerImpl file_manager(ctx);
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), sizeof(uint64_t));
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), texts.size());
+        EXPECT_FALSE(nulls[0]);
+        EXPECT_TRUE(nulls[1]);
+        EXPECT_FALSE(nulls[2]);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), texts.size());
+        EXPECT_FALSE(not_in[0]);
+        EXPECT_FALSE(not_in[1]);
+        EXPECT_TRUE(not_in[2]);
+    }
+}
+
+TEST(TextMatch, V2LoadSlicedNullOffsets) {
+    constexpr int64_t kSliceSize = 4 * 1024;
+    constexpr size_t kRows = kSliceSize / sizeof(size_t) + 1;
+
+    auto ctx = CreateTextMatchTestFileManagerContext(1004);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts(kRows);
+    std::vector<uint8_t> valid_bytes((kRows + 7) / 8, 0);
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = [&]() {
+        FileSliceSizeGuard slice_size_guard(kSliceSize);
+        return builder->Upload({});
+    }();
+
+    std::vector<std::string> files;
+    bool found_null_offset_slice = false;
+    bool found_slice_meta = false;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+        auto file_name =
+            boost::filesystem::path(file.file_name).filename().string();
+        found_null_offset_slice |=
+            file_name.find(index::INDEX_NULL_OFFSET_FILE_NAME +
+                           std::string("_")) == 0;
+        found_slice_meta |= file_name == INDEX_FILE_SLICE_META;
+    }
+    ASSERT_TRUE(found_null_offset_slice);
+    ASSERT_TRUE(found_slice_meta);
+
+    storage::DiskFileManagerImpl file_manager(ctx);
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+        loaded->Load(config);
+
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(),
+                  TargetBitmap(kRows).size_in_bytes());
+        auto nulls = loaded->IsNull();
+        ASSERT_EQ(nulls.size(), kRows);
+        EXPECT_EQ(nulls.count(), kRows);
+
+        auto valid = loaded->IsNotNull();
+        ASSERT_EQ(valid.size(), kRows);
+        EXPECT_EQ(valid.count(), 0);
+
+        std::string excluded = "alpha";
+        auto not_in = loaded->NotIn(1, &excluded);
+        ASSERT_EQ(not_in.size(), kRows);
+        EXPECT_EQ(not_in.count(), 0);
+    }
+}
+
+TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
+    auto ctx = CreateTextMatchTestFileManagerContext(1005);
+    auto builder = std::make_unique<index::TextMatchIndex>(
+        ctx, index::TANTIVY_INDEX_LATEST_VERSION, "milvus_tokenizer", "{}", "");
+
+    std::vector<std::string> texts = {"alpha", "", "beta"};
+    std::vector<uint8_t> valid_bytes = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+    field_data->FillFieldData(
+        texts.data(), valid_bytes.data(), texts.size(), 0);
+    builder->BuildIndexFromFieldData({field_data}, true, 0);
+    auto stats = builder->Upload({});
+
+    std::vector<std::string> files;
+    for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+        files.push_back(file.file_name);
+    }
+    auto index_size = stats->GetMemSize();
+    auto bitmap_bytes =
+        static_cast<int64_t>(TargetBitmap(texts.size()).size_in_bytes());
+    storage::DiskFileManagerImpl file_manager(ctx);
+
+    for (bool mmap_enabled : {false, true}) {
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+        config[index::ENABLE_MMAP] = mmap_enabled;
+
+        storagev1translator::TextMatchIndexLoadInfo load_info{
+            mmap_enabled,
+            3,
+            101,
+            "{}",
+            index_size,
+            static_cast<int64_t>(texts.size()),
+            "",
+            ""};
+        storagev1translator::TextMatchIndexTranslator translator(
+            load_info, ctx, config);
+
+        auto [estimated_loaded, estimated_overhead] =
+            translator.estimated_byte_size_of_cell(0);
+        if (mmap_enabled) {
+            EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, index_size);
+            EXPECT_EQ(estimated_overhead.memory_bytes, index_size);
+            EXPECT_EQ(estimated_overhead.file_bytes, 0);
+        } else {
+            EXPECT_EQ(estimated_loaded.memory_bytes, index_size + bitmap_bytes);
+            EXPECT_EQ(estimated_loaded.file_bytes, 0);
+            EXPECT_EQ(estimated_overhead.memory_bytes, 0);
+            EXPECT_EQ(estimated_overhead.file_bytes, index_size);
+        }
+
+        auto cells = translator.get_cells(nullptr, {0});
+        ASSERT_EQ(cells.size(), 1);
+        auto* loaded = cells.front().second.get();
+        ASSERT_NE(loaded, nullptr);
+        EXPECT_EQ(loaded->ValidityBitmapByteSize(), bitmap_bytes);
+        if (mmap_enabled) {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, bitmap_bytes);
+            EXPECT_EQ(loaded->CellByteSize().file_bytes,
+                      loaded->ByteSize() - bitmap_bytes);
+        } else {
+            EXPECT_EQ(loaded->CellByteSize().memory_bytes, loaded->ByteSize());
+            EXPECT_EQ(loaded->CellByteSize().file_bytes, 0);
+        }
+    }
+}
+
+class ObservedTextMatchIndex : public index::TextMatchIndex {
+ public:
+    using TextMatchIndex::TextMatchIndex;
+    void
+    ComputeByteSize() override {
+        finalizer_thread = folly::getCurrentThreadName().value_or("");
+        if (on_finalize) {
+            on_finalize();
+        }
+        TextMatchIndex::ComputeByteSize();
+    }
+    std::string
+    LocalDirectory() const {
+        return disk_file_manager_->GetLocalIndexObjectPrefix();
+    }
+    std::string finalizer_thread;
+    std::function<void()> on_finalize;
+};
+
+class TextMatchNativeFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    TextMatchNativeFileSystem()
+        : SubTreeFileSystem("",
+                            std::make_shared<arrow::fs::LocalFileSystem>()) {
+    }
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "MILVUS_ASYNC"));
+        return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
+            MakeFinished(std::static_pointer_cast<arrow::io::RandomAccessFile>(
+                files.at(path)));
+    }
+    std::map<std::string, std::shared_ptr<test::ControlledDirectReadFile>>
+        files;
+};
+
+class PackedTextMatchAsyncLoadTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        old_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+        old_workers_ = storage::GetAsyncLoadThreadPoolSize();
+        storage::SetAsyncLoadThreadPoolSize(1);
+        old_slots_ =
+            storage::LoadAdmissionController::GetInstance().CapacitySlots();
+        storage::LoadAdmissionController::GetInstance().SetCapacitySlots(1);
+    }
+    void
+    TearDown() override {
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_TRUE(available);
+        if (available)
+            admission.Release({0, 1});
+        admission.SetCapacitySlots(old_slots_);
+        storage::SetAsyncLoadThreadPoolSize(old_workers_);
+        storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled_);
+    }
+    Config
+    Upload(const storage::FileManagerContext& ctx) {
+        index::TextMatchIndex builder(ctx,
+                                      index::TANTIVY_INDEX_LATEST_VERSION,
+                                      "milvus_tokenizer",
+                                      "{}",
+                                      "");
+        std::vector<std::string> texts = {"alpha", "", "beta"};
+        const uint8_t valid = 0b00000101;
+        auto data = storage::CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+        data->FillFieldData(texts.data(), &valid, texts.size(), 0);
+        builder.BuildIndexFromFieldData({data}, true, 0);
+        const auto stats = builder.UploadUnified({});
+        index_size_ = stats->GetMemSize();
+        std::vector<std::string> files;
+        for (const auto& file : stats->GetSerializedIndexFileInfo())
+            files.push_back(file.file_name);
+        storage::MemFileManagerImpl manager(ctx);
+        return {{index::INDEX_FILES, files},
+                {STATS_BASE_PATH_KEY, manager.GetRemoteTextLogPrefix()},
+                {index::ENABLE_MMAP, true},
+                {LOAD_PRIORITY, proto::common::LoadPriority::LOW}};
+    }
+    void
+    CheckQuery(index::TextMatchIndex& loaded) {
+        loaded.RegisterAnalyzer("milvus_tokenizer", "{}");
+        ExpectOnlyTextMatchHit(loaded, "alpha", 0, 3);
+        EXPECT_EQ(loaded.IsNull().count(), 1);
+        EXPECT_TRUE(loaded.IsNull()[1]);
+        const std::string excluded = "alpha";
+        const auto result = loaded.NotIn(1, &excluded);
+        EXPECT_EQ(result.count(), 1);
+        EXPECT_TRUE(result[2]);
+    }
+    test::ScopedLoadTransientBudget budget_{64 * 1024 * 1024};
+    int64_t index_size_{};
+    bool old_enabled_{};
+    int old_workers_{};
+    size_t old_slots_{};
+};
+
+TEST_F(PackedTextMatchAsyncLoadTest, HeapAndMmapReloadAcrossRolloutChanges) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1011);
+        auto config = Upload(ctx);
+        for (const bool mmap : {false, true}) {
+            config[index::ENABLE_MMAP] = mmap;
+            for (const bool planning_enabled : {false, true}) {
+                storagev2translator::SetStorageV2AsyncLoadEnabled(
+                    planning_enabled);
+                storagev1translator::TextMatchIndexTranslator translator(
+                    {mmap, 3, 101, "{}", index_size_, 3, "", ""}, ctx, config);
+                const auto estimate = translator.estimated_byte_size_of_cell(0);
+                for (const bool enabled : {true, false}) {
+                    storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+                    auto cells = translator.get_cells(nullptr, {0});
+                    ASSERT_EQ(cells.size(), 1);
+                    CheckQuery(*cells.front().second);
+                    const auto actual = cells.front().second->CellByteSize();
+                    EXPECT_GE(estimate.first.memory_bytes, actual.memory_bytes);
+                    EXPECT_GE(estimate.first.file_bytes, actual.file_bytes);
+                    EXPECT_EQ(estimate,
+                              translator.estimated_byte_size_of_cell(0));
+
+                    auto cached_ctx = ctx;
+                    cached_ctx.use_async_load = planning_enabled;
+                    ObservedTextMatchIndex cached(cached_ctx);
+                    cached.Load(config);
+                    EXPECT_EQ(
+                        cached.finalizer_thread.starts_with("MILVUS_ASYNC"),
+                        planning_enabled);
+                    CheckQuery(cached);
+
+                    ObservedTextMatchIndex direct(ctx);
+                    direct.Load(config);
+                    EXPECT_EQ(
+                        direct.finalizer_thread.starts_with("MILVUS_ASYNC"),
+                        enabled);
+                    CheckQuery(direct);
+                    EXPECT_EQ(std::filesystem::exists(direct.LocalDirectory()),
+                              mmap);
+                }
+            }
+        }
+    }
+}
+
+TEST_F(PackedTextMatchAsyncLoadTest,
+       TranslatorNativeReadSuspendsAndDrainsOnCancel) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1013);
+        auto config = Upload(ctx);
+        auto fs = std::make_shared<TextMatchNativeFileSystem>();
+        for (const auto& file :
+             config.at(index::INDEX_FILES).get<std::vector<std::string>>()) {
+            const auto path =
+                config.at(STATS_BASE_PATH_KEY).get<std::string>() + "/" + file;
+            std::vector<uint8_t> bytes;
+            auto input = ctx.fs->OpenInputFile(path).ValueOrDie();
+            const auto size = input->GetSize().ValueOrDie();
+            bytes.resize(size);
+            ASSERT_EQ(input->ReadAt(0, size, bytes.data()).ValueOrDie(), size);
+            fs->files.emplace(path,
+                              std::make_shared<test::ControlledDirectReadFile>(
+                                  std::move(bytes)));
+        }
+        ctx.fs = fs;
+        storagev1translator::TextMatchIndexTranslator translator(
+            {true, 3, 101, "{}", index_size_, 3, "", ""}, ctx, config);
+        const auto first_path = fs->files.begin()->first;
+        auto first = fs->files.at(first_path);
+        first->ResetCounters();
+        first->SetAutoComplete(false);
+        folly::CancellationSource cancel;
+        OpContext op;
+        op.cancellation_token = cancel.getToken();
+        auto pending = std::async(
+            std::launch::async, [&] { return translator.get_cells(&op, {0}); });
+        auto drain = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            first->SetAutoComplete(true);
+            for (size_t i = 0; i < first->DirectReadCalls().size(); ++i)
+                first->Complete(i);
+            pending.wait();
+        });
+        // Opening reads magic, footer and directory without admission. Wait
+        // for the admitted _meta payload before probing cancellation and slots.
+        for (size_t i = 0; i < 3; ++i) {
+            ASSERT_TRUE(first->WaitForCallCount(i + 1));
+            first->Complete(i);
+        }
+        ASSERT_TRUE(first->WaitForCallCount(4));
+        auto probe = std::make_shared<std::promise<void>>();
+        auto ready = probe->get_future();
+        storage::ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::LOW)
+            ->add([probe] { probe->set_value(); });
+        EXPECT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_FALSE(available);
+        if (available)
+            admission.Release({0, 1});
+        cancel.requestCancellation();
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        first->SetAutoComplete(true);
+        first->Complete(3);
+        pending.wait();
+        drain.dismiss();
+        try {
+            pending.get();
+            FAIL() << "cancelled translator must not publish a cell";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        for (const auto& [path, file] : fs->files) {
+            EXPECT_EQ(file->ReadAtCalls(), 0);
+            EXPECT_EQ(file->AsyncReadCalls(), 0);
+        }
+    }
+}
+
+TEST_F(PackedTextMatchAsyncLoadTest, FinalizerCancellationCleansFiles) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1015);
+        auto config = Upload(ctx);
+        for (const bool mmap : {false, true}) {
+            config[index::ENABLE_MMAP] = mmap;
+            folly::CancellationSource cancel;
+            OpContext op;
+            op.cancellation_token = cancel.getToken();
+            ObservedTextMatchIndex loaded(ctx);
+            loaded.on_finalize = [&] { cancel.requestCancellation(); };
+            try {
+                loaded.Load(config, &op);
+                FAIL() << "finalization must observe cancellation";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), FollyCancel);
+            }
+            EXPECT_FALSE(std::filesystem::exists(loaded.LocalDirectory()));
+        }
+    }
+}
+
 // Regression test: BuildIndexFromFieldData with multiple FieldData batches
 // and nullable fields must record correct global offsets in null_offset_.
 // Previously, null_offset_.push_back(i) used the batch-local index instead
@@ -467,7 +985,7 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true /* nullable */);
+    index->BuildIndexFromFieldData(field_datas, true /* nullable */, 0);
     index->Commit();
     index->Reload();
 
@@ -530,6 +1048,101 @@ TEST(TextMatch, BuildIndexFromFieldDataMultiBatchNullable) {
     }
 }
 
+// Regression test: a growing segment loads each batch at the offset PreInsert
+// reserved. BuildIndexFromFieldData has to place that batch's doc ids there,
+// the same doc-id space AddTextsGrowing writes into -- starting at 0 would
+// stack the loaded batch on top of doc ids the index already owns.
+TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
+    using Index = index::TextMatchIndex;
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_offset_begin",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    // Rows [0, 3) arrive through the insert path, which is already
+    // offset-addressed.
+    const std::vector<std::string> inserted = {"alpha", "beta", "gamma"};
+    index->AddTextsGrowing(
+        inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
+
+    // Rows [3, 6) arrive through the load path, at the offset it reserved;
+    // row 4 is null, so its null bitmap entry must use the same doc-id space.
+    const std::vector<std::string> loaded = {"delta", "", "epsilon"};
+    const std::vector<uint8_t> loaded_valid = {0b00000101};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, loaded.size());
+    field_data->FillFieldData(
+        loaded.data(), loaded_valid.data(), loaded.size(), 0);
+    index->BuildIndexFromFieldData({field_data}, true, /*offset_begin=*/3);
+    index->Commit();
+    index->Reload();
+
+    auto nulls = index->IsNull();
+    auto not_nulls = index->IsNotNull();
+    ASSERT_EQ(nulls.size(), 6);
+    ASSERT_EQ(not_nulls.size(), 6);
+    for (int64_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(static_cast<bool>(nulls[i]), i == 4);
+        EXPECT_EQ(static_cast<bool>(not_nulls[i]), i != 4);
+    }
+
+    ExpectOnlyTextMatchHit(*index, "alpha", 0, 6);
+    ExpectOnlyTextMatchHit(*index, "gamma", 2, 6);
+    ExpectOnlyTextMatchHit(*index, "delta", 3, 6);
+    ExpectOnlyTextMatchHit(*index, "epsilon", 5, 6);
+}
+
+// The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
+// index honouring offset_begin, this covers load_field_data_common actually
+// handing it the offset PreInsert reserved. Insert fills rows [0, 2), a load
+// fills [2, 4); on a build that indexes from 0 the loaded rows land on top of
+// the inserted ones and the term queries below hit the wrong offsets.
+TEST(TextMatch, GrowingLoadBuildsTextIndexAtReservedOffset) {
+    auto schema = GenTestSchema();
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto* seg_impl = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ASSERT_NE(seg_impl, nullptr);
+    const auto pk_field = FieldId(100);
+    const auto str_field = FieldId(101);
+
+    constexpr int64_t inserted_rows = 2;
+    auto data = DataGen(schema, inserted_rows);
+    auto* str_col = data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data()
+                        ->mutable_data();
+    str_col->at(0) = "football basketball";
+    str_col->at(1) = "swimming tennis";
+    ASSERT_EQ(seg->PreInsert(inserted_rows), 0);
+    seg->Insert(0,
+                inserted_rows,
+                data.row_ids_.data(),
+                data.timestamps_.data(),
+                data.raw_);
+
+    const std::vector<std::string> loaded = {"cricket rugby", "hockey curling"};
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, false, 1, loaded.size());
+    field_data->FillFieldData(loaded.data(), loaded.size());
+    auto reserved = seg->PreInsert(loaded.size());
+    ASSERT_EQ(reserved, inserted_rows);
+    seg_impl->load_field_data_common(
+        str_field, reserved, {field_data}, pk_field, loaded.size());
+
+    auto pinned = seg_impl->GetTextIndex(nullptr, str_field);
+    auto* index = pinned.get();
+
+    ExpectOnlyTextMatchHit(*index, "football", 0, 4);
+    ExpectOnlyTextMatchHit(*index, "tennis", 1, 4);
+    ExpectOnlyTextMatchHit(*index, "cricket", 2, 4);
+    ExpectOnlyTextMatchHit(*index, "curling", 3, 4);
+}
+
 TEST(TextMatch, BuildIndexFromTextFieldData) {
     auto ctx = CreateTextMatchTestFileManagerContext(
         1002, proto::schema::DataType::Text);
@@ -542,7 +1155,7 @@ TEST(TextMatch, BuildIndexFromTextFieldData) {
         storage::CreateFieldData(DataType::TEXT, DataType::NONE, false);
     field_data->FillFieldData(texts.data(), texts.size());
 
-    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false));
+    ASSERT_NO_THROW(index->BuildIndexFromFieldData({field_data}, false, 0));
 }
 
 TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
@@ -553,10 +1166,10 @@ TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
     const std::string unique_token = "zzlobuniqueterm";
 
     auto test_dir =
-        "sealed_text_lob_index_" +
+        TestLocalPath + "sealed_text_lob_index_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldMeta(
@@ -651,7 +1264,7 @@ TEST(TextMatch, SealedCreateTextIndexDecodesTextLobRefs) {
     EXPECT_TRUE(hits[1]);
     EXPECT_FALSE(hits[2]);
 
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 }
 
 TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
@@ -662,10 +1275,10 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     constexpr int64_t row_count = 1030;
 
     auto test_dir =
-        "growing_text_lob_index_" +
+        TestLocalPath + "growing_text_lob_index_" +
         std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count());
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 
     auto schema = std::make_shared<Schema>();
     schema->AddField(FieldMeta(
@@ -766,7 +1379,7 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     ASSERT_EQ(null_hits.size(), row_count);
     EXPECT_FALSE(null_hits[7]);
 
-    boost::filesystem::remove_all(TestLocalPath + test_dir);
+    boost::filesystem::remove_all(test_dir);
 }
 
 // Regression test: BuildIndexFromFieldData with a single batch should still
@@ -797,7 +1410,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {
     index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterAnalyzer("milvus_tokenizer", "{}");
 
-    index->BuildIndexFromFieldData(field_datas, true);
+    index->BuildIndexFromFieldData(field_datas, true, 0);
     index->Commit();
     index->Reload();
 
@@ -1811,6 +2424,75 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
 
     writer.join();
     reader.join();
+}
+
+TEST(TextMatch, ExprResCacheGrowingTextBypassesReadAndWrite) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    auto reset_cache = folly::makeGuard([&]() {
+        mgr.Clear();
+        EXPECT_TRUE(mgr.SetConfig(milvus::exec::CacheConfig{}));
+        ExprResCacheManager::SetEnabled(false);
+    });
+    milvus::exec::CacheConfig config;
+    config.mode = milvus::exec::CacheMode::Memory;
+    config.mem_enable_growing = true;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(config));
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(true);
+
+    auto schema = GenTestSchema();
+    constexpr int64_t N = 2;
+    auto raw_data = DataGen(schema, N);
+    auto* strings = raw_data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data();
+    strings->set_data(0, "football basketball");
+    strings->set_data(1, "swimming football");
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto index = seg->GetTextIndex(nullptr, FieldId(101));
+    index.get()->Commit();
+    index.get()->Reload();
+    ASSERT_EQ(seg->get_row_count(), N);
+    ASSERT_EQ(index.get()->MatchQuery("football", 1).count(), N);
+
+    for (auto op :
+         {OpType::TextMatch, OpType::PhraseMatch, OpType::TextMatchFuzzy}) {
+        SCOPED_TRACE(proto::plan::OpType_Name(op));
+        auto expr = GetMatchExpr(schema, "football", op);
+        auto result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(result.count(), N);
+        EXPECT_EQ(mgr.GetEntryCount(), 0);
+        mgr.Clear();
+
+        // Simulate a result cached before the index became visible, with the
+        // same active_count. Explicit commit/reload above avoids a timed race.
+        ExprResCacheManager::Key key{seg->get_segment_id(),
+                                     expr->filter()->ToString()};
+        ExprResCacheManager::Value stale;
+        stale.result = std::make_shared<TargetBitmap>(N);
+        stale.valid_result = std::make_shared<TargetBitmap>(N, true);
+        stale.active_count = N;
+        mgr.Put(key, stale);
+        ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+        result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(result.count(), N);
+        ExprResCacheManager::Value still_cached;
+        still_cached.active_count = N;
+        ASSERT_TRUE(mgr.Get(key, still_cached));
+        EXPECT_EQ(still_cached.result->count(), 0);
+        mgr.Clear();
+    }
 }
 
 TEST(TextMatch, ExprResCacheSealed) {

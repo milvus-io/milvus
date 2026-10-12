@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/CGoCatch.h"
 #include "storage/storage_c.h"
 
 #include <exception>
@@ -24,14 +25,17 @@
 #include "common/EasyAssert.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -50,9 +54,8 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
             *size = 0;
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -62,9 +65,8 @@ InitLocalChunkManagerSingleton(const char* c_path) {
         milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -102,13 +104,29 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         }
         storage_config.use_crc32c_checksum =
             c_storage_config.use_crc32c_checksum;
+        storage_config.talon_mode = c_storage_config.talon_mode;
+        storage_config.talon_small_read_threshold =
+            c_storage_config.talon_small_read_threshold;
+        storage_config.talon_coordinator =
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "";
+        storage_config.talon_block_size = c_storage_config.talon_block_size;
+        storage_config.talon_max_idle_per_addr =
+            c_storage_config.talon_max_idle_per_addr;
+        storage_config.talon_enable_for_external_table =
+            c_storage_config.talon_enable_for_external_table;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable) {
+    milvus::storage::SetUseArrowFileSystemChunkManager(enable);
 }
 
 CStatus
@@ -130,37 +148,42 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =
             std::string(c_mmap_config.json_stats_mmap_path);
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
     try {
-        std::string mode_str(c_disk_write_config.mode);
+        const std::string mode_str(c_disk_write_config.mode);
+        auto mode = milvus::storage::FileWriter::WriteMode::BUFFERED;
         if (mode_str == "direct") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::DIRECT);
-            // buffer size checking is done in FileWriter::SetBufferSize,
-            // and it will try to find a proper and valid buffer size
-            milvus::storage::FileWriter::SetBufferSize(
-                c_disk_write_config.buffer_size_kb * 1024);  // convert to bytes
-        } else if (mode_str == "buffered") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::BUFFERED);
-        } else {
+            mode = milvus::storage::FileWriter::WriteMode::DIRECT;
+        } else if (mode_str != "buffered") {
             return milvus::FailureCStatus(milvus::ConfigInvalid,
                                           "Invalid mode");
         }
-        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
+        // Reject invalid input before publishing any part of the configuration.
+        const auto& rate_config = c_disk_write_config.rate_limiter_config;
+        milvus::storage::io::WriteRateLimiter::ValidateConfig(
+            rate_config.refill_period_us,
+            rate_config.avg_bps,
+            rate_config.max_burst_bps);
+        milvus::storage::LocalFileIOPool::GetInstance().Configure(
             c_disk_write_config.nr_threads);
+        milvus::storage::FileWriter::SetMode(mode);
+        if (mode == milvus::storage::FileWriter::WriteMode::DIRECT) {
+            // SetBufferSize normalizes the configured size and alignment.
+            milvus::storage::FileWriter::SetBufferSize(
+                c_disk_write_config.buffer_size_kb * 1024);
+        }
         // configure rate limiter
         milvus::storage::io::WriteRateLimiter::GetInstance().Configure(
             c_disk_write_config.rate_limiter_config.refill_period_us,
@@ -170,9 +193,8 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -195,9 +217,18 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
             .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
                                   c_arrow_reader_config.range_size_limit_bytes);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
 }
 
 CStatus
@@ -274,18 +305,27 @@ InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
 
 void
 CleanRemoteChunkManagerSingleton() {
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    try {
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    }
+    CGO_CATCH_AND_LOG("CleanRemoteChunkManagerSingleton")
 }
 
 void
 ResizeTheadPool(int64_t priority, float ratio) {
-    milvus::ThreadPools::ResizeThreadPool(
-        static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    try {
+        milvus::ThreadPools::ResizeThreadPool(
+            static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    }
+    CGO_CATCH_AND_LOG("ResizeTheadPool")
 }
 
 void
 CleanPluginLoader() {
-    milvus::storage::PluginLoader::GetInstance().unloadAll();
+    try {
+        milvus::storage::PluginLoader::GetInstance().unloadAll();
+    }
+    CGO_CATCH_AND_LOG("CleanPluginLoader")
 }
 
 CStatus
@@ -293,34 +333,57 @@ InitPluginLoader(const char* plugin_path) {
     try {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+    }
+    // Plugin callbacks can throw opaque messages containing configuration.
+    // Sanitize before FailureCStatus: its untyped-exception observer also logs
+    // the message. Keep the same code/OOM/fallback rules as the shared macro.
+    catch (const std::bad_alloc&) {
+        return milvus::FailureCStatus(
+            milvus::MemAllocateFailed,
+            "Plugin initialization ran out of memory");
+    } catch (const milvus::SegcoreError& error) {
+        return milvus::FailureCStatus(error.get_error_code(),
+                                      "Native plugin initialization failed");
+    } catch (const std::exception&) {
+        const std::runtime_error safe_error(
+            "Native plugin initialization failed");
+        return milvus::FailureCStatus(&safe_error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "Unknown exception during native plugin initialization");
     }
 }
 
 CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(c_plugin_context.ez_id,
+                                c_plugin_context.collection_id,
+                                std::string(c_plugin_context.key));
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(c_plugin_context.ez_id,
-                            c_plugin_context.collection_id,
-                            std::string(c_plugin_context.key));
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 UnRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(
+            c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(
-        c_plugin_context.ez_id, c_plugin_context.collection_id, "");
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

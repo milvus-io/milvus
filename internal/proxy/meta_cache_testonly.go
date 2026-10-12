@@ -25,12 +25,14 @@ import (
 	"context"
 
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -61,6 +63,35 @@ func InitEmptyMetaCacheForTest() *MetaCache {
 		panic(err)
 	}
 	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	credResponse := func(username, password string) *rootcoordpb.GetCredentialResponse {
+		// Mock credentials need no production-grade hashing: MinCost keeps the
+		// package-wide per-test engine setup cheap and avoids the -race timeout.
+		// Mirrors internal/util/adminauth/verifier_test.go. Production
+		// crypto.PasswordEncrypt (DefaultCost) is untouched.
+		encryptedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+		if err != nil {
+			panic(err)
+		}
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: string(encryptedPassword),
+		}
+	}
+	mixcoord.EXPECT().GetCredential(
+		mock.Anything,
+		mock.MatchedBy(func(req *rootcoordpb.GetCredentialRequest) bool {
+			return req.GetUsername() == "mockUser"
+		}),
+		mock.Anything,
+	).Return(credResponse("mockUser", "mockPass"), nil)
+	mixcoord.EXPECT().GetCredential(
+		mock.Anything,
+		mock.MatchedBy(func(req *rootcoordpb.GetCredentialRequest) bool {
+			return req.GetUsername() == "root"
+		}),
+		mock.Anything,
+	).Return(credResponse("root", "pwd"), nil)
 	privilege.InitPrivilegeCache(context.Background(), mixcoord)
 	return metaCache
 }

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <any>
 #include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
@@ -26,6 +27,9 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "folly/coro/Task.h"
+#include "index/IndexLoadPlan.h"
+#include "storage/IndexEntryFormat.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -116,7 +120,6 @@ class ScalarIndex : public IndexBase {
                   "scalar index don't support build index with dataset");
     };
 
- public:
     using IndexBase::Build;
 
     virtual ScalarIndexType
@@ -284,6 +287,33 @@ class ScalarIndex : public IndexBase {
     LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
+
+    // Describe final targets before IO; AsyncIndexEntryReader fills them.
+    // Public so Hybrid can delegate both stages to its internal scalar index.
+    virtual IndexLoadPlan
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
+    }
+
+    // Complete index initialization after all planned entries pass verification.
+    // Runs on the calling async worker; may await local-file writes (e.g. Bitmap's
+    // frozen file). The caller retains the plan until
+    // completion.
+    virtual folly::coro::Task<void>
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
+        co_return;
+    }
+
+ private:
+    // Uses the shared async executor, with local-file phases on LocalFileIOPool.
+    folly::coro::Task<void>
+    LoadUnifiedAsync(const std::string& packed_file,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
 
  protected:
     // Execute a LIKE-pattern query inside PatternMatch implementations.

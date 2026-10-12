@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -39,9 +40,21 @@ import (
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
+const (
+	telemetryHistoryRetention    = time.Hour
+	maxTelemetryHistorySnapshots = 4096
+	// Retain a small quantile sketch per operation/window for mathematically valid
+	// history percentiles. At the one-hour hard snapshot cap this stays in the same
+	// memory range as the C++ implementation while preserving sub-percentile detail.
+	telemetryHistorySamplesPerWindow = 128
+)
+
 // TelemetryConfig holds configurable settings for client telemetry
 type TelemetryConfig struct {
-	// Enabled controls whether telemetry collection is active
+	// Enabled controls telemetry at connection startup. An initial false value is an
+	// explicit opt-out and starts no heartbeat. When an already-running client is
+	// dynamically disabled by the server, operation collection and metric payloads
+	// stop while the command heartbeat stays active for ACKs and later re-enable.
 	Enabled bool
 	// HeartbeatInterval is how often to send heartbeats to server (default: 10 seconds).
 	//
@@ -278,11 +291,20 @@ func (c *OperationMetricsCollector) Record(collection string, latencyUs int64, s
 // IMPORTANT: P99 is calculated here atomically before clearing the sample buffer
 // This prevents the race condition where sendHeartbeat could calculate P99 from a cleared buffer
 func (c *OperationMetricsCollector) GetMetrics() *Metrics {
+	metrics, _ := c.getMetricsAndHistorySamples()
+	return metrics
+}
+
+// getMetricsAndHistorySamples atomically snapshots both the public interval metrics and
+// a bounded internal latency sketch before resetting the collector. A percentile cannot
+// be combined from per-window percentiles, so history aggregation needs samples from the
+// underlying distributions rather than a weighted average of their P99 values.
+func (c *OperationMetricsCollector) getMetricsAndHistorySamples() (*Metrics, []int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.requestCount == 0 {
-		return nil
+		return nil, nil
 	}
 
 	avgLatency := float64(c.totalLatency) / float64(c.requestCount) / 1000.0
@@ -299,6 +321,10 @@ func (c *OperationMetricsCollector) GetMetrics() *Metrics {
 		P99LatencyMs: p99Latency,
 		MaxLatencyMs: maxLatency,
 	}
+	historySamples := retainHistoryLatencySamples(
+		copyValidLatencySamples(c.latencySamples, c.totalSamples, c.bufferSize),
+		telemetryHistorySamplesPerWindow,
+	)
 
 	// Reset counters for next period
 	c.requestCount = 0
@@ -309,7 +335,7 @@ func (c *OperationMetricsCollector) GetMetrics() *Metrics {
 	c.sampleIndex = 0
 	c.totalSamples = 0
 
-	return metrics
+	return metrics, historySamples
 }
 
 // GetMetricsSnapshot returns current metrics WITHOUT resetting counters
@@ -393,6 +419,43 @@ func calculateP99FromSamples(samples []int64, totalSamples int64, bufferSize int
 	}
 
 	return float64(sorted[index])
+}
+
+func copyValidLatencySamples(samples []int64, totalSamples int64, bufferSize int) []int64 {
+	if totalSamples <= 0 || bufferSize <= 0 {
+		return nil
+	}
+	count := min(bufferSize, len(samples))
+	if totalSamples < int64(count) {
+		count = int(totalSamples)
+	}
+	result := make([]int64, count)
+	// Ring order is irrelevant because the history sketch is sorted below.
+	copy(result, samples[:count])
+	return result
+}
+
+// retainHistoryLatencySamples turns the collector's recent ring into an evenly spaced
+// quantile sketch. Including both endpoints is important for tail percentiles, while the
+// fixed cap prevents one-hour history from retaining 1000 samples for every operation in
+// every heartbeat window.
+func retainHistoryLatencySamples(samples []int64, limit int) []int64 {
+	if len(samples) == 0 || limit <= 0 {
+		return nil
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	if len(samples) <= limit {
+		return samples
+	}
+	if limit == 1 {
+		return []int64{samples[len(samples)-1]}
+	}
+	retained := make([]int64, limit)
+	for index := range retained {
+		source := index * (len(samples) - 1) / (limit - 1)
+		retained[index] = samples[source]
+	}
+	return retained
 }
 
 // GetP99Latency calculates P99 latency from current samples (in milliseconds)
@@ -532,6 +595,11 @@ type MetricsSnapshot struct {
 	Timestamp int64               // Unix timestamp in milliseconds (start of snapshot period)
 	EndTime   int64               // Unix timestamp in milliseconds (end of snapshot period)
 	Metrics   []*OperationMetrics // Metrics for all operations
+
+	// historyLatencySamples is an internal per-operation quantile sketch in microseconds.
+	// It is deliberately absent from heartbeat/detail payloads and exists only so a history
+	// query can calculate the percentile of the combined distribution.
+	historyLatencySamples map[string][]int64
 }
 
 // NewClientTelemetryManager creates a new client telemetry manager
@@ -580,7 +648,8 @@ func (m *ClientTelemetryManager) Start() {
 	// Mark as ready immediately - no blocking initial heartbeat
 	m.ready.Store(true)
 
-	// Start background heartbeat loop (snapshot creation is done inside heartbeatLoop)
+	// The heartbeat is also the command control plane. Keep it running while metrics
+	// are disabled so the server receives ACKs and can later re-enable collection.
 	m.wg.Add(1)
 	go m.heartbeatLoop()
 }
@@ -717,18 +786,16 @@ func (m *ClientTelemetryManager) sendHeartbeat() {
 	enabled := m.config.Enabled
 	m.configMu.RUnlock()
 
-	if !enabled {
-		return
-	}
-
 	if m.client == nil || m.client.telemetryService == nil {
 		return
 	}
 
 	// Get metrics from the latest snapshot (P99 already calculated during snapshot creation)
 	var metrics []*commonpb.OperationMetrics
-	if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
-		metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
+	if enabled {
+		if latestSnapshot := m.GetLatestSnapshot(); latestSnapshot != nil {
+			metrics = m.toProtoOperationMetrics(latestSnapshot.Metrics)
+		}
 	}
 
 	// Get pending command replies (snapshot only)
@@ -1016,12 +1083,12 @@ func (m *ClientTelemetryManager) processProtoCommands(commands []*commonpb.Clien
 		}
 	}
 
-	// Clean up old entries from executedCommands map
-	// Commands with CreateTime <= lastTS are now filtered by timestamp comparison
-	// Using <= ensures commands with same millisecond timestamp are also cleaned up
+	// Clean up entries older than the new cursor. Commands at the cursor still pass
+	// the timestamp check, so retain their IDs to keep equal-timestamp redeliveries
+	// idempotent across any number of retries.
 	m.executedCommandsMu.Lock()
 	for cmdID, ts := range m.executedCommands {
-		if ts <= lastTS {
+		if ts < maxCommandTS {
 			delete(m.executedCommands, cmdID)
 		}
 	}
@@ -1088,14 +1155,23 @@ func (m *ClientTelemetryManager) updateLastCommandTimestamp(ts int64) {
 
 // collectMetrics collects all operation metrics (local types, for testing)
 func (m *ClientTelemetryManager) collectMetrics() []*OperationMetrics {
+	metrics, _ := m.collectMetricsWithHistorySamples()
+	return metrics
+}
+
+func (m *ClientTelemetryManager) collectMetricsWithHistorySamples() ([]*OperationMetrics, map[string][]int64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var result []*OperationMetrics
+	historySamples := make(map[string][]int64)
 	for opName, collector := range m.collectors {
-		globalMetrics := collector.GetMetrics()
+		globalMetrics, samples := collector.getMetricsAndHistorySamples()
 		if globalMetrics == nil {
 			continue
+		}
+		if len(samples) > 0 {
+			historySamples[opName] = samples
 		}
 
 		collMetrics := collector.GetCollectionMetrics()
@@ -1107,11 +1183,24 @@ func (m *ClientTelemetryManager) collectMetrics() []*OperationMetrics {
 		})
 	}
 
-	return result
+	return result, historySamples
 }
 
-// handleCommand handles a single command
-func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply {
+// handleCommand handles a single command. Command handlers are extensible user callbacks
+// invoked by the background heartbeat goroutine, so a panic must not take down either that
+// goroutine or the caller's whole process. Convert it into the same failed reply used for an
+// ordinary handler error and let later commands and heartbeats continue.
+func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) (reply *CommandReply) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			reply = &CommandReply{
+				CommandId:    cmd.CommandId,
+				Success:      false,
+				ErrorMessage: "command handler panicked: " + panicValueString(recovered),
+			}
+		}
+	}()
+
 	m.commandHandlersMu.RLock()
 	handler, ok := m.commandHandlers[cmd.CommandType]
 	m.commandHandlersMu.RUnlock()
@@ -1125,6 +1214,17 @@ func (m *ClientTelemetryManager) handleCommand(cmd *ClientCommand) *CommandReply
 	}
 
 	return handler(cmd)
+}
+
+func panicValueString(value any) (result string) {
+	// A panic value can implement Stringer/Error with another panicking method. Keep a safe
+	// type-only fallback so formatting a malicious callback failure cannot escape the boundary.
+	result = fmt.Sprintf("%T", value)
+	defer func() {
+		_ = recover()
+	}()
+	result = fmt.Sprint(value)
+	return result
 }
 
 // RegisterCommandHandler registers a handler for a command type
@@ -1291,7 +1391,7 @@ func (m *ClientTelemetryManager) createSnapshot() {
 
 	// Collect current metrics (and reset counters)
 	// P99 is calculated here, before samples are cleared
-	metrics := m.collectMetrics()
+	metrics, historySamples := m.collectMetricsWithHistorySamples()
 
 	now := time.Now().UnixMilli()
 
@@ -1312,16 +1412,28 @@ func (m *ClientTelemetryManager) createSnapshot() {
 	m.lastSnapshotEnd.Store(now)
 
 	snapshot := &MetricsSnapshot{
-		Timestamp: start, // Start of the snapshot period
-		EndTime:   now,   // End of the snapshot period
-		Metrics:   metrics,
+		Timestamp:             start, // Start of the snapshot period
+		EndTime:               now,   // End of the snapshot period
+		Metrics:               metrics,
+		historyLatencySamples: historySamples,
 	}
 
-	// Add to snapshot list (keep only the most recent 120 = 1 hour at 30s intervals)
+	// Retain one hour by timestamp instead of assuming a fixed heartbeat interval. The
+	// interval is dynamically configurable, so a fixed snapshot count silently changes the
+	// amount of queryable history. Keep a hard cap as a final memory bound for sub-second
+	// heartbeat configurations.
 	m.snapshotsMu.Lock()
 	m.snapshots = append(m.snapshots, snapshot)
-	if len(m.snapshots) > 120 {
-		m.snapshots = m.snapshots[len(m.snapshots)-120:]
+	cutoff := now - telemetryHistoryRetention.Milliseconds()
+	retained := m.snapshots[:0]
+	for _, existing := range m.snapshots {
+		if existing.EndTime >= cutoff {
+			retained = append(retained, existing)
+		}
+	}
+	m.snapshots = retained
+	if len(m.snapshots) > maxTelemetryHistorySnapshots {
+		m.snapshots = m.snapshots[len(m.snapshots)-maxTelemetryHistorySnapshots:]
 	}
 	m.snapshotsMu.Unlock()
 }
@@ -1371,7 +1483,6 @@ type ConfigPayload struct {
 	Enabled           *bool    `json:"enabled,omitempty"`
 	HeartbeatInterval *int64   `json:"heartbeat_interval_ms,omitempty"`
 	SamplingRate      *float64 `json:"sampling_rate,omitempty"`
-	TTLSeconds        int64    `json:"ttl_seconds,omitempty"`
 }
 
 // ConfigApplyResult is what a push_config reply carries back, so the sender can tell a
@@ -1898,8 +2009,7 @@ func (m *ClientTelemetryManager) handleShowLatencyHistory(cmd *ClientCommand) *C
 	}
 }
 
-// aggregateSnapshots aggregates multiple snapshots into a single response
-// Uses weighted average for latencies (weighted by request count)
+// aggregateSnapshots aggregates multiple snapshots into a single response.
 func (m *ClientTelemetryManager) aggregateSnapshots(snapshots []*MetricsSnapshot, startTime, endTime int64) *AggregatedLatencyHistoryResponse {
 	if len(snapshots) == 0 {
 		return &AggregatedLatencyHistoryResponse{
@@ -1913,13 +2023,17 @@ func (m *ClientTelemetryManager) aggregateSnapshots(snapshots []*MetricsSnapshot
 	}
 
 	// Aggregate metrics by operation
+	type weightedLatencySample struct {
+		latencyMs float64
+		weight    float64
+	}
 	type aggregator struct {
 		requestCount   int64
 		successCount   int64
 		errorCount     int64
 		weightedAvgSum float64 // sum of (avg_latency * request_count)
-		weightedP99Sum float64 // sum of (p99_latency * request_count)
 		maxLatency     float64
+		latencySamples []weightedLatencySample
 	}
 
 	aggregators := make(map[string]*aggregator)
@@ -1940,7 +2054,25 @@ func (m *ClientTelemetryManager) aggregateSnapshots(snapshots []*MetricsSnapshot
 			agg.successCount += opMetrics.Global.SuccessCount
 			agg.errorCount += opMetrics.Global.ErrorCount
 			agg.weightedAvgSum += opMetrics.Global.AvgLatencyMs * float64(opMetrics.Global.RequestCount)
-			agg.weightedP99Sum += opMetrics.Global.P99LatencyMs * float64(opMetrics.Global.RequestCount)
+			samples := snapshot.historyLatencySamples[opMetrics.Operation]
+			if len(samples) > 0 && opMetrics.Global.RequestCount > 0 {
+				weight := float64(opMetrics.Global.RequestCount) / float64(len(samples))
+				for _, latencyUs := range samples {
+					agg.latencySamples = append(agg.latencySamples, weightedLatencySample{
+						latencyMs: float64(latencyUs) / 1000.0,
+						weight:    weight,
+					})
+				}
+			} else if opMetrics.Global.RequestCount > 0 {
+				// Backward-compatible fallback for manually constructed or transferred
+				// snapshots that predate the internal sample sketch. Treat the window P99
+				// as a weighted point; unlike averaging percentiles, this at least retains
+				// percentile ordering and preserves the exact single-window result.
+				agg.latencySamples = append(agg.latencySamples, weightedLatencySample{
+					latencyMs: opMetrics.Global.P99LatencyMs,
+					weight:    float64(opMetrics.Global.RequestCount),
+				})
+			}
 			if opMetrics.Global.MaxLatencyMs > agg.maxLatency {
 				agg.maxLatency = opMetrics.Global.MaxLatencyMs
 			}
@@ -1954,7 +2086,21 @@ func (m *ClientTelemetryManager) aggregateSnapshots(snapshots []*MetricsSnapshot
 		p99Latency := 0.0
 		if agg.requestCount > 0 {
 			avgLatency = agg.weightedAvgSum / float64(agg.requestCount)
-			p99Latency = agg.weightedP99Sum / float64(agg.requestCount)
+			sort.Slice(agg.latencySamples, func(i, j int) bool {
+				return agg.latencySamples[i].latencyMs < agg.latencySamples[j].latencyMs
+			})
+			if len(agg.latencySamples) > 0 {
+				target := float64(agg.requestCount) * 0.99
+				cumulative := 0.0
+				p99Latency = agg.latencySamples[len(agg.latencySamples)-1].latencyMs
+				for _, sample := range agg.latencySamples {
+					cumulative += sample.weight
+					if cumulative > target {
+						p99Latency = sample.latencyMs
+						break
+					}
+				}
+			}
 		}
 
 		metrics[op] = &MetricsResponse{

@@ -21,14 +21,14 @@ is_special(char c) {
     static std::once_flag _initialized;
     static std::string special_bytes(R"(\.+*?()|[]{}^$)");
     static std::vector<bool> special_bytes_bitmap;
-    std::call_once(_initialized, []() -> void {
+    std::call_once(_initialized, []() {
         special_bytes_bitmap.resize(256);
         for (char b : special_bytes) {
-            special_bytes_bitmap[b + 128] = true;
+            special_bytes_bitmap[static_cast<unsigned char>(b)] = true;
         }
     });
 
-    return special_bytes_bitmap[c + 128];
+    return special_bytes_bitmap[static_cast<unsigned char>(c)];
 }
 
 std::string
@@ -94,6 +94,36 @@ extract_fixed_prefix_from_pattern(const std::string& pattern) {
                   "to escape");
     }
     return prefix;
+}
+
+std::vector<std::string>
+split_by_wildcard(const std::string& literal) {
+    std::vector<std::string> result;
+    std::string r;
+    r.reserve(literal.size());
+    bool escape_mode = false;
+    for (char c : literal) {
+        if (escape_mode) {
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                // consider case "\\%", we should reserve %
+                escape_mode = true;
+            } else if (c == '%' || c == '_') {
+                if (r.length() > 0) {
+                    result.push_back(std::move(r));
+                    r.clear();
+                }
+            } else {
+                r += c;
+            }
+        }
+    }
+    if (r.length() > 0) {
+        result.push_back(std::move(r));
+    }
+    return result;
 }
 
 }  // namespace milvus
