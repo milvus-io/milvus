@@ -35,6 +35,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/vector/VectorDiskArtifact.h"
@@ -429,6 +430,7 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                        "vector disk build requires declared scalar input "
                        "delivery");
             auto config = build_params_;
+            EraseNormalizedBuildContract(config);
             config[EMB_LIST] = embedding_list;
             config[DISK_ANN_RAW_DATA_PATH] = input.raw_path;
             config[DISK_ANN_PREFIX_PATH] = file_manager_->IndexPrefix();
