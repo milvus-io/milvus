@@ -95,7 +95,10 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 	// The serving dispatcher may still contain pre-snapshot messages. Catch it
 	// up before merging so those inserts cannot be applied twice. Only events
 	// after this boundary enter the stage queue, so backpressure cannot block it.
-	if err := r.WaitMVCCVisible(ctx, view.BaseGrowingTimeTick, view.BaseTransformTimeTick); err != nil {
+	// Growing advances for every WAL message. Reaching T therefore also proves
+	// all transforms through T were applied, even when T itself is an Insert
+	// and has no transform entry. Do not wait for a nonexistent transform at T.
+	if err := r.WaitMVCCVisible(ctx, view.BaseGrowingTimeTick, 0); err != nil {
 		return err
 	}
 	for {

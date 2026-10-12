@@ -9,6 +9,12 @@ import (
 )
 
 func TestResolvePartitionsUsesLeasedViewScope(t *testing.T) {
+	var absent *QueryRuntime
+	legacy, err := absent.ResolvePartitions(0, []int64{10})
+	require.NoError(t, err)
+	require.Equal(t, []int64{10}, legacy)
+	_, err = absent.ResolvePartitions(1, nil)
+	require.Error(t, err)
 	runtime := NewQueryRuntime()
 	runtime.partitionScopes = map[uint64][]int64{1: {10}, 2: {10, 20}, 3: {20}, 4: {}}
 	for _, tc := range []struct {
@@ -31,7 +37,7 @@ func TestResolvePartitionsUsesLeasedViewScope(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		}
 	}
-	_, err := runtime.ResolvePartitions(99, nil)
+	_, err = runtime.ResolvePartitions(99, nil)
 	require.Error(t, err)
 	_, err = runtime.ResolvePartitions(4, nil)
 	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)

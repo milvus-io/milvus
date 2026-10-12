@@ -34,7 +34,8 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		return context.Canceled
 	}
 	r.collection = collection
-	r.view = view
+	// Retain only the recapture hooks, not the snapshot payload and WAL tail.
+	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext}
 	if view.PartitionIDs != nil {
 		r.loadedPartitions = make(map[int64]struct{}, len(view.PartitionIDs))
 		for _, id := range view.PartitionIDs {
