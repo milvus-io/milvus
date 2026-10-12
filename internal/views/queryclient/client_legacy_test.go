@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -384,6 +385,10 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 
 func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Limit:         1,
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
 }
 
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
