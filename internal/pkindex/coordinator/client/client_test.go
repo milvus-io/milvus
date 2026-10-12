@@ -168,3 +168,14 @@ func TestClientContextErrorsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestClientGRPCDeadlineAndCancelUnchanged(t *testing.T) {
+	for _, code := range []codes.Code{codes.DeadlineExceeded, codes.Canceled} {
+		grpcErr := grpcstatus.Error(code, "rpc ended")
+		for _, err := range callAll(newTestClient(&fakeCoordClient{err: grpcErr})) {
+			assert.Equal(t, grpcErr, err)
+			assert.Equal(t, code, grpcstatus.Code(err))
+			assert.False(t, errors.Is(err, merr.ErrServiceUnavailable))
+		}
+	}
+}
