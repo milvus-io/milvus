@@ -343,10 +343,10 @@ enum class VisitOutcome {
 using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
 
 // Visits storage-v2 data on the calling thread in numeric binlog-ID order,
-// preserving row-group order within each file. Stop takes effect after the
-// current row group: no later row group is read, but a row group is not a fixed
-// byte bound and may itself be large. Producer work for the current row group
-// is complete before the visitor is called.
+// preserving row-group order within each file, using bounded parallel reads.
+// One visit may contain multiple adjacent row groups.
+// Stop prevents later visits; reads already submitted for the current file are
+// drained and joined before return. Row groups are not a fixed byte bound.
 VisitOutcome
 VisitFieldDataFromStorageV2(
     const std::vector<std::vector<std::string>>& remote_files,
