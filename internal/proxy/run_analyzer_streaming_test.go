@@ -6,6 +6,8 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -121,4 +123,31 @@ func (*analyzerTestWAL) AnalyzerClient() streaming.AnalyzerClient { panic("unpat
 func mockStreamingAnalyzerClient() {
 	mockey.Mock(streaming.WAL).Return(&analyzerTestWAL{}).Build()
 	mockey.Mock((*analyzerTestWAL).AnalyzerClient).Return(&analyzerTestClient{}).Build()
+}
+
+func TestRunAnalyzerStreamingErrors(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"canceled", context.Canceled, context.Canceled},
+		{"deadline", context.DeadlineExceeded, context.DeadlineExceeded},
+		{"unimplemented", status.ConvertStreamingError("RunAnalyzer", grpcstatus.Error(codes.Unimplemented, "older SN")), merr.ErrServiceUnimplemented},
+		{"invalid envelope", status.NewInvalidArgument("bad envelope"), merr.ErrParameterInvalid},
+		{"shutdown", status.NewOnShutdownError("closing"), merr.ErrServiceUnavailable},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			node := &Proxy{}
+			node.UpdateStateCode(commonpb.StateCode_Healthy)
+			mockStreamingAnalyzerClient()
+			call := mockey.Mock((*analyzerTestClient).RunAnalyzer).Return(nil, tc.err).Build()
+			response, err := node.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello")}})
+			require.NoError(t, err)
+			require.Equal(t, merr.Code(tc.want), response.GetStatus().GetCode())
+			require.Equal(t, merr.IsRetryableErr(tc.want), response.GetStatus().GetRetriable())
+			require.Equal(t, 1, call.Times())
+		})
+	}
 }

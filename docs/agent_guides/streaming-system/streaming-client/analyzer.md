@@ -82,5 +82,5 @@ requests additionally work before load and after release.
 - `internal/streamingnode/server/service/analyzer.go` — native RPC dispatch/errors.
 - `internal/streamingnode/server/wal/adaptor/analyzer.go` — WAL field execution.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.
-- `internal/proxy/{impl.go,run_analyzer_streaming.go}` — SDK adaptation and collection identity.
+- `internal/proxy/impl.go` — SDK adaptation and collection identity.
 - `pkg/proto/streaming.proto` — additive request/response and service method.

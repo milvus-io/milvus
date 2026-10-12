@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/streamingnode/analyzerservice"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -7118,16 +7117,41 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		if err := validateRunAnalyzer(req); err != nil {
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(err))}, nil
 		}
-		field, err := node.buildFieldAnalyzerRequest(ctx, req)
+		cache := node.GetMetaCache()
+		id, err := cache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
-		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: field}
+		// Resolve by ID so drop/recreate cannot redirect this request to a new collection.
+		info, err := cache.GetCollectionInfo(ctx, req.GetDbName(), "", id)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
+		}
+		fieldID, exists := info.Schema.MapFieldID(req.GetFieldName())
+		if !exists {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(req.GetFieldName())))}, nil
+		}
+		if len(info.VChannels) == 0 {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceNotReadyMsg("collection has no analyzer channel"))}, nil
+		}
+		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
+			CollectionId: id, Vchannel: info.VChannels[0], FieldId: fieldID, AnalyzerNames: req.GetAnalyzerNames(),
+		}}
 	}
 
 	response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, request)
 	if err != nil {
-		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(analyzerservice.PublicError(err))}, nil
+		// Translate streaming failures only; analyzer Status is forwarded below.
+		switch {
+		case status.IsCanceled(err):
+		case status.AsStreamingError(err).IsInvalidArgument():
+			err = merr.WrapErrParameterInvalidErr(err, "run analyzer")
+		case grpcstatus.Code(err) == codes.Unimplemented:
+			err = merr.Wrap(merr.ErrServiceUnimplemented, err.Error())
+		default:
+			err = merr.WrapErrServiceUnavailableErr(err, "run analyzer")
+		}
+		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	return &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetResults()}, nil
 }
