@@ -307,20 +307,6 @@ func getLoadFieldWarmupPolicy(loadInfo *querypb.SegmentLoadInfo, fieldSchema *sc
 	return getFieldWarmupPolicy(fieldSchema)
 }
 
-func getLoadIndexWarmupPolicy(loadInfo *querypb.SegmentLoadInfo, fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
-	if loadInfo.GetForceSyncWarmup() {
-		return common.WarmupSync
-	}
-	return getIndexWarmupPolicy(fieldSchema, indexInfo)
-}
-
-func getLoadScalarDataWarmupPolicy(loadInfo *querypb.SegmentLoadInfo, fieldSchema *schemapb.FieldSchema) string {
-	if loadInfo.GetForceSyncWarmup() {
-		return common.WarmupSync
-	}
-	return getScalarDataWarmupPolicy(fieldSchema)
-}
-
 // isExternalCollectionLazyLoad checks if all external fields in the schema can
 // avoid eager loading during segment load.
 func isExternalCollectionLazyLoad(schema *schemapb.CollectionSchema) bool {
