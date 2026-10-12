@@ -496,6 +496,25 @@ func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// checkPredicates reads the target key of each predicate inside txn and returns
+// an error marked as predicate-not-met when one predicate does not hold.
+func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, preds []predicates.Predicate) error {
+	for _, pred := range preds {
+		key := kv.GetPath(pred.Key())
+		val, err := txn.Get(ctx, []byte(key))
+		if err != nil {
+			if errors.Is(err, tikverr.ErrNotExist) {
+				return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
+			}
+			return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
+		}
+		if !pred.IsTrue(val.Value) {
+			return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
+		}
+	}
+	return nil
+}
+
 // MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	start := time.Now()
@@ -511,18 +530,8 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	removals = removeKeys.Complement(saveKeys).Collect()
 
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemove", func(txn *transaction.KVTxn) error {
-		for _, pred := range preds {
-			key := kv.GetPath(pred.Key())
-			val, err := txn.Get(ctx, []byte(key))
-			if err != nil {
-				if errors.Is(err, tikverr.ErrNotExist) {
-					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
-				}
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-			}
-			if !pred.IsTrue(val.Value) {
-				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
-			}
+		if err := kv.checkPredicates(ctx, txn, preds); err != nil {
+			return err
 		}
 
 		for _, key := range removals {
@@ -562,18 +571,8 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	defer logWarnOnFailure(&loggingErr, "txnTiKV MultiSaveAndRemoveWithPrefix() error", mlog.Strings("saveKeys", lo.Keys(saves)), mlog.Strings("removes", removals), mlog.Int("saveLength", len(saves)), mlog.Int("removeLength", len(removals)))
 
 	loggingErr = kv.runWriteTxnWithRetry(ctx, "MultiSaveAndRemoveWithPrefix", func(txn *transaction.KVTxn) error {
-		for _, pred := range preds {
-			key := kv.GetPath(pred.Key())
-			val, err := txn.Get(ctx, []byte(key))
-			if err != nil {
-				if errors.Is(err, tikverr.ErrNotExist) {
-					return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error()))
-				}
-				return merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), err.Error())
-			}
-			if !pred.IsTrue(val.Value) {
-				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
-			}
+		if err := kv.checkPredicates(ctx, txn, preds); err != nil {
+			return err
 		}
 
 		// Remove keys with prefix
