@@ -1,0 +1,953 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package testcases
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"maps"
+	"math/bits"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/tests/go_client/common"
+	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
+)
+
+// The oracle is application-owned row data; it is never populated from a server read.
+type rlsSchemaRow map[string]any
+
+type rlsSchemaCase struct {
+	noArrays                              bool
+	noTimestamp                           bool
+	defaults, autoID                      bool
+	vector                                string
+	varchar, dynamic, nullable, partition bool
+	special, structured                   bool
+	nullVector                            bool
+}
+
+func rlsSchemaVector(t *testing.T, kind string, n int) (entity.Vector, any, column.Column, index.Index) {
+	t.Helper()
+	v := entity.FloatVector{float32(n), 1, 2, 3, 4, 5, 6, 7}
+	switch kind {
+	case "binary":
+		v := entity.BinaryVector{byte(n), 0xff}
+		return v, []byte(v), column.NewColumnBinaryVector("vector", 16, nil), index.NewBinFlatIndex(entity.HAMMING)
+	case "float16":
+		v := v.ToFloat16Vector()
+		return v, []byte(v), column.NewColumnFloat16Vector("vector", 8, nil), index.NewFlatIndex(entity.L2)
+	case "bfloat16":
+		v := v.ToBFloat16Vector()
+		return v, []byte(v), column.NewColumnBFloat16Vector("vector", 8, nil), index.NewFlatIndex(entity.L2)
+	case "int8":
+		v := entity.Int8Vector{int8(n), 1, 2, 3, 4, 5, 6, 7}
+		return v, []int8(v), column.NewColumnInt8Vector("vector", 8, nil), index.NewHNSWIndex(entity.L2, 16, 200)
+	case "sparse":
+		v, err := entity.NewSliceSparseEmbedding([]uint32{1, 3, 100}, []float32{float32(n), 1, 2})
+		require.NoError(t, err)
+		return v, v, column.NewColumnSparseVectors("vector", nil), index.NewSparseInvertedIndex(entity.IP, 0)
+	default:
+		return v, []float32(v), column.NewColumnFloatVector("vector", 8, nil), index.NewFlatIndex(entity.L2)
+	}
+}
+
+func rlsSchemaColumns(t *testing.T, tc rlsSchemaCase) []column.Column {
+	t.Helper()
+	pk := column.Column(column.NewColumnInt64("id", nil))
+	if tc.varchar {
+		pk = column.NewColumnVarChar("id", nil)
+	}
+	_, _, vec, _ := rlsSchemaVector(t, tc.vector, 1)
+	vec.SetNullable(tc.nullVector)
+	cols := []column.Column{
+		pk, column.NewColumnVarChar("owner", nil), vec,
+		column.NewColumnBool("flag", nil), column.NewColumnInt8("i8", nil), column.NewColumnInt16("i16", nil), column.NewColumnInt32("i32", nil), column.NewColumnInt64("i64", nil),
+		column.NewColumnFloat("f32", nil), column.NewColumnDouble("f64", nil), column.NewColumnVarChar("text", nil), column.NewColumnJSONBytes("doc", nil),
+		column.NewColumnBoolArray("a_bool", nil), column.NewColumnInt8Array("a_i8", nil), column.NewColumnInt16Array("a_i16", nil), column.NewColumnInt32Array("a_i32", nil), column.NewColumnInt64Array("a_i64", nil), column.NewColumnFloatArray("a_f32", nil), column.NewColumnDoubleArray("a_f64", nil), column.NewColumnVarCharArray("a_text", nil),
+	}
+	for _, c := range cols[3:] {
+		c.SetNullable(tc.nullable)
+	}
+	if tc.noArrays {
+		cols = slices.DeleteFunc(cols, func(c column.Column) bool { return c.Type() == entity.FieldTypeArray })
+	}
+	if tc.special {
+		cols = append(cols, column.NewColumnGeometryWKT("shape", nil))
+		if !tc.noTimestamp {
+			cols = append(cols, column.NewColumnTimestamptzIsoString("instant", nil))
+		}
+	}
+	if tc.structured {
+		c, err := column.NewColumnStructArrayFromSchema("objects", rlsStructSchema())
+		require.NoError(t, err)
+		cols = append(cols, c)
+	}
+	if tc.dynamic {
+		cols = append(cols, column.NewColumnInt64("extra", nil))
+	}
+	return cols
+}
+
+func rlsSchemaData(t *testing.T, tc rlsSchemaCase, id, revision int, owner string) rlsSchemaRow {
+	t.Helper()
+	n := id + revision*10
+	_, vec, _, _ := rlsSchemaVector(t, tc.vector, n)
+	pk := any(int64(id))
+	if tc.varchar {
+		pk = fmt.Sprintf("用户/%03d", id)
+	}
+	r := rlsSchemaRow{
+		"id": pk, "owner": owner, "vector": vec, "flag": n%2 == 0,
+		"i8": int8(-n), "i16": int16(-300 - n), "i32": int32(100000 + n), "i64": 9007199254740993 + int64(n),
+		"f32": float32(n) + 0.25, "f64": float64(n) + 0.125, "text": fmt.Sprintf("中文_%d_🧪", n),
+		"doc":    []byte(fmt.Sprintf(`{"n":%d,"nested":{"owner":%q},"items":[1,null,"中"]}`, n, owner)),
+		"a_bool": []bool{true, false}, "a_i8": []int8{-128, int8(n), 127}, "a_i16": []int16{-32768, int16(n), 32767}, "a_i32": []int32{-2147483648, int32(n), 2147483647},
+		"a_i64": []int64{-9223372036854775808, int64(n), 9223372036854775807}, "a_f32": []float32{-0.5, float32(n)}, "a_f64": []float64{-0.25, float64(n)}, "a_text": []string{"", owner, "中文"},
+	}
+	if tc.nullable && (id+revision)%3 == 0 {
+		for k := range r {
+			if k != "id" && k != "owner" && k != "vector" {
+				r[k] = nil
+			}
+		}
+	}
+	if tc.nullVector && (id+revision)%3 == 0 {
+		r["vector"] = nil
+	}
+	if tc.dynamic {
+		r["extra"] = int64(n * 100)
+	}
+	if tc.special {
+		r["shape"] = fmt.Sprintf("POINT (%d 1)", n)
+		r["instant"] = time.Date(2024, 1, 1, 0, 0, n, 0, time.UTC).Format(time.RFC3339Nano)
+	}
+	if tc.structured {
+		r["objects"] = map[string]any{"label": []string{owner, "中"}, "number": []int64{int64(n), -1}, "embedding": []entity.FloatVector{{float32(n), 1, 2, 3}, {1, 2, 3, 4}}}
+	}
+	return r
+}
+
+func rlsStructSchema() *entity.StructSchema {
+	return entity.NewStructSchema().WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256)).WithField(entity.NewField().WithName("number").WithDataType(entity.FieldTypeInt64)).WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(4))
+}
+
+func rlsSchemaWriteColumns(t *testing.T, tc rlsSchemaCase, rows ...rlsSchemaRow) []column.Column {
+	t.Helper()
+	var result []column.Column
+	for _, c := range rlsSchemaColumns(t, tc) {
+		if _, ok := rows[0][c.Name()]; !ok {
+			continue
+		}
+		if c.Name() == "vector" && tc.nullVector {
+			valid := make([]bool, len(rows))
+			var floats [][]float32
+			var bytes [][]byte
+			var ints [][]int8
+			var sparse []entity.SparseEmbedding
+			for i, r := range rows {
+				if r["vector"] == nil {
+					continue
+				}
+				valid[i] = true
+				switch v := r["vector"].(type) {
+				case []float32:
+					floats = append(floats, v)
+				case []byte:
+					bytes = append(bytes, v)
+				case []int8:
+					ints = append(ints, v)
+				case entity.SparseEmbedding:
+					sparse = append(sparse, v)
+				}
+			}
+			var col column.Column
+			var err error
+			switch tc.vector {
+			case "float32":
+				col, err = column.NewNullableColumnFloatVector("vector", 8, floats, valid)
+			case "binary":
+				col, err = column.NewNullableColumnBinaryVector("vector", 16, bytes, valid)
+			case "float16":
+				col, err = column.NewNullableColumnFloat16Vector("vector", 8, bytes, valid)
+			case "bfloat16":
+				col, err = column.NewNullableColumnBFloat16Vector("vector", 8, bytes, valid)
+			case "int8":
+				col, err = column.NewNullableColumnInt8Vector("vector", 8, ints, valid)
+			case "sparse":
+				col, err = column.NewNullableColumnSparseFloatVector("vector", sparse, valid)
+			}
+			require.NoError(t, err)
+			result = append(result, col)
+			continue
+		}
+		if c.Name() == "doc" && tc.nullable {
+			var values [][]byte
+			valid := make([]bool, len(rows))
+			for i, r := range rows {
+				if r["doc"] != nil {
+					values = append(values, r["doc"].([]byte))
+					valid[i] = true
+				}
+			}
+			col, err := column.NewNullableColumnJSONBytes("doc", values, valid)
+			require.NoError(t, err)
+			result = append(result, col)
+			continue
+		}
+		for _, r := range rows {
+			if r[c.Name()] == nil {
+				require.NoError(t, c.AppendNull(), "field=%s", c.Name())
+			} else {
+				require.NoError(t, c.AppendValue(r[c.Name()]), "field=%s", c.Name())
+			}
+		}
+		result = append(result, c)
+	}
+	return result
+}
+
+func prepareRLSSchema(ctx context.Context, t *testing.T, mc *client.Client, tc rlsSchemaCase) string {
+	t.Helper()
+	name := common.GenRandomString("rls_schema_", 8)
+	schema := entity.NewSchema().WithName(name).WithDynamicFieldEnabled(tc.dynamic)
+	for _, c := range rlsSchemaColumns(t, tc) {
+		if c.Name() == "extra" {
+			continue
+		}
+		f := entity.NewField().WithName(c.Name()).WithDataType(c.Type()).WithNullable(c.Nullable())
+		if c.Name() == "id" {
+			f.WithIsPrimaryKey(true).WithIsAutoID(tc.autoID)
+		}
+		if c.Type() == entity.FieldTypeVarChar {
+			f.WithMaxLength(256)
+		}
+		if c.Name() == "owner" {
+			f.WithIsPartitionKey(tc.partition)
+		}
+		if tc.defaults {
+			switch c.Name() {
+			case "flag":
+				f.WithDefaultValueBool(true)
+			case "i8", "i16", "i32":
+				f.WithDefaultValueInt(7)
+			case "i64":
+				f.WithDefaultValueLong(9007199254740993)
+			case "f32":
+				f.WithDefaultValueFloat(0.25)
+			case "f64":
+				f.WithDefaultValueDouble(0.125)
+			case "text":
+				f.WithDefaultValueString("default_中")
+			case "owner":
+				f.WithDefaultValueString("alice")
+			}
+		}
+		if c.Type() == entity.FieldTypeArray {
+			f.WithElementType(entity.FieldType(c.FieldData().GetScalars().GetArrayData().GetElementType())).WithMaxCapacity(32).WithMaxLength(256)
+		}
+		if c.Name() == "objects" {
+			f.WithElementType(entity.FieldTypeStruct).WithStructSchema(rlsStructSchema())
+		}
+		if c.Name() == "vector" && tc.vector != "sparse" {
+			dim := int64(8)
+			if tc.vector == "binary" {
+				dim = 16
+			}
+			f.WithDim(dim)
+		}
+		schema.WithField(f)
+	}
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).WithProperty("rls.enabled", true).WithConsistencyLevel(entity.ClStrong)))
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		require.NoError(t, mc.DropCollection(cleanup, client.NewDropCollectionOption(name)))
+	})
+	createRLSPolicy(ctx, t, mc, name, "owner", "owner == $current_principal", "owner == $current_principal", rlsActions...)
+	_, _, _, idx := rlsSchemaVector(t, tc.vector, 1)
+	task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "vector", idx))
+	require.NoError(t, err)
+	require.NoError(t, task.Await(ctx))
+	if tc.structured {
+		task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "objects[embedding]", index.NewHNSWIndex(entity.MaxSimCosine, 16, 200)))
+		require.NoError(t, err)
+		require.NoError(t, task.Await(ctx))
+	}
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	return name
+}
+
+func checkRLSSchemaRows(t *testing.T, result client.ResultSet, want map[any]rlsSchemaRow, fields []string) []any {
+	t.Helper()
+	require.NoError(t, result.Err)
+	ids := result.IDs
+	if ids == nil {
+		ids = result.GetColumn("id")
+	}
+	if result.Len() == 0 {
+		return nil
+	}
+	require.NotNil(t, ids)
+	seen := make([]any, 0, result.Len())
+	for i := range result.Len() {
+		id, err := ids.Get(i)
+		require.NoError(t, err)
+		expected, ok := want[id]
+		require.True(t, ok, "unexpected/hidden id=%v", id)
+		require.NotContains(t, seen, id, "duplicate PK")
+		seen = append(seen, id)
+		for _, f := range fields {
+			c := result.GetColumn(f)
+			require.NotNil(t, c, "missing output field=%s", f)
+			null, err := c.IsNull(i)
+			require.NoError(t, err)
+			require.Equal(t, expected[f] == nil, null, "id=%v field=%s null", id, f)
+			if null {
+				continue
+			}
+			actual, err := c.Get(i)
+			require.NoError(t, err)
+			if f == "extra" {
+				n, err := c.GetAsInt64(i)
+				require.NoError(t, err)
+				require.Equal(t, expected[f], n)
+			} else if f == "vector" && c.Type() == entity.FieldTypeSparseVector {
+				require.Equal(t, expected[f].(entity.SparseEmbedding).Serialize(), actual.(entity.SparseEmbedding).Serialize())
+			} else if f == "doc" {
+				require.JSONEq(t, string(expected[f].([]byte)), string(actual.([]byte)), "id=%v", id)
+			} else if f == "instant" {
+				wantTime, err := time.Parse(time.RFC3339Nano, expected[f].(string))
+				require.NoError(t, err)
+				gotTime, err := time.Parse(time.RFC3339Nano, actual.(string))
+				require.NoError(t, err)
+				require.True(t, wantTime.Equal(gotTime))
+			} else {
+				require.EqualValues(t, expected[f], actual, "id=%v field=%s", id, f)
+			}
+		}
+	}
+	return seen
+}
+
+// Every read checks exact IDs and complete values; iterator pages additionally check duplicates across pages.
+func checkRLSSchemaReads(ctx context.Context, t *testing.T, mc *client.Client, name string, tc rlsSchemaCase, all map[any]rlsSchemaRow) {
+	t.Helper()
+	fields := []string{}
+	for _, c := range rlsSchemaColumns(t, tc) {
+		fields = append(fields, c.Name())
+	}
+	qv, _, _, _ := rlsSchemaVector(t, tc.vector, 1)
+	for _, principal := range []string{"alice", "bob", "nobody", ""} {
+		t.Run("principal_"+principal, func(t *testing.T) {
+			want := map[any]rlsSchemaRow{}
+			for id, r := range all {
+				if principal == "" || r["owner"] == principal {
+					want[id] = r
+				}
+			}
+			keys := slices.Collect(maps.Keys(want))
+			searchWant := maps.Clone(want)
+			maps.DeleteFunc(searchWant, func(_ any, r rlsSchemaRow) bool { return r["vector"] == nil })
+			searchKeys := slices.Collect(maps.Keys(searchWant))
+			checkSearch := func(t *testing.T, r client.ResultSet) {
+				require.ElementsMatch(t, searchKeys, checkRLSSchemaRows(t, r, searchWant, fields))
+			}
+			check := func(t *testing.T, r client.ResultSet, fs []string) {
+				require.ElementsMatch(t, keys, checkRLSSchemaRows(t, r, want, fs))
+			}
+			t.Run("query", func(t *testing.T) {
+				r, e := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				check(t, r, fields)
+			})
+			t.Run("projection", func(t *testing.T) {
+				fs := []string{"id", "doc", "a_i64", "f64"}
+				if tc.noArrays {
+					fs = []string{"id", "doc", "f64"}
+				}
+				r, e := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields(fs...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				check(t, r, fs)
+			})
+			t.Run("pagination", func(t *testing.T) {
+				var got []any
+				for offset := 0; offset < len(want)+2; offset += 2 {
+					r, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOffset(offset).WithLimit(2).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+					require.NoError(t, err)
+					got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+					if r.Len() < 2 {
+						break
+					}
+				}
+				require.ElementsMatch(t, keys, got)
+			})
+			t.Run("get", func(t *testing.T) {
+				pk := rlsSchemaColumns(t, tc)[0]
+				for id := range all {
+					require.NoError(t, pk.AppendValue(id))
+				}
+				r, e := mc.Get(ctx, client.NewQueryOption(name).WithIDs(pk).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				check(t, r, fields)
+			})
+			t.Run("count", func(t *testing.T) {
+				r, e := mc.Query(ctx, client.NewQueryOption(name).WithFilter("owner != ''").WithOutputFields("count(*)").WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				n, e := r.GetColumn("count(*)").GetAsInt64(0)
+				require.NoError(t, e)
+				require.EqualValues(t, len(want), n)
+			})
+			t.Run("query_iterator", func(t *testing.T) {
+				it, e := mc.QueryIterator(ctx, client.NewQueryIteratorOption(name).WithBatchSize(2).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				var got []any
+				ended := false
+				for range len(all) + 2 {
+					r, e := it.Next(ctx)
+					if errors.Is(e, io.EOF) {
+						ended = true
+						break
+					}
+					require.NoError(t, e)
+					got = append(got, checkRLSSchemaRows(t, r, want, fields)...)
+				}
+				require.True(t, ended)
+				require.ElementsMatch(t, keys, got)
+			})
+			t.Run("search", func(t *testing.T) {
+				rs, e := mc.Search(ctx, client.NewSearchOption(name, 100, []entity.Vector{qv, qv}).WithANNSField("vector").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				require.Len(t, rs, 2)
+				for _, r := range rs {
+					checkSearch(t, r)
+					for i, score := range r.Scores {
+						id, err := r.IDs.Get(i)
+						require.NoError(t, err)
+						expected := rlsSchemaDistance(tc.vector, want[id]["vector"])
+						require.InDelta(t, expected, score, 0.001, "id=%v distance", id)
+					}
+				}
+			})
+			t.Run("hybrid", func(t *testing.T) {
+				rs, e := mc.HybridSearch(ctx, client.NewHybridSearchOption(name, 100, client.NewAnnRequest("vector", 100, qv), client.NewAnnRequest("vector", 100, qv).WithFilter("owner == 'bob'")).WithReranker(client.NewRRFReranker()).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				require.Len(t, rs, 1)
+				checkSearch(t, rs[0])
+			})
+			t.Run("search_iterator", func(t *testing.T) {
+				it, e := mc.SearchIterator(ctx, client.NewSearchIteratorOption(name, qv).WithANNSField("vector").WithBatchSize(2).WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, e)
+				var got []any
+				ended := false
+				for range len(all) + 2 {
+					r, e := it.Next(ctx)
+					if errors.Is(e, io.EOF) {
+						ended = true
+						break
+					}
+					require.NoError(t, e)
+					got = append(got, checkRLSSchemaRows(t, r, searchWant, fields)...)
+				}
+				require.True(t, ended)
+				require.ElementsMatch(t, searchKeys, got)
+			})
+			if len(searchKeys) > 0 {
+				t.Run("search_by_ids", func(t *testing.T) {
+					pk := rlsSchemaColumns(t, tc)[0]
+					require.NoError(t, pk.AppendValue(searchKeys[0]))
+					rs, e := mc.Search(ctx, client.NewSearchByIDsOption(name, 100, pk).WithANNSField("vector").WithOutputFields(fields...).WithRLSPrincipal(principal).WithSkipRLS(principal == "").WithConsistencyLevel(entity.ClStrong))
+					require.NoError(t, e)
+					require.Len(t, rs, 1)
+					checkSearch(t, rs[0])
+				})
+			}
+		})
+	}
+}
+
+func rlsSchemaDistance(kind string, value any) float32 {
+	var n float32
+	switch kind {
+	case "binary":
+		return float32(bits.OnesCount8(value.([]byte)[0] ^ 1))
+	case "sparse":
+		_, n, _ = value.(entity.SparseEmbedding).Get(0)
+		return n + 5
+	case "float16":
+		n = entity.Float16Vector(value.([]byte)).ToFloat32Vector()[0]
+	case "bfloat16":
+		n = entity.BFloat16Vector(value.([]byte)).ToFloat32Vector()[0]
+	case "int8":
+		n = float32(value.([]int8)[0])
+	default:
+		n = value.([]float32)[0]
+	}
+	return (n - 1) * (n - 1)
+}
+
+// Six vector types and wide schemas exercise supported serializers with a full-value oracle.
+func TestRLSSchemaReadWriteMatrix(t *testing.T) {
+	for _, vector := range []string{"float32", "binary", "float16", "bfloat16", "int8", "sparse"} {
+		for _, profile := range []string{"required_int64", "nullable_dynamic_int64", "required_partition_varchar", "nullable_dynamic_varchar", "special", "structured", "nullable_vector"} {
+			if vector != "float32" && (profile == "special" || profile == "structured") {
+				continue
+			}
+			t.Run(vector+"/"+profile, func(t *testing.T) {
+				// Collections and clients are independent; Flush retries the shared rate limit.
+				t.Parallel()
+				tc := rlsSchemaCase{vector: vector, varchar: profile == "required_partition_varchar" || profile == "nullable_dynamic_varchar", dynamic: profile == "nullable_dynamic_int64" || profile == "nullable_dynamic_varchar", nullable: profile == "nullable_dynamic_int64" || profile == "nullable_dynamic_varchar", partition: profile == "required_partition_varchar", special: profile == "special", structured: profile == "structured", nullVector: profile == "nullable_vector"}
+				ctx := hp.CreateContext(t, 8*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+				name := prepareRLSSchema(ctx, t, mc, tc)
+				all := map[any]rlsSchemaRow{}
+				modes := []string{"column", "row"}
+				if tc.special {
+					// Geometry row serialization is not supported by the SDK.
+					modes = []string{"column"}
+				}
+				for _, mode := range modes {
+					write := func(rows []rlsSchemaRow, upsert, partial bool, principal string) (writeErr error) {
+						defer func() {
+							if recovered := recover(); recovered != nil {
+								writeErr = errors.Newf("SDK write panic: %v", recovered)
+							}
+						}()
+						if mode == "row" {
+							values := make([]any, len(rows))
+							for i, r := range rows {
+								values[i] = rlsSchemaRowInput(r)
+							}
+							opt := client.NewRowBasedInsertOption(name, values...).WithRLSPrincipal(principal).WithPartialUpdate(partial)
+							if upsert {
+								_, e := mc.Upsert(ctx, opt)
+								return e
+							}
+							_, e := mc.Insert(ctx, opt)
+							return e
+						}
+						opt := client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rows...)...).WithRLSPrincipal(principal).WithPartialUpdate(partial)
+						if upsert {
+							_, e := mc.Upsert(ctx, opt)
+							return e
+						}
+						_, e := mc.Insert(ctx, opt)
+						return e
+					}
+					t.Run(mode, func(t *testing.T) {
+						for _, stage := range []string{"insert", "full_upsert", "partial_upsert", "rejected_insert", "rejected_upsert", "rejected_partial", "hidden_upsert", "hidden_partial", "transfer_owner", "delete_ids", "delete_filter", "delete_template"} {
+							stagePassed := t.Run(stage, func(t *testing.T) {
+								switch stage {
+								case "insert", "full_upsert":
+									rev := 0
+									if stage == "full_upsert" {
+										rev = 1
+									}
+									for _, owner := range []string{"alice", "bob"} {
+										var rows []rlsSchemaRow
+										for id := 1; id <= 8; id++ {
+											if (id%2 == 1) == (owner == "alice") {
+												rows = append(rows, rlsSchemaData(t, tc, id, rev, owner))
+											}
+										}
+										err := write(rows, stage == "full_upsert", false, owner)
+										if tc.partition && stage == "full_upsert" {
+											require.ErrorContains(t, err, "not supported for partition-key")
+											continue
+										}
+										require.NoError(t, err)
+										for _, r := range rows {
+											all[r["id"]] = r
+										}
+									}
+								case "partial_upsert":
+									for _, owner := range []string{"alice", "bob"} {
+										r := rlsSchemaData(t, tc, 1, 2, owner)
+										if owner == "bob" {
+											r = rlsSchemaData(t, tc, 2, 2, owner)
+										}
+										patch := rlsSchemaRow{"id": r["id"], "doc": r["doc"], "a_i64": r["a_i64"], "f64": r["f64"]}
+										err := write([]rlsSchemaRow{patch}, true, true, owner)
+										if tc.partition {
+											require.ErrorContains(t, err, "not supported for partition-key")
+											continue
+										}
+										require.NoError(t, err)
+										for k, v := range patch {
+											all[r["id"]][k] = v
+										}
+									}
+								case "hidden_upsert", "hidden_partial", "transfer_owner":
+									id, owner := 2, "alice"
+									if stage == "transfer_owner" {
+										id, owner = 1, "bob"
+									}
+									r := rlsSchemaData(t, tc, id, 3, owner)
+									if stage == "hidden_partial" {
+										r = rlsSchemaRow{"id": r["id"], "f64": float64(999)}
+									}
+									require.ErrorContains(t, write([]rlsSchemaRow{r}, true, stage == "hidden_partial", "alice"), "RLS")
+								case "rejected_insert", "rejected_upsert", "rejected_partial":
+									rows := []rlsSchemaRow{rlsSchemaData(t, tc, 20, 0, "alice"), rlsSchemaData(t, tc, 21, 0, "bob")}
+									require.ErrorContains(t, write(rows, stage != "rejected_insert", stage == "rejected_partial", "alice"), "RLS")
+								default:
+									opt := client.NewDeleteOption(name).WithRLSPrincipal("alice")
+									switch stage {
+									case "delete_ids":
+										if tc.varchar {
+											opt.WithStringIDs("id", []string{"用户/001", "用户/002"})
+										} else {
+											opt.WithInt64IDs("id", []int64{1, 2})
+										}
+										delete(all, rlsSchemaData(t, tc, 1, 0, "alice")["id"])
+									case "delete_filter":
+										opt.WithExpr("i8 <= -13 and i8 >= -14")
+										maps.DeleteFunc(all, func(_ any, r rlsSchemaRow) bool {
+											n, ok := r["i8"].(int8)
+											return ok && r["owner"] == "alice" && n <= -13 && n >= -14
+										})
+									case "delete_template":
+										opt.WithExpr("owner in {owners}").WithTemplateParam("owners", []string{"alice", "bob"})
+										for id, r := range all {
+											if r["owner"] == "alice" {
+												delete(all, id)
+											}
+										}
+									}
+									_, err := mc.Delete(ctx, opt)
+									require.NoError(t, err)
+								}
+								t.Run("live", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+								if stage == "full_upsert" || stage == "partial_upsert" {
+									rlsFlush(ctx, t, mc, name)
+									t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+								}
+							})
+							if !stagePassed && stage == "insert" && len(all) != 8 {
+								return
+							}
+						}
+						// Reset via an authorized administrative delete before exercising the other serialization path.
+						_, err := mc.Delete(ctx, client.NewDeleteOption(name).WithExpr("owner != ''").WithSkipRLS(true))
+						require.NoError(t, err)
+						clear(all)
+					})
+				}
+			})
+		}
+	}
+}
+
+// every scalar array operator checks complete rows and mixed-owner atomicity.
+func TestRLSSchemaPartialOperators(t *testing.T) {
+	for _, mode := range []string{"column", "row"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := hp.CreateContext(t, 10*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+			tc := rlsSchemaCase{vector: "float32", dynamic: true, structured: true}
+			name := prepareRLSSchema(ctx, t, mc, tc)
+			all := map[any]rlsSchemaRow{}
+			for i, owner := range []string{"alice", "bob"} {
+				r := rlsSchemaData(t, tc, i+1, 0, owner)
+				_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, r)...).WithRLSPrincipal(owner))
+				require.NoError(t, err)
+				all[r["id"]] = r
+			}
+			tests := []struct {
+				name                                       string
+				seed, operand, appended, removed, replaced any
+			}{
+				{"a_bool", []bool{false}, []bool{true}, []bool{false, true}, []bool{false}, []bool{true}},
+				{"a_i8", []int8{1, 2}, []int8{99}, []int8{1, 2, 99}, []int8{1, 2}, []int8{99, 2}},
+				{"a_i16", []int16{1, 2}, []int16{99}, []int16{1, 2, 99}, []int16{1, 2}, []int16{99, 2}},
+				{"a_i32", []int32{1, 2}, []int32{99}, []int32{1, 2, 99}, []int32{1, 2}, []int32{99, 2}},
+				{"a_i64", []int64{1, 2}, []int64{99}, []int64{1, 2, 99}, []int64{1, 2}, []int64{99, 2}},
+				{"a_f32", []float32{1, 2}, []float32{99}, []float32{1, 2, 99}, []float32{1, 2}, []float32{99, 2}},
+				{"a_f64", []float64{1, 2}, []float64{99}, []float64{1, 2, 99}, []float64{1, 2}, []float64{99, 2}},
+				{"a_text", []string{"one", "two"}, []string{"中"}, []string{"one", "two", "中"}, []string{"one", "two"}, []string{"中", "two"}},
+			}
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rlsSchemaRow{"id": int64(1), test.name: test.seed})...).WithPartialUpdate(true).WithRLSPrincipal("alice"))
+					require.NoError(t, err)
+					all[int64(1)][test.name] = test.seed
+					for _, op := range []string{"append", "remove", "path_replace"} {
+						t.Run(op, func(t *testing.T) {
+							write := func(ids []int64) error {
+								rows := make([]rlsSchemaRow, len(ids))
+								values := make([]any, len(ids))
+								for i, id := range ids {
+									rows[i] = rlsSchemaRow{"id": id, test.name: test.operand}
+									values[i] = map[string]any(rows[i])
+								}
+								if mode == "row" {
+									o := client.NewRowBasedInsertOption(name, values...).WithRLSPrincipal("alice")
+									switch op {
+									case "append":
+										o.WithArrayAppend(test.name)
+									case "remove":
+										o.WithArrayRemove(test.name)
+									default:
+										o.WithPathReplace(test.name, "[0]")
+									}
+									_, e := mc.Upsert(ctx, o)
+									return e
+								}
+								o := client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, rows...)...).WithRLSPrincipal("alice")
+								switch op {
+								case "append":
+									o.WithArrayAppend(test.name)
+								case "remove":
+									o.WithArrayRemove(test.name)
+								default:
+									o.WithPathReplace(test.name, "[0]")
+								}
+								_, e := mc.Upsert(ctx, o)
+								return e
+							}
+							require.ErrorContains(t, write([]int64{1, 2}), "RLS")
+							t.Run("rejected_mixed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+							require.NoError(t, write([]int64{1}))
+							switch op {
+							case "append":
+								all[int64(1)][test.name] = test.appended
+							case "remove":
+								all[int64(1)][test.name] = test.removed
+							default:
+								all[int64(1)][test.name] = test.replaced
+							}
+							t.Run("accepted", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+						})
+					}
+				})
+			}
+			for _, field := range []string{"doc", "objects"} {
+				t.Run(field+"_path", func(t *testing.T) {
+					for _, hidden := range []bool{true, false} {
+						id := int64(1)
+						if hidden {
+							id = 2
+						}
+						path := `["nested"]["owner"]`
+						operand := any([]byte(`"changed"`))
+						if field == "objects" {
+							path = "[0][number]"
+							operand = map[string]any{"number": []int64{99}}
+						}
+						// A struct child path uses a narrowed operand schema as required by the public SDK.
+						var err error
+						if mode == "row" {
+							_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any{"id": id, field: operand}).WithPathReplace(field, path).WithRLSPrincipal("alice"))
+						} else {
+							col := column.Column(column.NewColumnJSONBytes(field, [][]byte{operandBytes(operand)}))
+							if field == "objects" {
+								col = column.NewColumnStructArray(field, []column.Column{column.NewColumnInt64Array("number", [][]int64{{99}})})
+							}
+							_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, column.NewColumnInt64("id", []int64{id}), col).WithPathReplace(field, path).WithRLSPrincipal("alice"))
+						}
+						if hidden {
+							require.ErrorContains(t, err, "RLS")
+						} else {
+							require.NoError(t, err)
+							if field == "doc" {
+								all[id][field] = []byte(`{"n":1,"nested":{"owner":"changed"},"items":[1,null,"中"]}`)
+							} else {
+								m := maps.Clone(all[id][field].(map[string]any))
+								m["number"] = []int64{99, -1}
+								all[id][field] = m
+							}
+						}
+						t.Run(fmt.Sprintf("hidden_%v", hidden), func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+					}
+				})
+			}
+			rlsFlush(ctx, t, mc, name)
+			t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+		})
+	}
+}
+
+func operandBytes(value any) []byte {
+	b, _ := value.([]byte)
+	return b
+}
+
+// defaults must materialize before CHECK and preserve unrelated fields on partial updates.
+func TestRLSSchemaDefaults(t *testing.T) {
+	defaults := rlsSchemaRow{"owner": "alice", "flag": true, "i8": int8(7), "i16": int16(7), "i32": int32(7), "i64": int64(9007199254740993), "f32": float32(0.25), "f64": float64(0.125), "text": "default_中"}
+	for _, mode := range []string{"column", "row"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := hp.CreateContext(t, 8*time.Minute)
+			mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+			tc := rlsSchemaCase{vector: "float32", nullable: true, dynamic: true, defaults: true}
+			name := prepareRLSSchema(ctx, t, mc, tc)
+			all := map[any]rlsSchemaRow{}
+			bob := rlsSchemaData(t, tc, 2, 0, "bob")
+			_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, bob)...).WithRLSPrincipal("bob"))
+			require.NoError(t, err)
+			all[bob["id"]] = bob
+			for _, stage := range []string{"omitted_insert", "null_insert", "explicit_insert", "omitted_full_upsert", "null_partial_upsert", "rejected_check"} {
+				t.Run(stage, func(t *testing.T) {
+					defer func() {
+						if p := recover(); p != nil {
+							t.Errorf("SDK write panic: %v", p)
+						}
+					}()
+					id := 1
+					if stage == "null_insert" {
+						id = 3
+					}
+					if stage == "explicit_insert" {
+						id = 4
+					}
+					if stage == "rejected_check" {
+						id = 5
+					}
+					r := rlsSchemaData(t, tc, id, 1, "alice")
+					expected := maps.Clone(r)
+					for k, v := range defaults {
+						switch stage {
+						case "omitted_insert", "omitted_full_upsert":
+							delete(r, k)
+							expected[k] = v
+						case "null_insert":
+							if k != "owner" {
+								r[k] = nil
+								expected[k] = v
+							}
+						}
+					}
+					partial := stage == "null_partial_upsert"
+					upsert := partial || stage == "omitted_full_upsert"
+					if partial {
+						r = rlsSchemaRow{"id": int64(1), "f64": nil, "doc": nil}
+						require.Contains(t, all, int64(1), "earlier insert failed; partial update cannot be exercised")
+						expected = maps.Clone(all[int64(1)])
+						expected["f64"] = float64(0.125)
+						expected["doc"] = nil
+					}
+					if stage == "rejected_check" {
+						r["owner"] = "bob"
+					}
+					if mode == "column" {
+						o := client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, r)...).WithRLSPrincipal("alice").WithPartialUpdate(partial)
+						if upsert {
+							_, err = mc.Upsert(ctx, o)
+						} else {
+							_, err = mc.Insert(ctx, o)
+						}
+					} else {
+						o := client.NewRowBasedInsertOption(name, rlsSchemaRowInput(r)).WithRLSPrincipal("alice").WithPartialUpdate(partial)
+						if upsert {
+							_, err = mc.Upsert(ctx, o)
+						} else {
+							_, err = mc.Insert(ctx, o)
+						}
+					}
+					if stage == "rejected_check" {
+						require.ErrorContains(t, err, "RLS")
+					} else {
+						require.NoError(t, err)
+						all[expected["id"]] = expected
+					}
+					checkRLSSchemaReads(ctx, t, mc, name, tc, all)
+				})
+			}
+			rlsFlush(ctx, t, mc, name)
+			t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+		})
+	}
+}
+
+// generated primary keys are opaque; all application-owned payload fields remain exact.
+func TestRLSSchemaAutoID(t *testing.T) {
+	for _, varchar := range []bool{false, true} {
+		for _, mode := range []string{"column", "row"} {
+			t.Run(fmt.Sprintf("varchar_%v/%s", varchar, mode), func(t *testing.T) {
+				ctx := hp.CreateContext(t, 6*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t).Client
+				tc := rlsSchemaCase{vector: "float32", varchar: varchar, autoID: true, dynamic: true}
+				name := prepareRLSSchema(ctx, t, mc, tc)
+				all := map[any]rlsSchemaRow{}
+				for i, owner := range []string{"alice", "bob", "alice", "bob"} {
+					r := rlsSchemaData(t, tc, i+1, 0, owner)
+					delete(r, "id")
+					var result client.InsertResult
+					var err error
+					if mode == "row" {
+						result, err = mc.Insert(ctx, client.NewRowBasedInsertOption(name, rlsSchemaRowInput(r)).WithRLSPrincipal(owner))
+					} else {
+						result, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, r)...).WithRLSPrincipal(owner))
+					}
+					require.NoError(t, err)
+					require.EqualValues(t, 1, result.InsertCount)
+					id, err := result.IDs.Get(0)
+					require.NoError(t, err)
+					require.NotContains(t, all, id)
+					r["id"] = id
+					all[id] = r
+				}
+				t.Run("insert", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+				for _, partial := range []bool{false, true} {
+					t.Run(fmt.Sprintf("upsert_partial_%v", partial), func(t *testing.T) {
+						for id, old := range all {
+							if old["owner"] != "alice" {
+								continue
+							}
+							r := maps.Clone(old)
+							r["text"] = "updated_中"
+							patch := r
+							if partial {
+								patch = rlsSchemaRow{"id": id, "text": "updated_中"}
+							}
+							var err error
+							if mode == "row" {
+								_, err = mc.Upsert(ctx, client.NewRowBasedInsertOption(name, map[string]any(patch)).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
+							} else {
+								_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(name, rlsSchemaWriteColumns(t, tc, patch)...).WithPartialUpdate(partial).WithRLSPrincipal("alice"))
+							}
+							require.NoError(t, err)
+							all[id] = r
+						}
+						checkRLSSchemaReads(ctx, t, mc, name, tc, all)
+					})
+				}
+				_, err := mc.Delete(ctx, client.NewDeleteOption(name).WithExpr("owner != ''").WithRLSPrincipal("alice"))
+				require.NoError(t, err)
+				maps.DeleteFunc(all, func(_ any, r rlsSchemaRow) bool { return r["owner"] == "alice" })
+				t.Run("delete", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+				rlsFlush(ctx, t, mc, name)
+				t.Run("flushed", func(t *testing.T) { checkRLSSchemaReads(ctx, t, mc, name, tc, all) })
+			})
+		}
+	}
+}
+
+func rlsSchemaRowInput(r rlsSchemaRow) map[string]any {
+	return maps.Clone(map[string]any(r))
+}

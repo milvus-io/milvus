@@ -199,6 +199,34 @@ gotestsum --format testname --hide-summary=output -v ./testcases/advcases/... --
 gotestsum --format testname --hide-summary=output -v ./testcases/... --addr=127.0.0.1:19530 -timeout=30m -tags=rg -p 1
 ```
 
+## RLS functional tests
+
+The `TestRLS*` cases in `testcases/rls*_test.go` run through the default Go SDK
+E2E package without extra build tags, custom flags, or cluster administration.
+They create isolated collections and databases and clean them up after each
+test. Run against a standalone instance with the default RLS admission limits;
+when authentication is enabled, use the configured administrator credentials.
+Requests still specify an RLS principal explicitly. `SkipRLS` is used only for
+fixture setup, administrative result checks, and tests of its documented behavior.
+
+Coverage includes policy and principal-tag lifecycle, action-specific enforcement,
+policy composition, collection properties, sharing and revocation, nullable and
+default values, dynamic fields, six vector types, and row/column serialization.
+Read checks compare IDs and field values with application-owned expectations;
+write checks verify accepted changes and unchanged data after rejected writes.
+
+```bash
+cd tests/go_client
+go test -tags=dynamic,test -gcflags='all=-N -l' -count=1 \
+  ./testcases -run '^TestRLS' -timeout=30m -parallel=4 \
+  -addr=127.0.0.1:19530
+```
+
+This suite does not cover RBAC privilege grants/revocations, runtime server
+configuration changes, bulk import, CDC, restart orchestration, fault injection,
+or performance/soak testing. TEXT fields requiring a StorageV3 deployment and
+unsupported Geometry row serialization are outside this default matrix.
+
 ## Contributing
 1. Follow the existing code structure
 2. Add comprehensive test cases
